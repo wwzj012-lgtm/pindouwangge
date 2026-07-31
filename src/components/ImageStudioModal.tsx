@@ -44,6 +44,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   );
 
   const [previewGrid, setPreviewGrid] = useState<(string | null)[][]>([]);
+  const [activeMobileTab, setActiveMobileTab] = useState<'preview' | 'settings'>('preview');
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
@@ -230,37 +231,67 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col h-[90vh] max-h-[92vh] overflow-hidden">
+      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col h-[92vh] max-h-[92vh] sm:h-[90vh] overflow-hidden">
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20">
-              <Wand2 className="w-5 h-5" />
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-1.5 sm:p-2 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20 shrink-0">
+              <Wand2 className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                <span>高级图像增强与转拼豆工作坊</span>
-                <span className="px-2 py-0.5 text-[10px] bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30">
-                  AI & 算法驱动
+            <div className="min-w-0">
+              <h2 className="text-xs sm:text-base font-bold text-slate-100 flex items-center gap-1.5 sm:gap-2 truncate">
+                <span className="truncate">图像增强与转拼豆</span>
+                <span className="px-1.5 py-0.5 text-[9px] sm:text-[10px] bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30 shrink-0">
+                  AI & 算法
                 </span>
               </h2>
-              <p className="text-xs text-slate-400">
-                针对高精度拼豆修正模糊、粗糙、背景杂色与边缘失真问题
+              <p className="text-[10px] sm:text-xs text-slate-400 truncate">
+                修正模糊、杂色与边缘失真问题
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer transition-colors"
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer transition-colors shrink-0 ml-2"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4 sm:w-5 sm:h-5" />
+          </button>
+        </div>
+
+        {/* Mobile Tab Switcher (Visible on < xl screens) */}
+        <div className="flex xl:hidden border-b border-slate-800 bg-slate-950/80 shrink-0 text-xs">
+          <button
+            onClick={() => setActiveMobileTab('preview')}
+            className={`flex-1 py-2 font-semibold text-center flex items-center justify-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+              activeMobileTab === 'preview'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>1. 效果预览 ({localSettings.width}×{localSettings.height})</span>
+          </button>
+          <button
+            onClick={() => setActiveMobileTab('settings')}
+            className={`flex-1 py-2 font-semibold text-center flex items-center justify-center gap-1.5 border-b-2 transition-colors cursor-pointer ${
+              activeMobileTab === 'settings'
+                ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                : 'border-transparent text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sliders className="w-3.5 h-3.5" />
+            <span>2. 参数与调色</span>
           </button>
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden min-h-0">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
-          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-visible xl:overflow-y-auto bg-slate-950/50 min-h-0 shrink-0 xl:shrink">
+          <div
+            className={`flex-1 p-3 sm:p-6 flex-col gap-4 overflow-y-auto bg-slate-950/50 min-h-0 ${
+              activeMobileTab === 'preview' ? 'flex' : 'hidden xl:flex'
+            }`}
+          >
             {/* Action Presets bar */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none shrink-0">
               <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1 whitespace-nowrap">
@@ -338,11 +369,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex-1 flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
+                <div className="flex-1 min-h-[220px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
                   <canvas
                     ref={imageCanvasRef}
                     onClick={handleCanvasClick}
-                    className={`max-w-full max-h-[320px] object-contain rounded ${
+                    className={`max-w-full max-h-[260px] sm:max-h-[320px] object-contain rounded ${
                       isPickingColor ? 'cursor-crosshair ring-2 ring-rose-500' : ''
                     }`}
                   />
@@ -362,15 +393,15 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                     转换后拼豆效果 ({localSettings.width} × {localSettings.height})
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    像素颗粒数: {localSettings.width * localSettings.height}
+                    颗粒数: {localSettings.width * localSettings.height}
                   </span>
                 </div>
 
-                <div className="flex-1 flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
+                <div className="flex-1 min-h-[220px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
                   {previewGrid.length > 0 ? (
                     <canvas
                       ref={previewCanvasRef}
-                      className="max-w-full max-h-[320px] object-contain rounded shadow-lg"
+                      className="max-w-full max-h-[260px] sm:max-h-[320px] object-contain rounded shadow-lg"
                     />
                   ) : (
                     <div className="text-slate-500 text-xs">正在计算高精度像素...</div>
@@ -378,10 +409,36 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* Mobile jump-to-settings button */}
+            <div className="xl:hidden mt-1 shrink-0">
+              <button
+                onClick={() => setActiveMobileTab('settings')}
+                className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 border border-slate-700 cursor-pointer transition-colors"
+              >
+                <Sliders className="w-4 h-4 text-amber-400" />
+                <span>调节尺寸、锐化、颜色算法等参数 →</span>
+              </button>
+            </div>
           </div>
 
           {/* Right Control Drawer: Advanced Sliders */}
-          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-visible xl:overflow-y-auto space-y-5 text-xs select-none shrink-0 min-h-0">
+          <div
+            className={`w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-y-auto space-y-5 text-xs select-none shrink-0 min-h-0 ${
+              activeMobileTab === 'settings' ? 'block' : 'hidden xl:block'
+            }`}
+          >
+            {/* Mobile Header Banner in settings tab */}
+            <div className="xl:hidden pb-3 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-slate-400 text-[11px]">当前拼豆尺寸: <strong className="text-amber-400 font-mono text-xs">{localSettings.width} × {localSettings.height}</strong></span>
+              <button
+                onClick={() => setActiveMobileTab('preview')}
+                className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>切回效果预览</span>
+              </button>
+            </div>
             {/* Section 0: Grid Target Dimensions */}
             <div className="space-y-2">
               <label className="text-slate-200 font-bold flex items-center justify-between text-xs">
@@ -700,19 +757,19 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-3.5 border-t border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
+        <div className="px-3.5 sm:px-6 py-2.5 sm:py-3.5 border-t border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0 gap-2">
           <button
             onClick={onClose}
-            className="px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"
+            className="px-3.5 sm:px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer transition-colors shrink-0"
           >
             取消
           </button>
           <button
             onClick={handleApply}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+            className="flex-1 sm:flex-initial px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 truncate"
           >
-            <Check className="w-4 h-4" />
-            <span>应用增强参数并生成拼豆图纸</span>
+            <Check className="w-4 h-4 shrink-0" />
+            <span className="truncate">应用参数并生成图纸</span>
           </button>
         </div>
       </div>

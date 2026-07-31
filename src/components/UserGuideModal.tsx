@@ -47,11 +47,11 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white">豆织星格 · 简体中文版使用指南</h2>
                 <span className="bg-purple-950 text-purple-300 border border-purple-800/60 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  v2.5 全功能说明书
+                  v2.8 全功能说明书
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                拼豆图纸网格编辑器 & 图像转像素工作台 · 功能与快捷键详解
+                拼豆图纸网格编辑器 & 图像转像素工作台 · 触屏/桌面双端全功能说明
               </p>
             </div>
           </div>
@@ -89,13 +89,17 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
               {/* Tool Hotkeys */}
               <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60 space-y-2">
                 <div className="font-bold text-purple-300 flex items-center justify-between">
-                  <span>✦ 绘图工具快捷键</span>
-                  <span className="text-[10px] text-slate-400">单键即可切换</span>
+                  <span>✦ 绘图与平移快捷键</span>
+                  <span className="text-[10px] text-slate-400">单键即刻切换</span>
                 </div>
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                     <span className="flex items-center gap-2"><Pencil className="w-3.5 h-3.5 text-rose-400" /> 画笔工具 (Pencil)</span>
                     <kbd className="bg-slate-800 text-rose-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700">P</kbd>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                    <span className="flex items-center gap-2"><Move className="w-3.5 h-3.5 text-amber-400" /> 单指平移拖拽 (Hand)</span>
+                    <kbd className="bg-slate-800 text-amber-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700">H</kbd>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                     <span className="flex items-center gap-2"><PaintBucket className="w-3.5 h-3.5 text-amber-400" /> 油漆桶填充 (Bucket)</span>
@@ -116,28 +120,32 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 </div>
               </div>
 
-              {/* View & Canvas Mouse Controls */}
+              {/* Mobile Touch & Desktop Mouse Controls */}
               <div className="bg-slate-800/60 p-3.5 rounded-xl border border-slate-700/60 space-y-2">
                 <div className="font-bold text-sky-300 flex items-center justify-between">
-                  <span>✦ 视图控制与撤销重做</span>
-                  <span className="text-[10px] text-slate-400">组合键与手势</span>
+                  <span>✦ 手机触屏手势 & 视图控制</span>
+                  <span className="text-[10px] text-slate-400">触屏/电脑优化</span>
                 </div>
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> 撤销上一步 (Undo)</span>
-                    <kbd className="bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700">Ctrl + Z</kbd>
+                    <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-rose-400" /> 双指捏合 (Pinch Zoom)</span>
+                    <span className="text-rose-300 font-mono font-bold">两指缩放/平移</span>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-indigo-400 scale-x-[-1]" /> 重做撤销 (Redo)</span>
-                    <kbd className="bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700">Ctrl + Shift + Z</kbd>
+                    <span className="flex items-center gap-2"><Move className="w-3.5 h-3.5 text-amber-400" /> 单指抓手模式 (Hand Tool)</span>
+                    <span className="text-amber-300 font-mono font-bold">切抓手/点右下角🤚</span>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-                    <span className="flex items-center gap-2"><Move className="w-3.5 h-3.5 text-amber-400" /> 拖拽平移动画布</span>
-                    <span className="text-amber-300 font-mono font-bold">Shift + 左键 / 鼠标中键</span>
+                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> 撤销 / 重做</span>
+                    <kbd className="bg-slate-800 text-indigo-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700">Ctrl + Z / Y</kbd>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-                    <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-emerald-400" /> 画布缩放</span>
-                    <span className="text-emerald-300 font-mono font-bold">鼠标滚轮 (Wheel)</span>
+                    <span className="flex items-center gap-2"><Move className="w-3.5 h-3.5 text-emerald-400" /> 电脑端平移</span>
+                    <span className="text-emerald-300 font-mono font-bold">Shift+左键 / 鼠标中键</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                    <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-sky-400" /> 一键居中自适应</span>
+                    <span className="text-sky-300 font-mono font-bold">右下角 🎯 适应屏幕</span>
                   </div>
                 </div>
               </div>
@@ -228,20 +236,20 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
                   <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                    <strong className="text-white block mb-0.5">✦ 暗色黑线条描边保护</strong>
-                    独创二次元轮廓增强技术，防止转换时边缘黑线条被周围浅色混合侵蚀。
+                    <strong className="text-white block mb-0.5">✦ 🔥 鲜艳高饱满预设 (防发白/色彩保护)</strong>
+                    预设内置 CIEDE2000 色彩匹配算法，保护动漫人物肤色与高饱和发色，彻底解决传统转图发白灰暗问题。
                   </div>
                   <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                    <strong className="text-white block mb-0.5">✦ CIEDE2000 工业级色差匹配</strong>
-                    模拟人眼视觉感知的真实颜色匹配算法，匹配效果远超传统 RGB 色差距离。
+                    <strong className="text-white block mb-0.5">✦ 暗色黑线条轮廓描边保护</strong>
+                    独创二次元轮廓增强技术，自动识别边缘黑线与暗色描边，防止转换时被周围浅色像素混合侵蚀。
                   </div>
                   <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                    <strong className="text-white block mb-0.5">✦ 单色绿幕/纯色背景抠除</strong>
-                    点击图片中的背景颜色，自动将背景转为透明，保留纯净人物主体。
+                    <strong className="text-white block mb-0.5">✦ 单色绿幕/纯色背景一键抠除 (Chroma Key)</strong>
+                    点击图片中的背景颜色，自动将同色系背景转为透明，保留纯净人物主体与边缘。
                   </div>
                   <div className="bg-slate-900/60 p-2.5 rounded-lg border border-slate-800">
-                    <strong className="text-white block mb-0.5">✦ 实时缩放、旋转与翻转</strong>
-                    任意裁剪原图区域，调整色彩对比度、饱和度与亮度，预览转图细节。
+                    <strong className="text-white block mb-0.5">✦ 抖动扩散 (Dithering) & 锐化抖动滤镜</strong>
+                    提供 Floyd-Steinberg 像素抖动与锐化对比调节，自然过度复杂人像渐变色与光影细节。
                   </div>
                 </div>
               </div>

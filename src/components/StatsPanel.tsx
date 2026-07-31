@@ -7,6 +7,7 @@ import {
   Eye,
   RefreshCw,
   Hash,
+  X,
 } from 'lucide-react';
 import { BeadColor, ColorStat } from '../types';
 
@@ -20,6 +21,7 @@ interface StatsPanelProps {
   onSetHighlightColorId: (id: string | null) => void;
   onOpenReplaceModal: (sourceColor: BeadColor) => void;
   onSelectColor: (color: BeadColor) => void;
+  onCloseMobile?: () => void;
 }
 
 export const StatsPanel: React.FC<StatsPanelProps> = ({
@@ -32,6 +34,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   onSetHighlightColorId,
   onOpenReplaceModal,
   onSelectColor,
+  onCloseMobile,
 }) => {
   const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
@@ -102,14 +105,25 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           <span>豆数用量统计与色卡清单</span>
         </div>
 
-        <button
-          onClick={handleCopyList}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
-          title="复制用量清单"
-        >
-          {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-          <span>{copied ? '已复制' : '复制用量'}</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleCopyList}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
+            title="复制用量清单"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? '已复制' : '复制用量'}</span>
+          </button>
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+              title="关闭"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Overview Cards */}

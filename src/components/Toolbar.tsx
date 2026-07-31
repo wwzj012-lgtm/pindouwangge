@@ -103,9 +103,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   ];
 
   return (
-    <div className="bg-slate-900 border-b border-slate-800 text-slate-200 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs shadow-sm z-20 select-none">
+    <div className="bg-slate-900 border-b border-slate-800 text-slate-200 px-3 py-2 flex items-center justify-between gap-2.5 text-xs shadow-sm z-20 select-none overflow-x-auto scrollbar-none">
       {/* Left: Editing Tools & Active Color Swatch */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2.5 shrink-0">
         {/* Active Color Swatch */}
         <button
           onClick={onOpenColorPicker}
@@ -236,7 +236,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       {/* Right: Display Overlays, Backdrop & Zoom Controls */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-center gap-2.5 shrink-0 ml-2">
         {/* Canvas Backdrop Selector */}
         <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 text-[11px]">
           <span className="px-1.5 text-slate-400 flex items-center gap-1">

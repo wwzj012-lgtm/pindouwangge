@@ -10,6 +10,7 @@ import {
   Zap,
   Pipette,
   Wand2,
+  X,
 } from 'lucide-react';
 import { BrandKey, ConvertSettings, DitherMode, ColorMatchAlgo } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
@@ -20,6 +21,7 @@ interface SettingsPanelProps {
   onReconvert: () => void;
   hasImage: boolean;
   onOpenImageStudio: () => void;
+  onCloseMobile?: () => void;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -28,6 +30,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onReconvert,
   hasImage,
   onOpenImageStudio,
+  onCloseMobile,
 }) => {
   const updateSetting = <K extends keyof ConvertSettings>(key: K, value: ConvertSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
@@ -56,14 +59,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Sliders className="w-4 h-4" />
           <span>拼豆转换参数设置</span>
         </div>
-        <button
-          onClick={handleResetFilters}
-          className="text-slate-400 hover:text-white flex items-center gap-1 text-[11px] cursor-pointer"
-          title="重置图像滤镜"
-        >
-          <RotateCcw className="w-3 h-3" />
-          <span>重置</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleResetFilters}
+            className="text-slate-400 hover:text-white flex items-center gap-1 text-[11px] cursor-pointer"
+            title="重置图像滤镜"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>重置</span>
+          </button>
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+              title="关闭"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Image Studio Workshop Launcher */}
@@ -168,18 +182,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {/* 2. Color Matching Algorithm */}
       <div className="space-y-2 pt-2 border-t border-slate-800">
-        <label className="text-slate-300 font-bold flex items-center gap-1.5">
-          <Zap className="w-3.5 h-3.5 text-amber-400" />
-          <span>色彩匹配演算法</span>
+        <label className="text-slate-300 font-bold flex items-center justify-between">
+          <span className="flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-amber-400" />
+            <span>色彩匹配演算法</span>
+          </span>
+          <span className="text-[10px] text-rose-400 font-normal">防发白/色彩保护</span>
         </label>
         <select
-          value={settings.colorMatchAlgo || 'ciede2000'}
+          value={settings.colorMatchAlgo || 'ciede2000_vivid'}
           onChange={e => updateSetting('colorMatchAlgo', e.target.value as ColorMatchAlgo)}
-          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs outline-none focus:border-rose-500 cursor-pointer"
+          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs outline-none focus:border-rose-500 cursor-pointer font-medium"
         >
-          <option value="ciede2000">CIEDE2000 工业级精准感知匹配 (推荐)</option>
-          <option value="cie76">CIE76 标准Lab空间演算法</option>
-          <option value="rgb_weighted">加权RGB 快速高对比度</option>
+          <option value="ciede2000_vivid">🎨 CIEDE2000 鲜艳饱满匹配 (防发白/推荐)</option>
+          <option value="ciede2000">⚖️ CIEDE2000 工业标准柔和匹配</option>
+          <option value="cie76">📐 CIE76 标准Lab空间演算法</option>
+          <option value="rgb_weighted">⚡ 加权RGB 快速高对比度</option>
         </select>
       </div>
 

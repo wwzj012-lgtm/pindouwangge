@@ -140,10 +140,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
         {/* Header */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ImageIcon className="w-5 h-5 text-emerald-400" />
             <div>
@@ -196,18 +196,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <option value="grid_and_legend">✦ 网格图 + 色号表双重斜向水印 (推荐)</option>
                 <option value="legend_only">✦ 仅色号清单斜向水印</option>
                 <option value="grid_center">✦ 仅网格中心半透明水印</option>
+                <option value="none">✦ 无水印</option>
               </select>
 
-              <select
-                value={watermarkOpacity.toString()}
-                onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
-                className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                title="调整水印透明度"
-              >
-                <option value="0.1">透明度 10% (轻柔)</option>
-                <option value="0.18">透明度 18% (标准推荐)</option>
-                <option value="0.28">透明度 28% (清晰显眼)</option>
-              </select>
+              {watermarkPosition !== 'none' && (
+                <select
+                  value={watermarkOpacity.toString()}
+                  onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
+                  className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                  title="调整水印透明度"
+                >
+                  <option value="0.1">透明度 10% (轻柔)</option>
+                  <option value="0.18">透明度 18% (标准推荐)</option>
+                  <option value="0.28">透明度 28% (清晰显眼)</option>
+                </select>
+              )}
             </div>
           </div>
 
@@ -238,28 +241,28 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 border-t border-slate-800 bg-slate-900 flex flex-wrap items-center justify-between gap-3">
-          <div className="text-slate-400 text-[11px]">
+        <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+          <div className="text-slate-400 text-[11px] text-center sm:text-left">
             当前导出分辨率: 高清矢量位图 ({width}x{height} 豆)
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
             {totalBoards > 1 && (
               <button
                 onClick={handleDownloadAllBoards}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer transition-colors"
+                className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Download className="w-4 h-4 text-sky-400" />
-                <span>批量下载全部分板图纸 ({totalBoards + 1}张)</span>
+                <span>批量全部分板图纸 ({totalBoards + 1}张)</span>
               </button>
             )}
 
             <button
               onClick={handleDownloadSingle}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center gap-1.5 cursor-pointer transition-all active:scale-95"
+              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
             >
               <Download className="w-4 h-4" />
-              <span>下载当前高清 PNG 图纸</span>
+              <span>下载高清 PNG 图纸</span>
             </button>
           </div>
         </div>

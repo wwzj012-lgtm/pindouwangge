@@ -1,6 +1,6 @@
 import { BeadColor, BeadShape } from '../types';
 
-export type WatermarkPosition = 'grid_and_legend' | 'legend_only' | 'grid_center';
+export type WatermarkPosition = 'grid_and_legend' | 'legend_only' | 'grid_center' | 'none';
 
 export interface ExportOptions {
   grid: (string | null)[][];
@@ -18,7 +18,7 @@ export interface ExportOptions {
   watermarkOpacity?: number; // Default: 0.18
 }
 
-// Draw diagonal translucent watermark across a rectangular region sparsely
+// Draw diagonal translucent watermark across a rectangular region
 function drawDiagonalWatermark(
   ctx: CanvasRenderingContext2D,
   rectX: number,
@@ -27,9 +27,9 @@ function drawDiagonalWatermark(
   rectH: number,
   text: string,
   opacity: number = 0.18,
-  fontSize: number = 22,
-  minStepX: number = 450,
-  minStepY: number = 300
+  fontSize: number = 20,
+  stepX: number = 240,
+  stepY: number = 140
 ) {
   ctx.save();
   ctx.beginPath();
@@ -41,10 +41,6 @@ function drawDiagonalWatermark(
   ctx.font = `bold ${fontSize}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-
-  // Ensure sparse coverage (around 4 - 8 watermarks in total per section)
-  const stepX = Math.max(minStepX, rectW / 2.2);
-  const stepY = Math.max(minStepY, rectH / 3.2);
 
   const angle = -25 * Math.PI / 180;
   ctx.translate(rectX + rectW / 2, rectY + rectH / 2);
@@ -319,15 +315,15 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
       gridPixelHeight,
       '✦ 豆织星格 PERLER PATTERN',
       watermarkOpacity,
-      22,
-      520,
-      340
+      20,
+      250,
+      150
     );
   } else if (watermarkPosition === 'grid_center') {
     ctx.save();
     ctx.globalAlpha = Math.min(0.35, watermarkOpacity * 1.5);
     ctx.fillStyle = '#6B21A8';
-    ctx.font = 'bold 32px sans-serif';
+    ctx.font = 'bold 30px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
@@ -353,8 +349,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
       '✦ 豆织星格 色号清单 ✦',
       Math.min(0.28, watermarkOpacity + 0.04),
       16,
-      360,
-      280
+      200,
+      110
     );
   }
 

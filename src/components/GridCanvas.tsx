@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
 
@@ -589,7 +590,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-slate-950 overflow-hidden cursor-crosshair select-none"
+      className="relative w-full h-full bg-slate-950 overflow-hidden cursor-crosshair select-none touch-none"
       onWheel={handleWheel}
       onContextMenu={e => e.preventDefault()}
     >
@@ -599,12 +600,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
-        className="w-full h-full block"
+        className="w-full h-full block touch-none"
       />
 
       {/* Hover Pixel Info Popover Card */}
       {hoverCell && (
-        <div className="absolute top-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-200 text-xs px-3 py-2 rounded-xl backdrop-blur shadow-xl flex items-center gap-3 pointer-events-none">
+        <div className="absolute top-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-200 text-xs px-3 py-2 rounded-xl backdrop-blur shadow-xl flex items-center gap-3 pointer-events-none z-10">
           <div className="font-mono text-sky-400 font-bold">
             {getColumnLetter(hoverCell.x)}{hoverCell.y + 1} ({hoverCell.x + 1}, {hoverCell.y + 1})
           </div>
@@ -624,14 +625,45 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[11px] px-3 py-1.5 rounded-lg backdrop-blur shadow-md flex items-center gap-3">
-        <span>画布尺寸: <strong className="text-white">{width} × {height}</strong> 豆</span>
-        <span>拼豆板: <strong className="text-sky-400">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
+      <div className="absolute bottom-16 sm:bottom-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[10px] sm:text-[11px] px-2.5 py-1.5 rounded-lg backdrop-blur shadow-md flex flex-wrap items-center gap-2 max-w-[calc(100vw-120px)] sm:max-w-none z-10">
+        <span><strong className="text-white">{width} × {height}</strong> 豆</span>
+        <span><strong className="text-sky-400">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
-          <span className="text-rose-400 font-bold bg-rose-950/60 px-1.5 py-0.5 rounded border border-rose-600/40">
-            对称模式: {symmetryMode === 'horizontal' ? '左右对称' : symmetryMode === 'vertical' ? '上下对称' : '4向四轴镜像'}
+          <span className="text-rose-400 font-bold bg-rose-950/60 px-1 py-0.5 rounded border border-rose-600/40">
+            {symmetryMode === 'horizontal' ? '左右镜像' : symmetryMode === 'vertical' ? '上下镜像' : '4向镜像'}
           </span>
         )}
+      </div>
+
+      {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
+      <div className="absolute bottom-16 sm:bottom-3 right-3 bg-slate-900/90 border border-slate-800 rounded-xl p-1 shadow-xl flex items-center gap-1 z-10 backdrop-blur">
+        <button
+          onClick={() => setZoom(Math.min(4.0, zoom * 1.2))}
+          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          title="放大"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+        <span className="text-[10px] font-mono font-bold text-sky-400 px-1 select-none min-w-[36px] text-center">
+          {Math.round(zoom * 100)}%
+        </span>
+        <button
+          onClick={() => setZoom(Math.max(0.3, zoom * 0.8))}
+          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          title="缩小"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+        <button
+          onClick={() => {
+            setZoom(1.0);
+            setPan({ x: 40, y: 40 });
+          }}
+          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          title="复位 100%"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
       </div>
     </div>
   );

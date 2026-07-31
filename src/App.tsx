@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette } from 'lucide-react';
 import {
   BeadColor,
   BeadShape,
@@ -76,7 +77,8 @@ export default function App() {
   const [showOverlay, setShowOverlay] = useState(false);
   const [zoom, setZoom] = useState(1.0);
 
-  // Modals Toggle State
+  // Modals & Drawer State
+  const [mobileDrawer, setMobileDrawer] = useState<'none' | 'settings' | 'stats'>('none');
   const [isPaletteModalOpen, setIsPaletteModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
@@ -477,17 +479,37 @@ export default function App() {
 
       {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
       <div className="flex-1 flex overflow-hidden relative">
-        {/* Left Drawer: Conversion Settings */}
-        <SettingsPanel
-          settings={settings}
-          setSettings={setSettings}
-          onReconvert={handleReconvert}
-          hasImage={sourceImage !== null}
-          onOpenImageStudio={() => setIsStudioModalOpen(true)}
-        />
+        {/* Mobile Backdrop Overlay for Side Drawers */}
+        {mobileDrawer !== 'none' && (
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-30 lg:hidden transition-opacity"
+            onClick={() => setMobileDrawer('none')}
+          />
+        )}
+
+        {/* Left Panel: Conversion Settings (Desktop sidebar + Mobile drawer) */}
+        <div
+          className={`h-full transition-transform duration-300 ease-in-out z-40 ${
+            mobileDrawer === 'settings'
+              ? 'fixed inset-y-0 left-0 max-w-[85vw] shadow-2xl block'
+              : 'hidden lg:block'
+          }`}
+        >
+          <SettingsPanel
+            settings={settings}
+            setSettings={setSettings}
+            onReconvert={handleReconvert}
+            hasImage={sourceImage !== null}
+            onOpenImageStudio={() => {
+              setMobileDrawer('none');
+              setIsStudioModalOpen(true);
+            }}
+            onCloseMobile={() => setMobileDrawer('none')}
+          />
+        </div>
 
         {/* Center Canvas Area */}
-        <div className="flex-1 h-full relative">
+        <div className="flex-1 h-full relative min-w-0">
           <GridCanvas
             grid={grid}
             paletteMap={paletteMap}
@@ -513,19 +535,79 @@ export default function App() {
           />
         </div>
 
-        {/* Right Drawer: Color Code Comparison & Bead Statistics */}
-        <StatsPanel
-          grid={grid}
-          paletteMap={paletteMap}
-          width={settings.width}
-          height={settings.height}
-          boardSize={settings.boardSize}
-          highlightColorId={highlightColorId}
-          onSetHighlightColorId={setHighlightColorId}
-          onOpenReplaceModal={color => setReplaceSourceColor(color)}
-          onSelectColor={color => setSelectedColor(color)}
-        />
+        {/* Right Panel: Color Statistics (Desktop sidebar + Mobile drawer) */}
+        <div
+          className={`h-full transition-transform duration-300 ease-in-out z-40 ${
+            mobileDrawer === 'stats'
+              ? 'fixed inset-y-0 right-0 max-w-[85vw] shadow-2xl block'
+              : 'hidden lg:block'
+          }`}
+        >
+          <StatsPanel
+            grid={grid}
+            paletteMap={paletteMap}
+            width={settings.width}
+            height={settings.height}
+            boardSize={settings.boardSize}
+            highlightColorId={highlightColorId}
+            onSetHighlightColorId={setHighlightColorId}
+            onOpenReplaceModal={color => setReplaceSourceColor(color)}
+            onSelectColor={color => setSelectedColor(color)}
+            onCloseMobile={() => setMobileDrawer('none')}
+          />
+        </div>
       </div>
+
+      {/* Mobile Bottom Navigation Bar (< lg screens) */}
+      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur px-2 py-1 flex items-center justify-around z-30 shrink-0 text-[10px]">
+        <button
+          onClick={() => setMobileDrawer('none')}
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
+            mobileDrawer === 'none' ? 'text-rose-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          <span>画布</span>
+        </button>
+
+        <button
+          onClick={() => setMobileDrawer(mobileDrawer === 'settings' ? 'none' : 'settings')}
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
+            mobileDrawer === 'settings' ? 'text-rose-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>设置</span>
+        </button>
+
+        <button
+          onClick={() => setMobileDrawer(mobileDrawer === 'stats' ? 'none' : 'stats')}
+          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
+            mobileDrawer === 'stats' ? 'text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>用量</span>
+        </button>
+
+        {sourceImage && (
+          <button
+            onClick={() => setIsStudioModalOpen(true)}
+            className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg text-amber-400 hover:text-amber-300 transition-colors cursor-pointer font-medium"
+          >
+            <Wand2 className="w-4 h-4" />
+            <span>AI抠图</span>
+          </button>
+        )}
+
+        <button
+          onClick={() => setIsExportModalOpen(true)}
+          className="flex flex-col items-center gap-0.5 py-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors cursor-pointer shadow-sm"
+        >
+          <Download className="w-4 h-4" />
+          <span>导出</span>
+        </button>
+      </nav>
 
       {/* Modals */}
       <PaletteManagerModal

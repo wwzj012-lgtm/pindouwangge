@@ -1,11 +1,23 @@
 import { BeadColor, ConvertSettings, ColorMatchAlgo } from '../types';
 
+// Helper: Convert sRGB component (0-255) to Linear RGB (0.0-1.0)
+export function srgbToLinear(c: number): number {
+  const norm = c / 255;
+  return norm <= 0.04045 ? norm / 12.92 : Math.pow((norm + 0.055) / 1.055, 2.4);
+}
+
+// Helper: Convert Linear RGB (0.0-1.0) back to sRGB (0-255)
+export function linearToSrgb(c: number): number {
+  const clamped = Math.max(0, Math.min(1, c));
+  const srgb = clamped <= 0.0031308 ? clamped * 12.92 : 1.055 * Math.pow(clamped, 1 / 2.4) - 0.055;
+  return Math.min(255, Math.max(0, Math.round(srgb * 255)));
+}
+
 // 1. Convert RGB to CIELAB (D65 White Point)
 export function rgbToLab(r: number, g: number, b: number): [number, number, number] {
-  let rN = r / 255, gN = g / 255, bN = b / 255;
-  rN = rN > 0.04045 ? Math.pow((rN + 0.055) / 1.055, 2.4) : rN / 12.92;
-  gN = gN > 0.04045 ? Math.pow((gN + 0.055) / 1.055, 2.4) : gN / 12.92;
-  bN = bN > 0.04045 ? Math.pow((bN + 0.055) / 1.055, 2.4) : bN / 12.92;
+  let rN = srgbToLinear(r);
+  let gN = srgbToLinear(g);
+  let bN = srgbToLinear(b);
 
   let x = (rN * 0.4124 + gN * 0.3576 + bN * 0.1805) * 100;
   let y = (rN * 0.2126 + gN * 0.7152 + bN * 0.0722) * 100;
@@ -27,12 +39,16 @@ export function rgbToLab(r: number, g: number, b: number): [number, number, numb
   return [L, a, B];
 }
 
-// 2. Exact CIEDE2000 Delta E Calculation (Standard for human perception)
-export function deltaE2000(lab1: [number, number, number], lab2: [number, number, number]): number {
+// 2. Exact CIEDE2000 Delta E Calculation with customizable weighting factors
+export function deltaE2000(
+  lab1: [number, number, number],
+  lab2: [number, number, number],
+  kL = 1,
+  kC = 1,
+  kH = 1
+): number {
   const [L1, a1, b1] = lab1;
   const [L2, a2, b2] = lab2;
-
-  const kL = 1, kC = 1, kH = 1;
 
   const C1 = Math.sqrt(a1 * a1 + b1 * b1);
   const C2 = Math.sqrt(a2 * a2 + b2 * b2);
@@ -112,13 +128,14 @@ export function findClosestBeadColor(
   g: number,
   b: number,
   palette: BeadColor[],
-  algo: ColorMatchAlgo = 'ciede2000'
+  algo: ColorMatchAlgo = 'ciede2000_vivid'
 ): BeadColor {
   if (palette.length === 0) {
     throw new Error('Palette cannot be empty');
   }
 
-  const targetLab = (algo === 'ciede2000' || algo === 'cie76') ? rgbToLab(r, g, b) : null;
+  const isLabAlgo = algo === 'ciede2000' || algo === 'ciede2000_vivid' || algo === 'cie76';
+  const targetLab = isLabAlgo ? rgbToLab(r, g, b) : null;
   let minDistance = Infinity;
   let closest = palette[0];
 
@@ -127,9 +144,14 @@ export function findClosestBeadColor(
 
     let dist = Infinity;
 
-    if (algo === 'ciede2000') {
+    if (algo === 'ciede2000_vivid') {
+      // Vivid mode: kC = 0.65 (heavy chroma penalty), kL = 1.35 (relaxed lightness)
+      // Strongly prefers vibrant/saturated bead matches over washed-out/whitish ones
       const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      dist = deltaE2000(targetLab!, colorLab);
+      dist = deltaE2000(targetLab!, colorLab, 1.35, 0.65, 1.0);
+    } else if (algo === 'ciede2000') {
+      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
+      dist = deltaE2000(targetLab!, colorLab, 1.0, 1.0, 1.0);
     } else if (algo === 'cie76') {
       const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
       const dL = targetLab![0] - colorLab[0];
@@ -169,17 +191,21 @@ function adjustColor(
   b += (brightness / 100) * 255;
 
   // 2. Contrast (-100 to 100)
-  const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-  r = factor * (r - 128) + 128;
-  g = factor * (g - 128) + 128;
-  b = factor * (b - 128) + 128;
+  if (contrast !== 0) {
+    const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
+    r = factor * (r - 128) + 128;
+    g = factor * (g - 128) + 128;
+    b = factor * (b - 128) + 128;
+  }
 
-  // 3. Saturation (-100 to 100)
-  const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-  const satFactor = (saturation + 100) / 100;
-  r = gray + satFactor * (r - gray);
-  g = gray + satFactor * (g - gray);
-  b = gray + satFactor * (b - gray);
+  // 3. Saturation boost & protection (-100 to 100)
+  if (saturation !== 0) {
+    const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
+    const satFactor = (saturation + 100) / 100;
+    r = gray + satFactor * (r - gray);
+    g = gray + satFactor * (g - gray);
+    b = gray + satFactor * (b - gray);
+  }
 
   return [
     Math.min(255, Math.max(0, Math.round(r))),
@@ -212,10 +238,6 @@ function applySharpening(
   const origG = new Float32Array(bufferG);
   const origB = new Float32Array(bufferB);
 
-  // 3x3 Laplacian / High-pass Kernel
-  // [ 0, -1,  0]
-  // [-1,  5, -1]
-  // [ 0, -1,  0]
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
       const idx = y * width + x;
@@ -236,7 +258,7 @@ function applySharpening(
   }
 }
 
-// 6. Main Image to Grid Conversion with High-Precision Features
+// 6. High-Precision Linear-RGB Area Downsampling & Grid Conversion
 export function imageToGrid(
   img: HTMLImageElement | HTMLCanvasElement,
   settings: ConvertSettings,
@@ -253,78 +275,135 @@ export function imageToGrid(
     contrast,
     saturation,
     transparentCutoff,
-    colorMatchAlgo = 'ciede2000',
+    colorMatchAlgo = 'ciede2000_vivid',
     sharpening = 0,
     outlineBoost = false,
     chromaKeyColor = null,
     chromaKeyTolerance = 30,
   } = settings;
 
-  // Create temporary offscreen canvas to scale image
-  const canvas = document.createElement('canvas');
-  canvas.width = targetW;
-  canvas.height = targetH;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-  if (!ctx) return [];
+  // Render original image onto high-resolution source canvas
+  const srcW = img instanceof HTMLImageElement ? (img.naturalWidth || img.width) : img.width;
+  const srcH = img instanceof HTMLImageElement ? (img.naturalHeight || img.height) : img.height;
 
-  // Disable smooth scaling for crisp pixel conversion
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(img, 0, 0, targetW, targetH);
+  if (srcW === 0 || srcH === 0) return [];
 
-  const imgData = ctx.getImageData(0, 0, targetW, targetH);
-  const data = imgData.data;
+  // Limit max source dimensions for fast computation while keeping precision
+  const maxDim = 1200;
+  let renderW = srcW;
+  let renderH = srcH;
+  if (renderW > maxDim || renderH > maxDim) {
+    if (renderW >= renderH) {
+      renderH = Math.round((renderH * maxDim) / renderW);
+      renderW = maxDim;
+    } else {
+      renderW = Math.round((renderW * maxDim) / renderH);
+      renderH = maxDim;
+    }
+  }
 
-  // Prepare float buffer for color processing
+  const srcCanvas = document.createElement('canvas');
+  srcCanvas.width = renderW;
+  srcCanvas.height = renderH;
+  const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
+  if (!srcCtx) return [];
+
+  srcCtx.drawImage(img, 0, 0, renderW, renderH);
+  const srcImgData = srcCtx.getImageData(0, 0, renderW, renderH);
+  const srcData = srcImgData.data;
+
+  // Prepare target grid buffers
   const bufferR = new Float32Array(targetW * targetH);
   const bufferG = new Float32Array(targetW * targetH);
   const bufferB = new Float32Array(targetW * targetH);
   const bufferA = new Uint8Array(targetW * targetH);
 
   const keyRgb = chromaKeyColor ? hexToRgb(chromaKeyColor) : null;
+  const maxChromaDist = (chromaKeyTolerance / 100) * 441.67;
 
-  for (let y = 0; y < targetH; y++) {
-    for (let x = 0; x < targetW; x++) {
-      const idx = (y * targetW + x) * 4;
-      let alpha = data[idx + 3];
-      const r = data[idx];
-      const g = data[idx + 1];
-      const b = data[idx + 2];
+  // Perform Linear-RGB Area Box Downsampling
+  for (let gy = 0; gy < targetH; gy++) {
+    for (let gx = 0; gx < targetW; gx++) {
+      const gIdx = gy * targetW + gx;
 
-      // Check Chroma Key background removal if active
-      if (keyRgb && alpha >= transparentCutoff) {
-        const distSq =
-          Math.pow(r - keyRgb[0], 2) +
-          Math.pow(g - keyRgb[1], 2) +
-          Math.pow(b - keyRgb[2], 2);
-        const maxDist = (chromaKeyTolerance / 100) * 441.67; // max RGB distance 441.67
-        if (Math.sqrt(distSq) <= maxDist) {
-          alpha = 0; // Key out background
+      const x0 = Math.floor((gx * renderW) / targetW);
+      const x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * renderW) / targetW));
+      const y0 = Math.floor((gy * renderH) / targetH);
+      const y1 = Math.max(y0 + 1, Math.floor(((gy + 1) * renderH) / targetH));
+
+      let sumR_lin = 0;
+      let sumG_lin = 0;
+      let sumB_lin = 0;
+      let validPixelCount = 0;
+      let totalAlpha = 0;
+
+      for (let sy = y0; sy < y1; sy++) {
+        for (let sx = x0; sx < x1; sx++) {
+          const sIdx = (sy * renderW + sx) * 4;
+          let alpha = srcData[sIdx + 3];
+          const sr = srcData[sIdx];
+          const sg = srcData[sIdx + 1];
+          const sb = srcData[sIdx + 2];
+
+          // Chroma key background check
+          if (keyRgb && alpha >= transparentCutoff) {
+            const dist = Math.sqrt(
+              Math.pow(sr - keyRgb[0], 2) +
+              Math.pow(sg - keyRgb[1], 2) +
+              Math.pow(sb - keyRgb[2], 2)
+            );
+            if (dist <= maxChromaDist) {
+              alpha = 0;
+            }
+          }
+
+          totalAlpha += alpha;
+
+          if (alpha >= transparentCutoff) {
+            sumR_lin += srgbToLinear(sr);
+            sumG_lin += srgbToLinear(sg);
+            sumB_lin += srgbToLinear(sb);
+            validPixelCount++;
+          }
         }
       }
 
-      bufferA[y * targetW + x] = alpha;
+      const avgAlpha = validPixelCount > 0 ? 255 : 0;
+      bufferA[gIdx] = avgAlpha;
 
-      if (alpha >= transparentCutoff) {
+      if (validPixelCount > 0) {
+        // Linear RGB average
+        const avgR_lin = sumR_lin / validPixelCount;
+        const avgG_lin = sumG_lin / validPixelCount;
+        const avgB_lin = sumB_lin / validPixelCount;
+
+        // Convert back to sRGB
+        const sR = linearToSrgb(avgR_lin);
+        const sG = linearToSrgb(avgG_lin);
+        const sB = linearToSrgb(avgB_lin);
+
+        // Apply brightness, contrast, saturation adjustments
         const [ar, ag, ab] = adjustColor(
-          r,
-          g,
-          b,
+          sR,
+          sG,
+          sB,
           brightness,
           contrast,
           saturation
         );
-        bufferR[y * targetW + x] = ar;
-        bufferG[y * targetW + x] = ag;
-        bufferB[y * targetW + x] = ab;
+
+        bufferR[gIdx] = ar;
+        bufferG[gIdx] = ag;
+        bufferB[gIdx] = ab;
       } else {
-        bufferR[y * targetW + x] = 0;
-        bufferG[y * targetW + x] = 0;
-        bufferB[y * targetW + x] = 0;
+        bufferR[gIdx] = 0;
+        bufferG[gIdx] = 0;
+        bufferB[gIdx] = 0;
       }
     }
   }
 
-  // Apply sharpening filter if requested
+  // Apply sharpening filter
   if (sharpening > 0) {
     applySharpening(bufferR, bufferG, bufferB, targetW, targetH, sharpening);
   }
@@ -333,7 +412,7 @@ export function imageToGrid(
     Array(targetW).fill(null)
   );
 
-  // Find darkest palette colors for outline protection
+  // Outline protection: Find darkest palette color
   let darkestColor = activePalette[0];
   if (outlineBoost) {
     let minL = Infinity;
@@ -346,7 +425,7 @@ export function imageToGrid(
     }
   }
 
-  // Apply conversion with selected algorithm and dither mode
+  // Map to closest bead colors with error diffusion
   for (let y = 0; y < targetH; y++) {
     for (let x = 0; x < targetW; x++) {
       const idx = y * targetW + x;
@@ -359,8 +438,8 @@ export function imageToGrid(
       let curG = Math.min(255, Math.max(0, bufferG[idx]));
       let curB = Math.min(255, Math.max(0, bufferB[idx]));
 
-      // Outline protection: If pixel is very dark (luminance < 40/255) and outlineBoost is ON
-      if (outlineBoost && (curR * 0.299 + curG * 0.587 + curB * 0.114) < 45) {
+      // Dark outline protection
+      if (outlineBoost && (curR * 0.299 + curG * 0.587 + curB * 0.114) < 42) {
         resultGrid[y][x] = darkestColor.id;
         continue;
       }
@@ -401,7 +480,7 @@ export function imageToGrid(
     }
   }
 
-  // If color limit is specified (> 0)
+  // Apply color limit if configured (> 0)
   if (settings.colorLimit > 0) {
     return applyColorLimit(resultGrid, activePalette, settings.colorLimit, colorMatchAlgo);
   }
@@ -427,7 +506,6 @@ function applyColorLimit(
 
   if (counts.size <= maxColors) return grid;
 
-  // Pick top N colors
   const topColorIds = new Set(
     Array.from(counts.entries())
       .sort((a, b) => b[1] - a[1])
@@ -456,4 +534,3 @@ function applyColorLimit(
     })
   );
 }
-

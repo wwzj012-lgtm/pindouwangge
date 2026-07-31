@@ -119,11 +119,21 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   };
 
   // Apply Presets
-  const applyPreset = (preset: 'anime' | 'photo' | 'pixel' | 'clean') => {
-    if (preset === 'anime') {
+  const applyPreset = (preset: 'vivid' | 'anime' | 'photo' | 'pixel' | 'clean') => {
+    if (preset === 'vivid') {
       setLocalSettings(s => ({
         ...s,
-        colorMatchAlgo: 'ciede2000',
+        colorMatchAlgo: 'ciede2000_vivid',
+        sharpening: 50,
+        outlineBoost: true,
+        contrast: 15,
+        saturation: 20,
+        dither: 'none',
+      }));
+    } else if (preset === 'anime') {
+      setLocalSettings(s => ({
+        ...s,
+        colorMatchAlgo: 'ciede2000_vivid',
         sharpening: 70,
         outlineBoost: true,
         contrast: 20,
@@ -133,7 +143,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     } else if (preset === 'photo') {
       setLocalSettings(s => ({
         ...s,
-        colorMatchAlgo: 'ciede2000',
+        colorMatchAlgo: 'ciede2000_vivid',
         sharpening: 25,
         outlineBoost: false,
         contrast: 10,
@@ -171,10 +181,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 animate-fadeIn">
+      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20">
               <Wand2 className="w-5 h-5" />
@@ -200,15 +210,21 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
-          <div className="flex-1 p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50">
+          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50">
             {/* Action Presets bar */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
               <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 智能快速预设:
               </span>
+              <button
+                onClick={() => applyPreset('vivid')}
+                className="px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/80 text-amber-200 hover:bg-amber-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm"
+              >
+                🔥 鲜艳高饱满 (防发白/推荐)
+              </button>
               <button
                 onClick={() => applyPreset('anime')}
                 className="px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-600/50 text-rose-300 hover:bg-rose-900/80 cursor-pointer transition-all shrink-0 font-medium"
@@ -219,7 +235,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 onClick={() => applyPreset('photo')}
                 className="px-2.5 py-1 rounded-lg bg-sky-950/60 border border-sky-600/50 text-sky-300 hover:bg-sky-900/80 cursor-pointer transition-all shrink-0 font-medium"
               >
-                📷 真实照片 (CIEDE2000精准柔和)
+                📷 真实照片 (柔和渐变)
               </button>
               <button
                 onClick={() => applyPreset('pixel')}
@@ -236,7 +252,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
 
             {/* Canvas Display Dual Box */}
-            <div className="grid grid-cols-2 gap-4 flex-1 min-h-[300px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-[300px]">
               {/* Box 1: Pre-processed Source Image Canvas */}
               <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3 relative group">
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300">
@@ -337,7 +353,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           </div>
 
           {/* Right Control Drawer: Advanced Sliders */}
-          <div className="w-80 bg-slate-900 border-l border-slate-800 p-5 overflow-y-auto space-y-5 text-xs select-none">
+          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-y-auto space-y-5 text-xs select-none shrink-0">
             {/* Section 1: Color Match Engine */}
             <div className="space-y-2">
               <label className="text-slate-200 font-bold flex items-center gap-1.5 text-xs">
@@ -347,9 +363,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               <div className="space-y-1.5">
                 {[
                   {
+                    id: 'ciede2000_vivid',
+                    name: 'CIEDE2000 鲜艳饱满 (防发白)',
+                    desc: '优先匹配饱和色彩，强力防止发白变淡 (推荐)',
+                  },
+                  {
                     id: 'ciede2000',
-                    name: 'CIEDE2000 工业级匹配',
-                    desc: '符合人眼视觉感知，渐变自然无断层 (最推荐)',
+                    name: 'CIEDE2000 工业标准柔和',
+                    desc: '符合人眼标准感知，渐变平滑自然',
                   },
                   {
                     id: 'cie76',

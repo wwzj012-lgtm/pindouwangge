@@ -15,7 +15,7 @@ export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat';
 
 export type DitherMode = 'none' | 'floyd' | 'atkinson';
 
-export type ColorMatchAlgo = 'ciede2000' | 'cie76' | 'rgb_weighted';
+export type ColorMatchAlgo = 'ciede2000_vivid' | 'ciede2000' | 'cie76' | 'rgb_weighted';
 
 export type ToolType =
   | 'pencil'
@@ -45,12 +45,13 @@ export interface ConvertSettings {
   boardSize: number;         // Standard board grid size e.g. 29 for 29x29, 14 for 14x14
   
   // Enhanced image conversion options
-  colorMatchAlgo: ColorMatchAlgo; // Distance algorithm: CIEDE2000 vs CIE76 vs RGB
+  colorMatchAlgo: ColorMatchAlgo; // Distance algorithm: CIEDE2000 Vivid vs CIEDE2000 Standard vs CIE76 vs RGB
   sharpening: number;             // 0-100 unsharp mask sharpening
   outlineBoost: boolean;          // Preserve black/dark outlines in pixel art/sprites
+  vividBoost?: boolean;           // Prevent color whitening & enhance saturation
   chromaKeyColor: string | null;  // Transparent background color hex (if set)
   chromaKeyTolerance: number;     // 0-100 tolerance for chroma keying
-  kmeansClustering: boolean;      // Group similar colors before mapping to reduce noise
+  kmeansClustering?: boolean;     // Group similar colors before mapping to reduce noise
 }
 
 export interface GridCell {

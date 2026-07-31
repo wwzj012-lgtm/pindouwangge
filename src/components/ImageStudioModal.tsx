@@ -239,9 +239,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
-                <span>高级图像增强与转换工作坊</span>
+                <span>高级图像增强与转拼豆工作坊</span>
                 <span className="px-2 py-0.5 text-[10px] bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30">
-                  AI & 算法优化
+                  AI & 算法驱动
                 </span>
               </h2>
               <p className="text-xs text-slate-400">
@@ -258,9 +258,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden min-h-0">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden min-h-0">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
-          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50 min-h-0">
+          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-visible xl:overflow-y-auto bg-slate-950/50 min-h-0 shrink-0 xl:shrink">
             {/* Action Presets bar */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none shrink-0">
               <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1 whitespace-nowrap">
@@ -300,13 +300,13 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
 
             {/* Canvas Display Dual Box */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-[300px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
               {/* Box 1: Pre-processed Source Image Canvas */}
               <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3 relative group">
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Scissors className="w-3.5 h-3.5 text-sky-400" />
-                    原图变换与抠图预览
+                    原图变换与预处理
                   </span>
                   <div className="flex items-center gap-1">
                     <button
@@ -381,7 +381,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           </div>
 
           {/* Right Control Drawer: Advanced Sliders */}
-          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-y-auto space-y-5 text-xs select-none shrink-0 min-h-0">
+          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-visible xl:overflow-y-auto space-y-5 text-xs select-none shrink-0 min-h-0">
             {/* Section 0: Grid Target Dimensions */}
             <div className="space-y-2">
               <label className="text-slate-200 font-bold flex items-center justify-between text-xs">

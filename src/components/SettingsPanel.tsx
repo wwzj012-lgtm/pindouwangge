@@ -88,7 +88,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         >
           <div className="flex items-center gap-2 text-xs">
             <Wand2 className="w-4 h-4" />
-            <span>图像AI增强/抠图工作坊</span>
+            <span>图像转换与增强工作坊</span>
           </div>
           <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">打开</span>
         </button>

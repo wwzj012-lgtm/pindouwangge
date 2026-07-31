@@ -602,9 +602,10 @@ export default function App() {
           <button
             onClick={() => setIsStudioModalOpen(true)}
             className="flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg text-amber-400 hover:text-amber-300 font-medium transition-all cursor-pointer"
+            title="高级图像增强与转拼豆工作坊"
           >
             <Wand2 className="w-3.5 h-3.5" />
-            <span>AI抠图</span>
+            <span>图像增强</span>
           </button>
         )}
 

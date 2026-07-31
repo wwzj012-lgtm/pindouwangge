@@ -6,6 +6,8 @@ import {
   downloadCanvasImage,
   ExportOptions,
   WatermarkPosition,
+  LegendPosition,
+  LegendScaleMode,
 } from '../utils/exportUtils';
 
 interface ExportModalProps {
@@ -37,6 +39,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [showCoordinates, setShowCoordinates] = useState(true);
   const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('grid_and_legend');
   const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
+  const [legendPosition, setLegendPosition] = useState<LegendPosition>('right');
+  const [legendScaleMode, setLegendScaleMode] = useState<LegendScaleMode>('auto');
   const [selectedBoard, setSelectedBoard] = useState<number | null>(null); // null = full canvas
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -62,6 +66,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       selectedBoardIndex: selectedBoard,
       watermarkPosition,
       watermarkOpacity,
+      legendPosition,
+      legendScaleMode,
     };
 
     const canvas = generatePatternCanvas(options);
@@ -83,6 +89,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     selectedBoard,
     watermarkPosition,
     watermarkOpacity,
+    legendPosition,
+    legendScaleMode,
   ]);
 
   if (!isOpen) return null;
@@ -102,6 +110,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       selectedBoardIndex: selectedBoard,
       watermarkPosition,
       watermarkOpacity,
+      legendPosition,
+      legendScaleMode,
     };
     const canvas = generatePatternCanvas(options);
     const suffix = selectedBoard !== null ? `_板${selectedBoard + 1}` : '_完整图纸';
@@ -124,6 +134,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       selectedBoardIndex: null,
       watermarkPosition,
       watermarkOpacity,
+      legendPosition,
+      legendScaleMode,
     };
     downloadCanvasImage(generatePatternCanvas(fullOptions), `${projectName}_完整图纸.png`);
 
@@ -193,24 +205,47 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 onChange={e => setWatermarkPosition(e.target.value as WatermarkPosition)}
                 className="bg-slate-800 border border-slate-700 text-purple-200 font-medium rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
               >
-                <option value="grid_and_legend">✦ 网格图 + 色号表双重斜向水印 (推荐)</option>
-                <option value="legend_only">✦ 仅色号清单斜向水印</option>
-                <option value="grid_center">✦ 仅网格中心半透明水印</option>
-                <option value="none">✦ 无水印</option>
+                <option value="grid_and_legend">✦ 双重斜向水印 (全图覆盖)</option>
               </select>
 
-              {watermarkPosition !== 'none' && (
-                <select
-                  value={watermarkOpacity.toString()}
-                  onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
-                  className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                  title="调整水印透明度"
-                >
-                  <option value="0.1">透明度 10% (轻柔)</option>
-                  <option value="0.18">透明度 18% (标准推荐)</option>
-                  <option value="0.28">透明度 28% (清晰显眼)</option>
-                </select>
-              )}
+              <select
+                value={watermarkOpacity.toString()}
+                onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
+                className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                title="调整水印透明度"
+              >
+                <option value="0.1">透明度 10% (极淡)</option>
+                <option value="0.18">透明度 18% (标准防盗)</option>
+                <option value="0.28">透明度 28% (高清晰度)</option>
+              </select>
+            </div>
+
+            {/* Legend Scale & Layout Settings */}
+            <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+              <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <span className="text-slate-400">色号清单字号:</span>
+              <select
+                value={legendScaleMode}
+                onChange={e => setLegendScaleMode(e.target.value as LegendScaleMode)}
+                className="bg-slate-800 border border-slate-700 text-amber-300 font-bold rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                title="网格变大时可自动按比例放大色号文字与色块"
+              >
+                <option value="auto">🔥 与网格自适应等比例放大 (推荐)</option>
+                <option value="1.0">标准 1.0x (100%)</option>
+                <option value="1.5">中度 1.5x (150%)</option>
+                <option value="2.0">放大 2.0x (200%)</option>
+                <option value="2.5">特大 2.5x (250%)</option>
+                <option value="3.0">巨型 3.0x (300%)</option>
+              </select>
+
+              <select
+                value={legendPosition}
+                onChange={e => setLegendPosition(e.target.value as LegendPosition)}
+                className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+              >
+                <option value="right">右侧多列侧边栏</option>
+                <option value="bottom">下方横向表格</option>
+              </select>
             </div>
           </div>
 

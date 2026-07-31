@@ -1,6 +1,8 @@
 import { BeadColor, BeadShape } from '../types';
 
 export type WatermarkPosition = 'grid_and_legend' | 'legend_only' | 'grid_center' | 'none';
+export type LegendPosition = 'right' | 'bottom';
+export type LegendScaleMode = 'auto' | '1.0' | '1.5' | '2.0' | '2.5' | '3.0';
 
 export interface ExportOptions {
   grid: (string | null)[][];
@@ -16,35 +18,62 @@ export interface ExportOptions {
   selectedBoardIndex?: number | null; // null for full image, 0..N for specific sub-board
   watermarkPosition?: WatermarkPosition; // Default: 'grid_and_legend'
   watermarkOpacity?: number; // Default: 0.18
+  legendPosition?: LegendPosition; // Default: 'right'
+  legendScaleMode?: LegendScaleMode; // Default: 'auto'
 }
 
-// Draw diagonal translucent watermark across a rectangular region
+// Draw diagonal translucent watermark across a rectangular region with smart density calculation
 function drawDiagonalWatermark(
   ctx: CanvasRenderingContext2D,
   rectX: number,
   rectY: number,
   rectW: number,
   rectH: number,
-  text: string,
+  text: string = '✦ 豆织星格',
   opacity: number = 0.18,
-  fontSize: number = 20,
-  stepX: number = 240,
-  stepY: number = 140
+  fontSize?: number,
+  customStepX?: number,
+  customStepY?: number
 ) {
+  if (rectW <= 0 || rectH <= 0) return;
+
+  const area = rectW * rectH;
+  const targetCount = Math.max(5, Math.min(22, Math.round(Math.sqrt(area) / 120)));
+
+  // Calculate step sizes
+  const targetCellArea = area / targetCount;
+  const stepY = (customStepY && customStepY >= 100)
+    ? customStepY
+    : Math.max(100, Math.round(Math.sqrt(targetCellArea / 2.0)));
+  const stepX = (customStepX && customStepX >= 180)
+    ? customStepX
+    : Math.max(200, Math.round(stepY * 2.0));
+
+  // Determine succinct font size
+  const calculatedFontSize = fontSize && fontSize >= 14
+    ? fontSize
+    : Math.max(18, Math.min(26, Math.round(stepY * 0.22)));
+
   ctx.save();
   ctx.beginPath();
   ctx.rect(rectX, rectY, rectW, rectH);
   ctx.clip();
 
   ctx.globalAlpha = opacity;
-  ctx.fillStyle = '#6B21A8'; // Deep purple contrast watermark
-  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.font = `bold ${calculatedFontSize}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
   const angle = -25 * Math.PI / 180;
   ctx.translate(rectX + rectW / 2, rectY + rectH / 2);
   ctx.rotate(angle);
+
+  // Purple gradient for watermark text
+  const purpleGrad = ctx.createLinearGradient(-50, -10, 50, 10);
+  purpleGrad.addColorStop(0, '#7C3AED'); // Deep Violet
+  purpleGrad.addColorStop(0.5, '#A855F7'); // Bright Purple
+  purpleGrad.addColorStop(1, '#D946EF'); // Fuchsia
+  ctx.fillStyle = purpleGrad;
 
   // Cover bounding box
   const diagonal = Math.sqrt(rectW * rectW + rectH * rectH) * 1.5;
@@ -53,11 +82,13 @@ function drawDiagonalWatermark(
   const startY = -diagonal;
   const endY = diagonal;
 
+  const watermarkLabel = '✦ 豆织星格';
+
   for (let y = startY; y < endY; y += stepY) {
     const rowIdx = Math.floor(y / stepY);
     const offsetX = (rowIdx % 2 === 0) ? 0 : stepX / 2;
     for (let x = startX; x < endX; x += stepX) {
-      ctx.fillText(text, x + offsetX, y);
+      ctx.fillText(watermarkLabel, x + offsetX, y);
     }
   }
 
@@ -160,9 +191,11 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     selectedBoardIndex,
     watermarkPosition = 'grid_and_legend',
     watermarkOpacity = 0.18,
+    legendPosition = 'right',
+    legendScaleMode = 'auto',
   } = options;
 
-  // Calculate sub-boards bounds if a specific board is requested
+  // 1. Calculate sub-boards bounds if a specific board is requested
   const boardsX = Math.ceil(width / boardSize);
   let startX = 0;
   let endX = width;
@@ -185,15 +218,84 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
   // Sizing parameters for high resolution output
   const cellSize = 24; // 24px per bead cell in high-res export
-  const coordSize = showCoordinates ? 30 : 0;
-  const headerHeight = 70;
-  const legendWidth = 260; // Right side legend panel
-
   const gridPixelWidth = activeWidth * cellSize;
   const gridPixelHeight = activeHeight * cellSize;
 
-  const totalCanvasWidth = coordSize + gridPixelWidth + legendWidth + 40;
-  const totalCanvasHeight = headerHeight + coordSize + Math.max(gridPixelHeight, 400) + 40;
+  // 2. Count beads & colors
+  const colorCounts = new Map<string, number>();
+  let totalBeadsInView = 0;
+
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const cellId = grid[y][x];
+      if (cellId) {
+        colorCounts.set(cellId, (colorCounts.get(cellId) || 0) + 1);
+        totalBeadsInView++;
+      }
+    }
+  }
+
+  const sortedColors = Array.from(colorCounts.entries())
+    .map(([colorId, count]) => ({ bead: paletteMap.get(colorId), count }))
+    .filter(item => item.bead !== undefined)
+    .sort((a, b) => b.count - a.count);
+
+  // 3. Dynamic Legend Scaling Factor Calculation
+  let scale = 1.0;
+  if (legendScaleMode === 'auto') {
+    const maxGridDim = Math.max(gridPixelWidth, gridPixelHeight);
+    scale = Math.max(1.0, Math.min(4.0, maxGridDim / 720));
+  } else {
+    scale = parseFloat(legendScaleMode) || 1.0;
+  }
+
+  // Scaled dimensions & typography
+  const headerHeight = Math.round(70 * Math.max(1, scale * 0.7));
+  const coordSize = showCoordinates ? Math.round(30 * Math.max(1, scale * 0.6)) : 0;
+  const startGridX = 20 + coordSize;
+  const startGridY = headerHeight + coordSize;
+
+  const swatchSize = Math.round(22 * scale);
+  const rowHeight = Math.round(32 * scale);
+  const legendColWidth = Math.round(270 * scale);
+
+  const legendHeaderFont = `bold ${Math.round(18 * scale)}px sans-serif`;
+  const legendSubFont = `${Math.round(13 * scale)}px sans-serif`;
+  const legendCodeFont = `bold ${Math.round(14 * scale)}px monospace`;
+  const legendNameFont = `${Math.round(13 * scale)}px sans-serif`;
+  const legendCountFont = `bold ${Math.round(14 * scale)}px sans-serif`;
+
+  // 4. Calculate Legend Layout & Canvas Bounds
+  let totalCanvasWidth = 0;
+  let totalCanvasHeight = 0;
+  let numCols = 1;
+  let maxRowsPerCol = sortedColors.length || 1;
+  let totalLegendWidth = 0;
+  let totalLegendHeight = 0;
+
+  if (legendPosition === 'right') {
+    const headerSpace = Math.round(75 * scale);
+    const availGridHeight = Math.max(gridPixelHeight, Math.round(320 * scale));
+    maxRowsPerCol = Math.max(4, Math.floor((availGridHeight - headerSpace) / rowHeight));
+    numCols = Math.max(1, Math.ceil(sortedColors.length / maxRowsPerCol));
+    totalLegendWidth = numCols * legendColWidth + Math.round(20 * scale);
+
+    totalCanvasWidth = startGridX + gridPixelWidth + totalLegendWidth + Math.round(35 * scale);
+    const legendNeededH = maxRowsPerCol * rowHeight + headerSpace;
+    totalCanvasHeight = headerHeight + coordSize + Math.max(gridPixelHeight, legendNeededH) + Math.round(40 * scale);
+  } else {
+    // 'bottom' layout
+    const availWidth = gridPixelWidth + coordSize;
+    numCols = Math.max(1, Math.floor(availWidth / legendColWidth));
+    const totalRows = Math.ceil(sortedColors.length / numCols) || 1;
+    totalLegendHeight = totalRows * rowHeight + Math.round(85 * scale);
+
+    totalCanvasWidth = Math.max(
+      startGridX + gridPixelWidth + Math.round(30 * scale),
+      startGridX + numCols * legendColWidth + Math.round(30 * scale)
+    );
+    totalCanvasHeight = startGridY + gridPixelHeight + totalLegendHeight + Math.round(40 * scale);
+  }
 
   const canvas = document.createElement('canvas');
   canvas.width = totalCanvasWidth;
@@ -205,34 +307,34 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, totalCanvasWidth, totalCanvasHeight);
 
-  // 1. Header Title & Meta Info
+  // 5. Header Title & Meta Info
+  const mainTitleFont = `bold ${Math.round(22 * Math.max(1, scale * 0.7))}px sans-serif`;
+  const subTitleFont = `${Math.round(13 * Math.max(1, scale * 0.6))}px sans-serif`;
+
   ctx.fillStyle = '#1E293B';
-  ctx.font = 'bold 22px sans-serif';
+  ctx.font = mainTitleFont;
   ctx.textAlign = 'left';
-  ctx.fillText(`${projectName}${subBoardTitle}`, 20, 36);
+  ctx.fillText(`${projectName}${subBoardTitle}`, 20, Math.round(36 * Math.max(1, scale * 0.7)));
 
   ctx.fillStyle = '#64748B';
-  ctx.font = '13px sans-serif';
+  ctx.font = subTitleFont;
   ctx.fillText(
     `品牌: ${brandName} | 尺寸: ${width}x${height} 豆 (需 ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} 个 ${boardSize}x${boardSize} 板)`,
     20,
-    58
+    Math.round(58 * Math.max(1, scale * 0.7))
   );
 
-  const startGridX = 20 + coordSize;
-  const startGridY = headerHeight + coordSize;
-
-  // 2. Coordinate Labels (A..Z top, 1..N left)
+  // 6. Coordinate Labels (A..Z top, 1..N left)
   if (showCoordinates) {
     ctx.fillStyle = '#475569';
-    ctx.font = 'bold 11px sans-serif';
+    ctx.font = `bold ${Math.round(11 * Math.max(1, scale * 0.6))}px sans-serif`;
     ctx.textAlign = 'center';
 
     // Top X coordinates
     for (let x = startX; x < endX; x++) {
       const px = startGridX + (x - startX) * cellSize + cellSize / 2;
       const label = getColumnLetter(x);
-      ctx.fillText(label, px, headerHeight + coordSize - 8);
+      ctx.fillText(label, px, startGridY - 8);
     }
 
     // Left Y coordinates
@@ -243,9 +345,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // 3. Render Bead Grid
-  const colorCounts = new Map<string, number>();
-
+  // 7. Render Bead Grid
   for (let y = startY; y < endY; y++) {
     for (let x = startX; x < endX; x++) {
       const px = startGridX + (x - startX) * cellSize;
@@ -253,7 +353,6 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
       const cellId = grid[y][x];
       if (cellId) {
-        colorCounts.set(cellId, (colorCounts.get(cellId) || 0) + 1);
         const bead = paletteMap.get(cellId);
         const colorHex = bead ? bead.hex : '#CCCCCC';
         const label = showSymbols && bead ? (bead.symbol || bead.code) : null;
@@ -274,14 +373,13 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
         ctx.fill();
       }
 
-      // Board grid highlights (every 5 cells subtle line, every boardSize thick line)
       ctx.strokeStyle = '#E2E8F0';
       ctx.lineWidth = 0.5;
       ctx.strokeRect(px, py, cellSize, cellSize);
     }
   }
 
-  // 4. Board Outline Overlays (Thick red/blue lines for pegboards)
+  // 8. Board Outline Overlays (Thick lines for pegboards)
   ctx.strokeStyle = '#3B82F6';
   ctx.lineWidth = 2;
   for (let bx = Math.floor(startX / boardSize); bx <= Math.ceil(endX / boardSize); bx++) {
@@ -305,129 +403,146 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // Render Grid Watermark Overlay
-  if (watermarkPosition === 'grid_and_legend') {
+  // Render Grid Watermark Overlay (Smart Density Diagonal Watermark)
+  if (watermarkPosition !== 'none') {
     drawDiagonalWatermark(
       ctx,
       startGridX,
       startGridY,
       gridPixelWidth,
       gridPixelHeight,
-      '✦ 豆织星格 PERLER PATTERN',
-      watermarkOpacity,
-      20,
-      250,
-      150
+      '✦ 豆织星格',
+      watermarkOpacity
     );
-  } else if (watermarkPosition === 'grid_center') {
-    ctx.save();
-    ctx.globalAlpha = Math.min(0.35, watermarkOpacity * 1.5);
-    ctx.fillStyle = '#6B21A8';
-    ctx.font = 'bold 30px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(
-      '✦ 豆织星格 拼豆图纸 ✦',
-      startGridX + gridPixelWidth / 2,
-      startGridY + gridPixelHeight / 2
-    );
-    ctx.restore();
   }
 
-  // 5. Render Legend Sidebar on Right Side
-  const legendX = startGridX + gridPixelWidth + 30;
-  let legendY = headerHeight + 10;
+  // 9. Render Scaled Legend Panel (Right Sidebar or Bottom Block)
+  const legendX = legendPosition === 'right'
+    ? startGridX + gridPixelWidth + Math.round(25 * scale)
+    : startGridX;
+  const legendY = legendPosition === 'right'
+    ? headerHeight + 10
+    : startGridY + gridPixelHeight + Math.round(25 * scale);
 
-  // Render Legend Diagonal Watermark
-  if (watermarkPosition === 'grid_and_legend' || watermarkPosition === 'legend_only') {
+  const legendBoxW = legendPosition === 'right'
+    ? totalLegendWidth
+    : (totalCanvasWidth - legendX - Math.round(20 * scale));
+  const legendBoxH = legendPosition === 'right'
+    ? (totalCanvasHeight - legendY - Math.round(20 * scale))
+    : (totalCanvasHeight - legendY - Math.round(25 * scale));
+
+  // Legend Card Background
+  ctx.fillStyle = '#F8FAFC';
+  ctx.strokeStyle = '#CBD5E1';
+  ctx.lineWidth = Math.max(1, Math.round(1.5 * scale));
+  ctx.fillRect(legendX - 10, legendY - 10, legendBoxW, legendBoxH);
+  ctx.strokeRect(legendX - 10, legendY - 10, legendBoxW, legendBoxH);
+
+  // Legend Diagonal Watermark
+  if (watermarkPosition !== 'none') {
     drawDiagonalWatermark(
       ctx,
       legendX - 10,
-      headerHeight + 5,
-      legendWidth,
-      totalCanvasHeight - headerHeight - 20,
-      '✦ 豆织星格 色号清单 ✦',
-      Math.min(0.28, watermarkOpacity + 0.04),
-      16,
-      200,
-      110
+      legendY - 10,
+      legendBoxW,
+      legendBoxH,
+      '✦ 豆织星格',
+      Math.min(0.28, watermarkOpacity + 0.04)
     );
   }
 
+  // Legend Header Text
   ctx.fillStyle = '#0F172A';
-  ctx.font = 'bold 15px sans-serif';
+  ctx.font = legendHeaderFont;
   ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
   ctx.fillText('拼豆用量色号清单', legendX, legendY);
-  legendY += 24;
 
-  let totalBeadsInView = 0;
-  const sortedColors = Array.from(colorCounts.entries())
-    .map(([colorId, count]) => {
-      totalBeadsInView += count;
-      return { bead: paletteMap.get(colorId), count };
-    })
-    .filter(item => item.bead !== undefined)
-    .sort((a, b) => b.count - a.count);
-
-  ctx.font = '12px sans-serif';
+  ctx.font = legendSubFont;
   ctx.fillStyle = '#64748B';
-  ctx.fillText(`总用豆量: ${totalBeadsInView} 粒 | 共 ${sortedColors.length} 色`, legendX, legendY);
-  legendY += 20;
+  ctx.fillText(
+    `总用豆量: ${totalBeadsInView} 粒 | 共 ${sortedColors.length} 色`,
+    legendX,
+    legendY + Math.round(26 * scale)
+  );
 
-  // Divider
+  // Divider Line
   ctx.strokeStyle = '#CBD5E1';
-  ctx.lineWidth = 1;
+  ctx.lineWidth = Math.max(1, Math.round(1 * scale));
   ctx.beginPath();
-  ctx.moveTo(legendX, legendY);
-  ctx.lineTo(legendX + legendWidth - 10, legendY);
+  ctx.moveTo(legendX, legendY + Math.round(48 * scale));
+  ctx.lineTo(legendX + legendBoxW - Math.round(20 * scale), legendY + Math.round(48 * scale));
   ctx.stroke();
-  legendY += 15;
 
-  // Table items
-  sortedColors.forEach(({ bead, count }) => {
+  const itemsStartY = legendY + Math.round(60 * scale);
+
+  // Render Table Items
+  sortedColors.forEach(({ bead, count }, idx) => {
     if (!bead) return;
 
-    if (legendY > totalCanvasHeight - 30) return; // Prevent overflow
+    let col = 0;
+    let row = 0;
+
+    if (legendPosition === 'right') {
+      col = Math.floor(idx / maxRowsPerCol);
+      row = idx % maxRowsPerCol;
+    } else {
+      col = idx % numCols;
+      row = Math.floor(idx / numCols);
+    }
+
+    const itemX = legendX + col * legendColWidth;
+    const itemY = itemsStartY + row * rowHeight;
 
     // Color Swatch Box
     ctx.fillStyle = bead.hex;
-    ctx.fillRect(legendX, legendY, 20, 20);
-    ctx.strokeStyle = '#00000022';
-    ctx.strokeRect(legendX, legendY, 20, 20);
+    ctx.fillRect(itemX, itemY, swatchSize, swatchSize);
+    ctx.strokeStyle = '#00000033';
+    ctx.lineWidth = Math.max(1, Math.round(1 * scale));
+    ctx.strokeRect(itemX, itemY, swatchSize, swatchSize);
 
+    // Symbol inside swatch
     if (bead.symbol && showSymbols) {
-      ctx.fillStyle = '#000000';
-      ctx.font = 'bold 10px sans-serif';
+      const hex = bead.hex.replace('#', '');
+      const r = parseInt(hex.substring(0, 2), 16) || 255;
+      const g = parseInt(hex.substring(2, 4), 16) || 255;
+      const b = parseInt(hex.substring(4, 6), 16) || 255;
+      const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+
+      ctx.fillStyle = brightness > 140 ? '#000000' : '#FFFFFF';
+      ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(bead.symbol, legendX + 10, legendY + 12);
+      ctx.textBaseline = 'middle';
+      ctx.fillText(bead.symbol, itemX + swatchSize / 2, itemY + swatchSize / 2);
     }
 
-    // Code & Name
+    // Code
     ctx.textAlign = 'left';
-    ctx.font = 'bold 12px monospace';
+    ctx.textBaseline = 'middle';
+    ctx.font = legendCodeFont;
     ctx.fillStyle = '#0F172A';
-    ctx.fillText(`${bead.code}`, legendX + 28, legendY + 14);
+    ctx.fillText(`${bead.code}`, itemX + swatchSize + Math.round(8 * scale), itemY + swatchSize / 2);
 
-    ctx.font = '12px sans-serif';
+    // Name
+    ctx.font = legendNameFont;
     ctx.fillStyle = '#334155';
     const nameStr = bead.name.length > 8 ? bead.name.slice(0, 8) + '..' : bead.name;
-    ctx.fillText(nameStr, legendX + 80, legendY + 14);
+    ctx.fillText(nameStr, itemX + swatchSize + Math.round(62 * scale), itemY + swatchSize / 2);
 
     // Count
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = legendCountFont;
     ctx.fillStyle = '#2563EB';
     ctx.textAlign = 'right';
-    ctx.fillText(`${count} 粒`, legendX + legendWidth - 20, legendY + 14);
-
-    legendY += 26;
+    ctx.fillText(`${count} 粒`, itemX + legendColWidth - Math.round(15 * scale), itemY + swatchSize / 2);
   });
 
   // Footer Watermark
   ctx.save();
   ctx.fillStyle = '#94A3B8';
-  ctx.font = '500 12px sans-serif';
+  ctx.font = `500 ${Math.round(12 * Math.max(1, scale * 0.7))}px sans-serif`;
   ctx.textAlign = 'right';
-  ctx.fillText('图纸生成自专业拼豆工作台【豆织星格】', totalCanvasWidth - 20, totalCanvasHeight - 12);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText('图纸生成自专业拼豆工作台【豆织星格】', totalCanvasWidth - 20, totalCanvasHeight - 10);
   ctx.restore();
 
   return canvas;

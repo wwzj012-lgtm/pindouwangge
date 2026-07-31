@@ -45,6 +45,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   const [previewGrid, setPreviewGrid] = useState<(string | null)[][]>([]);
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Palette map lookup
   const paletteMap = React.useMemo(() => {
@@ -58,6 +59,53 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       setPickedChromaColor(settings.chromaKeyColor);
     }
   }, [isOpen, settings]);
+
+  // Render preview grid to canvas with exact 1:1 aspect ratio
+  useEffect(() => {
+    const canvas = previewCanvasRef.current;
+    if (!canvas || previewGrid.length === 0) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rows = previewGrid.length;
+    const cols = previewGrid[0]?.length || 0;
+    if (cols === 0 || rows === 0) return;
+
+    const cellSize = Math.max(3, Math.min(10, Math.floor(600 / Math.max(cols, rows))));
+    canvas.width = cols * cellSize;
+    canvas.height = rows * cellSize;
+
+    // Dark canvas background
+    ctx.fillStyle = '#0F172A';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const cellId = previewGrid[y][x];
+        const px = x * cellSize;
+        const py = y * cellSize;
+
+        if (cellId) {
+          const bead = paletteMap.get(cellId);
+          ctx.fillStyle = bead ? bead.hex : '#CCCCCC';
+          if (cellSize >= 4) {
+            ctx.beginPath();
+            ctx.arc(px + cellSize / 2, py + cellSize / 2, (cellSize / 2) * 0.9, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#00000033';
+            ctx.lineWidth = 0.5;
+            ctx.stroke();
+          } else {
+            ctx.fillRect(px, py, cellSize, cellSize);
+          }
+        } else {
+          // Transparent checker pattern
+          ctx.fillStyle = (x + y) % 2 === 0 ? '#1E293B' : '#0F172A';
+          ctx.fillRect(px, py, cellSize, cellSize);
+        }
+      }
+    }
+  }, [previewGrid, paletteMap]);
 
   // Update transformed source image canvas
   useEffect(() => {
@@ -182,9 +230,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-2 sm:p-4 animate-fadeIn">
-      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
+      <div className="bg-slate-900 border border-slate-800 w-full max-w-5xl rounded-2xl shadow-2xl flex flex-col h-[90vh] max-h-[92vh] overflow-hidden">
         {/* Header */}
-        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-xl bg-gradient-to-tr from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/20">
               <Wand2 className="w-5 h-5" />
@@ -210,11 +258,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 flex flex-col xl:flex-row overflow-y-auto xl:overflow-hidden">
+        <div className="flex-1 flex flex-col xl:flex-row overflow-hidden min-h-0">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
-          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50">
+          <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50 min-h-0">
             {/* Action Presets bar */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none shrink-0">
               <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1 whitespace-nowrap">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 智能预设:
@@ -255,7 +303,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-[300px]">
               {/* Box 1: Pre-processed Source Image Canvas */}
               <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3 relative group">
-                <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300">
+                <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Scissors className="w-3.5 h-3.5 text-sky-400" />
                     原图变换与抠图预览
@@ -308,7 +356,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
               {/* Box 2: Live Converted Pixel Bead Preview */}
               <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-                <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300">
+                <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Eye className="w-3.5 h-3.5 text-rose-400" />
                     转换后拼豆效果 ({localSettings.width} × {localSettings.height})
@@ -320,30 +368,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
                 <div className="flex-1 flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
                   {previewGrid.length > 0 ? (
-                    <div
-                      className="grid bg-slate-900 rounded p-1 shadow-inner gap-[1px]"
-                      style={{
-                        gridTemplateColumns: `repeat(${localSettings.width}, minmax(0, 1fr))`,
-                        width: 'fit-content',
-                        maxHeight: '320px',
-                      }}
-                    >
-                      {previewGrid.map((row, y) =>
-                        row.map((cellId, x) => {
-                          const bead = cellId ? paletteMap.get(cellId) : null;
-                          return (
-                            <div
-                              key={`${x}-${y}`}
-                              className="w-2.5 h-2.5 rounded-full border border-black/20"
-                              style={{
-                                backgroundColor: bead ? bead.hex : 'transparent',
-                              }}
-                              title={bead ? `${bead.code} (${bead.name})` : '透明格'}
-                            />
-                          );
-                        })
-                      )}
-                    </div>
+                    <canvas
+                      ref={previewCanvasRef}
+                      className="max-w-full max-h-[320px] object-contain rounded shadow-lg"
+                    />
                   ) : (
                     <div className="text-slate-500 text-xs">正在计算高精度像素...</div>
                   )}
@@ -353,9 +381,57 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           </div>
 
           {/* Right Control Drawer: Advanced Sliders */}
-          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-y-auto space-y-5 text-xs select-none shrink-0">
-            {/* Section 1: Color Match Engine */}
+          <div className="w-full xl:w-80 bg-slate-900 border-t xl:border-t-0 xl:border-l border-slate-800 p-4 sm:p-5 overflow-y-auto space-y-5 text-xs select-none shrink-0 min-h-0">
+            {/* Section 0: Grid Target Dimensions */}
             <div className="space-y-2">
+              <label className="text-slate-200 font-bold flex items-center justify-between text-xs">
+                <span>转换拼豆目标尺寸</span>
+                <span className="text-[11px] text-amber-400 font-mono">
+                  {localSettings.width} x {localSettings.height} 豆
+                </span>
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <span className="text-[10px] text-slate-400">宽度 (W)</span>
+                  <input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={localSettings.width}
+                    onChange={e => {
+                      const newW = Math.max(10, parseInt(e.target.value) || 29);
+                      setLocalSettings(s => ({
+                        ...s,
+                        width: newW,
+                        height: s.keepAspectRatio && sourceImage ? Math.round((newW * (sourceImage.naturalHeight || sourceImage.height)) / (sourceImage.naturalWidth || sourceImage.width)) : s.height
+                      }));
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 font-mono rounded px-2 py-1 text-xs outline-none"
+                  />
+                </div>
+                <div>
+                  <span className="text-[10px] text-slate-400">高度 (H)</span>
+                  <input
+                    type="number"
+                    min={10}
+                    max={300}
+                    value={localSettings.height}
+                    onChange={e => {
+                      const newH = Math.max(10, parseInt(e.target.value) || 29);
+                      setLocalSettings(s => ({
+                        ...s,
+                        height: newH,
+                        width: s.keepAspectRatio && sourceImage ? Math.round((newH * (sourceImage.naturalWidth || sourceImage.width)) / (sourceImage.naturalHeight || sourceImage.height)) : s.width
+                      }));
+                    }}
+                    className="w-full bg-slate-800 border border-slate-700 text-slate-200 font-mono rounded px-2 py-1 text-xs outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Section 1: Color Match Engine */}
+            <div className="space-y-2 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold flex items-center gap-1.5 text-xs">
                 <Zap className="w-4 h-4 text-amber-400" />
                 <span>色彩匹配引擎 (Color Engine)</span>
@@ -469,7 +545,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                       setPickedChromaColor(null);
                       setLocalSettings(s => ({ ...s, chromaKeyColor: null }));
                     }}
-                    className="text-[10px] text-rose-400 hover:underline"
+                    className="text-[10px] text-rose-400 hover:underline cursor-pointer"
                   >
                     清除扣色
                   </button>
@@ -516,14 +592,34 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               )}
             </div>
 
-            {/* Section 4: Filters */}
+            {/* Section 4: Filters (Brightness, Contrast, Saturation) */}
             <div className="space-y-3 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold text-xs">基础明暗调色</label>
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">对比度</span>
-                  <span className="font-mono">{localSettings.contrast}</span>
+                  <span className="text-slate-400">亮度 (Brightness)</span>
+                  <span className="font-mono text-slate-200">{localSettings.brightness}</span>
+                </div>
+                <input
+                  type="range"
+                  min={-100}
+                  max={100}
+                  value={localSettings.brightness}
+                  onChange={e =>
+                    setLocalSettings(s => ({
+                      ...s,
+                      brightness: parseInt(e.target.value),
+                    }))
+                  }
+                  className="w-full accent-rose-500 cursor-pointer"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">对比度 (Contrast)</span>
+                  <span className="font-mono text-slate-200">{localSettings.contrast}</span>
                 </div>
                 <input
                   type="range"
@@ -542,8 +638,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">饱和度</span>
-                  <span className="font-mono">{localSettings.saturation}</span>
+                  <span className="text-slate-400">饱和度 (Saturation)</span>
+                  <span className="font-mono text-slate-200">{localSettings.saturation}</span>
                 </div>
                 <input
                   type="range"
@@ -560,11 +656,51 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 />
               </div>
             </div>
+
+            {/* Section 5: Color Limit & Dithering */}
+            <div className="space-y-3 pt-3 border-t border-slate-800">
+              <label className="text-slate-200 font-bold text-xs">用色精简与抖动采样</label>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">抖动算法 (Dither)</span>
+                </div>
+                <select
+                  value={localSettings.dither}
+                  onChange={e => setLocalSettings(s => ({ ...s, dither: e.target.value as any }))}
+                  className="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1.5 text-xs outline-none cursor-pointer"
+                >
+                  <option value="none">无抖动 (保持边缘清晰洁净)</option>
+                  <option value="floyd">Floyd-Steinberg 误差扩散抖动 (平滑渐变)</option>
+                  <option value="atkinson">Atkinson 经典像素风抖动 (细腻复古)</option>
+                </select>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex justify-between text-[11px]">
+                  <span className="text-slate-400">用色种类上限</span>
+                </div>
+                <select
+                  value={localSettings.colorLimit}
+                  onChange={e => setLocalSettings(s => ({ ...s, colorLimit: parseInt(e.target.value) }))}
+                  className="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1.5 text-xs outline-none cursor-pointer"
+                >
+                  <option value={0}>不设限 (自动匹配色板全色彩)</option>
+                  <option value={8}>最多 8 色 (超简复古)</option>
+                  <option value={12}>最多 12 色</option>
+                  <option value={16}>最多 16 色 (经典16色)</option>
+                  <option value={24}>最多 24 色</option>
+                  <option value={32}>最多 32 色</option>
+                  <option value={48}>最多 48 色</option>
+                  <option value={64}>最多 64 色</option>
+                </select>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Footer Actions */}
-        <div className="px-6 py-3.5 border-t border-slate-800 flex items-center justify-between bg-slate-900/90">
+        <div className="px-6 py-3.5 border-t border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer transition-colors"

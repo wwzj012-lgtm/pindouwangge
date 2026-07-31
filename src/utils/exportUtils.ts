@@ -1,5 +1,7 @@
 import { BeadColor, BeadShape } from '../types';
 
+export type WatermarkPosition = 'grid_and_legend' | 'legend_only' | 'grid_center';
+
 export interface ExportOptions {
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -12,6 +14,58 @@ export interface ExportOptions {
   showCoordinates: boolean;
   beadShape: BeadShape;
   selectedBoardIndex?: number | null; // null for full image, 0..N for specific sub-board
+  watermarkPosition?: WatermarkPosition; // Default: 'grid_and_legend'
+  watermarkOpacity?: number; // Default: 0.18
+}
+
+// Draw diagonal translucent watermark across a rectangular region sparsely
+function drawDiagonalWatermark(
+  ctx: CanvasRenderingContext2D,
+  rectX: number,
+  rectY: number,
+  rectW: number,
+  rectH: number,
+  text: string,
+  opacity: number = 0.18,
+  fontSize: number = 22,
+  minStepX: number = 450,
+  minStepY: number = 300
+) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(rectX, rectY, rectW, rectH);
+  ctx.clip();
+
+  ctx.globalAlpha = opacity;
+  ctx.fillStyle = '#6B21A8'; // Deep purple contrast watermark
+  ctx.font = `bold ${fontSize}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Ensure sparse coverage (around 4 - 8 watermarks in total per section)
+  const stepX = Math.max(minStepX, rectW / 2.2);
+  const stepY = Math.max(minStepY, rectH / 3.2);
+
+  const angle = -25 * Math.PI / 180;
+  ctx.translate(rectX + rectW / 2, rectY + rectH / 2);
+  ctx.rotate(angle);
+
+  // Cover bounding box
+  const diagonal = Math.sqrt(rectW * rectW + rectH * rectH) * 1.5;
+  const startX = -diagonal;
+  const endX = diagonal;
+  const startY = -diagonal;
+  const endY = diagonal;
+
+  for (let y = startY; y < endY; y += stepY) {
+    const rowIdx = Math.floor(y / stepY);
+    const offsetX = (rowIdx % 2 === 0) ? 0 : stepX / 2;
+    for (let x = startX; x < endX; x += stepX) {
+      ctx.fillText(text, x + offsetX, y);
+    }
+  }
+
+  ctx.restore();
 }
 
 // Convert column index to Excel-style letter coordinate (0 -> A, 25 -> Z, 26 -> AA)
@@ -108,6 +162,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     showCoordinates,
     beadShape,
     selectedBoardIndex,
+    watermarkPosition = 'grid_and_legend',
+    watermarkOpacity = 0.18,
   } = options;
 
   // Calculate sub-boards bounds if a specific board is requested
@@ -166,17 +222,6 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     20,
     58
   );
-
-  // Brand Watermark (豆织星格)
-  ctx.save();
-  ctx.fillStyle = '#8B5CF6';
-  ctx.font = 'bold 16px sans-serif';
-  ctx.textAlign = 'right';
-  ctx.fillText('✦ 豆织星格', totalCanvasWidth - 20, 34);
-  ctx.fillStyle = '#94A3B8';
-  ctx.font = '11px sans-serif';
-  ctx.fillText('Perler Bead Pattern Studio', totalCanvasWidth - 20, 52);
-  ctx.restore();
 
   const startGridX = 20 + coordSize;
   const startGridY = headerHeight + coordSize;
@@ -264,9 +309,54 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
+  // Render Grid Watermark Overlay
+  if (watermarkPosition === 'grid_and_legend') {
+    drawDiagonalWatermark(
+      ctx,
+      startGridX,
+      startGridY,
+      gridPixelWidth,
+      gridPixelHeight,
+      '✦ 豆织星格 PERLER PATTERN',
+      watermarkOpacity,
+      22,
+      520,
+      340
+    );
+  } else if (watermarkPosition === 'grid_center') {
+    ctx.save();
+    ctx.globalAlpha = Math.min(0.35, watermarkOpacity * 1.5);
+    ctx.fillStyle = '#6B21A8';
+    ctx.font = 'bold 32px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      '✦ 豆织星格 拼豆图纸 ✦',
+      startGridX + gridPixelWidth / 2,
+      startGridY + gridPixelHeight / 2
+    );
+    ctx.restore();
+  }
+
   // 5. Render Legend Sidebar on Right Side
   const legendX = startGridX + gridPixelWidth + 30;
   let legendY = headerHeight + 10;
+
+  // Render Legend Diagonal Watermark
+  if (watermarkPosition === 'grid_and_legend' || watermarkPosition === 'legend_only') {
+    drawDiagonalWatermark(
+      ctx,
+      legendX - 10,
+      headerHeight + 5,
+      legendWidth,
+      totalCanvasHeight - headerHeight - 20,
+      '✦ 豆织星格 色号清单 ✦',
+      Math.min(0.28, watermarkOpacity + 0.04),
+      16,
+      360,
+      280
+    );
+  }
 
   ctx.fillStyle = '#0F172A';
   ctx.font = 'bold 15px sans-serif';

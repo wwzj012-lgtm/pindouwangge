@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Image as ImageIcon, Printer, Check, Eye } from 'lucide-react';
+import { X, Download, Image as ImageIcon, ShieldAlert, Sliders } from 'lucide-react';
 import { BeadColor, BeadShape } from '../types';
 import {
   generatePatternCanvas,
   downloadCanvasImage,
   ExportOptions,
+  WatermarkPosition,
 } from '../utils/exportUtils';
 
 interface ExportModalProps {
@@ -34,6 +35,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 }) => {
   const [showSymbols, setShowSymbols] = useState(true);
   const [showCoordinates, setShowCoordinates] = useState(true);
+  const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('grid_and_legend');
+  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
   const [selectedBoard, setSelectedBoard] = useState<number | null>(null); // null = full canvas
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -57,6 +60,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
+      watermarkPosition,
+      watermarkOpacity,
     };
 
     const canvas = generatePatternCanvas(options);
@@ -76,6 +81,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     showCoordinates,
     beadShape,
     selectedBoard,
+    watermarkPosition,
+    watermarkOpacity,
   ]);
 
   if (!isOpen) return null;
@@ -93,6 +100,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
+      watermarkPosition,
+      watermarkOpacity,
     };
     const canvas = generatePatternCanvas(options);
     const suffix = selectedBoard !== null ? `_板${selectedBoard + 1}` : '_完整图纸';
@@ -113,6 +122,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: null,
+      watermarkPosition,
+      watermarkOpacity,
     };
     downloadCanvasImage(generatePatternCanvas(fullOptions), `${projectName}_完整图纸.png`);
 
@@ -151,27 +162,53 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         </div>
 
         {/* Controls Bar */}
-        <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+        <div className="p-3.5 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-3 flex-wrap">
-            <label className="flex items-center gap-1.5 cursor-pointer">
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
               <input
                 type="checkbox"
                 checked={showSymbols}
                 onChange={e => setShowSymbols(e.target.checked)}
-                className="accent-emerald-500 rounded cursor-pointer"
+                className="accent-purple-500 rounded cursor-pointer"
               />
-              <span>显示色号标识字符</span>
+              <span>显示色号标识</span>
             </label>
 
-            <label className="flex items-center gap-1.5 cursor-pointer">
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
               <input
                 type="checkbox"
                 checked={showCoordinates}
                 onChange={e => setShowCoordinates(e.target.checked)}
-                className="accent-emerald-500 rounded cursor-pointer"
+                className="accent-purple-500 rounded cursor-pointer"
               />
               <span>显示标尺坐标 (A..Z / 1..N)</span>
             </label>
+
+            {/* Anti-crop Watermark Setting */}
+            <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+              <ShieldAlert className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="text-slate-400">防盗水印:</span>
+              <select
+                value={watermarkPosition}
+                onChange={e => setWatermarkPosition(e.target.value as WatermarkPosition)}
+                className="bg-slate-800 border border-slate-700 text-purple-200 font-medium rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+              >
+                <option value="grid_and_legend">✦ 网格图 + 色号表双重斜向水印 (推荐)</option>
+                <option value="legend_only">✦ 仅色号清单斜向水印</option>
+                <option value="grid_center">✦ 仅网格中心半透明水印</option>
+              </select>
+
+              <select
+                value={watermarkOpacity.toString()}
+                onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
+                className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                title="调整水印透明度"
+              >
+                <option value="0.1">透明度 10% (轻柔)</option>
+                <option value="0.18">透明度 18% (标准推荐)</option>
+                <option value="0.28">透明度 28% (清晰显眼)</option>
+              </select>
+            </div>
           </div>
 
           {/* Sub Board Pagination selector */}

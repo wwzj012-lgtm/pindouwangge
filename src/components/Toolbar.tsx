@@ -10,13 +10,22 @@ import {
   ZoomIn,
   ZoomOut,
   Maximize2,
-  Circle,
+  Circle as CircleIcon,
   Square,
   Hash,
   Grid2x2,
   Eye,
+  Minus,
+  Spline,
+  FlipHorizontal,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  Layers,
+  Wand2,
 } from 'lucide-react';
-import { BeadColor, BeadShape, ToolType } from '../types';
+import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 
 interface ToolbarProps {
   activeTool: ToolType;
@@ -39,6 +48,16 @@ interface ToolbarProps {
   setShowGridLines: (show: boolean) => void;
   showCoordinates: boolean;
   setShowCoordinates: (show: boolean) => void;
+  
+  symmetryMode: SymmetryMode;
+  setSymmetryMode: (mode: SymmetryMode) => void;
+  canvasBackdrop: CanvasBackdrop;
+  setCanvasBackdrop: (backdrop: CanvasBackdrop) => void;
+  onShiftGrid: (dir: 'up' | 'down' | 'left' | 'right') => void;
+  onOpenImageStudio: () => void;
+  hasImage: boolean;
+  showOverlay: boolean;
+  setShowOverlay: (show: boolean) => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -62,13 +81,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setShowGridLines,
   showCoordinates,
   setShowCoordinates,
+  symmetryMode,
+  setSymmetryMode,
+  canvasBackdrop,
+  setCanvasBackdrop,
+  onShiftGrid,
+  onOpenImageStudio,
+  hasImage,
+  showOverlay,
+  setShowOverlay,
 }) => {
   const tools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
-    { id: 'pencil', label: '画笔 (P)', icon: <Pencil className="w-4 h-4" /> },
-    { id: 'bucket', label: '油漆桶 (B)', icon: <PaintBucket className="w-4 h-4" /> },
-    { id: 'eyedropper', label: '吸管 (I)', icon: <Pipette className="w-4 h-4" /> },
-    { id: 'eraser', label: '橡皮擦 (E)', icon: <Eraser className="w-4 h-4" /> },
-    { id: 'replace', label: '替换全图此色 (R)', icon: <RefreshCw className="w-4 h-4" /> },
+    { id: 'pencil', label: '画笔 (P)', icon: <Pencil className="w-3.5 h-3.5" /> },
+    { id: 'line', label: '直线', icon: <Minus className="w-3.5 h-3.5" /> },
+    { id: 'rectangle', label: '矩形', icon: <Square className="w-3.5 h-3.5" /> },
+    { id: 'circle', label: '圆形', icon: <CircleIcon className="w-3.5 h-3.5" /> },
+    { id: 'bucket', label: '油漆桶 (B)', icon: <PaintBucket className="w-3.5 h-3.5" /> },
+    { id: 'eyedropper', label: '吸管 (I)', icon: <Pipette className="w-3.5 h-3.5" /> },
+    { id: 'eraser', label: '橡皮擦 (E)', icon: <Eraser className="w-3.5 h-3.5" /> },
+    { id: 'replace', label: '替换全图此色 (R)', icon: <RefreshCw className="w-3.5 h-3.5" /> },
   ];
 
   return (
@@ -99,13 +130,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         <div className="h-5 w-px bg-slate-800 hidden sm:block" />
 
-        {/* Paint Tool Buttons */}
+        {/* Image Studio Launcher Button */}
+        {hasImage && (
+          <button
+            onClick={onOpenImageStudio}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-lg shadow-sm cursor-pointer transition-all active:scale-95 text-[11px]"
+            title="打开图像AI增强与转换工作坊"
+          >
+            <Wand2 className="w-3.5 h-3.5" />
+            <span>转换增强工作坊</span>
+          </button>
+        )}
+
+        {/* Paint & Shape Tools Buttons */}
         <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80">
           {tools.map(t => (
             <button
               key={t.id}
               onClick={() => setActiveTool(t.id)}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 px-2 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
                 activeTool === t.id
                   ? 'bg-rose-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
@@ -113,9 +156,60 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               title={t.label}
             >
               {t.icon}
-              <span className="hidden md:inline text-[11px]">{t.label.split(' ')[0]}</span>
+              <span className="hidden xl:inline text-[11px]">{t.label.split(' ')[0]}</span>
             </button>
           ))}
+        </div>
+
+        {/* Symmetry Selector */}
+        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 text-[11px]">
+          <span className="px-1.5 text-slate-400 flex items-center gap-1">
+            <Spline className="w-3 h-3 text-rose-400" />
+            对称:
+          </span>
+          <select
+            value={symmetryMode}
+            onChange={e => setSymmetryMode(e.target.value as SymmetryMode)}
+            className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 outline-none cursor-pointer"
+          >
+            <option value="none">无对称</option>
+            <option value="horizontal">↔ 左右镜像</option>
+            <option value="vertical">↕ 上下镜像</option>
+            <option value="quad">❖ 4向四轴镜像</option>
+          </select>
+        </div>
+
+        {/* Shift Grid Offset */}
+        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80">
+          <span className="px-1.5 text-slate-400 text-[10px]">平移:</span>
+          <button
+            onClick={() => onShiftGrid('left')}
+            className="p-1 hover:bg-slate-700 rounded text-slate-300 cursor-pointer"
+            title="向左平移 1 豆"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onShiftGrid('right')}
+            className="p-1 hover:bg-slate-700 rounded text-slate-300 cursor-pointer"
+            title="向右平移 1 豆"
+          >
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onShiftGrid('up')}
+            className="p-1 hover:bg-slate-700 rounded text-slate-300 cursor-pointer"
+            title="向上平移 1 豆"
+          >
+            <ArrowUp className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => onShiftGrid('down')}
+            className="p-1 hover:bg-slate-700 rounded text-slate-300 cursor-pointer"
+            title="向下平移 1 豆"
+          >
+            <ArrowDown className="w-3.5 h-3.5" />
+          </button>
         </div>
 
         <div className="h-5 w-px bg-slate-800 hidden sm:block" />
@@ -141,8 +235,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      {/* Right: Display Overlays, Bead Style, Zoom Controls */}
+      {/* Right: Display Overlays, Backdrop & Zoom Controls */}
       <div className="flex items-center gap-3 flex-wrap">
+        {/* Canvas Backdrop Selector */}
+        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 text-[11px]">
+          <span className="px-1.5 text-slate-400 flex items-center gap-1">
+            <Layers className="w-3 h-3 text-sky-400" />
+            背景:
+          </span>
+          <select
+            value={canvasBackdrop}
+            onChange={e => setCanvasBackdrop(e.target.value as CanvasBackdrop)}
+            className="bg-slate-900 border border-slate-700 rounded px-1.5 py-0.5 text-slate-200 outline-none cursor-pointer"
+          >
+            <option value="dark_grid">深色网格</option>
+            <option value="light_pegboard">白色插板</option>
+            <option value="wood">复古木纹</option>
+            <option value="studio">暗调工作台</option>
+          </select>
+        </div>
+
         {/* Bead Shape Style */}
         <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 text-[11px]">
           <button
@@ -152,7 +264,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             }`}
             title="3D立体拼豆样式"
           >
-            <Circle className="w-3.5 h-3.5 fill-amber-400/20" />
+            <CircleIcon className="w-3.5 h-3.5 fill-amber-400/20" />
             <span className="hidden lg:inline">3D立体豆</span>
           </button>
           <button
@@ -162,7 +274,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             }`}
             title="平面圆豆样式"
           >
-            <Circle className="w-3.5 h-3.5" />
+            <CircleIcon className="w-3.5 h-3.5" />
             <span className="hidden lg:inline">平面圆豆</span>
           </button>
           <button
@@ -177,8 +289,23 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </button>
         </div>
 
-        {/* Overlays: Symbols & Grid & Coordinates */}
+        {/* Overlays: Symbols & Overlay photo */}
         <div className="flex items-center gap-1">
+          {hasImage && (
+            <button
+              onClick={() => setShowOverlay(!showOverlay)}
+              className={`px-2 py-1.5 rounded-lg border transition-colors flex items-center gap-1 cursor-pointer ${
+                showOverlay
+                  ? 'bg-amber-950/80 border-amber-600 text-amber-300 font-bold'
+                  : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title="在网格上显示原图半透明叠影衬底"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">原图叠影</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowSymbols(!showSymbols)}
             className={`px-2 py-1.5 rounded-lg border transition-colors flex items-center gap-1 cursor-pointer ${
@@ -203,19 +330,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           >
             <Grid2x2 className="w-3.5 h-3.5" />
             <span className="hidden sm:inline text-[11px]">网格线</span>
-          </button>
-
-          <button
-            onClick={() => setShowCoordinates(!showCoordinates)}
-            className={`px-2 py-1.5 rounded-lg border transition-colors flex items-center gap-1 cursor-pointer ${
-              showCoordinates
-                ? 'bg-slate-800 border-slate-600 text-slate-200'
-                : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
-            }`}
-            title="显示/隐藏网格标尺坐标(A..Z / 1..N)"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline text-[11px]">标尺坐标</span>
           </button>
         </div>
 
@@ -252,3 +366,4 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     </div>
   );
 };
+

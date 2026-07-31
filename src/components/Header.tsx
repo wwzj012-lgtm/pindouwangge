@@ -9,6 +9,7 @@ import {
   Palette,
   Image as ImageIcon,
   RotateCcw,
+  BookOpen,
 } from 'lucide-react';
 import { BrandKey, ConvertSettings } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
@@ -25,6 +26,7 @@ interface HeaderProps {
   onImportJson: (jsonStr: string) => void;
   onOpenExportModal: () => void;
   onOpenPaletteModal: () => void;
+  onOpenGuideModal: () => void;
   onClearCanvas: () => void;
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
@@ -41,6 +43,7 @@ export const Header: React.FC<HeaderProps> = ({
   onImportJson,
   onOpenExportModal,
   onOpenPaletteModal,
+  onOpenGuideModal,
   onClearCanvas,
   settings,
   setSettings,
@@ -69,22 +72,26 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md sticky top-0 z-30">
-      {/* Brand & Project Title */}
+      {/* Brand & Project Title (Fixed non-editable "豆织星格") */}
       <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-pink-500 via-rose-500 to-amber-400 flex items-center justify-center shadow-lg shadow-rose-500/20">
-          <Grid className="w-6 h-6 text-white" />
+        <div className="w-10 h-10 rounded-xl overflow-hidden bg-purple-950/60 border border-purple-500/40 flex items-center justify-center shadow-lg shadow-purple-500/20 shrink-0">
+          <img
+            src="/douzhixingge_logo.svg"
+            alt="豆织星格图标"
+            className="w-full h-full object-cover"
+          />
         </div>
         <div>
           <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={projectName}
-              onChange={e => setProjectName(e.target.value)}
-              className="bg-transparent hover:bg-slate-800/80 focus:bg-slate-800 text-base font-bold text-slate-100 rounded px-1.5 py-0.5 outline-none transition-colors border border-transparent focus:border-slate-700 max-w-[200px] sm:max-w-[280px]"
-            />
+            <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none">
+              豆织星格
+            </span>
+            <span className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[10px] font-bold px-1.5 py-0.2 rounded hidden md:inline">
+              PRO
+            </span>
           </div>
           <p className="text-xs text-slate-400 hidden sm:block">
-            拼豆像素网格编辑器 & 图纸转换工具
+            拼豆图纸网格编辑器
           </p>
         </div>
       </div>
@@ -150,6 +157,16 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Action Buttons: Import, Samples, Save/Export */}
       <div className="flex items-center gap-2">
+        {/* Operation Guide Button */}
+        <button
+          onClick={onOpenGuideModal}
+          className="bg-purple-950/90 hover:bg-purple-900 text-purple-200 text-xs font-bold px-2.5 py-2 rounded-lg border border-purple-700/80 flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-purple-950/40 active:scale-95"
+          title="查看简体中文版拼豆设计操作指南"
+        >
+          <BookOpen className="w-3.5 h-3.5 text-purple-300" />
+          <span>操作指南</span>
+        </button>
+
         {/* Upload Image Button */}
         <input
           type="file"

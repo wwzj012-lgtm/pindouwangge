@@ -6,6 +6,8 @@ import {
   ConvertSettings,
   ProjectData,
   ToolType,
+  SymmetryMode,
+  CanvasBackdrop,
 } from './types';
 import { BRAND_PALETTES } from './data/palettes';
 import { SAMPLE_IMAGES } from './data/samples';
@@ -19,6 +21,8 @@ import { StatsPanel } from './components/StatsPanel';
 import { PaletteManagerModal } from './components/PaletteManagerModal';
 import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
+import { ImageStudioModal } from './components/ImageStudioModal';
+import { UserGuideModal } from './components/UserGuideModal';
 
 export default function App() {
   // 1. Core State
@@ -39,6 +43,10 @@ export default function App() {
     saturation: 0,
     transparentCutoff: 128,
     boardSize: 29,
+    sharpening: 30,
+    outlineBoost: true,
+    chromaKeyColor: null,
+    colorMatchAlgo: 'ciede2000',
   });
 
   // Source Image element reference
@@ -57,17 +65,22 @@ export default function App() {
   const [activeTool, setActiveTool] = useState<ToolType>('pencil');
   const [selectedColor, setSelectedColor] = useState<BeadColor | null>(BRAND_PALETTES.MARD[0]);
   const [highlightColorId, setHighlightColorId] = useState<string | null>(null);
+  const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
 
-  // Display Mode Settings
+  // Display Mode & Backdrop Settings
   const [beadShape, setBeadShape] = useState<BeadShape>('fuse_3d');
+  const [canvasBackdrop, setCanvasBackdrop] = useState<CanvasBackdrop>('dark_grid');
   const [showSymbols, setShowSymbols] = useState(true);
   const [showGridLines, setShowGridLines] = useState(true);
   const [showCoordinates, setShowCoordinates] = useState(true);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [zoom, setZoom] = useState(1.0);
 
   // Modals Toggle State
   const [isPaletteModalOpen, setIsPaletteModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
+  const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
 
   // Palette Lookup Map
@@ -180,25 +193,82 @@ export default function App() {
     pushHistory(emptyGrid);
   };
 
-  // Interactive Painting on Cell Click/Drag
+  // Shift Grid in cardinal direction
+  const handleShiftGrid = (dir: 'up' | 'down' | 'left' | 'right') => {
+    const h = settings.height;
+    const w = settings.width;
+    const newGrid = Array.from({ length: h }, () => Array(w).fill(null));
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        let sx = x;
+        let sy = y;
+        if (dir === 'left') sx = x + 1;
+        if (dir === 'right') sx = x - 1;
+        if (dir === 'up') sy = y + 1;
+        if (dir === 'down') sy = y - 1;
+
+        if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
+          newGrid[y][x] = grid[sy][sx];
+        }
+      }
+    }
+    setGrid(newGrid);
+    pushHistory(newGrid);
+  };
+
+  // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
     if (x < 0 || x >= settings.width || y < 0 || y >= settings.height) return;
 
     if (activeTool === 'pencil') {
       if (!selectedColor) return;
       const nextColorId = selectedColor.id;
-      if (grid[y][x] === nextColorId) return; // No change
+      if (grid[y][x] === nextColorId) return;
 
-      const newGrid = grid.map((row, ry) =>
-        row.map((cell, cx) => (ry === y && cx === x ? nextColorId : cell))
-      );
+      const newGrid = grid.map(row => [...row]);
+
+      const applyPoint = (px: number, py: number) => {
+        if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
+          newGrid[py][px] = nextColorId;
+        }
+      };
+
+      // Apply with symmetry
+      applyPoint(x, y);
+      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
+        applyPoint(settings.width - 1 - x, y);
+      }
+      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
+        applyPoint(x, settings.height - 1 - y);
+      }
+      if (symmetryMode === 'quad') {
+        applyPoint(settings.width - 1 - x, settings.height - 1 - y);
+      }
+
       setGrid(newGrid);
       pushHistory(newGrid);
     } else if (activeTool === 'eraser') {
       if (grid[y][x] === null) return;
-      const newGrid = grid.map((row, ry) =>
-        row.map((cell, cx) => (ry === y && cx === x ? null : cell))
-      );
+      const newGrid = grid.map(row => [...row]);
+
+      const erasePoint = (px: number, py: number) => {
+        if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
+          newGrid[py][px] = null;
+        }
+      };
+
+      erasePoint(x, y);
+      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
+        erasePoint(settings.width - 1 - x, y);
+      }
+      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
+        erasePoint(x, settings.height - 1 - y);
+      }
+      if (symmetryMode === 'quad') {
+        erasePoint(settings.width - 1 - x, settings.height - 1 - y);
+      }
+
       setGrid(newGrid);
       pushHistory(newGrid);
     } else if (activeTool === 'bucket') {
@@ -207,7 +277,6 @@ export default function App() {
       const fillColorId = selectedColor.id;
       if (targetColorId === fillColorId) return;
 
-      // Flood fill algorithm
       const newGrid = grid.map(row => [...row]);
       const queue: [number, number][] = [[x, y]];
       const visited = new Set<string>();
@@ -239,6 +308,35 @@ export default function App() {
         if (sourceBead) setReplaceSourceColor(sourceBead);
       }
     }
+  };
+
+  // Shape creation handler from GridCanvas (Line / Rectangle / Circle)
+  const handleApplyShape = (points: { x: number; y: number }[]) => {
+    if (!selectedColor || points.length === 0) return;
+    const colorId = selectedColor.id;
+    const newGrid = grid.map(row => [...row]);
+
+    const applyPoint = (px: number, py: number) => {
+      if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
+        newGrid[py][px] = colorId;
+      }
+    };
+
+    points.forEach(pt => {
+      applyPoint(pt.x, pt.y);
+      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
+        applyPoint(settings.width - 1 - pt.x, pt.y);
+      }
+      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
+        applyPoint(pt.x, settings.height - 1 - pt.y);
+      }
+      if (symmetryMode === 'quad') {
+        applyPoint(settings.width - 1 - pt.x, settings.height - 1 - pt.y);
+      }
+    });
+
+    setGrid(newGrid);
+    pushHistory(newGrid);
   };
 
   // Replace all instances of sourceColorId with targetColorId
@@ -338,6 +436,7 @@ export default function App() {
         onImportJson={handleImportJson}
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
+        onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onClearCanvas={handleClearCanvas}
         settings={settings}
         setSettings={setSettings}
@@ -365,6 +464,15 @@ export default function App() {
         setShowGridLines={setShowGridLines}
         showCoordinates={showCoordinates}
         setShowCoordinates={setShowCoordinates}
+        symmetryMode={symmetryMode}
+        setSymmetryMode={setSymmetryMode}
+        canvasBackdrop={canvasBackdrop}
+        setCanvasBackdrop={setCanvasBackdrop}
+        onShiftGrid={handleShiftGrid}
+        onOpenImageStudio={() => setIsStudioModalOpen(true)}
+        hasImage={sourceImage !== null}
+        showOverlay={showOverlay}
+        setShowOverlay={setShowOverlay}
       />
 
       {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
@@ -375,6 +483,7 @@ export default function App() {
           setSettings={setSettings}
           onReconvert={handleReconvert}
           hasImage={sourceImage !== null}
+          onOpenImageStudio={() => setIsStudioModalOpen(true)}
         />
 
         {/* Center Canvas Area */}
@@ -392,9 +501,14 @@ export default function App() {
             showSymbols={showSymbols}
             showGridLines={showGridLines}
             showCoordinates={showCoordinates}
+            canvasBackdrop={canvasBackdrop}
+            symmetryMode={symmetryMode}
+            sourceImage={sourceImage}
+            showOverlay={showOverlay}
             zoom={zoom}
             setZoom={setZoom}
             onCellClick={handleCellClick}
+            onApplyShape={handleApplyShape}
             onEyedropColor={color => setSelectedColor(color)}
           />
         </div>
@@ -443,6 +557,27 @@ export default function App() {
         activePalette={activePalette}
         onExecuteReplace={handleExecuteReplace}
       />
+
+      <UserGuideModal
+        isOpen={isGuideModalOpen}
+        onClose={() => setIsGuideModalOpen(false)}
+      />
+
+      {sourceImage && (
+        <ImageStudioModal
+          isOpen={isStudioModalOpen}
+          onClose={() => setIsStudioModalOpen(false)}
+          sourceImage={sourceImage}
+          settings={settings}
+          setSettings={setSettings}
+          activePalette={activePalette}
+          onApplyConversion={(newGrid) => {
+            setGrid(newGrid);
+            pushHistory(newGrid);
+          }}
+        />
+      )}
     </div>
   );
 }
+

@@ -58,6 +58,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           color,
           count,
           percentage: total > 0 ? (count / total) * 100 : 0,
+          bagsCount: Math.ceil(count / 1000),
         });
       }
     });

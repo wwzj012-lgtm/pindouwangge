@@ -15,7 +15,21 @@ export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat';
 
 export type DitherMode = 'none' | 'floyd' | 'atkinson';
 
-export type ToolType = 'pencil' | 'bucket' | 'eyedropper' | 'eraser' | 'replace';
+export type ColorMatchAlgo = 'ciede2000' | 'cie76' | 'rgb_weighted';
+
+export type ToolType =
+  | 'pencil'
+  | 'line'
+  | 'rectangle'
+  | 'circle'
+  | 'bucket'
+  | 'eyedropper'
+  | 'eraser'
+  | 'replace';
+
+export type SymmetryMode = 'none' | 'horizontal' | 'vertical' | 'quad';
+
+export type CanvasBackdrop = 'dark_grid' | 'light_pegboard' | 'wood' | 'studio' | 'slate';
 
 export interface ConvertSettings {
   width: number;             // Grid width in beads
@@ -29,6 +43,14 @@ export interface ConvertSettings {
   saturation: number;        // -100 to 100
   transparentCutoff: number; // 0-255 alpha cutoff for transparent pixel
   boardSize: number;         // Standard board grid size e.g. 29 for 29x29, 14 for 14x14
+  
+  // Enhanced image conversion options
+  colorMatchAlgo: ColorMatchAlgo; // Distance algorithm: CIEDE2000 vs CIE76 vs RGB
+  sharpening: number;             // 0-100 unsharp mask sharpening
+  outlineBoost: boolean;          // Preserve black/dark outlines in pixel art/sprites
+  chromaKeyColor: string | null;  // Transparent background color hex (if set)
+  chromaKeyTolerance: number;     // 0-100 tolerance for chroma keying
+  kmeansClustering: boolean;      // Group similar colors before mapping to reduce noise
 }
 
 export interface GridCell {
@@ -42,6 +64,7 @@ export interface ColorStat {
   color: BeadColor;
   count: number;
   percentage: number;
+  bagsCount: number; // Estimated 1000-bead bags
 }
 
 export interface ProjectData {
@@ -62,3 +85,4 @@ export interface SampleImage {
   category: string;
   url: string; // Base64 or Data URL
 }
+

@@ -167,6 +167,17 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     58
   );
 
+  // Brand Watermark (豆织星格)
+  ctx.save();
+  ctx.fillStyle = '#8B5CF6';
+  ctx.font = 'bold 16px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('✦ 豆织星格', totalCanvasWidth - 20, 34);
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('Perler Bead Pattern Studio', totalCanvasWidth - 20, 52);
+  ctx.restore();
+
   const startGridX = 20 + coordSize;
   const startGridY = headerHeight + coordSize;
 
@@ -324,6 +335,14 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
     legendY += 26;
   });
+
+  // Footer Watermark
+  ctx.save();
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '500 12px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('图纸生成自专业拼豆工作台【豆织星格】', totalCanvasWidth - 20, totalCanvasHeight - 12);
+  ctx.restore();
 
   return canvas;
 }

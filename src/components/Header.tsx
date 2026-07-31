@@ -71,100 +71,98 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white px-4 py-3 flex flex-wrap items-center justify-between gap-3 shadow-md sticky top-0 z-30">
-      {/* Brand & Project Title (Fixed non-editable "豆织星格") */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl overflow-hidden bg-purple-950/60 border border-purple-500/40 flex items-center justify-center shadow-lg shadow-purple-500/20 shrink-0">
-          <img
-            src="/douzhixingge_logo.svg"
-            alt="豆织星格图标"
-            className="w-full h-full object-cover"
-          />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none">
+    <header className="bg-slate-900 border-b border-slate-800 text-white px-2.5 py-2 md:px-4 md:py-2.5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 shadow-md sticky top-0 z-30">
+      {/* Top Row / Main Header Row */}
+      <div className="flex items-center justify-between gap-2">
+        {/* Brand & Logo */}
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl overflow-hidden bg-purple-950/60 border border-purple-500/40 flex items-center justify-center shadow-md shadow-purple-500/20 shrink-0">
+            <img
+              src="/douzhixingge_logo.svg"
+              alt="豆织星格图标"
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-base md:text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none whitespace-nowrap">
               豆织星格
             </span>
-            <span className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[10px] font-bold px-1.5 py-0.2 rounded hidden md:inline">
+            <span className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[9px] font-bold px-1 py-0.2 rounded hidden sm:inline">
               PRO
             </span>
           </div>
-          <p className="text-xs text-slate-400 hidden sm:block">
-            拼豆图纸网格编辑器
-          </p>
+        </div>
+
+        {/* Brand Palette Selector & Custom Palette Button */}
+        <div className="flex items-center gap-1.5 text-xs overflow-x-auto scrollbar-none py-0.5">
+          {/* Brand Selector */}
+          <div className="flex items-center gap-1 bg-slate-800/90 border border-slate-700/80 rounded-lg px-2 py-1 shrink-0">
+            <Palette className="w-3.5 h-3.5 text-pink-400 shrink-0" />
+            <select
+              value={brand}
+              onChange={e => {
+                const newBrand = e.target.value as BrandKey;
+                setBrand(newBrand);
+                setSettings(s => ({ ...s, brand: newBrand }));
+              }}
+              className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs max-w-[120px] sm:max-w-none truncate"
+            >
+              {Object.entries(BRAND_NAMES).map(([key, name]) => (
+                <option key={key} value={key} className="bg-slate-800 text-white">
+                  {name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Quick Board Size Selector (Desktop) */}
+          <div className="hidden xl:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg px-2.5 py-1 shrink-0">
+            <span className="text-slate-400 text-xs whitespace-nowrap">拼豆板:</span>
+            <select
+              value={`${settings.width}x${settings.height}`}
+              onChange={e => {
+                const preset = BOARD_PRESETS.find(p => `${p.width}x${p.height}` === e.target.value);
+                if (preset) {
+                  setSettings(s => ({
+                    ...s,
+                    width: preset.width,
+                    height: preset.height,
+                    boardSize: preset.boardSize,
+                  }));
+                }
+              }}
+              className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs"
+            >
+              {BOARD_PRESETS.map(p => (
+                <option key={p.name} value={`${p.width}x${p.height}`} className="bg-slate-800 text-white">
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={onOpenPaletteModal}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap text-xs"
+            title="管理与禁用色卡"
+          >
+            <Palette className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="hidden sm:inline">自定义色板</span>
+            <span className="sm:hidden text-[11px]">色板</span>
+          </button>
         </div>
       </div>
 
-      {/* Preset Quick Size & Brand Selector */}
-      <div className="flex items-center gap-2 flex-wrap text-xs">
-        {/* Brand Selector */}
-        <div className="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg px-2.5 py-1.5">
-          <Palette className="w-3.5 h-3.5 text-pink-400" />
-          <span className="text-slate-400 hidden md:inline">品牌色卡:</span>
-          <select
-            value={brand}
-            onChange={e => {
-              const newBrand = e.target.value as BrandKey;
-              setBrand(newBrand);
-              setSettings(s => ({ ...s, brand: newBrand }));
-            }}
-            className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium"
-          >
-            {Object.entries(BRAND_NAMES).map(([key, name]) => (
-              <option key={key} value={key} className="bg-slate-800 text-white">
-                {name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Quick Board Size Selector */}
-        <div className="hidden lg:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg px-2.5 py-1.5">
-          <span className="text-slate-400">拼豆板:</span>
-          <select
-            value={`${settings.width}x${settings.height}`}
-            onChange={e => {
-              const preset = BOARD_PRESETS.find(p => `${p.width}x${p.height}` === e.target.value);
-              if (preset) {
-                setSettings(s => ({
-                  ...s,
-                  width: preset.width,
-                  height: preset.height,
-                  boardSize: preset.boardSize,
-                }));
-              }
-            }}
-            className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium"
-          >
-            {BOARD_PRESETS.map(p => (
-              <option key={p.name} value={`${p.width}x${p.height}`} className="bg-slate-800 text-white">
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <button
-          onClick={onOpenPaletteModal}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
-          title="管理与禁用色卡"
-        >
-          <Palette className="w-3.5 h-3.5 text-amber-400" />
-          <span>自定义色板</span>
-        </button>
-      </div>
-
-      {/* Action Buttons: Import, Samples, Save/Export */}
-      <div className="flex items-center gap-2">
+      {/* Action Buttons Row: Upload, Export, Samples, Guide, Clear */}
+      <div className="flex items-center justify-between md:justify-end gap-1.5 overflow-x-auto scrollbar-none pt-1 md:pt-0 border-t border-slate-800/80 md:border-t-0">
         {/* Operation Guide Button */}
         <button
           onClick={onOpenGuideModal}
-          className="bg-purple-950/90 hover:bg-purple-900 text-purple-200 text-xs font-bold px-2.5 py-2 rounded-lg border border-purple-700/80 flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-purple-950/40 active:scale-95"
-          title="查看简体中文版拼豆设计操作指南"
+          className="bg-purple-950/90 hover:bg-purple-900 text-purple-200 text-xs font-bold px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg border border-purple-700/80 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
+          title="查看拼豆设计操作指南"
         >
-          <BookOpen className="w-3.5 h-3.5 text-purple-300" />
-          <span>操作指南</span>
+          <BookOpen className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+          <span className="whitespace-nowrap">指南</span>
         </button>
 
         {/* Upload Image Button */}
@@ -177,17 +175,17 @@ export const Header: React.FC<HeaderProps> = ({
         />
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-md shadow-rose-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+          className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg shadow-md shadow-rose-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
         >
-          <Upload className="w-4 h-4" />
-          <span>上传图片转换</span>
+          <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="whitespace-nowrap">上传图片</span>
         </button>
 
         {/* Built-in Samples Dropdown */}
-        <div className="relative group">
-          <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-2.5 py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">示例图案</span>
+        <div className="relative group shrink-0">
+          <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap">
+            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="whitespace-nowrap">示例</span>
           </button>
 
           {/* Dropdown Menu */}
@@ -201,9 +199,9 @@ export const Header: React.FC<HeaderProps> = ({
                 onClick={() => onLoadSample(s.url)}
                 className="w-full text-left px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 flex items-center gap-2 transition-colors cursor-pointer"
               >
-                <ImageIcon className="w-3.5 h-3.5 text-rose-400" />
-                <span>{s.name}</span>
-                <span className="ml-auto text-[10px] text-slate-400">{s.category}</span>
+                <ImageIcon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                <span className="truncate">{s.name}</span>
+                <span className="ml-auto text-[10px] text-slate-400 shrink-0">{s.category}</span>
               </button>
             ))}
           </div>
@@ -219,39 +217,39 @@ export const Header: React.FC<HeaderProps> = ({
         />
         <button
           onClick={() => jsonInputRef.current?.click()}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
-          title="打开保存的项目工程"
+          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+          title="打开工程"
         >
-          <FolderOpen className="w-3.5 h-3.5 text-blue-400" />
-          <span className="hidden md:inline">打开工程</span>
+          <FolderOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+          <span className="hidden sm:inline whitespace-nowrap">打开工程</span>
         </button>
 
         {/* Save JSON Project */}
         <button
           onClick={onExportJson}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer"
-          title="导出.perler保存项目工程"
+          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
+          title="保存工程"
         >
-          <FileJson className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="hidden md:inline">保存工程</span>
+          <FileJson className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="hidden sm:inline whitespace-nowrap">保存工程</span>
         </button>
 
         {/* High-Res Tutorial Export */}
         <button
           onClick={onOpenExportModal}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-3 py-2 rounded-lg shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+          className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg shadow-md shadow-emerald-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
         >
-          <Download className="w-4 h-4" />
-          <span>导出拼豆图纸</span>
+          <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+          <span className="whitespace-nowrap">导出图纸</span>
         </button>
 
         {/* Clear */}
         <button
           onClick={onClearCanvas}
-          className="bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 p-2 rounded-lg border border-slate-700/80 transition-colors cursor-pointer"
+          className="bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 p-1.5 sm:p-2 rounded-lg border border-slate-700/80 transition-colors cursor-pointer shrink-0"
           title="清空画布"
         >
-          <RotateCcw className="w-3.5 h-3.5" />
+          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
         </button>
       </div>
     </header>

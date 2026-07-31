@@ -214,40 +214,40 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
           <div className="flex-1 p-3 sm:p-6 flex flex-col gap-4 overflow-y-auto bg-slate-950/50">
             {/* Action Presets bar */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs">
-              <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1">
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none">
+              <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1 whitespace-nowrap">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                智能快速预设:
+                智能预设:
               </span>
               <button
                 onClick={() => applyPreset('vivid')}
-                className="px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/80 text-amber-200 hover:bg-amber-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm"
+                className="px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/80 text-amber-200 hover:bg-amber-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🔥 鲜艳高饱满 (防发白/推荐)
+                🔥 鲜艳高饱满 (防发白)
               </button>
               <button
                 onClick={() => applyPreset('anime')}
-                className="px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-600/50 text-rose-300 hover:bg-rose-900/80 cursor-pointer transition-all shrink-0 font-medium"
+                className="px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-600/50 text-rose-300 hover:bg-rose-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🎨 动漫/卡通立绘 (强描边+高锐化)
+                🎨 动漫/卡通立绘
               </button>
               <button
                 onClick={() => applyPreset('photo')}
-                className="px-2.5 py-1 rounded-lg bg-sky-950/60 border border-sky-600/50 text-sky-300 hover:bg-sky-900/80 cursor-pointer transition-all shrink-0 font-medium"
+                className="px-2.5 py-1 rounded-lg bg-sky-950/60 border border-sky-600/50 text-sky-300 hover:bg-sky-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                📷 真实照片 (柔和渐变)
+                📷 真实照片
               </button>
               <button
                 onClick={() => applyPreset('pixel')}
-                className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 hover:bg-emerald-900/80 cursor-pointer transition-all shrink-0 font-medium"
+                className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 hover:bg-emerald-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🕹️ 8-Bit像素 (高对比+清晰边缘)
+                🕹️ 8-Bit像素
               </button>
               <button
                 onClick={() => applyPreset('clean')}
-                className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 cursor-pointer transition-all shrink-0"
+                className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 cursor-pointer transition-all shrink-0 whitespace-nowrap text-[11px] sm:text-xs"
               >
-                <RotateCw className="w-3 h-3 inline mr-1" /> 重置默认
+                <RotateCw className="w-3 h-3 inline mr-1" /> 重置
               </button>
             </div>
 

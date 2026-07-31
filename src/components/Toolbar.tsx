@@ -109,46 +109,47 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Active Color Swatch */}
         <button
           onClick={onOpenColorPicker}
-          className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-lg px-2.5 py-1.5 cursor-pointer transition-colors"
+          className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700/80 border border-slate-700 rounded-lg px-2 py-1 sm:px-2.5 sm:py-1.5 cursor-pointer transition-colors shrink-0"
           title="点击选择当前涂色拼豆"
         >
           <div
-            className="w-5 h-5 rounded-full border border-black/20 shadow-inner flex items-center justify-center font-bold text-[9px]"
+            className="w-4 h-4 sm:w-5 sm:h-5 rounded-full border border-black/20 shadow-inner flex items-center justify-center font-bold text-[8px] sm:text-[9px] shrink-0"
             style={{ backgroundColor: selectedColor ? selectedColor.hex : '#CCCCCC' }}
           >
             {selectedColor?.symbol || ''}
           </div>
-          <div className="text-left">
-            <div className="font-bold text-slate-100 leading-none">
+          <div className="text-left shrink-0">
+            <div className="font-bold text-slate-100 text-[11px] sm:text-xs leading-none">
               {selectedColor ? selectedColor.code : '未选择'}
             </div>
-            <div className="text-[10px] text-slate-400 leading-none mt-0.5 max-w-[80px] truncate">
-              {selectedColor ? selectedColor.name : '点此选色'}
+            <div className="text-[9px] sm:text-[10px] text-slate-400 leading-none mt-0.5 max-w-[65px] sm:max-w-[80px] truncate">
+              {selectedColor ? selectedColor.name : '选色'}
             </div>
           </div>
         </button>
 
-        <div className="h-5 w-px bg-slate-800 hidden sm:block" />
+        <div className="h-4 w-px bg-slate-800 shrink-0" />
 
         {/* Image Studio Launcher Button */}
         {hasImage && (
           <button
             onClick={onOpenImageStudio}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-lg shadow-sm cursor-pointer transition-all active:scale-95 text-[11px]"
-            title="打开图像AI增强与转换工作坊"
+            className="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-lg shadow-sm cursor-pointer transition-all active:scale-95 text-[11px] shrink-0 whitespace-nowrap"
+            title="打开图像转换增强工作坊"
           >
-            <Wand2 className="w-3.5 h-3.5" />
-            <span>转换增强工作坊</span>
+            <Wand2 className="w-3.5 h-3.5 shrink-0" />
+            <span className="hidden sm:inline">转换增强工作坊</span>
+            <span className="sm:hidden">转换增强</span>
           </button>
         )}
 
         {/* Paint & Shape Tools Buttons */}
-        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80">
+        <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
           {tools.map(t => (
             <button
               key={t.id}
               onClick={() => setActiveTool(t.id)}
-              className={`flex items-center gap-1 px-2 py-1.5 rounded-md font-medium transition-colors cursor-pointer ${
+              className={`flex items-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-md font-medium transition-colors cursor-pointer shrink-0 ${
                 activeTool === t.id
                   ? 'bg-rose-600 text-white shadow-sm'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/60'

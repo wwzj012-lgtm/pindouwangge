@@ -559,52 +559,58 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Navigation Bar (< lg screens) */}
-      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur px-2 py-1 flex items-center justify-around z-30 shrink-0 text-[10px]">
+      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur-md px-1.5 py-1 flex items-center justify-around z-30 shrink-0 text-[9px]">
         <button
           onClick={() => setMobileDrawer('none')}
-          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
-            mobileDrawer === 'none' ? 'text-rose-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+            mobileDrawer === 'none'
+              ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <LayoutGrid className="w-4 h-4" />
+          <LayoutGrid className="w-3.5 h-3.5" />
           <span>画布</span>
         </button>
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'settings' ? 'none' : 'settings')}
-          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
-            mobileDrawer === 'settings' ? 'text-rose-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+            mobileDrawer === 'settings'
+              ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Sliders className="w-4 h-4" />
+          <Sliders className="w-3.5 h-3.5" />
           <span>设置</span>
         </button>
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'stats' ? 'none' : 'stats')}
-          className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg transition-colors cursor-pointer ${
-            mobileDrawer === 'stats' ? 'text-emerald-400 font-bold' : 'text-slate-400 hover:text-slate-200'
+          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+            mobileDrawer === 'stats'
+              ? 'text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 shadow-xs'
+              : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <BarChart3 className="w-4 h-4" />
+          <BarChart3 className="w-3.5 h-3.5" />
           <span>用量</span>
         </button>
 
         {sourceImage && (
           <button
             onClick={() => setIsStudioModalOpen(true)}
-            className="flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-lg text-amber-400 hover:text-amber-300 transition-colors cursor-pointer font-medium"
+            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg text-amber-400 hover:text-amber-300 font-medium transition-all cursor-pointer"
           >
-            <Wand2 className="w-4 h-4" />
+            <Wand2 className="w-3.5 h-3.5" />
             <span>AI抠图</span>
           </button>
         )}
 
         <button
           onClick={() => setIsExportModalOpen(true)}
-          className="flex flex-col items-center gap-0.5 py-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-colors cursor-pointer shadow-sm"
+          className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
         >
-          <Download className="w-4 h-4" />
+          <Download className="w-3.5 h-3.5" />
           <span>导出</span>
         </button>
       </nav>

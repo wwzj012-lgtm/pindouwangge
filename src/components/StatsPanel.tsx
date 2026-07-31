@@ -97,7 +97,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   };
 
   return (
-    <div className="w-80 bg-slate-900 border-l border-slate-800 text-slate-200 p-4 flex flex-col h-full overflow-hidden text-xs select-none shrink-0">
+    <div className="w-80 max-w-[85vw] bg-slate-900 border-l border-slate-800 text-slate-200 p-4 flex flex-col h-full overflow-hidden text-xs select-none shrink-0">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">

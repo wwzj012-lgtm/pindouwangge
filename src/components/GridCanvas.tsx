@@ -605,64 +605,64 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
       {/* Hover Pixel Info Popover Card */}
       {hoverCell && (
-        <div className="absolute top-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-200 text-xs px-3 py-2 rounded-xl backdrop-blur shadow-xl flex items-center gap-3 pointer-events-none z-10">
+        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-200 text-[10px] sm:text-xs px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl backdrop-blur-md shadow-lg flex items-center gap-2 sm:gap-3 pointer-events-none z-10">
           <div className="font-mono text-sky-400 font-bold">
             {getColumnLetter(hoverCell.x)}{hoverCell.y + 1} ({hoverCell.x + 1}, {hoverCell.y + 1})
           </div>
           {hoveredBead ? (
-            <div className="flex items-center gap-2 border-l border-slate-700 pl-3">
+            <div className="flex items-center gap-1.5 border-l border-slate-700 pl-2 sm:pl-3">
               <div
-                className="w-4 h-4 rounded-full border border-black/30 shadow-inner"
+                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border border-black/30 shadow-inner shrink-0"
                 style={{ backgroundColor: hoveredBead.hex }}
               />
               <span className="font-bold">{hoveredBead.code}</span>
-              <span className="text-slate-400">({hoveredBead.name})</span>
+              <span className="text-slate-400 hidden xs:inline">({hoveredBead.name})</span>
             </div>
           ) : (
-            <span className="text-slate-500 border-l border-slate-700 pl-3">空拼针位置</span>
+            <span className="text-slate-500 border-l border-slate-700 pl-2 sm:pl-3">空位置</span>
           )}
         </div>
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-16 sm:bottom-3 left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[10px] sm:text-[11px] px-2.5 py-1.5 rounded-lg backdrop-blur shadow-md flex flex-wrap items-center gap-2 max-w-[calc(100vw-120px)] sm:max-w-none z-10">
+      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[9px] sm:text-[11px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-130px)] sm:max-w-none z-10">
         <span><strong className="text-white">{width} × {height}</strong> 豆</span>
         <span><strong className="text-sky-400">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
-          <span className="text-rose-400 font-bold bg-rose-950/60 px-1 py-0.5 rounded border border-rose-600/40">
+          <span className="text-rose-400 font-bold bg-rose-950/60 px-1 py-0.2 rounded border border-rose-600/40 text-[8px] sm:text-[10px]">
             {symmetryMode === 'horizontal' ? '左右镜像' : symmetryMode === 'vertical' ? '上下镜像' : '4向镜像'}
           </span>
         )}
       </div>
 
-      {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
-      <div className="absolute bottom-16 sm:bottom-3 right-3 bg-slate-900/90 border border-slate-800 rounded-xl p-1 shadow-xl flex items-center gap-1 z-10 backdrop-blur">
+      {/* Mobile & Touch Floating Zoom Controls at bottom right */}
+      <div className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-slate-900/90 border border-slate-800 rounded-lg sm:rounded-xl p-0.5 sm:p-1 shadow-xl flex items-center gap-0.5 sm:gap-1 z-10 backdrop-blur-md">
         <button
           onClick={() => setZoom(Math.min(4.0, zoom * 1.2))}
-          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
           title="放大"
         >
-          <ZoomIn className="w-4 h-4" />
+          <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
-        <span className="text-[10px] font-mono font-bold text-sky-400 px-1 select-none min-w-[36px] text-center">
+        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-sky-400 px-0.5 select-none min-w-[32px] sm:min-w-[36px] text-center">
           {Math.round(zoom * 100)}%
         </span>
         <button
           onClick={() => setZoom(Math.max(0.3, zoom * 0.8))}
-          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
           title="缩小"
         >
-          <ZoomOut className="w-4 h-4" />
+          <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
         <button
           onClick={() => {
             setZoom(1.0);
             setPan({ x: 40, y: 40 });
           }}
-          className="w-8 h-8 rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
           title="复位 100%"
         >
-          <Maximize2 className="w-4 h-4" />
+          <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
     </div>

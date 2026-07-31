@@ -414,6 +414,7 @@ export default function App() {
 
       const key = e.key.toLowerCase();
       if (key === 'p') setActiveTool('pencil');
+      else if (key === 'h') setActiveTool('hand');
       else if (key === 'b') setActiveTool('bucket');
       else if (key === 'i') setActiveTool('eyedropper');
       else if (key === 'e') setActiveTool('eraser');
@@ -517,6 +518,7 @@ export default function App() {
             height={settings.height}
             boardSize={settings.boardSize}
             activeTool={activeTool}
+            setActiveTool={setActiveTool}
             selectedColor={selectedColor}
             highlightColorId={highlightColorId}
             beadShape={beadShape}

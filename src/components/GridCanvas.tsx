@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Focus, Hand, Pencil } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
 
@@ -10,6 +10,7 @@ interface GridCanvasProps {
   height: number;
   boardSize: number;
   activeTool: ToolType;
+  setActiveTool?: (tool: ToolType) => void;
   selectedColor: BeadColor | null;
   highlightColorId: string | null;
   beadShape: BeadShape;
@@ -122,6 +123,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   height,
   boardSize,
   activeTool,
+  setActiveTool,
   selectedColor,
   highlightColorId,
   beadShape,
@@ -146,6 +148,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [isPanning, setIsPanning] = useState(false);
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
+  // Remember last drawing tool before switching to hand
+  const [lastDrawTool, setLastDrawTool] = useState<ToolType>('pencil');
+
+  useEffect(() => {
+    if (activeTool !== 'hand') {
+      setLastDrawTool(activeTool);
+    }
+  }, [activeTool]);
+
   // Drawing mouse drag state
   const [isDrawing, setIsDrawing] = useState(false);
   const [shapeStartCell, setShapeStartCell] = useState<{ x: number; y: number } | null>(null);
@@ -156,7 +167,41 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const cellSize = baseCellSize * zoom;
   const coordOffset = showCoordinates ? 28 : 0;
 
-  // Convert client mouse event to grid cell coordinates (x, y)
+  // Refs for touch gesture sync
+  const zoomRef = useRef(zoom);
+  const panRef = useRef(pan);
+  const activeToolRef = useRef(activeTool);
+
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { panRef.current = pan; }, [pan]);
+  useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+
+  // Touch tracking ref for pinch-to-zoom & two-finger pan
+  const touchStateRef = useRef<{
+    isPinch: boolean;
+    initialDist: number;
+    initialZoom: number;
+    initialMidX: number;
+    initialMidY: number;
+    initialPanX: number;
+    initialPanY: number;
+    lastSingleTouchX: number;
+    lastSingleTouchY: number;
+    isPanningSingle: boolean;
+  }>({
+    isPinch: false,
+    initialDist: 0,
+    initialZoom: 1.0,
+    initialMidX: 0,
+    initialMidY: 0,
+    initialPanX: 0,
+    initialPanY: 0,
+    lastSingleTouchX: 0,
+    lastSingleTouchY: 0,
+    isPanningSingle: false,
+  });
+
+  // Convert client coordinates to grid cell coordinates (x, y)
   const clientToGrid = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } | null => {
       const canvas = canvasRef.current;
@@ -176,28 +221,148 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     [pan, cellSize, width, height, coordOffset]
   );
 
-  // Center & auto fit view
-  const resetView = useCallback(() => {
+  // Auto-fit & center view in container
+  const fitToView = useCallback(() => {
     if (!containerRef.current) return;
     const { clientWidth, clientHeight } = containerRef.current;
-    const gridPixelWidth = width * cellSize + coordOffset;
-    const gridPixelHeight = height * cellSize + coordOffset;
+    if (clientWidth <= 0 || clientHeight <= 0) return;
+
+    const totalGridW = width * baseCellSize + coordOffset;
+    const totalGridH = height * baseCellSize + coordOffset;
+
+    const padding = clientWidth < 640 ? 20 : 36;
+    const availW = Math.max(100, clientWidth - padding * 2);
+    const availH = Math.max(100, clientHeight - padding * 2);
+
+    const scaleX = availW / totalGridW;
+    const scaleY = availH / totalGridH;
+    const bestZoom = Math.min(3.5, Math.max(0.25, Math.min(scaleX, scaleY)));
+
+    setZoom(bestZoom);
+
+    const finalPixelW = width * baseCellSize * bestZoom + coordOffset;
+    const finalPixelH = height * baseCellSize * bestZoom + coordOffset;
 
     setPan({
-      x: Math.max(20, (clientWidth - gridPixelWidth) / 2),
-      y: Math.max(20, (clientHeight - gridPixelHeight) / 2),
+      x: Math.max(8, (clientWidth - finalPixelW) / 2),
+      y: Math.max(8, (clientHeight - finalPixelH) / 2),
     });
-  }, [width, height, cellSize, coordOffset]);
+  }, [width, height, coordOffset, baseCellSize, setZoom]);
 
   useEffect(() => {
-    resetView();
+    fitToView();
   }, [width, height]);
 
-  // Handle Wheel Zoom
+  // Handle Touch Gestures (Pinch to zoom & two-finger / hand panning)
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        // Two-finger pinch / pan start
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+
+        touchStateRef.current = {
+          isPinch: true,
+          initialDist: dist,
+          initialZoom: zoomRef.current,
+          initialMidX: midX,
+          initialMidY: midY,
+          initialPanX: panRef.current.x,
+          initialPanY: panRef.current.y,
+          lastSingleTouchX: 0,
+          lastSingleTouchY: 0,
+          isPanningSingle: false,
+        };
+        setIsDrawing(false);
+        setIsPanning(true);
+      } else if (e.touches.length === 1) {
+        const t = e.touches[0];
+        if (activeToolRef.current === 'hand') {
+          e.preventDefault();
+          touchStateRef.current.isPanningSingle = true;
+          touchStateRef.current.lastSingleTouchX = t.clientX;
+          touchStateRef.current.lastSingleTouchY = t.clientY;
+          setIsPanning(true);
+        }
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const state = touchStateRef.current;
+
+      if (e.touches.length === 2 && state.isPinch) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+
+        if (state.initialDist > 0) {
+          const scale = dist / state.initialDist;
+          const newZoom = Math.min(4.5, Math.max(0.2, state.initialZoom * scale));
+
+          const rect = container.getBoundingClientRect();
+          const focusX = state.initialMidX - rect.left - state.initialPanX;
+          const focusY = state.initialMidY - rect.top - state.initialPanY;
+          const zoomRatio = newZoom / state.initialZoom;
+
+          const deltaMidX = midX - state.initialMidX;
+          const deltaMidY = midY - state.initialMidY;
+
+          const newPanX = state.initialMidX - rect.left - (focusX * zoomRatio) + deltaMidX;
+          const newPanY = state.initialMidY - rect.top - (focusY * zoomRatio) + deltaMidY;
+
+          setZoom(newZoom);
+          setPan({ x: newPanX, y: newPanY });
+        }
+      } else if (e.touches.length === 1 && state.isPanningSingle) {
+        e.preventDefault();
+        const t = e.touches[0];
+        const dx = t.clientX - state.lastSingleTouchX;
+        const dy = t.clientY - state.lastSingleTouchY;
+        state.lastSingleTouchX = t.clientX;
+        state.lastSingleTouchY = t.clientY;
+
+        setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) {
+        touchStateRef.current.isPinch = false;
+      }
+      if (e.touches.length === 0) {
+        touchStateRef.current.isPanningSingle = false;
+        setIsPanning(false);
+      }
+    };
+
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [setZoom]);
+
+  // Handle Mouse Wheel Zoom
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const newZoom = Math.min(4.0, Math.max(0.3, zoom * zoomFactor));
+    const newZoom = Math.min(4.5, Math.max(0.2, zoom * zoomFactor));
 
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
@@ -505,9 +670,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     renderCanvas();
   }, [renderCanvas]);
 
-  // Pointer Handlers
+  // Pointer Handlers for Mouse & Single-Point interactions
   const handlePointerDown = (e: React.PointerEvent) => {
-    if (e.button === 1 || e.button === 2 || e.shiftKey) {
+    // If pinch gesture active, ignore pointerdown
+    if (touchStateRef.current.isPinch) return;
+
+    if (e.button === 1 || e.button === 2 || e.shiftKey || activeTool === 'hand') {
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       return;
@@ -587,10 +755,21 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     ? paletteMap.get(grid[hoverCell.y][hoverCell.x]!)
     : null;
 
+  const toggleHandTool = () => {
+    if (!setActiveTool) return;
+    if (activeTool === 'hand') {
+      setActiveTool(lastDrawTool);
+    } else {
+      setActiveTool('hand');
+    }
+  };
+
   return (
     <div
       ref={containerRef}
-      className="relative w-full h-full bg-slate-950 overflow-hidden cursor-crosshair select-none touch-none"
+      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none ${
+        activeTool === 'hand' ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'
+      }`}
       onWheel={handleWheel}
       onContextMenu={e => e.preventDefault()}
     >
@@ -625,7 +804,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[9px] sm:text-[11px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-130px)] sm:max-w-none z-10">
+      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[9px] sm:text-[11px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-180px)] sm:max-w-none z-10">
         <span><strong className="text-white">{width} × {height}</strong> 豆</span>
         <span><strong className="text-sky-400">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
@@ -635,37 +814,68 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         )}
       </div>
 
-      {/* Mobile & Touch Floating Zoom Controls at bottom right */}
-      <div className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-slate-900/90 border border-slate-800 rounded-lg sm:rounded-xl p-0.5 sm:p-1 shadow-xl flex items-center gap-0.5 sm:gap-1 z-10 backdrop-blur-md">
+      {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
+      <div className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-2xl flex items-center gap-1 z-10 backdrop-blur-md">
+        {/* Toggle Hand / Pan Tool Button */}
+        {setActiveTool && (
+          <button
+            onClick={toggleHandTool}
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+              activeTool === 'hand'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/30 ring-2 ring-amber-400/50'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+            }`}
+            title={activeTool === 'hand' ? '切换回画笔模式' : '平移/拖拽画布模式'}
+          >
+            {activeTool === 'hand' ? <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Hand className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />}
+          </button>
+        )}
+
+        <div className="w-px h-4 bg-slate-800" />
+
+        {/* Focus / Auto-Fit View Button */}
         <button
-          onClick={() => setZoom(Math.min(4.0, zoom * 1.2))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
-          title="放大"
+          onClick={fitToView}
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sky-400 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          title="居中适应屏幕"
         >
-          <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <Focus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
-        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-sky-400 px-0.5 select-none min-w-[32px] sm:min-w-[36px] text-center">
-          {Math.round(zoom * 100)}%
-        </span>
-        <button
-          onClick={() => setZoom(Math.max(0.3, zoom * 0.8))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
-          title="缩小"
-        >
-          <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-        </button>
+
+        {/* Reset 100% Zoom */}
         <button
           onClick={() => {
             setZoom(1.0);
             setPan({ x: 40, y: 40 });
           }}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-md sm:rounded-lg hover:bg-slate-800 active:bg-slate-700 text-slate-200 flex items-center justify-center cursor-pointer transition-colors"
-          title="复位 100%"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          title="重置 100%"
         >
           <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </button>
+
+        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-sky-400 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
+          {Math.round(zoom * 100)}%
+        </span>
+
+        {/* Zoom Out */}
+        <button
+          onClick={() => setZoom(Math.max(0.2, zoom * 0.8))}
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          title="缩小"
+        >
+          <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </button>
+
+        {/* Zoom In */}
+        <button
+          onClick={() => setZoom(Math.min(4.5, zoom * 1.25))}
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          title="放大"
+        >
+          <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
     </div>
   );
 };
-

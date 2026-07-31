@@ -25,7 +25,8 @@ export type ToolType =
   | 'bucket'
   | 'eyedropper'
   | 'eraser'
-  | 'replace';
+  | 'replace'
+  | 'hand';
 
 export type SymmetryMode = 'none' | 'horizontal' | 'vertical' | 'quad';
 

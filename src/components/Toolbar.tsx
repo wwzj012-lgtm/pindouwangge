@@ -24,6 +24,7 @@ import {
   ArrowRight,
   Layers,
   Wand2,
+  Hand,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 
@@ -93,6 +94,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const tools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
     { id: 'pencil', label: '画笔 (P)', icon: <Pencil className="w-3.5 h-3.5" /> },
+    { id: 'hand', label: '平移拖拽 (H)', icon: <Hand className="w-3.5 h-3.5" /> },
     { id: 'line', label: '直线', icon: <Minus className="w-3.5 h-3.5" /> },
     { id: 'rectangle', label: '矩形', icon: <Square className="w-3.5 h-3.5" /> },
     { id: 'circle', label: '圆形', icon: <CircleIcon className="w-3.5 h-3.5" /> },

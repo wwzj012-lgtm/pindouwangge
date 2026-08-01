@@ -216,8 +216,17 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   const activeWidth = endX - startX;
   const activeHeight = endY - startY;
 
-  // Sizing parameters for high resolution output
-  const cellSize = 24; // 24px per bead cell in high-res export
+  // Sizing parameters: dynamically adjust cellSize based on grid dimensions to prevent canvas size limit failures
+  const maxGridBeadsInView = Math.max(activeWidth, activeHeight);
+  let cellSize = 24; // 24px per bead cell for standard boards
+  if (maxGridBeadsInView > 80) {
+    cellSize = 12;
+  } else if (maxGridBeadsInView > 50) {
+    cellSize = 16;
+  } else if (maxGridBeadsInView > 32) {
+    cellSize = 20;
+  }
+
   const gridPixelWidth = activeWidth * cellSize;
   const gridPixelHeight = activeHeight * cellSize;
 
@@ -240,11 +249,11 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     .filter(item => item.bead !== undefined)
     .sort((a, b) => b.count - a.count);
 
-  // 3. Dynamic Legend Scaling Factor Calculation
+  // 3. Dynamic Legend Scaling Factor Calculation (Capped to prevent huge canvas scaling)
   let scale = 1.0;
   if (legendScaleMode === 'auto') {
     const maxGridDim = Math.max(gridPixelWidth, gridPixelHeight);
-    scale = Math.max(1.0, Math.min(4.0, maxGridDim / 720));
+    scale = Math.max(1.0, Math.min(1.5, maxGridDim / 720));
   } else {
     scale = parseFloat(legendScaleMode) || 1.0;
   }
@@ -257,7 +266,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
   const swatchSize = Math.round(22 * scale);
   const rowHeight = Math.round(32 * scale);
-  const legendColWidth = Math.round(270 * scale);
+  const legendColWidth = Math.round(200 * scale);
 
   const legendHeaderFont = `bold ${Math.round(18 * scale)}px sans-serif`;
   const legendSubFont = `${Math.round(13 * scale)}px sans-serif`;
@@ -345,7 +354,21 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // 7. Render Bead Grid
+  // 7. Render Grid Background and Lines First (Allows round beads to overlap lines cleanly and keeps white beads highly visible)
+  ctx.fillStyle = '#F1F5F9';
+  ctx.fillRect(startGridX, startGridY, gridPixelWidth, gridPixelHeight);
+
+  ctx.strokeStyle = '#E2E8F0';
+  ctx.lineWidth = 0.5;
+  for (let y = startY; y < endY; y++) {
+    for (let x = startX; x < endX; x++) {
+      const px = startGridX + (x - startX) * cellSize;
+      const py = startGridY + (y - startY) * cellSize;
+      ctx.strokeRect(px, py, cellSize, cellSize);
+    }
+  }
+
+  // Draw Beads or Peg Dots on top of the background grid
   for (let y = startY; y < endY; y++) {
     for (let x = startX; x < endX; x++) {
       const px = startGridX + (x - startX) * cellSize;
@@ -359,23 +382,12 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
         drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label);
       } else {
-        // Empty pegboard cell
-        ctx.fillStyle = '#F1F5F9';
-        ctx.fillRect(px, py, cellSize, cellSize);
-        ctx.strokeStyle = '#E2E8F0';
-        ctx.lineWidth = 1;
-        ctx.strokeRect(px, py, cellSize, cellSize);
-
-        // Peg dot
+        // Simple elegant peg dot inside empty cell (rendered beautifully over the grey background grid)
         ctx.beginPath();
-        ctx.arc(px + cellSize / 2, py + cellSize / 2, 2, 0, Math.PI * 2);
+        ctx.arc(px + cellSize / 2, py + cellSize / 2, 1.8, 0, Math.PI * 2);
         ctx.fillStyle = '#CBD5E1';
         ctx.fill();
       }
-
-      ctx.strokeStyle = '#E2E8F0';
-      ctx.lineWidth = 0.5;
-      ctx.strokeRect(px, py, cellSize, cellSize);
     }
   }
 
@@ -548,12 +560,40 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   return canvas;
 }
 
-// Download canvas as PNG image
+// Download canvas as PNG image (utilizes toBlob with object URL for maximum memory efficiency, especially on large grids)
 export function downloadCanvasImage(canvas: HTMLCanvasElement, filename: string) {
-  const link = document.createElement('a');
-  link.download = filename.endsWith('.png') ? filename : `${filename}.png`;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
+  const finalFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
+  
+  try {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        // Fallback to toDataURL if toBlob fails or is not supported in environment
+        const url = canvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = finalFilename;
+        link.href = url;
+        link.click();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.download = finalFilename;
+      link.href = url;
+      link.click();
+      
+      // Clean up the object URL after a short delay
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 200);
+    }, 'image/png');
+  } catch (err) {
+    // Fallback if toBlob errors out
+    const url = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = finalFilename;
+    link.href = url;
+    link.click();
+  }
 }
 
 // Download project JSON file

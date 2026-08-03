@@ -84,6 +84,7 @@ export default function App() {
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
+  const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
   // Palette Lookup Map
   const paletteMap = useMemo(() => {
@@ -341,14 +342,163 @@ export default function App() {
     pushHistory(newGrid);
   };
 
-  // Replace all instances of sourceColorId with targetColorId
+  // Replace all instances of sourceColorId with targetColorId or erase if TRANSPARENT_ERASE
   const handleExecuteReplace = (sourceId: string, targetId: string) => {
     const newGrid = grid.map(row =>
-      row.map(cell => (cell === sourceId ? targetId : cell))
+      row.map(cell => {
+        if (cell === sourceId) {
+          return targetId === 'TRANSPARENT_ERASE' ? null : targetId;
+        }
+        return cell;
+      })
     );
     setGrid(newGrid);
     pushHistory(newGrid);
   };
+
+  // Erase all instances of a specific colorId
+  const handleEraseColor = useCallback((colorId: string) => {
+    const coords: [number, number][] = [];
+    grid.forEach((row, y) => {
+      row.forEach((cell, x) => {
+        if (cell === colorId) {
+          coords.push([x, y]);
+        }
+      });
+    });
+
+    if (coords.length > 0) {
+      setErasedColorCoords(prev => {
+        const next = new Map<string, [number, number][]>(prev);
+        const existing = next.get(colorId) || [];
+        next.set(colorId, [...existing, ...coords]);
+        return next;
+      });
+
+      const newGrid = grid.map(row =>
+        row.map(cell => (cell === colorId ? null : cell))
+      );
+      setGrid(newGrid);
+      pushHistory(newGrid);
+    }
+  }, [grid, pushHistory]);
+
+  // Restore an erased color back to the grid
+  const handleRestoreColor = useCallback((colorId: string) => {
+    const coords = erasedColorCoords.get(colorId);
+
+    if (coords && coords.length > 0) {
+      const newGrid = grid.map(row => [...row]);
+      for (const [x, y] of coords) {
+        if (y < newGrid.length && x < newGrid[y].length && newGrid[y][x] === null) {
+          newGrid[y][x] = colorId;
+        }
+      }
+      setGrid(newGrid);
+      pushHistory(newGrid);
+    }
+
+    setErasedColorCoords(prev => {
+      const next = new Map<string, [number, number][]>(prev);
+      next.delete(colorId);
+      return next;
+    });
+
+    const restoredColor = paletteMap.get(colorId);
+    if (restoredColor) {
+      setSelectedColor(restoredColor);
+    }
+  }, [grid, erasedColorCoords, pushHistory, paletteMap]);
+
+  // Flood-fill clear connected outer background beads starting from grid edges
+  const handleClearOuterBackground = useCallback(() => {
+    const h = settings.height;
+    const w = settings.width;
+    if (h === 0 || w === 0) return;
+
+    const newGrid = grid.map(row => [...row]);
+    const visited = Array.from({ length: h }, () => Array(w).fill(false));
+
+    // Sample potential outer background color IDs from edge coordinates
+    const sampleColorIds = new Set<string>();
+    const edgeCoords = [
+      [0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1],
+      [Math.floor(w / 2), 0], [Math.floor(w / 2), h - 1],
+      [0, Math.floor(h / 2)], [w - 1, Math.floor(h / 2)]
+    ];
+    for (const [cx, cy] of edgeCoords) {
+      const cid = grid[cy]?.[cx];
+      if (cid) sampleColorIds.add(cid);
+    }
+
+    if (sampleColorIds.size === 0) return;
+
+    // Queue for BFS
+    const queue: [number, number][] = [];
+
+    // Push all border cells that match a sampled background color
+    for (let x = 0; x < w; x++) {
+      if (grid[0][x] && sampleColorIds.has(grid[0][x]!)) {
+        queue.push([x, 0]);
+        visited[0][x] = true;
+      }
+      if (grid[h - 1][x] && sampleColorIds.has(grid[h - 1][x]!)) {
+        queue.push([x, h - 1]);
+        visited[h - 1][x] = true;
+      }
+    }
+    for (let y = 0; y < h; y++) {
+      if (grid[y][0] && sampleColorIds.has(grid[y][0]!)) {
+        queue.push([0, y]);
+        visited[y][0] = true;
+      }
+      if (grid[y][w - 1] && sampleColorIds.has(grid[y][w - 1]!)) {
+        queue.push([w - 1, y]);
+        visited[y][w - 1] = true;
+      }
+    }
+
+    const clearedByColor = new Map<string, [number, number][]>();
+    let clearedCount = 0;
+
+    while (queue.length > 0) {
+      const [cx, cy] = queue.shift()!;
+      const curColor = grid[cy][cx];
+      if (curColor) {
+        if (!clearedByColor.has(curColor)) {
+          clearedByColor.set(curColor, []);
+        }
+        clearedByColor.get(curColor)!.push([cx, cy]);
+      }
+      newGrid[cy][cx] = null;
+      clearedCount++;
+
+      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx;
+        const ny = cy + dy;
+        if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny][nx]) {
+          if (grid[ny][nx] && grid[ny][nx] === curColor) {
+            visited[ny][nx] = true;
+            queue.push([nx, ny]);
+          }
+        }
+      }
+    }
+
+    if (clearedCount > 0) {
+      setErasedColorCoords(prev => {
+        const next = new Map<string, [number, number][]>(prev);
+        clearedByColor.forEach((coords, cid) => {
+          const existing = next.get(cid) || [];
+          next.set(cid, [...existing, ...coords]);
+        });
+        return next;
+      });
+      setGrid(newGrid);
+      pushHistory(newGrid);
+    }
+  }, [grid, settings, pushHistory]);
 
   // Export & Import Project JSON
   const handleExportJson = () => {
@@ -555,6 +705,10 @@ export default function App() {
             onSetHighlightColorId={setHighlightColorId}
             onOpenReplaceModal={color => setReplaceSourceColor(color)}
             onSelectColor={color => setSelectedColor(color)}
+            onClearOuterBackground={handleClearOuterBackground}
+            onEraseColor={handleEraseColor}
+            onRestoreColor={handleRestoreColor}
+            erasedColorCoords={erasedColorCoords}
             onCloseMobile={() => setMobileDrawer('none')}
           />
         </div>

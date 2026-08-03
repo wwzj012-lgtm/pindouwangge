@@ -128,13 +128,13 @@ export function findClosestBeadColor(
   g: number,
   b: number,
   palette: BeadColor[],
-  algo: ColorMatchAlgo = 'ciede2000_vivid'
+  algo: ColorMatchAlgo = 'ciede2000_bright'
 ): BeadColor {
   if (palette.length === 0) {
     throw new Error('Palette cannot be empty');
   }
 
-  const isLabAlgo = algo === 'ciede2000' || algo === 'ciede2000_vivid' || algo === 'cie76';
+  const isLabAlgo = algo === 'ciede2000' || algo === 'ciede2000_vivid' || algo === 'ciede2000_bright' || algo === 'cie76';
   const targetLab = isLabAlgo ? rgbToLab(r, g, b) : null;
   let minDistance = Infinity;
   let closest = palette[0];
@@ -144,11 +144,27 @@ export function findClosestBeadColor(
 
     let dist = Infinity;
 
-    if (algo === 'ciede2000_vivid') {
-      // Vivid mode: kC = 0.65 (heavy chroma penalty), kL = 1.35 (relaxed lightness)
-      // Strongly prefers vibrant/saturated bead matches over washed-out/whitish ones
+    if (algo === 'ciede2000_bright') {
+      // High-Fidelity Brightness & Skin Tone Mode:
+      // Heightens lightness and hue sensitivity in high lightness regions (L* > 65 / bright colors / skin / white hair)
+      // Ensures white, off-white, light peach/skin tones, and light gray shading remain distinctly matched to correct beads
       const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      dist = deltaE2000(targetLab!, colorLab, 1.35, 0.65, 1.0);
+      const targetL = targetLab![0];
+      if (targetL > 65) {
+        dist = deltaE2000(targetLab!, colorLab, 0.8, 0.85, 0.85);
+      } else {
+        dist = deltaE2000(targetLab!, colorLab, 1.0, 0.85, 1.0);
+      }
+    } else if (algo === 'ciede2000_vivid') {
+      // Vivid mode:
+      // Avoids squashing bright skin/hair colors into pure white by keeping kL reasonable when L* > 75
+      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
+      const targetL = targetLab![0];
+      if (targetL > 75) {
+        dist = deltaE2000(targetLab!, colorLab, 0.9, 0.7, 0.9);
+      } else {
+        dist = deltaE2000(targetLab!, colorLab, 1.35, 0.65, 1.0);
+      }
     } else if (algo === 'ciede2000') {
       const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
       dist = deltaE2000(targetLab!, colorLab, 1.0, 1.0, 1.0);
@@ -190,12 +206,23 @@ function adjustColor(
   g += (brightness / 100) * 255;
   b += (brightness / 100) * 255;
 
-  // 2. Contrast (-100 to 100)
+  // 2. Contrast (-100 to 100) with soft highlight protection
   if (contrast !== 0) {
     const factor = (259 * (contrast + 255)) / (255 * (259 - contrast));
-    r = factor * (r - 128) + 128;
-    g = factor * (g - 128) + 128;
-    b = factor * (b - 128) + 128;
+    let cr = factor * (r - 128) + 128;
+    let cg = factor * (g - 128) + 128;
+    let cb = factor * (b - 128) + 128;
+
+    // Soft roll-off above 225 to prevent harsh white clipping
+    if (contrast > 0) {
+      if (cr > 225) cr = 225 + (cr - 225) * 0.5;
+      if (cg > 225) cg = 225 + (cg - 225) * 0.5;
+      if (cb > 225) cb = 225 + (cb - 225) * 0.5;
+    }
+
+    r = cr;
+    g = cg;
+    b = cb;
   }
 
   // 3. Saturation boost & protection (-100 to 100)

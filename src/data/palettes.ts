@@ -7,9 +7,9 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
-// Generate distinct printable symbols for grid printouts
+// Generate distinct printable symbols for grid printouts (Avoid solid black blobs for light colors like white)
 export const SYMBOL_LIST = [
-  '●', '■', '▲', '★', '♦', '♥', '♠', '♣', '✦', '✖',
+  '⚪', '■', '▲', '★', '♦', '♥', '♠', '♣', '✦', '✖',
   '◆', '▼', '◄', '►', '⬢', '⬟', '⬣', '⊕', '⊗', '⊙',
   '⊛', '⊜', '⊝', '1', '2', '3', '4', '5', '6', '7',
   '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',

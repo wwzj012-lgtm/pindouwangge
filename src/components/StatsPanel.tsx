@@ -8,6 +8,9 @@ import {
   RefreshCw,
   Hash,
   X,
+  Trash2,
+  Scissors,
+  RotateCcw,
 } from 'lucide-react';
 import { BeadColor, ColorStat } from '../types';
 
@@ -21,6 +24,10 @@ interface StatsPanelProps {
   onSetHighlightColorId: (id: string | null) => void;
   onOpenReplaceModal: (sourceColor: BeadColor) => void;
   onSelectColor: (color: BeadColor) => void;
+  onClearOuterBackground?: () => void;
+  onEraseColor?: (colorId: string) => void;
+  onRestoreColor?: (colorId: string) => void;
+  erasedColorCoords?: Map<string, [number, number][]>;
   onCloseMobile?: () => void;
 }
 
@@ -34,13 +41,17 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   onSetHighlightColorId,
   onOpenReplaceModal,
   onSelectColor,
+  onClearOuterBackground,
+  onEraseColor,
+  onRestoreColor,
+  erasedColorCoords,
   onCloseMobile,
 }) => {
   const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
 
-  // Compute stats
-  const { stats, totalBeads } = useMemo(() => {
+  // Compute active & erased stats
+  const { stats, erasedStats, totalBeads } = useMemo(() => {
     const counts = new Map<string, number>();
     let total = 0;
 
@@ -68,8 +79,25 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
     statList.sort((a, b) => b.count - a.count);
 
-    return { stats: statList, totalBeads: total };
-  }, [grid, paletteMap]);
+    const erasedList: ColorStat[] = [];
+    if (erasedColorCoords) {
+      erasedColorCoords.forEach((coords, colorId) => {
+        if ((counts.get(colorId) || 0) === 0) {
+          const color = paletteMap.get(colorId);
+          if (color) {
+            erasedList.push({
+              color,
+              count: coords.length,
+              percentage: 0,
+              bagsCount: 0,
+            });
+          }
+        }
+      });
+    }
+
+    return { stats: statList, erasedStats: erasedList, totalBeads: total };
+  }, [grid, paletteMap, erasedColorCoords]);
 
   // Filter stats
   const filteredStats = useMemo(() => {
@@ -81,6 +109,17 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         s.color.name.toLowerCase().includes(term)
     );
   }, [stats, search]);
+
+  const filteredErasedStats = useMemo(() => {
+    if (!erasedStats || erasedStats.length === 0) return [];
+    if (!search.trim()) return erasedStats;
+    const term = search.toLowerCase();
+    return erasedStats.filter(
+      s =>
+        s.color.code.toLowerCase().includes(term) ||
+        s.color.name.toLowerCase().includes(term)
+    );
+  }, [erasedStats, search]);
 
   // Total Boards needed
   const boardsX = Math.ceil(width / boardSize);
@@ -141,6 +180,18 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           <div className="text-sm font-bold text-sky-400 font-mono mt-0.5">{totalBoards} 板</div>
         </div>
       </div>
+
+      {/* Quick Action: Clear Outer Connected Background */}
+      {onClearOuterBackground && (
+        <button
+          onClick={onClearOuterBackground}
+          className="w-full mb-3 py-1.5 px-2 bg-pink-950/80 hover:bg-pink-900 border border-pink-600/60 rounded-xl text-pink-200 text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+          title="自动识别边缘相连的背景拼豆并一次性全部抹除 (只留人物/物体主体)"
+        >
+          <Scissors className="w-3.5 h-3.5 text-pink-400" />
+          <span>🪄 一键清除最外层连通背景豆</span>
+        </button>
+      )}
 
       {/* Search Input */}
       <div className="relative mb-3">
@@ -236,13 +287,78 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                 </button>
+
+                {onEraseColor && (
+                  <button
+                    onClick={() => onEraseColor(s.color.id)}
+                    className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-slate-700 cursor-pointer transition-colors"
+                    title="擦除全板此颜色 (变为空白/无豆)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           );
         })}
 
-        {filteredStats.length === 0 && (
+        {filteredStats.length === 0 && filteredErasedStats.length === 0 && (
           <div className="text-center py-8 text-slate-500">未找到匹配的颜色号</div>
+        )}
+
+        {/* Erased Colors Section (Displayed at the bottom with dimmed visual style) */}
+        {filteredErasedStats.length > 0 && (
+          <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-1 mb-1">
+              <span className="flex items-center gap-1.5 text-slate-400">
+                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+                已擦除色卡 ({filteredErasedStats.length})
+              </span>
+              <span className="text-[10px] text-slate-500 font-normal">点击右侧恢复入板</span>
+            </div>
+
+            {filteredErasedStats.map(s => (
+              <div
+                key={s.color.id}
+                className="p-2 rounded-xl border border-dashed border-slate-800 bg-slate-900/50 text-slate-400 opacity-60 hover:opacity-100 transition-all flex items-center gap-2.5 group"
+              >
+                {/* Color Swatch */}
+                <button
+                  onClick={() => onSelectColor(s.color)}
+                  className="w-7 h-7 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer opacity-70 group-hover:opacity-100 transition-all"
+                  style={{ backgroundColor: s.color.hex }}
+                  title="设为画笔涂色"
+                >
+                  <span className={isLightColor(s.color.hex) ? 'text-black' : 'text-white'}>
+                    {s.color.symbol}
+                  </span>
+                </button>
+
+                {/* Code & Name */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 line-through decoration-slate-600">
+                    <span className="font-mono font-bold text-slate-400 text-xs">{s.color.code}</span>
+                    <span className="text-[10px] text-slate-500 truncate">{s.color.name}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-0.5">
+                    已擦除 {s.count > 0 ? `(${s.count} 粒)` : ''}
+                  </div>
+                </div>
+
+                {/* Restore Action */}
+                {onRestoreColor && (
+                  <button
+                    onClick={() => onRestoreColor(s.color.id)}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 shadow-sm"
+                    title="点击恢复此颜色到网格原本位置"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>恢复</span>
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>

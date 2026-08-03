@@ -139,6 +139,72 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   if (!isOpen || !sourceImage) return null;
 
+  // Auto-detect solid outer background color from corners of source image
+  const autoDetectAndRemoveBackground = () => {
+    const canvas = imageCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+    if (w < 10 || h < 10) return;
+
+    // Sample pixels from 8 edge/corner positions
+    const samplePoints = [
+      [5, 5],
+      [w - 5, 5],
+      [5, h - 5],
+      [w - 5, h - 5],
+      [Math.floor(w / 2), 2],
+      [2, Math.floor(h / 2)],
+      [w - 3, Math.floor(h / 2)],
+      [Math.floor(w / 2), h - 3],
+    ];
+
+    let sumR = 0, sumG = 0, sumB = 0, count = 0;
+    for (const [sx, sy] of samplePoints) {
+      try {
+        const pixel = ctx.getImageData(sx, sy, 1, 1).data;
+        if (pixel[3] > 50) { // Non-transparent
+          sumR += pixel[0];
+          sumG += pixel[1];
+          sumB += pixel[2];
+          count++;
+        }
+      } catch (err) {
+        // Ignore bounds
+      }
+    }
+
+    if (count > 0) {
+      const avgR = Math.round(sumR / count);
+      const avgG = Math.round(sumG / count);
+      const avgB = Math.round(sumB / count);
+      const detectedHex = `#${((1 << 24) + (avgR << 16) + (avgG << 8) + avgB)
+        .toString(16)
+        .slice(1)
+        .toUpperCase()}`;
+
+      setPickedChromaColor(detectedHex);
+      setLocalSettings(s => ({
+        ...s,
+        chromaKeyColor: detectedHex,
+        chromaKeyTolerance: Math.max(20, s.chromaKeyTolerance || 25),
+      }));
+    }
+  };
+
+  // Quick remove white/light background
+  const removeWhiteBackground = () => {
+    setPickedChromaColor('#FFFFFF');
+    setLocalSettings(s => ({
+      ...s,
+      chromaKeyColor: '#FFFFFF',
+      chromaKeyTolerance: 20,
+    }));
+  };
+
   // Handle clicking on image to pick Chroma Key background color
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isPickingColor) return;
@@ -173,29 +239,29 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       setLocalSettings(s => ({
         ...s,
         colorMatchAlgo: 'ciede2000_vivid',
-        sharpening: 50,
+        sharpening: 40,
         outlineBoost: true,
-        contrast: 15,
-        saturation: 20,
+        contrast: 10,
+        saturation: 15,
         dither: 'none',
       }));
     } else if (preset === 'anime') {
       setLocalSettings(s => ({
         ...s,
-        colorMatchAlgo: 'ciede2000_vivid',
-        sharpening: 70,
+        colorMatchAlgo: 'ciede2000_bright',
+        sharpening: 25,
         outlineBoost: true,
-        contrast: 20,
-        saturation: 15,
-        dither: 'none',
+        contrast: 4,
+        saturation: 10,
+        dither: 'atkinson',
       }));
     } else if (preset === 'photo') {
       setLocalSettings(s => ({
         ...s,
-        colorMatchAlgo: 'ciede2000_vivid',
+        colorMatchAlgo: 'ciede2000_bright',
         sharpening: 25,
         outlineBoost: false,
-        contrast: 10,
+        contrast: 5,
         saturation: 10,
         dither: 'floyd',
       }));
@@ -299,6 +365,21 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 智能预设:
               </span>
               <button
+                onClick={autoDetectAndRemoveBackground}
+                className="px-2.5 py-1 rounded-lg bg-pink-950 border border-pink-500/80 text-pink-200 hover:bg-pink-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs flex items-center gap-1"
+                title="自动识别图像四个角落的背景颜色并扣除，只留主体人物/物品"
+              >
+                <Scissors className="w-3 h-3 text-pink-400" />
+                <span>🪄 智能抠除背景 (仅留主体)</span>
+              </button>
+              <button
+                onClick={removeWhiteBackground}
+                className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 hover:bg-slate-700 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
+                title="将纯白色/浅色背景替换为透明无豆"
+              >
+                ☁️ 扣除白色背景
+              </button>
+              <button
                 onClick={() => applyPreset('vivid')}
                 className="px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/80 text-amber-200 hover:bg-amber-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs"
               >
@@ -390,11 +471,16 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Eye className="w-3.5 h-3.5 text-rose-400" />
-                    转换后拼豆效果 ({localSettings.width} × {localSettings.height})
+                    拼豆图纸预览 ({localSettings.width} × {localSettings.height})
                   </span>
-                  <span className="text-[11px] text-slate-400">
-                    颗粒数: {localSettings.width * localSettings.height}
-                  </span>
+                  <div className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-1">
+                    <span>实际用豆: {previewGrid.flat().filter(Boolean).length} 粒</span>
+                    {previewGrid.flat().filter(c => c === null).length > 0 && (
+                      <span className="text-[10px] text-pink-300 bg-pink-950/80 border border-pink-700/60 px-1.5 py-0.5 rounded font-sans">
+                        (已免算 {previewGrid.flat().filter(c => c === null).length} 空格)
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex-1 min-h-[220px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
@@ -496,9 +582,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               <div className="space-y-1.5">
                 {[
                   {
+                    id: 'ciede2000_bright',
+                    name: '✨ CIEDE2000 亮色与肤色保护',
+                    desc: '超精准区分亮色、白色、浅粉/肤色与发色，防止曝光过度',
+                  },
+                  {
                     id: 'ciede2000_vivid',
                     name: 'CIEDE2000 鲜艳饱满 (防发白)',
-                    desc: '优先匹配饱和色彩，强力防止发白变淡 (推荐)',
+                    desc: '优先匹配饱满色彩，强力防止色彩发淡',
                   },
                   {
                     id: 'ciede2000',
@@ -608,6 +699,24 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </button>
                 )}
               </label>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={autoDetectAndRemoveBackground}
+                  className="py-1.5 px-2 rounded-lg bg-pink-950/80 border border-pink-700/80 text-pink-200 text-[11px] font-bold hover:bg-pink-900 cursor-pointer flex items-center justify-center gap-1"
+                >
+                  <Scissors className="w-3 h-3 text-pink-400" />
+                  <span>🪄 智能角落自动抠图</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={removeWhiteBackground}
+                  className="py-1.5 px-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-medium hover:bg-slate-700 cursor-pointer flex items-center justify-center gap-1"
+                >
+                  <span>☁️ 扣除纯白背景</span>
+                </button>
+              </div>
 
               <div className="flex items-center gap-3 bg-slate-800 p-2 rounded-xl border border-slate-700">
                 <div

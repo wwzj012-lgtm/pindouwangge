@@ -41,6 +41,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
   const [legendPosition, setLegendPosition] = useState<LegendPosition>('right');
   const [legendScaleMode, setLegendScaleMode] = useState<LegendScaleMode>('auto');
+  const [hideEmptyPegs, setHideEmptyPegs] = useState(false);
   const [selectedBoard, setSelectedBoard] = useState<number | null>(null); // null = full canvas
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +69,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       watermarkOpacity,
       legendPosition,
       legendScaleMode,
+      hideEmptyPegs,
     };
 
     const canvas = generatePatternCanvas(options);
@@ -91,6 +93,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     watermarkOpacity,
     legendPosition,
     legendScaleMode,
+    hideEmptyPegs,
   ]);
 
   if (!isOpen) return null;
@@ -112,6 +115,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       watermarkOpacity,
       legendPosition,
       legendScaleMode,
+      hideEmptyPegs,
     };
     const canvas = generatePatternCanvas(options);
     const suffix = selectedBoard !== null ? `_板${selectedBoard + 1}` : '_完整图纸';
@@ -136,6 +140,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       watermarkOpacity,
       legendPosition,
       legendScaleMode,
+      hideEmptyPegs,
     };
     downloadCanvasImage(generatePatternCanvas(fullOptions), `${projectName}_完整图纸.png`);
 
@@ -194,6 +199,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="accent-purple-500 rounded cursor-pointer"
               />
               <span>显示标尺坐标 (A..Z / 1..N)</span>
+            </label>
+
+            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
+              <input
+                type="checkbox"
+                checked={hideEmptyPegs}
+                onChange={e => setHideEmptyPegs(e.target.checked)}
+                className="accent-emerald-500 rounded cursor-pointer"
+              />
+              <span>隐藏空位点阵 (仅导出有豆区域)</span>
             </label>
 
             {/* Anti-crop Watermark Setting */}

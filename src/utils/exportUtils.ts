@@ -20,6 +20,7 @@ export interface ExportOptions {
   watermarkOpacity?: number; // Default: 0.18
   legendPosition?: LegendPosition; // Default: 'right'
   legendScaleMode?: LegendScaleMode; // Default: 'auto'
+  hideEmptyPegs?: boolean; // Default: false
 }
 
 // Draw diagonal translucent watermark across a rectangular region with smart density calculation
@@ -193,6 +194,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     watermarkOpacity = 0.18,
     legendPosition = 'right',
     legendScaleMode = 'auto',
+    hideEmptyPegs = false,
   } = options;
 
   // 1. Calculate sub-boards bounds if a specific board is requested
@@ -381,7 +383,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
         const label = showSymbols && bead ? (bead.symbol || bead.code) : null;
 
         drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label);
-      } else {
+      } else if (!hideEmptyPegs) {
         // Simple elegant peg dot inside empty cell (rendered beautifully over the grey background grid)
         ctx.beginPath();
         ctx.arc(px + cellSize / 2, py + cellSize / 2, 1.8, 0, Math.PI * 2);
@@ -391,9 +393,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // 8. Board Outline Overlays (Thick lines for pegboards)
-  ctx.strokeStyle = '#3B82F6';
-  ctx.lineWidth = 2;
+  // 8. Board Outline Overlays (Subtle translucent lines for pegboards)
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
+  ctx.lineWidth = 1.5;
   for (let bx = Math.floor(startX / boardSize); bx <= Math.ceil(endX / boardSize); bx++) {
     const gx = bx * boardSize;
     if (gx >= startX && gx <= endX) {

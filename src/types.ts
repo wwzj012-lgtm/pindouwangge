@@ -15,7 +15,7 @@ export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat';
 
 export type DitherMode = 'none' | 'floyd' | 'atkinson';
 
-export type ColorMatchAlgo = 'ciede2000_vivid' | 'ciede2000' | 'cie76' | 'rgb_weighted';
+export type ColorMatchAlgo = 'ciede2000_bright' | 'ciede2000_vivid' | 'ciede2000' | 'cie76' | 'rgb_weighted';
 
 export type ToolType =
   | 'pencil'

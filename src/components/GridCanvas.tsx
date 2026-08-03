@@ -583,8 +583,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     // 7. Board Boundary Outlines
     if (boardSize > 0) {
-      ctx.strokeStyle = '#38BDF8';
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.lineWidth = 1.5;
 
       for (let x = 0; x <= width; x += boardSize) {
         const px = startX + x * cellSize;
@@ -605,17 +605,36 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       const boardsX = Math.ceil(width / boardSize);
       const boardsY = Math.ceil(height / boardSize);
 
-      ctx.font = 'bold 12px sans-serif';
-      ctx.fillStyle = '#38BDF8';
+      // Subtle translucent sub-board number badge
+      const fontSize = Math.min(10, Math.max(8, Math.floor(cellSize * 0.45)));
+      ctx.font = `bold ${fontSize}px sans-serif`;
       ctx.textAlign = 'left';
       ctx.textBaseline = 'top';
 
       for (let by = 0; by < boardsY; by++) {
         for (let bx = 0; bx < boardsX; bx++) {
           const boardNum = by * boardsX + bx + 1;
-          const px = startX + bx * boardSize * cellSize + 6;
-          const py = startY + by * boardSize * cellSize + 6;
-          ctx.fillText(`板 ${boardNum}`, px, py);
+          const px = startX + bx * boardSize * cellSize + 4;
+          const py = startY + by * boardSize * cellSize + 4;
+
+          const labelText = `板 ${boardNum}`;
+          const metrics = ctx.measureText(labelText);
+          const bgW = metrics.width + 6;
+          const bgH = fontSize + 4;
+
+          // Soft dark translucent background pill so board index is readable without obscuring beads
+          ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(px - 2, py - 2, bgW, bgH, 3);
+            ctx.fill();
+          } else {
+            ctx.fillRect(px - 2, py - 2, bgW, bgH);
+          }
+
+          // Translucent sky blue text label
+          ctx.fillStyle = 'rgba(125, 211, 252, 0.75)';
+          ctx.fillText(labelText, px, py);
         }
       }
     }

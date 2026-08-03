@@ -84,7 +84,18 @@ export const ColorReplaceModal: React.FC<ColorReplaceModalProps> = ({
 
         {/* Target Palette Selector Grid */}
         <div className="space-y-1.5">
-          <div className="text-[11px] text-slate-400 font-semibold">选择目标替换色:</div>
+          <div className="text-[11px] text-slate-400 font-semibold flex items-center justify-between">
+            <span>选择目标替换色:</span>
+            <button
+              onClick={() => {
+                onExecuteReplace(sourceColor.id, 'TRANSPARENT_ERASE');
+                onClose();
+              }}
+              className="text-[10px] text-pink-400 hover:text-pink-300 underline font-bold cursor-pointer"
+            >
+              🧹 替换为透明/擦除此色
+            </button>
+          </div>
           <div className="max-h-48 overflow-y-auto grid grid-cols-2 gap-1.5 pr-1">
             {activePalette.map(color => (
               <button

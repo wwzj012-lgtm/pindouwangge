@@ -88,7 +88,7 @@ export async function sha256(message: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// User Profile Listener / Helper with Offline Support
+// User Profile Listener / Helper with Offline Support (Server-Side Proxy First for GFW Bypass)
 export async function syncUserProfile(user: User): Promise<UserProfile> {
   const isAdminEmail = user.email === 'wwzj012@gmail.com';
 
@@ -118,6 +118,31 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
+
+  // Try Server-Side API Proxy First (100% reliable GFW-bypass for Chinese Users)
+  try {
+    const res = await fetch(`/api/user-profile?uid=${user.uid}`);
+    if (res.ok) {
+      const serverProfile = await res.json() as UserProfile;
+      try {
+        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(serverProfile));
+      } catch (e) {}
+      return serverProfile;
+    } else if (res.status === 404) {
+      // Create profile on server
+      await fetch('/api/user-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: user.uid, profile: defaultProfile })
+      });
+      try {
+        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(defaultProfile));
+      } catch (e) {}
+      return defaultProfile;
+    }
+  } catch (apiErr) {
+    console.warn('Server API failed or timed out, falling back to direct Firestore SDK:', apiErr);
+  }
 
   // Skip Firestore entirely for guest/local-fallback users to be fast, but sync in background if online
   if (user.uid.startsWith('cn_guest_') && cachedProfile) {

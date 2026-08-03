@@ -135,31 +135,58 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const loadData = async () => {
     setLoading(true);
     try {
-      // Fetch Users
-      const usersSnap = await getDocs(collection(db, 'users'));
-      const uList: UserProfile[] = [];
-      usersSnap.forEach(d => {
-        uList.push(d.data() as UserProfile);
-      });
-      setUsersList(uList);
+      // Try fetching from Server-Side API proxy first (bypasses GFW for Admin)
+      let uList: UserProfile[] = [];
+      let cList: VipCodeData[] = [];
+      let lList: AuditLog[] = [];
+      let serverLoaded = false;
 
-      // Fetch Vip Codes
-      const codesSnap = await getDocs(collection(db, 'vipCodes'));
-      const cList: VipCodeData[] = [];
-      codesSnap.forEach(d => {
-        cList.push({ id: d.id, ...d.data() } as VipCodeData);
-      });
-      cList.sort((a, b) => b.createdAt - a.createdAt);
-      setCodesList(cList);
+      try {
+        const usersRes = await fetch('/api/admin/users');
+        const codesRes = await fetch('/api/admin/codes');
+        const logsRes = await fetch('/api/admin/audit-logs');
 
-      // Fetch Audit Logs
-      const logsSnap = await getDocs(collection(db, 'auditLogs'));
-      const lList: AuditLog[] = [];
-      logsSnap.forEach(d => {
-        lList.push({ id: d.id, ...d.data() } as AuditLog);
-      });
-      lList.sort((a, b) => b.timestamp - a.timestamp);
-      setAuditLogsList(lList);
+        if (usersRes.ok && codesRes.ok && logsRes.ok) {
+          uList = await usersRes.json();
+          cList = await codesRes.json();
+          lList = await logsRes.json();
+          serverLoaded = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server-side admin fetch failed, falling back to direct Firestore SDK:', apiErr);
+      }
+
+      if (serverLoaded) {
+        setUsersList(uList);
+        cList.sort((a, b) => b.createdAt - a.createdAt);
+        setCodesList(cList);
+        lList.sort((a, b) => b.timestamp - a.timestamp);
+        setAuditLogsList(lList);
+      } else {
+        // Fallback: Direct Firestore SDK
+        const usersSnap = await getDocs(collection(db, 'users'));
+        const directUsers: UserProfile[] = [];
+        usersSnap.forEach(d => {
+          directUsers.push(d.data() as UserProfile);
+        });
+        setUsersList(directUsers);
+
+        const codesSnap = await getDocs(collection(db, 'vipCodes'));
+        const directCodes: VipCodeData[] = [];
+        codesSnap.forEach(d => {
+          directCodes.push({ id: d.id, ...d.data() } as VipCodeData);
+        });
+        directCodes.sort((a, b) => b.createdAt - a.createdAt);
+        setCodesList(directCodes);
+
+        const logsSnap = await getDocs(collection(db, 'auditLogs'));
+        const directLogs: AuditLog[] = [];
+        logsSnap.forEach(d => {
+          directLogs.push({ id: d.id, ...d.data() } as AuditLog);
+        });
+        directLogs.sort((a, b) => b.timestamp - a.timestamp);
+        setAuditLogsList(directLogs);
+      }
     } catch (err) {
       console.error('Failed to load admin data:', err);
     } finally {
@@ -169,29 +196,57 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
   const handleSetUserMemberType = async (user: UserProfile, targetType: 0 | 1 | 2) => {
     try {
-      const userRef = doc(db, 'users', user.uid);
       const isVip = targetType >= 1;
       const isPermanent = targetType > 0 && newCodeDays >= 3650;
       const newExpire = targetType === 0 ? null : (isPermanent ? null : Date.now() + 30 * 86400 * 1000);
 
       const typeNameMap = { 0: '免费用户', 1: '普通VIP', 2: '商家Pro' };
 
-      await updateDoc(userRef, {
-        member_type: targetType,
-        member_expire: newExpire,
-        member_source: '管理员手动设置',
-        isVip: isVip,
-        vipExpireAt: newExpire,
-        updatedAt: Date.now(),
-      });
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/update-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: user.uid,
+            updates: {
+              member_type: targetType,
+              member_expire: newExpire,
+              member_source: '管理员手动设置',
+              isVip: isVip,
+              vipExpireAt: newExpire,
+              updatedAt: Date.now(),
+            },
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (e) {
+        console.warn('Server-side manual update failed, falling back to direct Firestore:', e);
+      }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'MANUAL_SET_MEMBER_TYPE',
-          `手动设置用户 [${user.displayName || user.email}] 为 【${typeNameMap[targetType]}】`
-        );
+      if (!serverSuccess) {
+        const userRef = doc(db, 'users', user.uid);
+        await updateDoc(userRef, {
+          member_type: targetType,
+          member_expire: newExpire,
+          member_source: '管理员手动设置',
+          isVip: isVip,
+          vipExpireAt: newExpire,
+          updatedAt: Date.now(),
+        });
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'MANUAL_SET_MEMBER_TYPE',
+            `手动设置用户 [${user.displayName || user.email}] 为 【${typeNameMap[targetType]}】`
+          );
+        }
       }
 
       setUsersList(prev =>
@@ -219,30 +274,52 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       const addMs = 30 * 86400 * 1000;
       const typeName = targetType === 2 ? '商家Pro' : '普通VIP';
 
-      for (const uid of selectedUserUids) {
-        const u = usersList.find(x => x.uid === uid);
-        if (!u) continue;
-        const currentExp =
-          u.member_expire && u.member_expire > Date.now() ? u.member_expire : Date.now();
-        const newExp = currentExp + addMs;
-
-        await updateDoc(doc(db, 'users', uid), {
-          member_type: targetType,
-          member_expire: newExp,
-          member_source: '管理员批量赠送',
-          isVip: true,
-          vipExpireAt: newExp,
-          updatedAt: Date.now(),
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/batch-grant-vip', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uids: selectedUserUids,
+            targetType,
+            days: 30,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
         });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server batch grant failed, falling back to direct Firestore:', apiErr);
       }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'BATCH_GRANT_VIP',
-          `批量授予 ${selectedUserUids.length} 名用户 30 天 ${typeName} 权限`
-        );
+      if (!serverSuccess) {
+        for (const uid of selectedUserUids) {
+          const u = usersList.find(x => x.uid === uid);
+          if (!u) continue;
+          const currentExp =
+            u.member_expire && u.member_expire > Date.now() ? u.member_expire : Date.now();
+          const newExp = currentExp + addMs;
+
+          await updateDoc(doc(db, 'users', uid), {
+            member_type: targetType,
+            member_expire: newExp,
+            member_source: '管理员批量赠送',
+            isVip: true,
+            vipExpireAt: newExp,
+            updatedAt: Date.now(),
+          });
+        }
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'BATCH_GRANT_VIP',
+            `批量授予 ${selectedUserUids.length} 名用户 30 天 ${typeName} 权限`
+          );
+        }
       }
 
       await loadData();
@@ -283,15 +360,35 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         updatedAt: Date.now(),
       };
 
-      await setDoc(doc(db, 'users', newUid), newProfile);
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/add-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            profile: newProfile,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server-side add user failed, falling back to direct Firestore:', apiErr);
+      }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'ADMIN_ADD_USER',
-          `后台添加用户 [${newProfile.displayName}]（邮箱: ${newProfile.email}, 角色: ${newProfile.role}, 会员类型: ${newProfile.member_type}）`
-        );
+      if (!serverSuccess) {
+        await setDoc(doc(db, 'users', newUid), newProfile);
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'ADMIN_ADD_USER',
+            `后台添加用户 [${newProfile.displayName}]（邮箱: ${newProfile.email}, 角色: ${newProfile.role}, 会员类型: ${newProfile.member_type}）`
+          );
+        }
       }
 
       setUsersList(prev => [...prev, newProfile]);
@@ -344,15 +441,36 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         updatedAt: Date.now(),
       };
 
-      await updateDoc(doc(db, 'users', editingUser.uid), updates);
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/update-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: editingUser.uid,
+            updates,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server-side user update failed, falling back to direct Firestore:', apiErr);
+      }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'ADMIN_EDIT_USER',
-          `后台修改用户 [${editingUser.displayName}] -> [${updates.displayName}]（UID: ${editingUser.uid}）`
-        );
+      if (!serverSuccess) {
+        await updateDoc(doc(db, 'users', editingUser.uid), updates);
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'ADMIN_EDIT_USER',
+            `后台修改用户 [${editingUser.displayName}] -> [${updates.displayName}]（UID: ${editingUser.uid}）`
+          );
+        }
       }
 
       setUsersList(prev =>
@@ -377,15 +495,35 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
     setLoading(true);
     try {
-      await deleteDoc(doc(db, 'users', userToDelete.uid));
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/delete-users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uids: [userToDelete.uid],
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server-side delete user failed, falling back to direct Firestore:', apiErr);
+      }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'ADMIN_DELETE_USER',
-          `后台删除用户 [${userToDelete.displayName}]（邮箱: ${userToDelete.email}, UID: ${userToDelete.uid}）`
-        );
+      if (!serverSuccess) {
+        await deleteDoc(doc(db, 'users', userToDelete.uid));
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'ADMIN_DELETE_USER',
+            `后台删除用户 [${userToDelete.displayName}]（邮箱: ${userToDelete.email}, UID: ${userToDelete.uid}）`
+          );
+        }
       }
 
       setUsersList(prev => prev.filter(u => u.uid !== userToDelete.uid));
@@ -403,17 +541,37 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
     setLoading(true);
     try {
-      for (const uid of selectedUserUids) {
-        await deleteDoc(doc(db, 'users', uid));
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/delete-users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uids: selectedUserUids,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+        }
+      } catch (apiErr) {
+        console.warn('Server-side batch delete failed, falling back to direct Firestore:', apiErr);
       }
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'ADMIN_BATCH_DELETE_USERS',
-          `批量删除 ${selectedUserUids.length} 名用户账号`
-        );
+      if (!serverSuccess) {
+        for (const uid of selectedUserUids) {
+          await deleteDoc(doc(db, 'users', uid));
+        }
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'ADMIN_BATCH_DELETE_USERS',
+            `批量删除 ${selectedUserUids.length} 名用户账号`
+          );
+        }
       }
 
       setUsersList(prev => prev.filter(u => !selectedUserUids.includes(u.uid)));
@@ -440,20 +598,51 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       const userRef = doc(db, 'users', userToResetPassword.uid);
       const defaultPassword = 'qwer0987';
 
-      // Store the new custom password in the user's document in Firestore.
-      // This is a seamless solution allowing user override credentials
-      await updateDoc(userRef, {
+      const updates = {
         customPassword: defaultPassword,
         updatedAt: Date.now(),
-      });
+      };
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'ADMIN_RESET_PASSWORD',
-          `后台重置了玩家 [${userToResetPassword.displayName}] 的登录密码为默认密码 qwer0987（UID: ${userToResetPassword.uid}）`
-        );
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/update-user', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uid: userToResetPassword.uid,
+            updates,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+          if (currentUser) {
+            await recordAuditLog(
+              currentUser.uid,
+              currentUser.email || 'admin',
+              'ADMIN_RESET_PASSWORD',
+              `后台重置了玩家 [${userToResetPassword.displayName}] 的登录密码为默认密码 qwer0987（UID: ${userToResetPassword.uid}）`
+            );
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Server-side password reset failed, falling back to direct Firestore:', apiErr);
+      }
+
+      if (!serverSuccess) {
+        // Store the new custom password in the user's document in Firestore.
+        // This is a seamless solution allowing user override credentials
+        await updateDoc(userRef, updates);
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'ADMIN_RESET_PASSWORD',
+            `后台重置了玩家 [${userToResetPassword.displayName}] 的登录密码为默认密码 qwer0987（UID: ${userToResetPassword.uid}）`
+          );
+        }
       }
 
       setResetSuccessMessage(`成功重置！玩家 [${userToResetPassword.displayName}] 的密码已重置为：qwer0987`);
@@ -489,7 +678,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         }
 
         const hashed = await sha256(codeStr);
-        const codeRef = doc(db, 'vipCodes', codeStr);
 
         const newCode: VipCodeData = {
           id: codeStr,
@@ -503,20 +691,54 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           createdAt: Date.now(),
         };
 
-        await setDoc(codeRef, newCode);
         createdCodes.push(newCode);
         plainCodesList.push(codeStr);
       }
 
       const typeName = codeMemberType === 2 ? '商家Pro (BP码)' : '普通VIP (PV码)';
+      const logDesc = `批量生成 ${countToGen} 张 ${typeName} 激活卡密（渠道: ${channelTag}，时长: ${newCodeDays}天）`;
 
-      if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'BATCH_GEN_CODES',
-          `批量生成 ${countToGen} 张 ${typeName} 激活卡密（渠道: ${channelTag}，时长: ${newCodeDays}天）`
-        );
+      let serverSuccess = false;
+      try {
+        const res = await fetch('/api/admin/generate-codes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            codes: createdCodes,
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin',
+            logDesc
+          })
+        });
+        if (res.ok) {
+          serverSuccess = true;
+          if (currentUser) {
+            await recordAuditLog(
+              currentUser.uid,
+              currentUser.email || 'admin',
+              'BATCH_GEN_CODES',
+              logDesc
+            );
+          }
+        }
+      } catch (apiErr) {
+        console.warn('Server-side code generation failed, falling back to direct Firestore:', apiErr);
+      }
+
+      if (!serverSuccess) {
+        for (const c of createdCodes) {
+          const codeRef = doc(db, 'vipCodes', c.code);
+          await setDoc(codeRef, c);
+        }
+
+        if (currentUser) {
+          await recordAuditLog(
+            currentUser.uid,
+            currentUser.email || 'admin',
+            'BATCH_GEN_CODES',
+            logDesc
+          );
+        }
       }
 
       setCodesList(prev => [...createdCodes, ...prev]);

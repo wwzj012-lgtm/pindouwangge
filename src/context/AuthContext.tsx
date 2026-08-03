@@ -197,6 +197,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
+    // Try Server-Side API first for 100% GFW-bypass and reliable authorization
+    try {
+      const res = await fetch('/api/redeem-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: currentUser.uid,
+          email: currentUser.email || '',
+          displayName: currentUser.displayName || '',
+          code: trimmedCode,
+          userProfile,
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        await refreshProfile();
+        return {
+          success: true,
+          message: data.message,
+          newType: data.profile?.member_type,
+        };
+      } else {
+        const errData = await res.json();
+        return {
+          success: false,
+          message: errData.message || errData.error || '兑换过程遇到问题，请核对后重试',
+        };
+      }
+    } catch (apiErr) {
+      console.warn('Server redeem API failed, falling back to direct client-side Firestore SDK:', apiErr);
+    }
+
     try {
       // Use getDoc directly since the document ID is the code itself (or its hash).
       // This bypasses the Firestore "list" query restriction for normal users, requiring only "get" permission.

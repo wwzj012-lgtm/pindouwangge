@@ -28,6 +28,11 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   updateProfile,
+  db,
+  collection,
+  query,
+  where,
+  getDocs,
 } from '../lib/firebase';
 
 interface AuthModalProps {
@@ -214,6 +219,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
 
     setIsSubmitting(true);
     try {
+      // 1. Check if there's a custom password set in Firestore first (e.g. from an administrator password reset)
+      if (mode === 'signin') {
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', targetEmail));
+        const querySnapshot = await getDocs(q);
+
+        if (!querySnapshot.empty) {
+          const userDoc = querySnapshot.docs[0];
+          const userData = userDoc.data();
+          if (userData.customPassword && userData.customPassword === password) {
+            // Log in using custom local fallback user session with the overridden password
+            await setLocalCustomUser({
+              uid: userDoc.id,
+              email: userData.email,
+              displayName: userData.displayName || autoDisplayName,
+            });
+            onClose();
+            setIsSubmitting(false);
+            return;
+          }
+        }
+      }
+
       if (mode === 'signup') {
         try {
           const res = await createUserWithEmailAndPassword(auth, targetEmail, password);

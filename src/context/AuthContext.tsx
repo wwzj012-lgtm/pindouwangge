@@ -197,19 +197,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      const qCol = collection(db, 'vipCodes');
-      let snap = await getDocs(query(qCol, where('code', '==', trimmedCode)));
+      // Use getDoc directly since the document ID is the code itself (or its hash).
+      // This bypasses the Firestore "list" query restriction for normal users, requiring only "get" permission.
+      let codeDoc = await getDoc(doc(db, 'vipCodes', trimmedCode));
 
-      if (snap.empty) {
+      if (!codeDoc.exists()) {
         const hashed = await sha256(trimmedCode);
-        snap = await getDocs(query(qCol, where('codeHash', '==', hashed)));
+        codeDoc = await getDoc(doc(db, 'vipCodes', hashed));
       }
 
-      if (snap.empty) {
+      if (!codeDoc.exists()) {
         return { success: false, message: '无效的兑换码，请核对卡密无误后重试' };
       }
 
-      const codeDoc = snap.docs[0];
       const codeData = codeDoc.data() as {
         used?: boolean;
         days?: number;

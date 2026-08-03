@@ -121,6 +121,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
   const [showBatchDeleteConfirmModal, setShowBatchDeleteConfirmModal] = useState<boolean>(false);
 
+  // Reset Password Modal state
+  const [showResetPasswordModal, setShowResetPasswordModal] = useState<boolean>(false);
+  const [userToResetPassword, setUserToResetPassword] = useState<UserProfile | null>(null);
+  const [resetSuccessMessage, setResetSuccessMessage] = useState<string>('');
+
   useEffect(() => {
     if (isOpen && isAdmin) {
       loadData();
@@ -416,6 +421,48 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       setShowBatchDeleteConfirmModal(false);
     } catch (err) {
       console.error('Batch delete failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenResetPasswordModal = (user: UserProfile) => {
+    setUserToResetPassword(user);
+    setResetSuccessMessage('');
+    setShowResetPasswordModal(true);
+  };
+
+  const handleResetPassword = async () => {
+    if (!userToResetPassword) return;
+
+    setLoading(true);
+    try {
+      const userRef = doc(db, 'users', userToResetPassword.uid);
+      const defaultPassword = 'qwer0987';
+
+      // Store the new custom password in the user's document in Firestore.
+      // This is a seamless solution allowing user override credentials
+      await updateDoc(userRef, {
+        customPassword: defaultPassword,
+        updatedAt: Date.now(),
+      });
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'ADMIN_RESET_PASSWORD',
+          `后台重置了玩家 [${userToResetPassword.displayName}] 的登录密码为默认密码 qwer0987（UID: ${userToResetPassword.uid}）`
+        );
+      }
+
+      setResetSuccessMessage(`成功重置！玩家 [${userToResetPassword.displayName}] 的密码已重置为：qwer0987`);
+      
+      setUsersList(prev =>
+        prev.map(u => (u.uid === userToResetPassword.uid ? { ...u, customPassword: defaultPassword } : u))
+      );
+    } catch (err) {
+      console.error('Failed to reset password:', err);
     } finally {
       setLoading(false);
     }
@@ -879,6 +926,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleOpenResetPasswordModal(user)}
+                              className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
+                              title="重置登录密码 (qwer0987)"
+                            >
+                              <Lock className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleDeleteUserClick(user)}
                               className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
                               title="永久删除玩家"
@@ -1043,6 +1098,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                                 title="编辑拼豆玩家账号"
                               >
                                 <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenResetPasswordModal(user)}
+                                className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer flex items-center justify-center"
+                                title="重置登录密码 (qwer0987)"
+                              >
+                                <Lock className="w-3.5 h-3.5" />
                               </button>
                               <button
                                 type="button"
@@ -1724,6 +1787,74 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                 取消
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reset Password Confirm Modal */}
+      {showResetPasswordModal && userToResetPassword && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4">
+          <div className="relative w-full max-w-sm bg-slate-900 border border-amber-500/40 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-amber-400 pb-2 border-b border-slate-800">
+              <KeyRound className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-bold text-white">重置密码确认</h3>
+            </div>
+
+            {resetSuccessMessage ? (
+              <div className="space-y-4">
+                <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs leading-relaxed flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
+                  <div>
+                    <p className="font-bold mb-1">重置密码成功！</p>
+                    <p>{resetSuccessMessage}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowResetPasswordModal(false);
+                    setUserToResetPassword(null);
+                    setResetSuccessMessage('');
+                  }}
+                  className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl cursor-pointer min-h-[40px]"
+                >
+                  我知道了
+                </button>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-300 leading-relaxed">
+                  您确定要重置玩家 <strong className="text-white font-bold">{userToResetPassword.displayName}</strong> 的登录密码吗？
+                  重置后，该玩家的登录密码将被强行修改为默认密码：<strong className="text-amber-400 font-mono text-sm underline">qwer0987</strong>
+                </p>
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleResetPassword}
+                    disabled={loading}
+                    className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+                  >
+                    {loading ? (
+                      <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                    ) : (
+                      <KeyRound className="w-4 h-4" />
+                    )}
+                    <span>确认重置为 qwer0987</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowResetPasswordModal(false);
+                      setUserToResetPassword(null);
+                    }}
+                    className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
+                  >
+                    取消
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

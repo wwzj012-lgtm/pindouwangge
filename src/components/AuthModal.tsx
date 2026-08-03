@@ -176,6 +176,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
     }
   };
 
+  const formatAuthEmail = (rawInput: string) => {
+    const trimmed = rawInput.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('@')) {
+      return trimmed;
+    }
+    // Clean phone number or username
+    const cleaned = trimmed.replace(/[^a-zA-Z0-9_]/g, '');
+    return `${cleaned.toLowerCase()}@pindou.cn`;
+  };
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setStructuredError(null);
@@ -183,21 +194,62 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
     if (!email || !password) {
       setStructuredError({
         title: '请完整填写登录信息',
-        detail: '电子邮箱与密码均为必填项。',
+        detail: '手机号/邮箱/账号与密码均为必填项。',
         isNetworkError: false,
       });
       return;
     }
 
+    const targetEmail = formatAuthEmail(email);
+    const isPhoneOrUsername = !email.includes('@');
+    const autoDisplayName = displayName || (isPhoneOrUsername ? `拼豆创作者_${email.trim().slice(-4)}` : email.split('@')[0]);
+
     setIsSubmitting(true);
     try {
       if (mode === 'signup') {
-        const res = await createUserWithEmailAndPassword(auth, email, password);
-        if (displayName && res.user) {
-          await updateProfile(res.user, { displayName });
+        const res = await createUserWithEmailAndPassword(auth, targetEmail, password);
+        if (res.user) {
+          await updateProfile(res.user, { displayName: autoDisplayName });
         }
       } else {
-        await signInWithEmailAndPassword(auth, email, password);
+        try {
+          await signInWithEmailAndPassword(auth, targetEmail, password);
+        } catch (err: any) {
+          // If login fails on phone/username, attempt seamless auto-creation or clear prompt
+          if (err?.code === 'auth/user-not-found' || err?.code === 'auth/invalid-credential') {
+            try {
+              const res = await createUserWithEmailAndPassword(auth, targetEmail, password);
+              if (res.user) {
+                await updateProfile(res.user, { displayName: autoDisplayName });
+              }
+            } catch (signupErr) {
+              throw err;
+            }
+          } else {
+            throw err;
+          }
+        }
+      }
+    } catch (err: any) {
+      setStructuredError(parseFirebaseError(err));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Quick 1-click Chinese user login without complex passwords
+  const handleQuickChinaLogin = async () => {
+    setStructuredError(null);
+    setIsSubmitting(true);
+    const randomId = Math.floor(1000 + Math.random() * 9000);
+    const quickEmail = `cn_user_${Date.now().toString().slice(-6)}_${randomId}@pindou.cn`;
+    const quickPassword = `Pindou_${randomId}_Pass888`;
+    const quickName = `拼豆爱好者_${randomId}`;
+
+    try {
+      const res = await createUserWithEmailAndPassword(auth, quickEmail, quickPassword);
+      if (res.user) {
+        await updateProfile(res.user, { displayName: quickName });
       }
     } catch (err: any) {
       setStructuredError(parseFirebaseError(err));
@@ -423,12 +475,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                 </button>
               </div>
 
-              {/* 1. Main Form: Email & Password Auth (TOP PRIORITY) */}
+              {/* 1. Main Form: Flexible Phone/Email/Account Auth */}
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
-                    <Mail className="w-3.5 h-3.5 text-sky-400" />
-                    <span>{mode === 'signin' ? '电子邮箱密码登录' : '注册新账号'}</span>
+                    <User className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{mode === 'signin' ? '国内手机 / 邮箱 / 账号登录' : '注册新账号 (手机号/邮箱/用户名)'}</span>
                   </span>
                   <div className="text-xs">
                     {mode === 'signin' ? (
@@ -460,14 +512,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                 <form onSubmit={handleEmailAuth} className="space-y-3">
                   {mode === 'signup' && (
                     <div>
-                      <label className="text-[11px] text-slate-400 block mb-1">昵称 / 姓名</label>
+                      <label className="text-[11px] text-slate-400 block mb-1">个性昵称 / 拼豆店名</label>
                       <div className="relative">
                         <User className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                         <input
                           type="text"
                           value={displayName}
                           onChange={e => setDisplayName(e.target.value)}
-                          placeholder="请输入您的昵称"
+                          placeholder="例如: 拼豆小当家 / 像素创作者"
                           className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
                         />
                       </div>
@@ -475,29 +527,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                   )}
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">电子邮箱</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">
+                      手机号 / QQ邮箱 / 163邮箱 / 自定义账号
+                    </label>
                     <div className="relative">
                       <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                       <input
-                        type="email"
+                        type="text"
                         value={email}
                         onChange={e => setEmail(e.target.value)}
-                        placeholder="name@example.com"
+                        placeholder="支持 11位手机号、QQ邮箱或自定义用户名"
                         required
                         className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
                       />
                     </div>
+                    <p className="text-[10px] text-slate-500 mt-1">
+                      * 支持国内任意手机号或常见邮箱，无需繁琐邮箱激活链接。
+                    </p>
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">密码</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">登录密码</label>
                     <div className="relative">
                       <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                       <input
                         type="password"
                         value={password}
                         onChange={e => setPassword(e.target.value)}
-                        placeholder="至少 6 位密码"
+                        placeholder="请输入至少 6 位密码"
                         required
                         className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
                       />
@@ -509,9 +566,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                     disabled={isSubmitting}
                     className="w-full py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer min-h-[44px]"
                   >
-                    {mode === 'signin' ? '登录账号' : '立即注册并登录'}
+                    {mode === 'signin' ? '立即登录账号' : '立即注册并登录'}
                   </button>
                 </form>
+
+                {/* 1-Click China Quick Authorization Button */}
+                <div className="pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={handleQuickChinaLogin}
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 px-3 bg-slate-950 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs rounded-xl shadow flex items-center justify-center gap-2 cursor-pointer transition-all min-h-[44px]"
+                  >
+                    <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+                    <span>国内玩家 1 秒快捷免密码授权登录</span>
+                  </button>
+                  <p className="text-[10px] text-slate-500 text-center mt-1">
+                    点击一键即可快速生成玩家凭证，即刻体验图纸制作与卡密兑换
+                  </p>
+                </div>
               </div>
 
               {/* Structured Localized Error Panel */}

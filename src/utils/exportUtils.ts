@@ -159,19 +159,25 @@ export function drawBeadOnCanvas(
   }
 
   // Symbol or short code text inside cell
-  if (symbolStr && size >= 10) {
-    // Determine text color based on background contrast
+  if (symbolStr && size >= 8) {
+    // Determine text color based on background contrast with soft alpha transparency for comfortable legibility
     const hex = colorHex.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16) || 255;
     const g = parseInt(hex.substring(2, 4), 16) || 255;
     const b = parseInt(hex.substring(4, 6), 16) || 255;
     const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    const textColor = brightness > 140 ? '#000000' : '#FFFFFF';
+    const textColor = brightness > 140 ? 'rgba(0, 0, 0, 0.72)' : 'rgba(255, 255, 255, 0.88)';
 
     ctx.fillStyle = textColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = `bold ${Math.max(8, Math.floor(size * 0.45))}px sans-serif`;
+    
+    // Dynamically adjust font size based on string length for perfect balance & clear readability
+    const len = symbolStr.length;
+    const scale = len <= 1 ? 0.46 : len === 2 ? 0.40 : 0.34;
+    const fontSize = Math.max(7, Math.floor(size * scale));
+
+    ctx.font = `700 ${fontSize}px system-ui, -apple-system, sans-serif`;
     ctx.fillText(symbolStr, x + size / 2, y + size / 2);
   }
 }

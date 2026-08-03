@@ -12,9 +12,11 @@ import {
   Zap,
   RotateCw,
   FlipHorizontal,
+  Crop,
 } from 'lucide-react';
 import { BeadColor, ConvertSettings, ColorMatchAlgo } from '../types';
 import { imageToGrid } from '../utils/colorUtils';
+import { smartCropSubject } from '../utils/cropUtils';
 
 interface ImageStudioModalProps {
   isOpen: boolean;
@@ -23,7 +25,7 @@ interface ImageStudioModalProps {
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
   activePalette: BeadColor[];
-  onApplyConversion: (newGrid: (string | null)[][]) => void;
+  onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement) => void;
 }
 
 export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
@@ -43,6 +45,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     settings.chromaKeyColor
   );
 
+  const [currentImg, setCurrentImg] = useState<HTMLImageElement | null>(sourceImage);
+  const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
+  const [cropSavedPercent, setCropSavedPercent] = useState<number | null>(null);
+
   const [previewGrid, setPreviewGrid] = useState<(string | null)[][]>([]);
   const [activeMobileTab, setActiveMobileTab] = useState<'preview' | 'settings'>('preview');
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -58,8 +64,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     if (isOpen) {
       setLocalSettings(settings);
       setPickedChromaColor(settings.chromaKeyColor);
+      setCurrentImg(sourceImage);
+      setOriginalImg(null);
+      setCropSavedPercent(null);
     }
-  }, [isOpen, settings]);
+  }, [isOpen, settings, sourceImage]);
 
   // Render preview grid to canvas with exact 1:1 aspect ratio
   useEffect(() => {
@@ -110,7 +119,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   // Update transformed source image canvas
   useEffect(() => {
-    if (!isOpen || !sourceImage) return;
+    const activeImage = currentImg || sourceImage;
+    if (!isOpen || !activeImage) return;
 
     const canvas = imageCanvasRef.current;
     if (!canvas) return;
@@ -118,8 +128,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const sw = sourceImage.naturalWidth || sourceImage.width;
-    const sh = sourceImage.naturalHeight || sourceImage.height;
+    const sw = activeImage.naturalWidth || activeImage.width;
+    const sh = activeImage.naturalHeight || activeImage.height;
 
     const isRotated = rotation === 90 || rotation === 270;
     canvas.width = isRotated ? sh : sw;
@@ -129,15 +139,49 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     ctx.translate(canvas.width / 2, canvas.height / 2);
     ctx.rotate((rotation * Math.PI) / 180);
     if (flipH) ctx.scale(-1, 1);
-    ctx.drawImage(sourceImage, -sw / 2, -sh / 2);
+    ctx.drawImage(activeImage, -sw / 2, -sh / 2);
     ctx.restore();
 
     // Generate preview pixel grid using current local settings
     const newGrid = imageToGrid(canvas, localSettings, activePalette || []);
     setPreviewGrid(newGrid);
-  }, [isOpen, sourceImage, localSettings, rotation, flipH, activePalette]);
+  }, [isOpen, currentImg, sourceImage, localSettings, rotation, flipH, activePalette]);
 
   if (!isOpen || !sourceImage) return null;
+
+  // Smart Crop Subject Handler
+  const handleSmartCrop = async () => {
+    const activeImage = currentImg || sourceImage;
+    if (!activeImage) return;
+
+    const result = await smartCropSubject(activeImage, 0.03);
+    if (!result) {
+      alert('未检测到可裁切的明显空白/黑白背景，或主体已紧凑填充整个画布。');
+      return;
+    }
+
+    if (!originalImg) {
+      setOriginalImg(activeImage);
+    }
+    setCurrentImg(result.croppedImage);
+    setCropSavedPercent(result.savedPixelRatioPercent);
+
+    // Adjust localSettings height ratio automatically
+    const newRatio = result.croppedCanvas.height / result.croppedCanvas.width;
+    const newHeight = Math.max(10, Math.round(localSettings.width * newRatio));
+    setLocalSettings(s => ({
+      ...s,
+      height: newHeight,
+    }));
+  };
+
+  const handleRestoreOriginal = () => {
+    if (originalImg) {
+      setCurrentImg(originalImg);
+      setOriginalImg(null);
+      setCropSavedPercent(null);
+    }
+  };
 
   // Auto-detect solid outer background color from corners of source image
   const autoDetectAndRemoveBackground = () => {
@@ -291,7 +335,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   const handleApply = () => {
     setSettings(localSettings);
-    onApplyConversion(previewGrid);
+    onApplyConversion(previewGrid, currentImg || undefined);
     onClose();
   };
 
@@ -365,12 +409,20 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 智能预设:
               </span>
               <button
+                onClick={handleSmartCrop}
+                className="px-3 py-1 rounded-lg bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 text-white font-bold hover:brightness-110 cursor-pointer transition-all shrink-0 shadow-md shadow-sky-500/20 text-[11px] sm:text-xs flex items-center gap-1.5"
+                title="自动检测并裁切掉大面积空黑/白边框，将像素100%集中在核心主角上，显著提升图纸清晰度并减少拼豆数量"
+              >
+                <Crop className="w-3.5 h-3.5" />
+                <span>🎯 智能主体自动裁剪 (高清省豆)</span>
+              </button>
+              <button
                 onClick={autoDetectAndRemoveBackground}
                 className="px-2.5 py-1 rounded-lg bg-pink-950 border border-pink-500/80 text-pink-200 hover:bg-pink-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs flex items-center gap-1"
                 title="自动识别图像四个角落的背景颜色并扣除，只留主体人物/物品"
               >
                 <Scissors className="w-3 h-3 text-pink-400" />
-                <span>🪄 智能抠除背景 (仅留主体)</span>
+                <span>🪄 智能抠除背景</span>
               </button>
               <button
                 onClick={removeWhiteBackground}
@@ -410,6 +462,24 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <RotateCw className="w-3 h-3 inline mr-1" /> 重置
               </button>
             </div>
+
+            {/* Smart Crop Result Banner */}
+            {cropSavedPercent !== null && (
+              <div className="bg-sky-950/90 border border-sky-500/60 rounded-xl p-2.5 px-3.5 text-xs text-sky-200 flex items-center justify-between shadow-lg shrink-0 animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
+                  <span>
+                    已成功裁切掉 <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> 的无效边框背景！图纸分辨率已100%集中于核心主角，清晰度显著提升且大幅省豆！
+                  </span>
+                </div>
+                <button
+                  onClick={handleRestoreOriginal}
+                  className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold border border-slate-600 shrink-0 cursor-pointer transition-colors"
+                >
+                  ↩️ 恢复完整原图
+                </button>
+              </div>
+            )}
 
             {/* Canvas Display Dual Box */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
@@ -680,12 +750,12 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               </label>
             </div>
 
-            {/* Section 3: Background Chroma Key */}
+            {/* Section 3: Background Chroma Key & Smart Auto Crop */}
             <div className="space-y-3 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold flex items-center justify-between text-xs">
                 <span className="flex items-center gap-1.5">
-                  <Pipette className="w-4 h-4 text-pink-400" />
-                  <span>背景抠图与去色 (Chroma Key)</span>
+                  <Crop className="w-4 h-4 text-sky-400" />
+                  <span>智能主体裁剪与背景扣除</span>
                 </span>
                 {pickedChromaColor && (
                   <button
@@ -700,6 +770,20 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 )}
               </label>
 
+              <button
+                type="button"
+                onClick={handleSmartCrop}
+                className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-sky-950 via-indigo-950 to-slate-900 border border-sky-500/80 text-sky-200 text-xs font-bold hover:brightness-110 cursor-pointer flex items-center justify-between shadow-md transition-all group"
+              >
+                <span className="flex items-center gap-2">
+                  <Crop className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform" />
+                  <span>🎯 智能主体自动裁剪 (自动去除黑/白边框)</span>
+                </span>
+                <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/40">
+                  提升清晰度
+                </span>
+              </button>
+
               <div className="grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
@@ -707,7 +791,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   className="py-1.5 px-2 rounded-lg bg-pink-950/80 border border-pink-700/80 text-pink-200 text-[11px] font-bold hover:bg-pink-900 cursor-pointer flex items-center justify-center gap-1"
                 >
                   <Scissors className="w-3 h-3 text-pink-400" />
-                  <span>🪄 智能角落自动抠图</span>
+                  <span>🪄 智能角落抠图</span>
                 </button>
                 <button
                   type="button"

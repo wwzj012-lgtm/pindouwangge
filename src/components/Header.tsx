@@ -10,6 +10,7 @@ import {
   Image as ImageIcon,
   RotateCcw,
   BookOpen,
+  Zap,
 } from 'lucide-react';
 import { BrandKey, ConvertSettings } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
@@ -27,6 +28,7 @@ interface HeaderProps {
   onOpenExportModal: () => void;
   onOpenPaletteModal: () => void;
   onOpenGuideModal: () => void;
+  onOpenSmartReduceModal?: () => void;
   onClearCanvas: () => void;
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
@@ -44,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenExportModal,
   onOpenPaletteModal,
   onOpenGuideModal,
+  onOpenSmartReduceModal,
   onClearCanvas,
   settings,
   setSettings,
@@ -180,6 +183,18 @@ export const Header: React.FC<HeaderProps> = ({
           <Upload className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
           <span className="whitespace-nowrap">上传图片</span>
         </button>
+
+        {/* Smart Bead Reducer Studio Button */}
+        {onOpenSmartReduceModal && (
+          <button
+            onClick={onOpenSmartReduceModal}
+            className="bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg shadow-md shadow-sky-500/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ring-1 ring-sky-400/40"
+            title="智能扣除无用背景与降格微调，真实减少使用拼豆总数(省豆20%~50%)"
+          >
+            <Zap className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0 fill-current text-amber-300 animate-pulse" />
+            <span className="whitespace-nowrap">智能减粒省豆</span>
+          </button>
+        )}
 
         {/* Built-in Samples Dropdown */}
         <div className="relative group shrink-0">

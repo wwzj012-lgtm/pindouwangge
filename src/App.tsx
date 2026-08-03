@@ -13,6 +13,7 @@ import {
 import { BRAND_PALETTES } from './data/palettes';
 import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGrid } from './utils/colorUtils';
+import { smartCropSubject } from './utils/cropUtils';
 
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
@@ -24,6 +25,7 @@ import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
 import { ImageStudioModal } from './components/ImageStudioModal';
 import { UserGuideModal } from './components/UserGuideModal';
+import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
 
 export default function App() {
   // 1. Core State
@@ -83,6 +85,7 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
+  const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
@@ -590,6 +593,7 @@ export default function App() {
         onOpenExportModal={() => setIsExportModalOpen(true)}
         onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
+        onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
         onClearCanvas={handleClearCanvas}
         settings={settings}
         setSettings={setSettings}
@@ -654,6 +658,10 @@ export default function App() {
             onOpenImageStudio={() => {
               setMobileDrawer('none');
               setIsStudioModalOpen(true);
+            }}
+            onOpenSmartReduceModal={() => {
+              setMobileDrawer('none');
+              setIsSmartReduceModalOpen(true);
             }}
             onCloseMobile={() => setMobileDrawer('none')}
           />
@@ -808,6 +816,22 @@ export default function App() {
         onClose={() => setIsGuideModalOpen(false)}
       />
 
+      <SmartBeadReducerModal
+        isOpen={isSmartReduceModalOpen}
+        onClose={() => setIsSmartReduceModalOpen(false)}
+        grid={grid}
+        palette={activePalette}
+        onApplyReducedGrid={(newGrid) => {
+          setGrid(newGrid);
+          pushHistory(newGrid);
+          setSettings(s => ({
+            ...s,
+            width: newGrid[0]?.length || s.width,
+            height: newGrid.length || s.height,
+          }));
+        }}
+      />
+
       {sourceImage && (
         <ImageStudioModal
           isOpen={isStudioModalOpen}
@@ -816,7 +840,10 @@ export default function App() {
           settings={settings}
           setSettings={setSettings}
           activePalette={activePalette}
-          onApplyConversion={(newGrid) => {
+          onApplyConversion={(newGrid, updatedImg) => {
+            if (updatedImg) {
+              setSourceImage(updatedImg);
+            }
             setGrid(newGrid);
             pushHistory(newGrid);
           }}

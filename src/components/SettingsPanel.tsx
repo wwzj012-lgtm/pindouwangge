@@ -21,6 +21,7 @@ interface SettingsPanelProps {
   onReconvert: () => void;
   hasImage: boolean;
   onOpenImageStudio: () => void;
+  onOpenSmartReduceModal?: () => void;
   onCloseMobile?: () => void;
 }
 
@@ -30,6 +31,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onReconvert,
   hasImage,
   onOpenImageStudio,
+  onOpenSmartReduceModal,
   onCloseMobile,
 }) => {
   const updateSetting = <K extends keyof ConvertSettings>(key: K, value: ConvertSettings[K]) => {
@@ -91,6 +93,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             <span>图像转换与增强工作坊</span>
           </div>
           <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">打开</span>
+        </button>
+      )}
+
+      {/* Smart Bead Reducer Studio Trigger */}
+      {onOpenSmartReduceModal && (
+        <button
+          onClick={() => {
+            if (onCloseMobile) onCloseMobile();
+            onOpenSmartReduceModal();
+          }}
+          className="w-full py-2 px-3 bg-gradient-to-r from-sky-950 via-indigo-950 to-slate-900 border border-sky-500/80 hover:brightness-110 text-sky-200 font-bold rounded-xl shadow-md flex items-center justify-between cursor-pointer transition-all active:scale-95 group"
+        >
+          <div className="flex items-center gap-2 text-xs">
+            <Zap className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform fill-current" />
+            <span className="text-white">⚡ 智能减少拼豆数量 (省豆20%~50%)</span>
+          </div>
+          <span className="text-[10px] bg-sky-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-sky-500/30">PRO</span>
         </button>
       )}
 

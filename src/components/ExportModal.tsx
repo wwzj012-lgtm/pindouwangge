@@ -1,11 +1,25 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Download, Image as ImageIcon, ShieldAlert, Sliders } from 'lucide-react';
+import {
+  X,
+  Download,
+  Image as ImageIcon,
+  ShieldAlert,
+  Sliders,
+  Crown,
+  Sparkles,
+  Lock,
+  CheckCircle2,
+  HelpCircle,
+  Palette,
+  RotateCw,
+} from 'lucide-react';
 import { BeadColor, BeadShape } from '../types';
+import { useAuth } from '../context/AuthContext';
 import {
   generatePatternCanvas,
   downloadCanvasImage,
   ExportOptions,
-  WatermarkPosition,
+  WatermarkType,
   LegendPosition,
   LegendScaleMode,
 } from '../utils/exportUtils';
@@ -21,6 +35,7 @@ interface ExportModalProps {
   brandName: string;
   projectName: string;
   beadShape: BeadShape;
+  onOpenAuthModal?: () => void;
 }
 
 export const ExportModal: React.FC<ExportModalProps> = ({
@@ -34,22 +49,51 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   brandName,
   projectName,
   beadShape,
+  onOpenAuthModal,
 }) => {
+  const { isVip } = useAuth();
+
+  // Watermark States
+  const [watermarkType, setWatermarkType] = useState<WatermarkType>('double_diagonal');
+  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
+  const [watermarkText, setWatermarkText] = useState<string>('豆织星格');
+  const [watermarkColor, setWatermarkColor] = useState<string>('#A855F7');
+  const [watermarkAngle, setWatermarkAngle] = useState<number>(-25);
+
+  // Layout & Display States
   const [showSymbols, setShowSymbols] = useState(true);
   const [showCoordinates, setShowCoordinates] = useState(true);
-  const [watermarkPosition, setWatermarkPosition] = useState<WatermarkPosition>('grid_and_legend');
-  const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
   const [legendPosition, setLegendPosition] = useState<LegendPosition>('right');
   const [legendScaleMode, setLegendScaleMode] = useState<LegendScaleMode>('auto');
   const [hideEmptyPegs, setHideEmptyPegs] = useState(false);
-  const [selectedBoard, setSelectedBoard] = useState<number | null>(null); // null = full canvas
+  const [selectedBoard, setSelectedBoard] = useState<number | null>(null);
+
+  // Tooltips and Modal States
+  const [showVipTooltip, setShowVipTooltip] = useState(false);
+  const [showFreeDownloadModal, setShowFreeDownloadModal] = useState(false);
+  const [pendingDownloadType, setPendingDownloadType] = useState<'single' | 'all' | null>(null);
+
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
   const boardsX = Math.ceil(width / boardSize);
   const boardsY = Math.ceil(height / boardSize);
   const totalBoards = boardsX * boardsY;
 
-  // Render High-res canvas preview inside container
+  // Enforce Hard Permission Rules for Non-VIP users
+  useEffect(() => {
+    if (!isVip) {
+      // Force watermark on if non-VIP
+      if (watermarkType === 'none') {
+        setWatermarkType('double_diagonal');
+      }
+      // Force platform default watermark text if non-VIP
+      setWatermarkText('豆织星格');
+      setWatermarkColor('#A855F7');
+      setWatermarkAngle(-25);
+    }
+  }, [isVip, watermarkType]);
+
+  // Render Canvas Preview
   useEffect(() => {
     if (!isOpen || !previewContainerRef.current) return;
 
@@ -65,8 +109,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
-      watermarkPosition,
+      watermarkType,
+      watermarkText: isVip ? watermarkText : '豆织星格',
       watermarkOpacity,
+      watermarkColor: isVip ? watermarkColor : '#A855F7',
+      watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
@@ -89,16 +136,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     showCoordinates,
     beadShape,
     selectedBoard,
-    watermarkPosition,
+    watermarkType,
+    watermarkText,
     watermarkOpacity,
+    watermarkColor,
+    watermarkAngle,
     legendPosition,
     legendScaleMode,
     hideEmptyPegs,
+    isVip,
   ]);
 
   if (!isOpen) return null;
 
-  const handleDownloadSingle = () => {
+  // Actual Download Execution
+  const executeSingleDownload = () => {
     const options: ExportOptions = {
       grid,
       paletteMap,
@@ -111,8 +163,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
-      watermarkPosition,
+      watermarkType,
+      watermarkText: isVip ? watermarkText : '豆织星格',
       watermarkOpacity,
+      watermarkColor: isVip ? watermarkColor : '#A855F7',
+      watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
@@ -122,8 +177,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     downloadCanvasImage(canvas, `${projectName}${suffix}.png`);
   };
 
-  const handleDownloadAllBoards = () => {
-    // Download full canvas first
+  const executeAllBoardsDownload = () => {
     const fullOptions: ExportOptions = {
       grid,
       paletteMap,
@@ -136,15 +190,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       showCoordinates,
       beadShape,
       selectedBoardIndex: null,
-      watermarkPosition,
+      watermarkType,
+      watermarkText: isVip ? watermarkText : '豆织星格',
       watermarkOpacity,
+      watermarkColor: isVip ? watermarkColor : '#A855F7',
+      watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
     };
     downloadCanvasImage(generatePatternCanvas(fullOptions), `${projectName}_完整图纸.png`);
 
-    // Download each subboard
     for (let i = 0; i < totalBoards; i++) {
       setTimeout(() => {
         const subOptions: ExportOptions = {
@@ -156,136 +212,352 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
+  // Download Trigger Handler with VIP check
+  const handleDownloadClick = (type: 'single' | 'all') => {
+    if (!isVip) {
+      setPendingDownloadType(type);
+      setShowFreeDownloadModal(true);
+    } else {
+      if (type === 'single') executeSingleDownload();
+      else executeAllBoardsDownload();
+    }
+  };
+
+  const confirmFreeDownload = () => {
+    setShowFreeDownloadModal(false);
+    if (pendingDownloadType === 'single') executeSingleDownload();
+    else if (pendingDownloadType === 'all') executeAllBoardsDownload();
+    setPendingDownloadType(null);
+  };
+
+  const handleWatermarkTypeSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value as WatermarkType;
+    if (value === 'none' && !isVip) {
+      setShowVipTooltip(true);
+      setTimeout(() => setShowVipTooltip(false), 3500);
+      return;
+    }
+    setWatermarkType(value);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] sm:max-h-[90vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[94vh] sm:max-h-[92vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
+        
         {/* Header */}
-        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ImageIcon className="w-5 h-5 text-emerald-400" />
+        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+              <ImageIcon className="w-5 h-5" />
+            </div>
             <div>
-              <h3 className="font-bold text-sm text-slate-100">导出高清拼豆图纸教程</h3>
-              <p className="text-[11px] text-slate-400">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-slate-100">导出高清拼豆图纸教程</h3>
+                {isVip ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                    <Crown className="w-3 h-3 text-amber-400" />
+                    VIP尊享导出
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 border border-slate-700 text-slate-400">
+                    免费版图纸
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
                 包含标准标尺坐标、色号符号标识与拼豆用量色卡列表
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer"
+            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Controls Bar */}
-        <div className="p-3.5 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-3 flex-wrap">
-            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                checked={showSymbols}
-                onChange={e => setShowSymbols(e.target.checked)}
-                className="accent-purple-500 rounded cursor-pointer"
-              />
-              <span>显示色号标识</span>
-            </label>
+        {/* Control Area: Watermark Section & Settings */}
+        <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex flex-col gap-3 text-xs">
+          
+          {/* Watermark Section Bar */}
+          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 flex flex-col gap-2.5">
+            
+            {/* Header Title with Permission Indication */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
+                <span className="font-bold text-slate-200">
+                  {isVip
+                    ? '防盗水印【VIP 可关闭水印】'
+                    : '防盗水印【免费强制开启，升级 VIP 可去除】'}
+                </span>
+              </div>
 
-            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-              <input
-                type="checkbox"
-                checked={showCoordinates}
-                onChange={e => setShowCoordinates(e.target.checked)}
-                className="accent-purple-500 rounded cursor-pointer"
-              />
-              <span>显示标尺坐标 (A..Z / 1..N)</span>
-            </label>
+              {/* VIP Quick Badge / Action */}
+              {!isVip && (
+                <button
+                  onClick={() => onOpenAuthModal?.()}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-500/30 text-amber-300 font-bold hover:brightness-110 transition-all cursor-pointer text-[11px]"
+                >
+                  <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
+                  <span>开通 VIP 去水印</span>
+                </button>
+              )}
+            </div>
 
-            <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
-              <input
-                type="checkbox"
-                checked={hideEmptyPegs}
-                onChange={e => setHideEmptyPegs(e.target.checked)}
-                className="accent-emerald-500 rounded cursor-pointer"
-              />
-              <span>隐藏空位点阵 (仅导出有豆区域)</span>
-            </label>
+            {/* Controls Row */}
+            <div className="flex flex-wrap items-center gap-3">
+              
+              {/* Dropdown 1: Watermark Type */}
+              <div className="relative flex items-center gap-1.5">
+                <span className="text-slate-400">样式:</span>
+                <div className="relative inline-block">
+                  <select
+                    value={watermarkType}
+                    onChange={handleWatermarkTypeSelect}
+                    className={`bg-slate-800 border ${
+                      watermarkType === 'none' ? 'border-emerald-500/50 text-emerald-300' : 'border-purple-500/40 text-purple-200'
+                    } font-medium rounded-lg px-2.5 py-1.5 text-xs outline-none cursor-pointer pr-7`}
+                  >
+                    <option value="double_diagonal">✦ 双重斜向水印 (全图覆盖)</option>
+                    <option value="corners">✦ 角落水印 (仅四角小字)</option>
+                    <option value="bottom">✦ 底部单行水印 (图纸最下方)</option>
+                    <option
+                      value="none"
+                      disabled={!isVip}
+                      className={!isVip ? 'text-slate-500 bg-slate-900' : 'text-emerald-400 font-bold'}
+                    >
+                      {isVip ? '✨ 无水印图纸 (VIP 已解锁)' : '👑 无水印图纸 (升级 VIP 解锁)'}
+                    </option>
+                  </select>
+                </div>
 
-            {/* Anti-crop Watermark Setting */}
-            <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-              <ShieldAlert className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-              <span className="text-slate-400">防盗水印:</span>
+                {/* VIP Lock Hover Tooltip Notice */}
+                {showVipTooltip && (
+                  <div className="absolute top-full left-0 mt-2 z-50 bg-slate-800 border border-amber-500/50 text-amber-200 text-[11px] p-2.5 rounded-xl shadow-2xl w-64 animate-in fade-in slide-in-from-top-1">
+                    <div className="flex items-start gap-2">
+                      <Crown className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-bold text-amber-300 mb-0.5">VIP 专属权限</p>
+                        <p className="text-slate-300 leading-relaxed">
+                          开通 VIP 会员，解锁纯净无水印图纸导出，支持商用摆摊、图纸售卖使用
+                        </p>
+                        <button
+                          onClick={() => {
+                            setShowVipTooltip(false);
+                            onOpenAuthModal?.();
+                          }}
+                          className="mt-2 text-xs font-bold text-amber-400 hover:underline flex items-center gap-1"
+                        >
+                          立即升级 VIP &rarr;
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Opacity Control (Hidden when watermarkType === 'none') */}
+              {watermarkType !== 'none' && (
+                <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+                  <span className="text-slate-400">透明度:</span>
+                  <select
+                    value={watermarkOpacity.toString()}
+                    onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
+                    className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
+                  >
+                    <option value="0.05">5% (极淡底纹)</option>
+                    <option value="0.1">10% (轻柔防盗)</option>
+                    <option value="0.18">18% (标准防盗 - 推荐)</option>
+                    <option value="0.25">25% (清晰标识)</option>
+                    <option value="0.35">35% (高度显著)</option>
+                    <option value="0.4">40% (强力防盗)</option>
+                  </select>
+                </div>
+              )}
+
+              {/* VIP Custom Watermark Features (VIP Exclusives) */}
+              <div className="flex items-center gap-2 border-l border-slate-800 pl-3 flex-wrap">
+                
+                {/* Custom Text */}
+                <div className="flex items-center gap-1">
+                  <span className="text-slate-400">文字:</span>
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      disabled={!isVip}
+                      value={isVip ? watermarkText : '豆织星格'}
+                      onChange={e => setWatermarkText(e.target.value)}
+                      placeholder="自定义店铺名称"
+                      className={`px-2 py-1 rounded-lg border text-xs outline-none w-32 ${
+                        isVip
+                          ? 'bg-slate-800 border-slate-700 text-purple-200 focus:border-purple-500'
+                          : 'bg-slate-800/50 border-slate-800 text-slate-500 cursor-not-allowed'
+                      }`}
+                    />
+                    {!isVip && (
+                      <Lock
+                        className="w-3 h-3 text-amber-400/80 absolute right-2 cursor-pointer"
+                        onClick={() => onOpenAuthModal?.()}
+                        title="VIP 可自定义店铺底纹"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                {/* Custom Color Selector (VIP only) */}
+                {isVip && watermarkType === 'double_diagonal' && (
+                  <div className="flex items-center gap-1 border-l border-slate-800 pl-2">
+                    <Palette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <select
+                      value={watermarkColor}
+                      onChange={e => setWatermarkColor(e.target.value)}
+                      className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                    >
+                      <option value="#A855F7">梦幻紫 (#A855F7)</option>
+                      <option value="#F59E0B">尊享金 (#F59E0B)</option>
+                      <option value="#64748B">低调灰 (#64748B)</option>
+                      <option value="#0284C7">天空蓝 (#0284C7)</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Custom Angle Selector (VIP only) */}
+                {isVip && watermarkType === 'double_diagonal' && (
+                  <div className="flex items-center gap-1">
+                    <RotateCw className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <select
+                      value={watermarkAngle.toString()}
+                      onChange={e => setWatermarkAngle(parseInt(e.target.value))}
+                      className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                    >
+                      <option value="-25">-25° 斜向</option>
+                      <option value="-45">-45° 角斜</option>
+                      <option value="0">0° 横向</option>
+                      <option value="-60">-60° 陡斜</option>
+                    </select>
+                  </div>
+                )}
+
+              </div>
+
+            </div>
+
+            {/* Global Permanent Banner (Below Watermark Module) */}
+            {isVip ? (
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px]">
+                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  VIP 权益已激活，可关闭防盗水印导出纯净商用图纸，支持自定义店铺水印
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px]">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>
+                    您当前为免费账号，导出图纸将添加平台防盗水印，升级 VIP 即可导出无水印高清图纸
+                  </span>
+                </div>
+                <button
+                  onClick={() => onOpenAuthModal?.()}
+                  className="text-emerald-400 hover:text-emerald-300 font-bold underline shrink-0 cursor-pointer"
+                >
+                  去升级 VIP &rarr;
+                </button>
+              </div>
+            )}
+
+          </div>
+
+          {/* Grid, Coordinates, and Layout Controls Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showSymbols}
+                  onChange={e => setShowSymbols(e.target.checked)}
+                  className="accent-purple-500 rounded cursor-pointer"
+                />
+                <span>显示色号标识</span>
+              </label>
+
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showCoordinates}
+                  onChange={e => setShowCoordinates(e.target.checked)}
+                  className="accent-purple-500 rounded cursor-pointer"
+                />
+                <span>显示标尺坐标 (A..Z / 1..N)</span>
+              </label>
+
+              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
+                <input
+                  type="checkbox"
+                  checked={hideEmptyPegs}
+                  onChange={e => setHideEmptyPegs(e.target.checked)}
+                  className="accent-emerald-500 rounded cursor-pointer"
+                />
+                <span>隐藏空位点阵 (仅导出有豆区域)</span>
+              </label>
+
+              {/* Legend Scale & Layout */}
+              <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
+                <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span className="text-slate-400">色号字号:</span>
+                <select
+                  value={legendScaleMode}
+                  onChange={e => setLegendScaleMode(e.target.value as LegendScaleMode)}
+                  className="bg-slate-800 border border-slate-700 text-amber-300 font-bold rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                >
+                  <option value="auto">🔥 网格自适应 (推荐)</option>
+                  <option value="1.0">标准 1.0x</option>
+                  <option value="1.5">中度 1.5x</option>
+                  <option value="2.0">放大 2.0x</option>
+                  <option value="2.5">特大 2.5x</option>
+                </select>
+
+                <select
+                  value={legendPosition}
+                  onChange={e => setLegendPosition(e.target.value as LegendPosition)}
+                  className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                >
+                  <option value="right">右侧多列侧边栏</option>
+                  <option value="bottom">下方横向表格</option>
+                </select>
+              </div>
+
+            </div>
+
+            {/* Sub Board View Selector */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">板块视角:</span>
               <select
-                value={watermarkPosition}
-                onChange={e => setWatermarkPosition(e.target.value as WatermarkPosition)}
-                className="bg-slate-800 border border-slate-700 text-purple-200 font-medium rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
+                value={selectedBoard === null ? 'full' : selectedBoard.toString()}
+                onChange={e => {
+                  const val = e.target.value;
+                  setSelectedBoard(val === 'full' ? null : parseInt(val));
+                }}
+                className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer"
               >
-                <option value="grid_and_legend">✦ 双重斜向水印 (全图覆盖)</option>
-              </select>
-
-              <select
-                value={watermarkOpacity.toString()}
-                onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
-                className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                title="调整水印透明度"
-              >
-                <option value="0.1">透明度 10% (极淡)</option>
-                <option value="0.18">透明度 18% (标准防盗)</option>
-                <option value="0.28">透明度 28% (高清晰度)</option>
+                <option value="full">全景整张图纸 ({width}x{height})</option>
+                {Array.from({ length: totalBoards }).map((_, idx) => (
+                  <option key={idx} value={idx}>
+                    第 {idx + 1} 板图纸 (29x29)
+                  </option>
+                ))}
               </select>
             </div>
 
-            {/* Legend Scale & Layout Settings */}
-            <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-              <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <span className="text-slate-400">色号清单字号:</span>
-              <select
-                value={legendScaleMode}
-                onChange={e => setLegendScaleMode(e.target.value as LegendScaleMode)}
-                className="bg-slate-800 border border-slate-700 text-amber-300 font-bold rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                title="网格变大时可自动按比例放大色号文字与色块"
-              >
-                <option value="auto">🔥 与网格自适应等比例放大 (推荐)</option>
-                <option value="1.0">标准 1.0x (100%)</option>
-                <option value="1.5">中度 1.5x (150%)</option>
-                <option value="2.0">放大 2.0x (200%)</option>
-                <option value="2.5">特大 2.5x (250%)</option>
-                <option value="3.0">巨型 3.0x (300%)</option>
-              </select>
-
-              <select
-                value={legendPosition}
-                onChange={e => setLegendPosition(e.target.value as LegendPosition)}
-                className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-              >
-                <option value="right">右侧多列侧边栏</option>
-                <option value="bottom">下方横向表格</option>
-              </select>
-            </div>
           </div>
 
-          {/* Sub Board Pagination selector */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-slate-400">选择板块视角:</span>
-            <select
-              value={selectedBoard === null ? 'full' : selectedBoard.toString()}
-              onChange={e => {
-                const val = e.target.value;
-                setSelectedBoard(val === 'full' ? null : parseInt(val));
-              }}
-              className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer"
-            >
-              <option value="full">全景整张图纸 ({width}x{height})</option>
-              {Array.from({ length: totalBoards }).map((_, idx) => (
-                <option key={idx} value={idx}>
-                  第 {idx + 1} 板图纸 (29x29)
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
 
-        {/* Live Canvas Preview Body */}
+        {/* Live Canvas Preview Canvas Container */}
         <div className="p-4 flex-1 overflow-auto bg-slate-950 flex items-center justify-center min-h-[300px]">
           <div ref={previewContainerRef} className="w-full h-full flex items-center justify-center" />
         </div>
@@ -293,13 +565,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         {/* Footer Actions */}
         <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <div className="text-slate-400 text-[11px] text-center sm:text-left">
-            当前导出分辨率: 高清矢量位图 ({width}x{height} 豆)
+            当前导出模式: {watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} ({width}x{height} 豆)
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
             {totalBoards > 1 && (
               <button
-                onClick={handleDownloadAllBoards}
+                onClick={() => handleDownloadClick('all')}
                 className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Download className="w-4 h-4 text-sky-400" />
@@ -308,7 +580,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             )}
 
             <button
-              onClick={handleDownloadSingle}
+              onClick={() => handleDownloadClick('single')}
               className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
             >
               <Download className="w-4 h-4" />
@@ -316,7 +588,49 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </button>
           </div>
         </div>
+
       </div>
+
+      {/* Free User Download Light Modal Confirmation (二次轻提示) */}
+      {showFreeDownloadModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 max-w-sm w-full shadow-2xl flex flex-col gap-4 text-center">
+            
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-center justify-center mx-auto">
+              <Crown className="w-6 h-6" />
+            </div>
+
+            <div>
+              <h4 className="font-bold text-base text-slate-100 mb-1.5">温馨提示</h4>
+              <p className="text-xs text-slate-300 leading-relaxed px-2">
+                免费版本导出图纸自带防盗水印，如需无水印商用图纸，可开通 VIP 会员
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-2 mt-1">
+              <button
+                onClick={() => {
+                  setShowFreeDownloadModal(false);
+                  onOpenAuthModal?.();
+                }}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>升级 VIP 纯净导出</span>
+              </button>
+
+              <button
+                onClick={confirmFreeDownload}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition-colors cursor-pointer"
+              >
+                确认直接下载带水印文件
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

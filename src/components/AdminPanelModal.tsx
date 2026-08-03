@@ -557,7 +557,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
                       <div className="flex items-center justify-between pt-1 border-t border-slate-900">
                         <div className="flex items-center gap-1.5">
-                          {user.isVip ? (
+                          {user.isVip || user.role === 'admin' ? (
                             <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
                               <Zap className="w-3 h-3 fill-current text-amber-400" />
                               PRO VIP
@@ -565,9 +565,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           ) : (
                             <span className="text-slate-500 text-[10px]">普通试用</span>
                           )}
-                          {user.vipExpireAt && user.isVip && (
-                            <span className="text-[10px] text-slate-500 font-mono">
-                              ({new Date(user.vipExpireAt).toLocaleDateString()})
+                          {(user.role === 'admin' || (user.vipExpireAt && user.isVip)) && (
+                            <span className="text-[10px] text-amber-400/80 font-mono font-bold">
+                              ({user.role === 'admin' ? '永久' : new Date(user.vipExpireAt!).toLocaleDateString()})
                             </span>
                           )}
                         </div>
@@ -652,7 +652,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1.5">
-                              {user.isVip ? (
+                              {user.isVip || user.role === 'admin' ? (
                                 <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded text-[11px] font-bold">
                                   <Zap className="w-3 h-3 fill-current text-amber-400" />
                                   PRO VIP
@@ -660,9 +660,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                               ) : (
                                 <span className="text-slate-500 text-[11px]">普通试用</span>
                               )}
-                              {user.vipExpireAt && user.isVip && (
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  ({new Date(user.vipExpireAt).toLocaleDateString()})
+                              {(user.role === 'admin' || (user.vipExpireAt && user.isVip)) && (
+                                <span className="text-[10px] text-amber-400/80 font-mono font-bold">
+                                  ({user.role === 'admin' ? '永久' : new Date(user.vipExpireAt!).toLocaleDateString()})
                                 </span>
                               )}
                             </div>

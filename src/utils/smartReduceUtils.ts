@@ -38,7 +38,9 @@ export interface ReductionReport {
   originalColorTypesCount: number;
   optimizedColorTypesCount: number;
   savedColorTypesCount: number;
-  estimatedMoneySavedRMB: number;
+  beadMaterialSavedRMB: number;    // 抠除背景合并连片减少耗材省约 RMB
+  colorPacksSavedRMB: number;       // 少购入整包杂色拼豆省约 RMB
+  estimatedMoneySavedRMB: number;   // 汇总总节省金额 (耗材 + 色包)
 }
 
 interface PixelMeta {
@@ -558,8 +560,14 @@ export function smartReduceGrid(
   const optimizedColorTypesCount = finalColorCounts.size;
   const savedColorTypesCount = originalColorTypesCount - optimizedColorTypesCount;
 
-  // Material cost saved estimate (Approx 0.012 RMB per bead)
-  const estimatedMoneySavedRMB = Math.round(savedBeadCount * 0.012 * 10) / 10;
+  // 1. Bead material saved estimate (3 RMB per 1000 beads = 0.003 RMB per bead)
+  const beadMaterialSavedRMB = Math.round(savedBeadCount * 0.003 * 10) / 10;
+
+  // 2. Color pack procurement saved estimate (3 RMB per 1000-bead color pack)
+  const colorPacksSavedRMB = Math.max(0, savedColorTypesCount) * 3;
+
+  // Total estimated RMB saved
+  const estimatedMoneySavedRMB = Math.round((beadMaterialSavedRMB + colorPacksSavedRMB) * 10) / 10;
 
   return {
     optimizedGrid: finalGrid,
@@ -573,6 +581,8 @@ export function smartReduceGrid(
     originalColorTypesCount,
     optimizedColorTypesCount,
     savedColorTypesCount,
+    beadMaterialSavedRMB,
+    colorPacksSavedRMB,
     estimatedMoneySavedRMB,
   };
 }
@@ -590,6 +600,8 @@ function createEmptyReport(grid: (string | null)[][]): ReductionReport {
     originalColorTypesCount: 0,
     optimizedColorTypesCount: 0,
     savedColorTypesCount: 0,
+    beadMaterialSavedRMB: 0,
+    colorPacksSavedRMB: 0,
     estimatedMoneySavedRMB: 0,
   };
 }

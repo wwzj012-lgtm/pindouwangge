@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   User,
@@ -10,7 +10,13 @@ import {
   Crown,
   LogOut,
   ShieldCheck,
-  Sparkles,
+  AlertTriangle,
+  Globe,
+  HardDrive,
+  Copy,
+  Check,
+  ExternalLink,
+  Info,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -29,6 +35,12 @@ interface AuthModalProps {
   onOpenAdminPanel?: () => void;
 }
 
+interface LocalizedError {
+  title: string;
+  detail: string;
+  isNetworkError: boolean;
+}
+
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdminPanel }) => {
   const { currentUser, userProfile, isVip, isAdmin, redeemVipCode } = useAuth();
 
@@ -40,17 +52,124 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
   const [redeemCodeInput, setRedeemCodeInput] = useState('');
   const [redeemMsg, setRedeemMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [authError, setAuthError] = useState('');
+  const [structuredError, setStructuredError] = useState<LocalizedError | null>(null);
 
-  if (!isOpen) return null;
+  // Connectivity probe for Chinese mainland network
+  const [isGoogleBlocked, setIsGoogleBlocked] = useState<boolean>(false);
+  const [isCheckingConnectivity, setIsCheckingConnectivity] = useState<boolean>(false);
+  const [copiedMirrorUrl, setCopiedMirrorUrl] = useState<boolean>(false);
+
+  const mirrorDomain = 'pindouwangge.pages.dev';
+  const mirrorUrl = `https://${mirrorDomain}`;
+
+  // Run network connectivity test when modal opens
+  useEffect(() => {
+    if (isOpen && !currentUser) {
+      checkGoogleConnectivity();
+    }
+  }, [isOpen, currentUser]);
+
+  const checkGoogleConnectivity = async () => {
+    setIsCheckingConnectivity(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s fast probe
+
+    try {
+      await fetch('https://accounts.google.com/gsi/client', {
+        method: 'HEAD',
+        mode: 'no-cors',
+        signal: controller.signal,
+      });
+      setIsGoogleBlocked(false);
+    } catch {
+      // Timeout or network blocked
+      setIsGoogleBlocked(true);
+    } finally {
+      clearTimeout(timeoutId);
+      setIsCheckingConnectivity(false);
+    }
+  };
+
+  const handleCopyMirrorUrl = () => {
+    navigator.clipboard.writeText(mirrorUrl);
+    setCopiedMirrorUrl(true);
+    setTimeout(() => setCopiedMirrorUrl(false), 2000);
+  };
+
+  const parseFirebaseError = (err: any): LocalizedError => {
+    const code = err?.code || '';
+    const rawMsg = String(err?.message || err || '');
+
+    if (code === 'auth/network-request-failed' || rawMsg.includes('network-request-failed') || rawMsg.includes('network')) {
+      return {
+        title: '当前网络无法连接账号服务',
+        detail: '国内网络环境无法直连谷歌 Firebase 服务器，建议改用【国内镜像入口】或直接使用【离线免登录模式】创作。',
+        isNetworkError: true,
+      };
+    }
+
+    if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+      return {
+        title: '账号或密码错误',
+        detail: '请输入正确的电子邮箱与密码。若尚未注册，请切换至【注册新账号】。',
+        isNetworkError: false,
+      };
+    }
+
+    if (code === 'auth/email-already-in-use') {
+      return {
+        title: '该邮箱已被注册',
+        detail: '此邮箱已有注册记录，请直接在上方切换为【登录】模式。',
+        isNetworkError: false,
+      };
+    }
+
+    if (code === 'auth/weak-password') {
+      return {
+        title: '密码强度不足',
+        detail: '为保证安全，密码长度请至少设置为 6 位字符。',
+        isNetworkError: false,
+      };
+    }
+
+    if (code === 'auth/invalid-email') {
+      return {
+        title: '邮箱格式不正确',
+        detail: '请输入有效的电子邮箱地址 (如: name@example.com)。',
+        isNetworkError: false,
+      };
+    }
+
+    if (code === 'auth/popup-closed-by-user') {
+      return {
+        title: '登录操作已取消',
+        detail: '您手动关闭了快捷登录弹窗。',
+        isNetworkError: false,
+      };
+    }
+
+    if (code === 'auth/popup-blocked') {
+      return {
+        title: '弹窗被浏览器拦截',
+        detail: '请在浏览器地址栏允许允许本站弹出窗口后再试。',
+        isNetworkError: false,
+      };
+    }
+
+    return {
+      title: '登录异常，请稍后重试',
+      detail: rawMsg || '发生未知错误，请检查网络或刷新页面。',
+      isNetworkError: false,
+    };
+  };
 
   const handleGoogleSignIn = async () => {
-    setAuthError('');
+    setStructuredError(null);
     setIsSubmitting(true);
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
-      setAuthError(err.message || 'Google 登录失败，请重试');
+      setStructuredError(parseFirebaseError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -58,9 +177,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
 
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthError('');
+    setStructuredError(null);
+
     if (!email || !password) {
-      setAuthError('请完整填写邮箱和密码');
+      setStructuredError({
+        title: '请完整填写登录信息',
+        detail: '电子邮箱与密码均为必填项。',
+        isNetworkError: false,
+      });
       return;
     }
 
@@ -75,15 +199,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
         await signInWithEmailAndPassword(auth, email, password);
       }
     } catch (err: any) {
-      let msg = err.message || '登录失败';
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        msg = '账号或密码不正确';
-      } else if (err.code === 'auth/email-already-in-use') {
-        msg = '该邮箱已被注册，请直接登录';
-      } else if (err.code === 'auth/weak-password') {
-        msg = '密码强度不足，最少6个字符';
-      }
-      setAuthError(msg);
+      setStructuredError(parseFirebaseError(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -108,13 +224,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
     await signOut(auth);
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
-      <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-3 sm:p-4 overflow-y-auto">
+      <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="px-5 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold">
+        <div className="px-5 py-3.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 flex items-center justify-center font-bold shrink-0">
               <Crown className="w-4 h-4" />
             </div>
             <div>
@@ -124,26 +242,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-5 overflow-y-auto space-y-5 custom-scrollbar">
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-4 custom-scrollbar">
           {currentUser && userProfile ? (
             /* Logged-In Account Info & VIP Manager */
             <div className="space-y-4">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   {userProfile.photoURL ? (
                     <img
                       src={userProfile.photoURL}
                       alt="Avatar"
-                      className="w-11 h-11 rounded-full border border-slate-700 object-cover"
+                      className="w-10 h-10 rounded-full border border-slate-700 object-cover"
                     />
                   ) : (
-                    <div className="w-11 h-11 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base">
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base">
                       {userProfile.displayName?.[0] || 'U'}
                     </div>
                   )}
@@ -162,7 +280,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
 
                 <button
                   onClick={handleSignOut}
-                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer"
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
                   title="退出登录"
                 >
                   <LogOut className="w-4 h-4" />
@@ -197,16 +315,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                     : '目前处于普通限制模式。获取激活码兑换即可解锁专属智能减少拼豆与精纯优化算法。'}
                 </p>
 
-                {isVip && userProfile.vipExpireAt && (
+                {isVip && (
                   <div className="mt-2.5 pt-2 border-t border-amber-500/20 text-[11px] font-mono text-amber-300/80 flex items-center justify-between">
                     <span>VIP 到期时间:</span>
-                    <span>{new Date(userProfile.vipExpireAt).toLocaleDateString()}</span>
+                    <span className="font-bold text-amber-300">
+                      {isAdmin || userProfile.role === 'admin'
+                        ? '永久'
+                        : userProfile.vipExpireAt
+                        ? new Date(userProfile.vipExpireAt).toLocaleDateString()
+                        : '永久'}
+                    </span>
                   </div>
                 )}
               </div>
 
               {/* Redeem Code Form */}
-              <form onSubmit={handleRedeem} className="space-y-2 pt-2">
+              <form onSubmit={handleRedeem} className="space-y-2 pt-1">
                 <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-amber-400" />
                   <span>兑换 VIP 激活码</span>
@@ -216,19 +340,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                     type="text"
                     value={redeemCodeInput}
                     onChange={e => setRedeemCodeInput(e.target.value.toUpperCase())}
-                    placeholder="输入 VIP 激活兑换码 (如: VIP-8888)"
-                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white uppercase font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-500"
+                    placeholder="输入 16位卡密 (如: TB-7D29FK8S7G-4A)"
+                    className="flex-1 px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white uppercase font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-500 min-h-[44px]"
                   />
                   <button
                     type="submit"
                     disabled={isSubmitting || !redeemCodeInput.trim()}
-                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer shrink-0"
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer shrink-0 min-h-[44px]"
                   >
                     立即兑换
                   </button>
                 </div>
                 {redeemMsg && (
-                  <div className={`text-xs p-2 rounded-lg ${
+                  <div className={`text-xs p-2.5 rounded-xl ${
                     redeemMsg.isError
                       ? 'bg-rose-950/50 text-rose-300 border border-rose-800/50'
                       : 'bg-emerald-950/50 text-emerald-300 border border-emerald-800/50'
@@ -246,7 +370,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                       onClose();
                       onOpenAdminPanel();
                     }}
-                    className="w-full py-2.5 px-3 bg-gradient-to-r from-slate-950 via-rose-950 to-slate-950 border border-rose-500/50 hover:brightness-110 text-rose-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all"
+                    className="w-full py-2.5 px-3 bg-gradient-to-r from-slate-950 via-rose-950 to-slate-950 border border-rose-500/50 hover:brightness-110 text-rose-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all min-h-[44px]"
                   >
                     <ShieldCheck className="w-4 h-4 text-rose-400" />
                     <span>进入后台系统 (账号管理与生成兑换码)</span>
@@ -255,131 +379,243 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
               )}
             </div>
           ) : (
-            /* Sign In / Sign Up Form */
+            /* Sign In / Sign Up Form (Email First + Google Lowered + Offline Fallback) */
             <div className="space-y-4">
-              {/* Sign in with Google */}
-              <button
-                onClick={handleGoogleSignIn}
-                disabled={isSubmitting}
-                className="w-full py-2.5 px-4 bg-slate-950 hover:bg-slate-800/80 border border-slate-700 text-slate-200 font-bold text-xs rounded-xl shadow flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-              >
-                <svg className="w-4 h-4" viewBox="0 0 24 24">
-                  <path
-                    fill="#EA4335"
-                    d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.1 9 5 12 5z"
-                  />
-                  <path
-                    fill="#4285F4"
-                    d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
-                  />
-                  <path
-                    fill="#FBBC05"
-                    d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z"
-                  />
-                  <path
-                    fill="#34A853"
-                    d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.1-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
-                  />
-                </svg>
-                <span>Google 快捷一键登录</span>
-              </button>
-
-              <div className="flex items-center gap-3 text-slate-600 text-xs my-2">
-                <div className="h-[1px] bg-slate-800 flex-1" />
-                <span>或使用邮箱密码</span>
-                <div className="h-[1px] bg-slate-800 flex-1" />
+              {/* Top Banner: Offline Direct Entry Quick Button */}
+              <div className="bg-slate-950 border border-indigo-500/30 p-3 rounded-xl flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <HardDrive className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <div>
+                    <span className="font-bold text-white block">无需账号？离线免登录使用</span>
+                    <span className="text-[10px] text-slate-400">所有图纸直接保存在本地浏览器缓存</span>
+                  </div>
+                </div>
+                <button
+                  onClick={onClose}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg shadow cursor-pointer shrink-0 transition-all min-h-[38px]"
+                >
+                  免登录直达图纸
+                </button>
               </div>
 
-              <form onSubmit={handleEmailAuth} className="space-y-3">
-                {mode === 'signup' && (
+              {/* 1. Main Form: Email & Password Auth (TOP PRIORITY) */}
+              <div className="space-y-3 pt-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5 text-sky-400" />
+                    <span>{mode === 'signin' ? '电子邮箱密码登录' : '注册新账号'}</span>
+                  </span>
+                  <div className="text-xs">
+                    {mode === 'signin' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signup');
+                          setStructuredError(null);
+                        }}
+                        className="text-sky-400 font-bold hover:underline cursor-pointer"
+                      >
+                        没有账号？点此注册
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode('signin');
+                          setStructuredError(null);
+                        }}
+                        className="text-sky-400 font-bold hover:underline cursor-pointer"
+                      >
+                        已有账号？点此登录
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <form onSubmit={handleEmailAuth} className="space-y-3">
+                  {mode === 'signup' && (
+                    <div>
+                      <label className="text-[11px] text-slate-400 block mb-1">昵称 / 姓名</label>
+                      <div className="relative">
+                        <User className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                        <input
+                          type="text"
+                          value={displayName}
+                          onChange={e => setDisplayName(e.target.value)}
+                          placeholder="请输入您的昵称"
+                          className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">昵称/姓名</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">电子邮箱</label>
                     <div className="relative">
-                      <User className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+                      <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                       <input
-                        type="text"
-                        value={displayName}
-                        onChange={e => setDisplayName(e.target.value)}
-                        placeholder="请输入您的昵称"
-                        className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500"
+                        type="email"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        placeholder="name@example.com"
+                        required
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
                       />
                     </div>
                   </div>
-                )}
 
-                <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">电子邮箱</label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={e => setEmail(e.target.value)}
-                      placeholder="name@example.com"
-                      required
-                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500"
-                    />
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">密码</label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                      <input
+                        type="password"
+                        value={password}
+                        onChange={e => setPassword(e.target.value)}
+                        placeholder="至少 6 位密码"
+                        required
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                      />
+                    </div>
                   </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer min-h-[44px]"
+                  >
+                    {mode === 'signin' ? '登录账号' : '立即注册并登录'}
+                  </button>
+                </form>
+              </div>
+
+              {/* Structured Localized Error Panel */}
+              {structuredError && (
+                <div className="p-3.5 bg-rose-950/80 border border-rose-500/60 rounded-xl text-xs space-y-2 text-rose-200">
+                  <div className="flex items-center gap-2 font-bold text-rose-100">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>{structuredError.title}</span>
+                  </div>
+                  <p className="text-[11px] text-rose-200/90 leading-relaxed">
+                    {structuredError.detail}
+                  </p>
+
+                  {/* Layered Domestic Diversion Guidance (If network fails) */}
+                  {structuredError.isNetworkError && (
+                    <div className="pt-2 border-t border-rose-800/60 space-y-2 text-[11px]">
+                      <div className="font-bold text-amber-300">💡 推荐国内访问解决方案 (二选一)：</div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {/* Option A: Cloudflare Mirror */}
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="font-bold text-slate-200 flex items-center justify-between">
+                            <span className="flex items-center gap-1 text-sky-300">
+                              <Globe className="w-3.5 h-3.5 text-sky-400" />
+                              方案 A：使用 Cloudflare 镜像分站
+                            </span>
+                            <button
+                              onClick={handleCopyMirrorUrl}
+                              className="text-[10px] text-sky-400 hover:underline flex items-center gap-1"
+                            >
+                              {copiedMirrorUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                              <span>{copiedMirrorUrl ? '已复制网址' : '复制网址'}</span>
+                            </button>
+                          </div>
+                          <p className="text-slate-400 text-[10px]">
+                            镜像分站域名已部署国内 CDN 加速，无需翻墙直连使用：
+                          </p>
+                          <a
+                            href={mirrorUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-amber-300 font-bold underline flex items-center gap-1 hover:text-amber-200"
+                          >
+                            <span>{mirrorDomain}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
+
+                        {/* Option B: Offline Mode */}
+                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                          <div className="font-bold text-slate-200 flex items-center justify-between">
+                            <span className="flex items-center gap-1 text-emerald-300">
+                              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                              方案 B：免登录直接开始画图
+                            </span>
+                          </div>
+                          <p className="text-slate-400 text-[10px]">
+                            不登录账号也能正常使用绘制网格、加载素材、导出图纸全套功能。
+                          </p>
+                          <button
+                            onClick={onClose}
+                            className="w-full mt-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[11px] cursor-pointer"
+                          >
+                            开启离线免登录模式
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
+              )}
 
-                <div>
-                  <label className="text-[11px] text-slate-400 block mb-1">密码</label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={e => setPassword(e.target.value)}
-                      placeholder="至少 6 位密码"
-                      required
-                      className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500"
-                    />
-                  </div>
-                </div>
+              {/* Divider */}
+              <div className="flex items-center gap-3 text-slate-600 text-xs my-2">
+                <div className="h-[1px] bg-slate-800 flex-1" />
+                <span>其他快捷登录</span>
+                <div className="h-[1px] bg-slate-800 flex-1" />
+              </div>
 
-                {authError && (
-                  <div className="text-xs p-2 rounded-lg bg-rose-950/50 text-rose-300 border border-rose-800/50">
-                    {authError}
-                  </div>
-                )}
-
+              {/* 2. Lowered Google Login Button with Warning Tag */}
+              <div className="space-y-1.5">
                 <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="w-full py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer"
+                  onClick={handleGoogleSignIn}
+                  disabled={isSubmitting || isGoogleBlocked}
+                  className={`w-full py-2.5 px-4 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer min-h-[44px] ${
+                    isGoogleBlocked
+                      ? 'bg-slate-950 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
+                      : 'bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 shadow'
+                  }`}
                 >
-                  {mode === 'signin' ? '登录账号' : '注册新账号'}
+                  <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                    <path
+                      fill="#EA4335"
+                      d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.1 9 5 12 5z"
+                    />
+                    <path
+                      fill="#4285F4"
+                      d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.1-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
+                    />
+                  </svg>
+                  <span>Google 一键快捷登录</span>
+                  {isGoogleBlocked && (
+                    <span className="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.2 rounded shrink-0">
+                      国内网络受限
+                    </span>
+                  )}
                 </button>
-              </form>
 
-              <div className="text-center text-xs text-slate-400 pt-1">
-                {mode === 'signin' ? (
-                  <span>
-                    还没有账号？{' '}
-                    <button
-                      onClick={() => {
-                        setMode('signup');
-                        setAuthError('');
-                      }}
-                      className="text-sky-400 font-bold hover:underline cursor-pointer"
-                    >
-                      点击注册
-                    </button>
-                  </span>
-                ) : (
-                  <span>
-                    已有账号？{' '}
-                    <button
-                      onClick={() => {
-                        setMode('signin');
-                        setAuthError('');
-                      }}
-                      className="text-sky-400 font-bold hover:underline cursor-pointer"
-                    >
-                      直接登录
-                    </button>
-                  </span>
-                )}
+                <p className="text-[10px] text-slate-500 text-center">
+                  * 提示：Google 登录需访问谷歌服务器，国内网络无代理可能提示网络异常，推荐优先使用【邮箱登录】或【离线模式】。
+                </p>
+              </div>
+
+              {/* Bottom Notice for Offline Mode */}
+              <div className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl text-[11px] text-slate-400 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-slate-300">
+                  <Info className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                  <span>离线画图说明</span>
+                </div>
+                <p className="text-[10px] text-slate-500 leading-relaxed">
+                  本画板支持完整的单机离线创作模式。离线生成的图纸保存在浏览器 LocalStorage 中，随时可以导出 PNG / JSON 工程。账号登录仅用于跨设备云存储与兑换 PRO 核心减粒权限。
+                </p>
               </div>
             </div>
           )}

@@ -1,6 +1,7 @@
 import { BeadColor, BeadShape } from '../types';
 
-export type WatermarkPosition = 'grid_and_legend' | 'legend_only' | 'grid_center' | 'none';
+export type WatermarkType = 'double_diagonal' | 'corners' | 'bottom' | 'none';
+export type WatermarkPosition = WatermarkType | 'grid_and_legend' | 'legend_only' | 'grid_center';
 export type LegendPosition = 'right' | 'bottom';
 export type LegendScaleMode = 'auto' | '1.0' | '1.5' | '2.0' | '2.5' | '3.0';
 
@@ -16,44 +17,31 @@ export interface ExportOptions {
   showCoordinates: boolean;
   beadShape: BeadShape;
   selectedBoardIndex?: number | null; // null for full image, 0..N for specific sub-board
-  watermarkPosition?: WatermarkPosition; // Default: 'grid_and_legend'
+  watermarkType?: WatermarkType; // Default: 'double_diagonal'
+  watermarkText?: string; // Default: '豆织星格'
   watermarkOpacity?: number; // Default: 0.18
+  watermarkColor?: string; // Default: '#A855F7'
+  watermarkAngle?: number; // Default: -25
+  watermarkPosition?: WatermarkPosition; // Legacy fallback
   legendPosition?: LegendPosition; // Default: 'right'
   legendScaleMode?: LegendScaleMode; // Default: 'auto'
   hideEmptyPegs?: boolean; // Default: false
 }
 
-// Draw diagonal translucent watermark across a rectangular region with smart density calculation
-function drawDiagonalWatermark(
+// Flexible watermark overlay function supporting double_diagonal, corners, bottom, or none
+export function drawWatermarkOverlay(
   ctx: CanvasRenderingContext2D,
   rectX: number,
   rectY: number,
   rectW: number,
   rectH: number,
-  text: string = '✦ 豆织星格',
+  type: WatermarkType = 'double_diagonal',
+  text: string = '豆织星格',
   opacity: number = 0.18,
-  fontSize?: number,
-  customStepX?: number,
-  customStepY?: number
+  color: string = '#A855F7',
+  angleDegrees: number = -25
 ) {
-  if (rectW <= 0 || rectH <= 0) return;
-
-  const area = rectW * rectH;
-  const targetCount = Math.max(5, Math.min(22, Math.round(Math.sqrt(area) / 120)));
-
-  // Calculate step sizes
-  const targetCellArea = area / targetCount;
-  const stepY = (customStepY && customStepY >= 100)
-    ? customStepY
-    : Math.max(100, Math.round(Math.sqrt(targetCellArea / 2.0)));
-  const stepX = (customStepX && customStepX >= 180)
-    ? customStepX
-    : Math.max(200, Math.round(stepY * 2.0));
-
-  // Determine succinct font size
-  const calculatedFontSize = fontSize && fontSize >= 14
-    ? fontSize
-    : Math.max(18, Math.min(26, Math.round(stepY * 0.22)));
+  if (type === 'none' || opacity <= 0 || rectW <= 0 || rectH <= 0) return;
 
   ctx.save();
   ctx.beginPath();
@@ -61,36 +49,72 @@ function drawDiagonalWatermark(
   ctx.clip();
 
   ctx.globalAlpha = opacity;
-  ctx.font = `bold ${calculatedFontSize}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  const label = text.trim() ? (text.startsWith('✦') ? text : `✦ ${text}`) : '✦ 豆织星格';
 
-  const angle = -25 * Math.PI / 180;
-  ctx.translate(rectX + rectW / 2, rectY + rectH / 2);
-  ctx.rotate(angle);
+  if (type === 'double_diagonal') {
+    const area = rectW * rectH;
+    const targetCount = Math.max(5, Math.min(22, Math.round(Math.sqrt(area) / 120)));
+    const targetCellArea = area / targetCount;
+    const stepY = Math.max(100, Math.round(Math.sqrt(targetCellArea / 2.0)));
+    const stepX = Math.max(200, Math.round(stepY * 2.0));
+    const fontSize = Math.max(18, Math.min(26, Math.round(stepY * 0.22)));
 
-  // Purple gradient for watermark text
-  const purpleGrad = ctx.createLinearGradient(-50, -10, 50, 10);
-  purpleGrad.addColorStop(0, '#7C3AED'); // Deep Violet
-  purpleGrad.addColorStop(0.5, '#A855F7'); // Bright Purple
-  purpleGrad.addColorStop(1, '#D946EF'); // Fuchsia
-  ctx.fillStyle = purpleGrad;
+    ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
 
-  // Cover bounding box
-  const diagonal = Math.sqrt(rectW * rectW + rectH * rectH) * 1.5;
-  const startX = -diagonal;
-  const endX = diagonal;
-  const startY = -diagonal;
-  const endY = diagonal;
+    const angle = (angleDegrees * Math.PI) / 180;
+    ctx.translate(rectX + rectW / 2, rectY + rectH / 2);
+    ctx.rotate(angle);
 
-  const watermarkLabel = '✦ 豆织星格';
+    ctx.fillStyle = color || '#A855F7';
 
-  for (let y = startY; y < endY; y += stepY) {
-    const rowIdx = Math.floor(y / stepY);
-    const offsetX = (rowIdx % 2 === 0) ? 0 : stepX / 2;
-    for (let x = startX; x < endX; x += stepX) {
-      ctx.fillText(watermarkLabel, x + offsetX, y);
+    const diagonal = Math.sqrt(rectW * rectW + rectH * rectH) * 1.5;
+    const startX = -diagonal;
+    const endX = diagonal;
+    const startY = -diagonal;
+    const endY = diagonal;
+
+    for (let y = startY; y < endY; y += stepY) {
+      const rowIdx = Math.floor(y / stepY);
+      const offsetX = rowIdx % 2 === 0 ? 0 : stepX / 2;
+      for (let x = startX; x < endX; x += stepX) {
+        ctx.fillText(label, x + offsetX, y);
+      }
     }
+  } else if (type === 'corners') {
+    const padding = 16;
+    const fontSize = Math.max(13, Math.min(20, Math.round(rectW * 0.03)));
+    ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+    ctx.fillStyle = color || '#A855F7';
+
+    // Top-Left
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(label, rectX + padding, rectY + padding);
+
+    // Top-Right
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText(label, rectX + rectW - padding, rectY + padding);
+
+    // Bottom-Left
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(label, rectX + padding, rectY + rectH - padding);
+
+    // Bottom-Right
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(label, rectX + rectW - padding, rectY + rectH - padding);
+  } else if (type === 'bottom') {
+    const padding = 14;
+    const fontSize = Math.max(14, Math.min(22, Math.round(rectW * 0.035)));
+    ctx.font = `bold ${fontSize}px system-ui, sans-serif`;
+    ctx.fillStyle = color || '#A855F7';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(label, rectX + rectW / 2, rectY + rectH - padding);
   }
 
   ctx.restore();
@@ -196,12 +220,21 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     showCoordinates,
     beadShape,
     selectedBoardIndex,
-    watermarkPosition = 'grid_and_legend',
+    watermarkType: rawWatermarkType,
+    watermarkText = '豆织星格',
     watermarkOpacity = 0.18,
+    watermarkColor = '#A855F7',
+    watermarkAngle = -25,
+    watermarkPosition = 'grid_and_legend',
     legendPosition = 'right',
     legendScaleMode = 'auto',
     hideEmptyPegs = false,
   } = options;
+
+  // Resolve effective watermark type
+  const watermarkType: WatermarkType = rawWatermarkType
+    ? rawWatermarkType
+    : (watermarkPosition === 'none' ? 'none' : 'double_diagonal');
 
   // 1. Calculate sub-boards bounds if a specific board is requested
   const boardsX = Math.ceil(width / boardSize);
@@ -423,18 +456,19 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // Render Grid Watermark Overlay (Smart Density Diagonal Watermark)
-  if (watermarkPosition !== 'none') {
-    drawDiagonalWatermark(
-      ctx,
-      startGridX,
-      startGridY,
-      gridPixelWidth,
-      gridPixelHeight,
-      '✦ 豆织星格',
-      watermarkOpacity
-    );
-  }
+  // Render Grid Watermark Overlay
+  drawWatermarkOverlay(
+    ctx,
+    startGridX,
+    startGridY,
+    gridPixelWidth,
+    gridPixelHeight,
+    watermarkType,
+    watermarkText,
+    watermarkOpacity,
+    watermarkColor,
+    watermarkAngle
+  );
 
   // 9. Render Scaled Legend Panel (Right Sidebar or Bottom Block)
   const legendX = legendPosition === 'right'
@@ -458,18 +492,19 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.fillRect(legendX - 10, legendY - 10, legendBoxW, legendBoxH);
   ctx.strokeRect(legendX - 10, legendY - 10, legendBoxW, legendBoxH);
 
-  // Legend Diagonal Watermark
-  if (watermarkPosition !== 'none') {
-    drawDiagonalWatermark(
-      ctx,
-      legendX - 10,
-      legendY - 10,
-      legendBoxW,
-      legendBoxH,
-      '✦ 豆织星格',
-      Math.min(0.28, watermarkOpacity + 0.04)
-    );
-  }
+  // Legend Watermark Overlay
+  drawWatermarkOverlay(
+    ctx,
+    legendX - 10,
+    legendY - 10,
+    legendBoxW,
+    legendBoxH,
+    watermarkType,
+    watermarkText,
+    Math.min(0.28, watermarkOpacity + 0.04),
+    watermarkColor,
+    watermarkAngle
+  );
 
   // Legend Header Text
   ctx.fillStyle = '#0F172A';

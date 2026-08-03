@@ -806,6 +806,7 @@ export default function App() {
         brandName={brand}
         projectName={projectName}
         beadShape={beadShape}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
 
       <ColorReplaceModal

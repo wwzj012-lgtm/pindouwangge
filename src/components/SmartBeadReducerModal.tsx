@@ -539,53 +539,45 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           {/* Precision Comparison & Savings Breakdown Card */}
           {report && (
             <div className="space-y-3">
-              {/* Detailed Stage Savings Breakdown Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[11px] flex items-center gap-1">
-                    <Scissors className="w-3.5 h-3.5 text-amber-400" />
-                    <span>抠除单色背景</span>
-                  </span>
-                  <div className="font-mono font-bold text-amber-300 text-sm mt-1">
-                    省 {report.bgBeadsSaved} 粒
+              {/* 2-Item Clear Savings Breakdown Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                {/* Item 1: Bead Material Savings */}
+                <div className="bg-slate-950/90 border border-amber-500/30 rounded-xl p-3.5 flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
+                    <Scissors className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs">① 抠除背景 & 连片合并 (耗材省豆)</span>
+                      <span className="font-mono font-bold text-amber-300 text-sm">省约 ¥{report.beadMaterialSavedRMB} 元</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      抠除背景、合并连片，减少 <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> 颗拼豆耗材 (物理省豆 <strong className="text-emerald-400">{report.savedPercent}%</strong>)
+                    </p>
                   </div>
                 </div>
 
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[11px] flex items-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-sky-400" />
-                    <span>净化悬空噪点</span>
-                  </span>
-                  <div className="font-mono font-bold text-sky-300 text-sm mt-1">
-                    省 {report.noiseBeadsSaved} 粒
+                {/* Item 2: Color Pack Savings */}
+                <div className="bg-slate-950/90 border border-purple-500/30 rounded-xl p-3.5 flex items-start gap-3">
+                  <div className="p-2.5 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-400 shrink-0">
+                    <Palette className="w-5 h-5" />
                   </div>
-                </div>
-
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[11px] flex items-center gap-1">
-                    <Layers className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>平滑连片合并</span>
-                  </span>
-                  <div className="font-mono font-bold text-indigo-300 text-sm mt-1">
-                    省 {report.patchMergedBeadsSaved} 粒
-                  </div>
-                </div>
-
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between">
-                  <span className="text-slate-400 text-[11px] flex items-center gap-1">
-                    <Palette className="w-3.5 h-3.5 text-purple-400" />
-                    <span>少用杂色袋清退</span>
-                  </span>
-                  <div className="font-mono font-bold text-purple-300 text-sm mt-1">
-                    少买 {report.savedColorTypesCount} 包色料
+                  <div className="space-y-1 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white text-xs">② 精简杂色色卡 (整包清退)</span>
+                      <span className="font-mono font-bold text-purple-300 text-sm">省约 ¥{report.colorPacksSavedRMB} 元</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      色卡从 <strong className="text-slate-200">{report.originalColorTypesCount}</strong> 种精简至 <strong className="text-emerald-400">{report.optimizedColorTypesCount}</strong> 种，少购入 <strong className="text-purple-300 font-mono">{report.savedColorTypesCount}</strong> 整包杂色拼豆
+                    </p>
                   </div>
                 </div>
               </div>
 
-              {/* Summary Banner */}
-              <div className="bg-gradient-to-r from-slate-950 via-sky-950/90 to-slate-950 border border-amber-500/50 rounded-xl p-3.5 px-4 text-xs text-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
-                <div className="space-y-1 text-center sm:text-left">
-                  <div className="font-bold text-white flex items-center gap-2">
+              {/* Summary Banner with Big RMB Display & Valuation Benchmark Note */}
+              <div className="bg-gradient-to-r from-slate-950 via-amber-950/80 to-slate-950 border-2 border-amber-500/60 rounded-xl p-4 text-xs text-slate-200 flex flex-col md:flex-row items-center justify-between gap-4 shadow-xl">
+                <div className="space-y-1.5 text-center md:text-left">
+                  <div className="font-bold text-white flex items-center gap-2 justify-center md:justify-start">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span>
                       原图 {origW}×{origH} = {report.originalTotalBeads} 粒拼豆 ({report.originalColorTypesCount}色)
@@ -593,16 +585,18 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                       PRO 减粒图纸 {optW}×{optH} = {report.optimizedTotalBeads} 粒拼豆 ({report.optimizedColorTypesCount}色)
                     </span>
                   </div>
-                  <p className="text-[11px] text-slate-300 font-mono">
-                    累计削减 <strong className="text-amber-300 text-xs">{report.savedBeadCount}</strong> 颗拼豆（物理省豆 <strong className="text-emerald-400">{report.savedPercent}%</strong>，画质五官零失真）
-                  </p>
+                  <div className="text-[11px] text-amber-200/80 font-mono flex items-center gap-1 justify-center md:justify-start">
+                    <span>* 备注计价基准：按市面常规 3 元 / 千粒补充包零售价测算。</span>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 bg-gradient-to-r from-amber-950 to-amber-900 border border-amber-500/60 px-4 py-2 rounded-xl shrink-0 shadow">
-                  <DollarSign className="w-4 h-4 text-amber-300" />
-                  <span className="text-amber-200 font-bold text-xs">
-                    预计为买家省材料费 <span className="text-amber-300 text-base font-mono font-black">¥{report.estimatedMoneySavedRMB}</span> 元
-                  </span>
+                <div className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 px-5 py-2.5 rounded-xl shrink-0 shadow-lg shadow-amber-500/25 border border-amber-300">
+                  <DollarSign className="w-5 h-5 fill-current shrink-0" />
+                  <div className="flex items-baseline gap-1">
+                    <span className="font-black text-xs">PRO VIP 预计总节省：</span>
+                    <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-slate-950">¥{report.estimatedMoneySavedRMB}</span>
+                    <span className="font-black text-xs">元</span>
+                  </div>
                 </div>
               </div>
             </div>

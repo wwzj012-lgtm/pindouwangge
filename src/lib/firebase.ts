@@ -22,6 +22,7 @@ import {
   getDocs,
   where,
   onSnapshot,
+  enableIndexedDbPersistence,
 } from 'firebase/firestore';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
@@ -39,6 +40,18 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfigJson.firestoreDatabaseId || '(default)');
+
+// Enable offline persistence for Firestore
+if (typeof window !== 'undefined') {
+  enableIndexedDbPersistence(db).catch((err) => {
+    if (err.code === 'failed-precondition') {
+      // Multiple tabs open, persistence can only be enabled in one tab at a time.
+    } else if (err.code === 'unimplemented') {
+      // The current browser does not support offline persistence
+    }
+  });
+}
+
 export const googleProvider = new GoogleAuthProvider();
 
 export interface UserProfile {
@@ -71,51 +84,56 @@ export async function sha256(message: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// User Profile Listener / Helper
+// User Profile Listener / Helper with Offline Support
 export async function syncUserProfile(user: User): Promise<UserProfile> {
-  const userRef = doc(db, 'users', user.uid);
-  const snap = await getDoc(userRef);
-
   const isAdminEmail = user.email === 'wwzj012@gmail.com';
+  const defaultProfile: UserProfile = {
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName || user.email?.split('@')[0] || '拼豆玩家',
+    photoURL: user.photoURL,
+    isVip: isAdminEmail, // Admin automatically starts with VIP
+    vipExpireAt: isAdminEmail ? Date.now() + 3650 * 86400 * 1000 : null,
+    freeTrialUsed: false,
+    role: isAdminEmail ? 'admin' : 'user',
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
 
-  if (!snap.exists()) {
-    const newProfile: UserProfile = {
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName || user.email?.split('@')[0] || '拼豆玩家',
-      photoURL: user.photoURL,
-      isVip: isAdminEmail, // Admin automatically starts with VIP
-      vipExpireAt: isAdminEmail ? Date.now() + 3650 * 86400 * 1000 : null,
-      freeTrialUsed: false,
-      role: isAdminEmail ? 'admin' : 'user',
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-    await setDoc(userRef, newProfile);
-    return newProfile;
-  } else {
-    const data = snap.data() as UserProfile;
-    let needsUpdate = false;
-    const updates: Partial<UserProfile> = { updatedAt: Date.now() };
+  try {
+    const userRef = doc(db, 'users', user.uid);
+    const snap = await getDoc(userRef);
 
-    if (isAdminEmail && data.role !== 'admin') {
-      updates.role = 'admin';
-      updates.isVip = true;
-      needsUpdate = true;
+    if (!snap.exists()) {
+      await setDoc(userRef, defaultProfile).catch(e => console.warn('Offline mode: skipped setDoc', e));
+      return defaultProfile;
+    } else {
+      const data = snap.data() as UserProfile;
+      let needsUpdate = false;
+      const updates: Partial<UserProfile> = { updatedAt: Date.now() };
+
+      if (isAdminEmail && data.role !== 'admin') {
+        updates.role = 'admin';
+        updates.isVip = true;
+        needsUpdate = true;
+      }
+
+      // Check VIP Expiration
+      if (data.isVip && data.vipExpireAt && data.vipExpireAt < Date.now()) {
+        updates.isVip = false;
+        needsUpdate = true;
+      }
+
+      if (needsUpdate) {
+        await updateDoc(userRef, updates).catch(e => console.warn('Offline mode: skipped updateDoc', e));
+        return { ...data, ...updates };
+      }
+
+      return data;
     }
-
-    // Check VIP Expiration
-    if (data.isVip && data.vipExpireAt && data.vipExpireAt < Date.now()) {
-      updates.isVip = false;
-      needsUpdate = true;
-    }
-
-    if (needsUpdate) {
-      await updateDoc(userRef, updates);
-      return { ...data, ...updates };
-    }
-
-    return data;
+  } catch (err) {
+    console.warn('Firestore unreachable, using local fallback user profile:', err);
+    return defaultProfile;
   }
 }
 

@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+        (
+          (request.auth.token.email == 'wwzj012@gmail.com' && request.auth.token.email_verified == true) ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin')
+        );
+    }
+
+    // Users Collection: Users can only read/write their own document; Admins can read/write all
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId)
+                    // Regular user cannot escalate role or grant themselves VIP manually
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isVip', 'vipExpireAt']) || isAdmin())
+                    || isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    // Patterns Collection: User patterns
+    match /patterns/{patternId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    // VIP Redeem Codes Collection:
+    // IMPORTANT: Normal users CANNOT list/browse all unredeemed codes. They can only get a single document or redeem it.
+    match /vipCodes/{codeId} {
+      allow list: if isAdmin();
+      allow get: if isSignedIn();
+      allow create, delete: if isAdmin();
+      // Users can only mark a valid, unused code as used by themselves
+      allow update: if isSignedIn() 
+                    && resource.data.used == false 
+                    && request.resource.data.used == true 
+                    && request.resource.data.usedBy == request.auth.uid
+                    || isAdmin();
+    }
+
+    // Audit Logs Collection
+    match /auditLogs/{logId} {
+      allow read, create: if isAdmin();
+      allow update, delete: if false;
+    }
+  }
+}

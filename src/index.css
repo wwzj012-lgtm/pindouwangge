@@ -29,3 +29,26 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.35) rgba(15, 23, 42, 0.5);
 }
+
+/* Bead Grid Symbol Adaptive Font Clamping (0.34rem ~ 0.46rem) */
+.bead-symbol-adaptive {
+  font-size: clamp(0.34rem, 1.1vw, 0.46rem);
+  line-height: 1;
+}
+
+/* Mobile & Tablet 48px Minimum Touch Target Utilities */
+@media (max-width: 1023px) {
+  .touch-target-min {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
+
+/* Touch Active Feedback without Lingering Hover States */
+@media (hover: none) {
+  .touch-feedback:active {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+  }
+}
+

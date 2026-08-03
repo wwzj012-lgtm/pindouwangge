@@ -26,6 +26,8 @@ import { ColorReplaceModal } from './components/ColorReplaceModal';
 import { ImageStudioModal } from './components/ImageStudioModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
+import { AuthModal } from './components/AuthModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
 
 export default function App() {
   // 1. Core State
@@ -86,6 +88,8 @@ export default function App() {
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
@@ -594,6 +598,7 @@ export default function App() {
         onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onClearCanvas={handleClearCanvas}
         settings={settings}
         setSettings={setSettings}
@@ -830,6 +835,18 @@ export default function App() {
             height: newGrid.length || s.height,
           }));
         }}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
+      />
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+      />
+
+      <AdminPanelModal
+        isOpen={isAdminPanelOpen}
+        onClose={() => setIsAdminPanelOpen(false)}
       />
 
       {sourceImage && (

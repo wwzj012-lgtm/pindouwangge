@@ -1,0 +1,56 @@
+{
+  "collections": {
+    "users": {
+      "description": "系统注册与管理的用户账号信息及VIP权限记录",
+      "fields": {
+        "uid": { "type": "string", "description": "用户Firebase UID" },
+        "email": { "type": "string", "description": "用户邮箱" },
+        "displayName": { "type": "string", "description": "用户显示名称" },
+        "photoURL": { "type": "string", "description": "头像地址" },
+        "isVip": { "type": "boolean", "description": "是否为VIP/PRO高级会员" },
+        "vipExpireAt": { "type": "number", "description": "VIP到期时间戳(ms)" },
+        "freeTrialUsed": { "type": "boolean", "description": "新用户1次免费体验试用额度是否已消耗" },
+        "role": { "type": "string", "description": "账号角色 (user | admin)" },
+        "createdAt": { "type": "number", "description": "注册创建时间戳(ms)" },
+        "updatedAt": { "type": "number", "description": "更新时间戳(ms)" }
+      }
+    },
+    "patterns": {
+      "description": "用户保存或导出的拼豆作品与作品图纸",
+      "fields": {
+        "id": { "type": "string", "description": "图纸ID" },
+        "userId": { "type": "string", "description": "归属用户UID" },
+        "title": { "type": "string", "description": "作品名称" },
+        "width": { "type": "number", "description": "宽度(像素)" },
+        "height": { "type": "number", "description": "高度(像素)" },
+        "totalBeads": { "type": "number", "description": "总拼豆颗数" },
+        "createdAt": { "type": "number", "description": "创建时间戳" }
+      }
+    },
+    "vipCodes": {
+      "description": "管理员可用于激活分配VIP权限的兑换激活码库",
+      "fields": {
+        "code": { "type": "string", "description": "VIP激活兑换码" },
+        "codeHash": { "type": "string", "description": "卡密安全哈希校验码" },
+        "days": { "type": "number", "description": "可得VIP天数" },
+        "channel": { "type": "string", "description": "发行渠道标记 (淘宝 | 抖音 | 社群 | 代理)" },
+        "expireAt": { "type": "number", "description": "兑换码本身有效期截止时间戳(ms)" },
+        "used": { "type": "boolean", "description": "是否已被使用" },
+        "usedBy": { "type": "string", "description": "使用者UID" },
+        "usedAt": { "type": "number", "description": "核销时间戳" },
+        "createdAt": { "type": "number", "description": "生成时间戳" }
+      }
+    },
+    "auditLogs": {
+      "description": "管理员运维及VIP权限分发操作审计日志",
+      "fields": {
+        "id": { "type": "string", "description": "日志ID" },
+        "operatorUid": { "type": "string", "description": "操作员UID" },
+        "operatorEmail": { "type": "string", "description": "操作员邮箱" },
+        "action": { "type": "string", "description": "操作动作 (GRANT_VIP | BATCH_GEN_CODES | REVOKE_VIP)" },
+        "details": { "type": "string", "description": "操作明细描述" },
+        "timestamp": { "type": "number", "description": "时间戳(ms)" }
+      }
+    }
+  }
+}

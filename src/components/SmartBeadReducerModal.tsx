@@ -14,8 +14,9 @@ import {
   ArrowRight,
   Palette,
   RefreshCw,
-  Maximize2,
   Minimize2,
+  Crown,
+  Gift,
 } from 'lucide-react';
 import { BeadColor } from '../types';
 import {
@@ -24,6 +25,7 @@ import {
   ReductionOptions,
   ReductionReport,
 } from '../utils/smartReduceUtils';
+import { useAuth } from '../context/AuthContext';
 
 interface SmartBeadReducerModalProps {
   isOpen: boolean;
@@ -31,6 +33,7 @@ interface SmartBeadReducerModalProps {
   grid: (string | null)[][];
   palette: BeadColor[];
   onApplyReducedGrid: (newGrid: (string | null)[][]) => void;
+  onOpenAuthModal?: () => void;
 }
 
 export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
@@ -39,7 +42,9 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   grid,
   palette,
   onApplyReducedGrid,
+  onOpenAuthModal,
 }) => {
+  const { isVip, hasFreeTrial, consumeFreeTrial } = useAuth();
   const [intensity, setIntensity] = useState<ReductionIntensity>('medium');
   const [downscaleRatio, setDownscaleRatio] = useState<number>(1.0); // 1.0, 0.85, 0.70
   const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(true);
@@ -152,7 +157,22 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const optH = report?.optimizedGrid.length || origH;
   const optW = report?.optimizedGrid[0]?.length || origW;
 
-  const handleApply = () => {
+  const handleApply = async () => {
+    if (!isVip) {
+      if (hasFreeTrial) {
+        const success = await consumeFreeTrial();
+        if (success && report) {
+          onApplyReducedGrid(report.optimizedGrid);
+          onClose();
+          return;
+        }
+      }
+      if (onOpenAuthModal) {
+        onOpenAuthModal();
+      }
+      return;
+    }
+
     if (report) {
       onApplyReducedGrid(report.optimizedGrid);
       onClose();
@@ -600,15 +620,37 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           </button>
 
           <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleApply}
-              disabled={isCalculating || !report}
-              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 text-white font-bold text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-sky-500/25 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
-            >
-              <Zap className="w-4 h-4 fill-current" />
-              <span>应用减粒图纸到当前拼豆画布</span>
-            </button>
+            {isVip ? (
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={isCalculating || !report}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 text-white font-bold text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-sky-500/25 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
+              >
+                <Zap className="w-4 h-4 fill-current text-amber-300" />
+                <span>应用减粒图纸到当前拼豆画布</span>
+              </button>
+            ) : hasFreeTrial ? (
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={isCalculating || !report}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-emerald-500/25 transition-all cursor-pointer flex items-center gap-2 border border-emerald-300"
+              >
+                <Gift className="w-4 h-4 fill-current text-slate-950" />
+                <span>消耗 1 次新用户免费体验额度直接应用</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={isCalculating || !report}
+                className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-amber-500/25 transition-all cursor-pointer flex items-center gap-2 border border-amber-300"
+              >
+                <Crown className="w-4 h-4 fill-current text-slate-950" />
+                <span>解锁 PRO VIP 权限 / 激活卡密应用</span>
+              </button>
+            )}
           </div>
         </div>
       </div>

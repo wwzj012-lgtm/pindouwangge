@@ -16,6 +16,7 @@ import {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   collection,
   addDoc,
   query,
@@ -90,7 +91,19 @@ export async function sha256(message: string): Promise<string> {
 // User Profile Listener / Helper with Offline Support
 export async function syncUserProfile(user: User): Promise<UserProfile> {
   const isAdminEmail = user.email === 'wwzj012@gmail.com';
-  const defaultProfile: UserProfile = {
+
+  // Load cached profile from localStorage if available
+  let cachedProfile: UserProfile | null = null;
+  try {
+    const rawCached = localStorage.getItem(`dzxg_user_profile_${user.uid}`);
+    if (rawCached) {
+      cachedProfile = JSON.parse(rawCached);
+    }
+  } catch (e) {
+    console.warn('Failed to read cached profile:', e);
+  }
+
+  const defaultProfile: UserProfile = cachedProfile || {
     uid: user.uid,
     email: user.email,
     displayName: user.displayName || user.email?.split('@')[0] || '拼豆玩家',
@@ -106,12 +119,34 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     updatedAt: Date.now(),
   };
 
+  // Skip Firestore entirely for guest/local-fallback users to be fast
+  if (user.uid.startsWith('cn_guest_') && cachedProfile) {
+    return cachedProfile;
+  }
+
+  // Fast connection timeout for Firestore (1.5 seconds)
+  const timeoutMs = isAdminEmail ? 3000 : 1500;
+
   try {
     const userRef = doc(db, 'users', user.uid);
-    const snap = await getDoc(userRef);
+    
+    // Race getDoc against a fast timeout
+    const snap = await Promise.race([
+      getDoc(userRef),
+      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Firestore connection timeout')), timeoutMs))
+    ]).catch((err) => {
+      console.warn('getDoc timed out or failed, utilizing fallback profile:', err);
+      return null;
+    });
 
-    if (!snap.exists()) {
-      await setDoc(userRef, defaultProfile).catch(e => console.warn('Offline mode: skipped setDoc', e));
+    if (!snap || !snap.exists()) {
+      // Create profile in Firestore asynchronously so we don't block
+      setDoc(userRef, defaultProfile).catch(e => console.warn('Offline mode: skipped setDoc', e));
+      
+      try {
+        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(defaultProfile));
+      } catch (e) {}
+      
       return defaultProfile;
     } else {
       const data = snap.data() as UserProfile;
@@ -137,16 +172,23 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
         needsUpdate = true;
       }
 
-      if (needsUpdate) {
-        await updateDoc(userRef, updates).catch(e => console.warn('Offline mode: skipped updateDoc', e));
-        return { ...data, ...updates };
-      }
-
-      return {
+      const mergedProfile: UserProfile = {
         ...data,
         member_type: data.member_type ?? (data.isVip ? 1 : 0),
         member_expire: data.member_expire ?? data.vipExpireAt ?? null,
+        ...(needsUpdate ? updates : {}),
       };
+
+      if (needsUpdate) {
+        updateDoc(userRef, updates).catch(e => console.warn('Offline mode: skipped updateDoc', e));
+      }
+
+      // Update cache
+      try {
+        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(mergedProfile));
+      } catch (e) {}
+
+      return mergedProfile;
     }
   } catch (err) {
     console.warn('Firestore unreachable, using local fallback user profile:', err);
@@ -180,6 +222,7 @@ export {
   getDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
   collection,
   addDoc,
   query,

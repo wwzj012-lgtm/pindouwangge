@@ -21,6 +21,10 @@ import {
   CheckCircle2,
   Crown,
   Store,
+  Trash2,
+  Edit3,
+  UserPlus,
+  Filter,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -30,6 +34,7 @@ import {
   doc,
   updateDoc,
   setDoc,
+  deleteDoc,
   UserProfile,
   sha256,
   recordAuditLog,
@@ -90,6 +95,31 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
   // CSV Export confirmation modal state
   const [showExportConfirmModal, setShowExportConfirmModal] = useState<boolean>(false);
+
+  // User CRUD states
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'admin' | 'pro' | 'vip' | 'free'>('all');
+
+  // Add User Modal state
+  const [showAddUserModal, setShowAddUserModal] = useState<boolean>(false);
+  const [addDisplayName, setAddDisplayName] = useState<string>('');
+  const [addEmail, setAddEmail] = useState<string>('');
+  const [addRole, setAddRole] = useState<'user' | 'admin'>('user');
+  const [addMemberType, setAddMemberType] = useState<0 | 1 | 2>(0);
+  const [addExpireDays, setAddExpireDays] = useState<number>(30);
+
+  // Edit User Modal state
+  const [showEditUserModal, setShowEditUserModal] = useState<boolean>(false);
+  const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState<string>('');
+  const [editEmail, setEditEmail] = useState<string>('');
+  const [editRole, setEditRole] = useState<'user' | 'admin'>('user');
+  const [editMemberType, setEditMemberType] = useState<0 | 1 | 2>(0);
+  const [editExpireDays, setEditExpireDays] = useState<number>(30);
+
+  // Delete User Confirm Modal state
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState<boolean>(false);
+  const [userToDelete, setUserToDelete] = useState<UserProfile | null>(null);
+  const [showBatchDeleteConfirmModal, setShowBatchDeleteConfirmModal] = useState<boolean>(false);
 
   useEffect(() => {
     if (isOpen && isAdmin) {
@@ -214,6 +244,178 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       setSelectedUserUids([]);
     } catch (err) {
       console.error('Batch grant failed:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addEmail.trim()) return;
+
+    setLoading(true);
+    try {
+      const targetEmail = addEmail.trim();
+      const cleanedUid = targetEmail.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+      const newUid = `cn_user_${cleanedUid || Date.now().toString(36)}`;
+
+      const isPermanent = addExpireDays >= 3650;
+      const expireTime = addMemberType === 0 ? null : (isPermanent ? null : Date.now() + addExpireDays * 86400 * 1000);
+
+      const newProfile: UserProfile = {
+        uid: newUid,
+        email: targetEmail,
+        displayName: addDisplayName.trim() || targetEmail.split('@')[0],
+        photoURL: null,
+        member_type: addMemberType,
+        member_expire: expireTime,
+        member_source: '管理员后台手动创建',
+        isVip: addMemberType > 0,
+        vipExpireAt: expireTime,
+        role: addRole,
+        freeTrialUsed: false,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      await setDoc(doc(db, 'users', newUid), newProfile);
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'ADMIN_ADD_USER',
+          `后台添加用户 [${newProfile.displayName}]（邮箱: ${newProfile.email}, 角色: ${newProfile.role}, 会员类型: ${newProfile.member_type}）`
+        );
+      }
+
+      setUsersList(prev => [...prev, newProfile]);
+      setShowAddUserModal(false);
+      setAddDisplayName('');
+      setAddEmail('');
+      setAddRole('user');
+      setAddMemberType(0);
+      setAddExpireDays(30);
+    } catch (err) {
+      console.error('Failed to add user:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleOpenEditModal = (user: UserProfile) => {
+    setEditingUser(user);
+    setEditDisplayName(user.displayName || '');
+    setEditEmail(user.email || '');
+    setEditRole(user.role || 'user');
+    setEditMemberType(user.member_type || 0);
+    if (user.member_expire) {
+      const remainingMs = user.member_expire - Date.now();
+      const remainingDays = Math.max(Math.ceil(remainingMs / (86400 * 1000)), 1);
+      setEditExpireDays(remainingDays);
+    } else {
+      setEditExpireDays(30);
+    }
+    setShowEditUserModal(true);
+  };
+
+  const handleEditUserSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingUser) return;
+
+    setLoading(true);
+    try {
+      const isPermanent = editExpireDays >= 3650;
+      const expireTime = editMemberType === 0 ? null : (isPermanent ? null : Date.now() + editExpireDays * 86400 * 1000);
+
+      const updates: Partial<UserProfile> = {
+        displayName: editDisplayName.trim(),
+        email: editEmail.trim(),
+        role: editRole,
+        member_type: editMemberType,
+        member_expire: expireTime,
+        isVip: editMemberType > 0,
+        vipExpireAt: expireTime,
+        updatedAt: Date.now(),
+      };
+
+      await updateDoc(doc(db, 'users', editingUser.uid), updates);
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'ADMIN_EDIT_USER',
+          `后台修改用户 [${editingUser.displayName}] -> [${updates.displayName}]（UID: ${editingUser.uid}）`
+        );
+      }
+
+      setUsersList(prev =>
+        prev.map(u => (u.uid === editingUser.uid ? { ...u, ...updates } : u))
+      );
+      setShowEditUserModal(false);
+      setEditingUser(null);
+    } catch (err) {
+      console.error('Failed to edit user:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteUserClick = (user: UserProfile) => {
+    setUserToDelete(user);
+    setShowDeleteConfirmModal(true);
+  };
+
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, 'users', userToDelete.uid));
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'ADMIN_DELETE_USER',
+          `后台删除用户 [${userToDelete.displayName}]（邮箱: ${userToDelete.email}, UID: ${userToDelete.uid}）`
+        );
+      }
+
+      setUsersList(prev => prev.filter(u => u.uid !== userToDelete.uid));
+      setShowDeleteConfirmModal(false);
+      setUserToDelete(null);
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleConfirmBatchDeleteUsers = async () => {
+    if (selectedUserUids.length === 0) return;
+
+    setLoading(true);
+    try {
+      for (const uid of selectedUserUids) {
+        await deleteDoc(doc(db, 'users', uid));
+      }
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'ADMIN_BATCH_DELETE_USERS',
+          `批量删除 ${selectedUserUids.length} 名用户账号`
+        );
+      }
+
+      setUsersList(prev => prev.filter(u => !selectedUserUids.includes(u.uid)));
+      setSelectedUserUids([]);
+      setShowBatchDeleteConfirmModal(false);
+    } catch (err) {
+      console.error('Batch delete failed:', err);
     } finally {
       setLoading(false);
     }
@@ -351,12 +553,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
   if (!isOpen || !isAdmin) return null;
 
-  const filteredUsers = usersList.filter(
-    u =>
+  const filteredUsers = usersList.filter(u => {
+    const matchesSearch =
       (u.displayName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (u.email || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.uid.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+      u.uid.toLowerCase().includes(searchQuery.toLowerCase());
+
+    if (!matchesSearch) return false;
+
+    if (userRoleFilter === 'all') return true;
+    if (userRoleFilter === 'admin') return u.role === 'admin';
+    if (userRoleFilter === 'pro') return u.member_type === 2 && u.role !== 'admin';
+    if (userRoleFilter === 'vip') return u.member_type === 1 && u.role !== 'admin';
+    if (userRoleFilter === 'free') return u.member_type === 0 && u.role !== 'admin';
+    return true;
+  });
 
   // Metrics & Anomaly Tracking
   const totalUsers = usersList.length;
@@ -523,28 +734,67 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           {activeTab === 'users' && (
             /* Users Tab */
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex flex-col lg:flex-row items-center justify-between gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800">
                 <div className="relative flex-1 w-full">
                   <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="搜索用户名、邮箱或 UID..."
-                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                    placeholder="搜索用户名、邮箱或 UID 标识..."
+                    className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[40px]"
                   />
                 </div>
 
-                {selectedUserUids.length > 0 && (
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full lg:w-auto">
+                  <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-xl shrink-0 min-h-[40px]">
+                    <Filter className="w-3.5 h-3.5 text-slate-400" />
+                    <select
+                      value={userRoleFilter}
+                      onChange={e => setUserRoleFilter(e.target.value as any)}
+                      className="bg-transparent text-xs text-slate-200 border-none outline-none focus:ring-0 font-bold cursor-pointer"
+                    >
+                      <option value="all">显示所有角色等级</option>
+                      <option value="admin">系统管理员 (Admin)</option>
+                      <option value="pro">商家Pro 会员</option>
+                      <option value="vip">普通VIP 会员</option>
+                      <option value="free">普通免费玩家</option>
+                    </select>
+                  </div>
+
                   <button
-                    onClick={handleBatchGrantVip}
-                    disabled={loading}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs rounded-xl shadow hover:brightness-110 cursor-pointer flex items-center justify-center gap-1.5 shrink-0 min-h-[44px]"
+                    type="button"
+                    onClick={() => setShowAddUserModal(true)}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow cursor-pointer flex items-center justify-center gap-1.5 min-h-[40px]"
                   >
-                    <Zap className="w-4 h-4 fill-current" />
-                    <span>为勾选的 {selectedUserUids.length} 名用户开通 30 天 VIP</span>
+                    <UserPlus className="w-4 h-4" />
+                    <span>添加玩家账号</span>
                   </button>
-                )}
+
+                  {selectedUserUids.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleBatchGrantVip(1)}
+                        disabled={loading}
+                        className="flex-1 px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 cursor-pointer flex items-center justify-center gap-1 min-h-[40px]"
+                      >
+                        <Zap className="w-3.5 h-3.5 fill-current" />
+                        <span>授予30天VIP ({selectedUserUids.length})</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowBatchDeleteConfirmModal(true)}
+                        disabled={loading}
+                        className="px-3 py-2 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800/60 text-rose-300 font-bold text-xs rounded-xl cursor-pointer flex items-center justify-center gap-1 min-h-[40px]"
+                        title="批量永久删除账号"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>批量删除</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Mobile Card List View (< sm screens) */}
@@ -617,27 +867,51 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-1.5 justify-end">
-                          <button
-                            onClick={() => handleSetUserMemberType(user, 1)}
-                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] cursor-pointer hover:bg-amber-500/30 transition-all min-h-[36px]"
-                          >
-                            设为普通VIP
-                          </button>
-                          <button
-                            onClick={() => handleSetUserMemberType(user, 2)}
-                            className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[11px] cursor-pointer hover:brightness-110 transition-all min-h-[36px]"
-                          >
-                            设为商家Pro
-                          </button>
-                          {((user.member_type ?? 0) > 0 || user.isVip) && (
+                        <div className="flex items-center gap-1.5 justify-between">
+                          <div className="flex items-center gap-1.5">
                             <button
-                              onClick={() => handleSetUserMemberType(user, 0)}
-                              className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-400 font-bold text-[11px] cursor-pointer hover:bg-slate-700 hover:text-slate-200 transition-all min-h-[36px]"
+                              type="button"
+                              onClick={() => handleOpenEditModal(user)}
+                              className="p-2 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
+                              title="编辑玩家资料"
                             >
-                              重置免费
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
-                          )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteUserClick(user)}
+                              className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
+                              title="永久删除玩家"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSetUserMemberType(user, 1)}
+                              className="px-2 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] cursor-pointer hover:bg-amber-500/30 transition-all min-h-[36px]"
+                            >
+                              VIP
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetUserMemberType(user, 2)}
+                              className="px-2 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[11px] cursor-pointer hover:brightness-110 transition-all min-h-[36px]"
+                            >
+                              Pro
+                            </button>
+                            {((user.member_type ?? 0) > 0 || user.isVip) && (
+                              <button
+                                type="button"
+                                onClick={() => handleSetUserMemberType(user, 0)}
+                                className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-400 font-bold text-[11px] cursor-pointer hover:bg-slate-700 hover:text-slate-200 transition-all min-h-[36px]"
+                              >
+                                重置
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -739,12 +1013,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
                               <button
+                                type="button"
                                 onClick={() => handleSetUserMemberType(user, 1)}
                                 className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] cursor-pointer hover:bg-amber-500/30 transition-all"
                               >
                                 普通VIP
                               </button>
                               <button
+                                type="button"
                                 onClick={() => handleSetUserMemberType(user, 2)}
                                 className="px-2.5 py-1 rounded bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[11px] cursor-pointer hover:brightness-110 transition-all shadow"
                               >
@@ -752,12 +1028,30 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                               </button>
                               {((user.member_type ?? 0) > 0 || user.isVip) && (
                                 <button
+                                  type="button"
                                   onClick={() => handleSetUserMemberType(user, 0)}
                                   className="px-2 py-1 rounded bg-slate-800 text-slate-400 font-bold text-[11px] cursor-pointer hover:bg-slate-700 hover:text-slate-200 transition-all"
                                 >
                                   重置免费
                                 </button>
                               )}
+                              <div className="w-[1px] h-4 bg-slate-800 mx-1 shrink-0" />
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditModal(user)}
+                                className="p-1.5 rounded-lg bg-sky-500/10 text-sky-400 border border-sky-500/20 hover:bg-sky-500/20 transition-all cursor-pointer flex items-center justify-center"
+                                title="编辑拼豆玩家账号"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUserClick(user)}
+                                className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20 hover:bg-rose-500/20 transition-all cursor-pointer flex items-center justify-center"
+                                title="删除玩家账号"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
                             </div>
                           </td>
                         </tr>
@@ -1131,6 +1425,300 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               </button>
               <button
                 onClick={() => setShowExportConfirmModal(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add User Modal */}
+      {showAddUserModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-lg p-4">
+          <form onSubmit={handleAddUser} className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <UserPlus className="w-5 h-5 text-sky-400" />
+                <h3 className="text-sm font-bold text-white">添加新拼豆账号</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(false)}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">用户登录邮箱</label>
+                <input
+                  type="email"
+                  value={addEmail}
+                  onChange={e => setAddEmail(e.target.value)}
+                  placeholder="name@example.com (作为登录主键)"
+                  required
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">个性昵称 / 拼豆店名</label>
+                <input
+                  type="text"
+                  value={addDisplayName}
+                  onChange={e => setAddDisplayName(e.target.value)}
+                  placeholder="例如: 拼豆萌新 / 水晶拼豆定制"
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">系统角色类型</label>
+                  <select
+                    value={addRole}
+                    onChange={e => setAddRole(e.target.value as 'user' | 'admin')}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value="user">普通玩家 (user)</option>
+                    <option value="admin">系统管理员 (admin)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">VIP PRO 权限</label>
+                  <select
+                    value={addMemberType}
+                    onChange={e => setAddMemberType(Number(e.target.value) as 0 | 1 | 2)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value={0}>免费体验玩家</option>
+                    <option value={1}>普通 VIP 会员</option>
+                    <option value={2}>商家 Pro 尊享版</option>
+                  </select>
+                </div>
+              </div>
+
+              {addMemberType > 0 && (
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">会员有效天数</label>
+                  <select
+                    value={addExpireDays}
+                    onChange={e => setAddExpireDays(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value={30}>30 天 (月度卡)</option>
+                    <option value={90}>90 天 (季度卡)</option>
+                    <option value={365}>365 天 (年度卡)</option>
+                    <option value={36500}>永久卡 (终身权益)</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-xs rounded-xl shadow hover:brightness-110 flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+              >
+                <Plus className="w-4 h-4" />
+                <span>立即创建并保存</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddUserModal(false)}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
+              >
+                取消
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditUserModal && editingUser && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-lg p-4">
+          <form onSubmit={handleEditUserSubmit} className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-sky-400" />
+                <h3 className="text-sm font-bold text-white">编辑拼豆账号</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                }}
+                className="p-1 text-slate-400 hover:text-white rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">用户登录邮箱</label>
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={e => setEditEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  required
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                />
+              </div>
+
+              <div>
+                <label className="text-[11px] text-slate-400 block mb-1">个性昵称 / 拼豆店名</label>
+                <input
+                  type="text"
+                  value={editDisplayName}
+                  onChange={e => setEditDisplayName(e.target.value)}
+                  placeholder="个性昵称"
+                  className="w-full px-3 py-2.5 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white placeholder:text-slate-600 focus:outline-none focus:border-sky-500 min-h-[44px]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">系统角色类型</label>
+                  <select
+                    value={editRole}
+                    onChange={e => setEditRole(e.target.value as 'user' | 'admin')}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value="user">普通玩家 (user)</option>
+                    <option value="admin">系统管理员 (admin)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">VIP PRO 权限</label>
+                  <select
+                    value={editMemberType}
+                    onChange={e => setEditMemberType(Number(e.target.value) as 0 | 1 | 2)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value={0}>免费体验玩家</option>
+                    <option value={1}>普通 VIP 会员</option>
+                    <option value={2}>商家 Pro 尊享版</option>
+                  </select>
+                </div>
+              </div>
+
+              {editMemberType > 0 && (
+                <div>
+                  <label className="text-[11px] text-slate-400 block mb-1">会员到期延长天数</label>
+                  <select
+                    value={editExpireDays}
+                    onChange={e => setEditExpireDays(Number(e.target.value))}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-sky-500 min-h-[44px]"
+                  >
+                    <option value={30}>30 天 (月度卡)</option>
+                    <option value={90}>90 天 (季度卡)</option>
+                    <option value={365}>365 天 (年度卡)</option>
+                    <option value={36500}>永久卡 (终身权益)</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="flex-1 py-2.5 bg-gradient-to-r from-sky-500 to-indigo-600 text-white font-bold text-xs rounded-xl shadow hover:brightness-110 flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+              >
+                <Check className="w-4 h-4" />
+                <span>保存修改</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEditUserModal(false);
+                  setEditingUser(null);
+                }}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
+              >
+                取消
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Delete User Confirm Modal */}
+      {showDeleteConfirmModal && userToDelete && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4">
+          <div className="relative w-full max-w-sm bg-slate-900 border border-rose-500/40 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-rose-400 pb-2 border-b border-slate-800">
+              <ShieldAlert className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-bold text-white">删除账号确认</h3>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              您确定要永久删除用户 <strong className="text-white font-bold">{userToDelete.displayName}</strong> 吗？
+              其所有的云端作品、VIP 权限状态和设置等数据将被立即永久擦除，此操作不可逆。
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleConfirmDeleteUser}
+                disabled={loading}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>确认永久删除</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirmModal(false);
+                  setUserToDelete(null);
+                }}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Batch Delete Confirm Modal */}
+      {showBatchDeleteConfirmModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/95 backdrop-blur-lg p-4">
+          <div className="relative w-full max-w-sm bg-slate-900 border border-rose-500/40 rounded-2xl p-5 shadow-2xl space-y-4">
+            <div className="flex items-center gap-2 text-rose-400 pb-2 border-b border-slate-800">
+              <ShieldAlert className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-bold text-white">批量删除账号确认</h3>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              您确定要批量删除已勾选的的 <strong className="text-white font-mono font-bold underline">{selectedUserUids.length}</strong> 名玩家账户吗？此操作将彻底擦除该批玩家的所有云端记录，不可恢复。
+            </p>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={handleConfirmBatchDeleteUsers}
+                disabled={loading}
+                className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-xl shadow flex items-center justify-center gap-1.5 cursor-pointer min-h-[44px]"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>确认批量删除</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBatchDeleteConfirmModal(false)}
                 className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
               >
                 取消

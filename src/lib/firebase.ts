@@ -119,8 +119,10 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     updatedAt: Date.now(),
   };
 
-  // Skip Firestore entirely for guest/local-fallback users to be fast
+  // Skip Firestore entirely for guest/local-fallback users to be fast, but sync in background if online
   if (user.uid.startsWith('cn_guest_') && cachedProfile) {
+    const userRef = doc(db, 'users', user.uid);
+    setDoc(userRef, cachedProfile, { merge: true }).catch(e => console.warn('Background sync failed for guest user:', e));
     return cachedProfile;
   }
 

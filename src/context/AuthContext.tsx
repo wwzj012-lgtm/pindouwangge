@@ -8,6 +8,7 @@ import {
   onAuthStateChanged,
   doc,
   getDoc,
+  setDoc,
   updateDoc,
   collection,
   query,
@@ -264,16 +265,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const memberSourceText = codeType === 2 ? '商家Pro兑换码' : '普通VIP兑换码';
 
-      // Update User Profile in Firestore
+      // Update User Profile in Firestore (use setDoc with merge to safely create or merge the document if it doesn't exist)
       const userRef = doc(db, 'users', currentUser.uid);
-      await updateDoc(userRef, {
+      await setDoc(userRef, {
+        uid: currentUser.uid,
+        email: currentUser.email || '',
+        displayName: currentUser.displayName || userProfile?.displayName || currentUser.email?.split('@')[0] || '拼豆玩家',
         member_type: targetMemberType,
         member_expire: newExpireAt,
         member_source: memberSourceText,
         isVip: true,
         vipExpireAt: newExpireAt,
+        role: userProfile?.role || 'user',
+        createdAt: userProfile?.createdAt || Date.now(),
         updatedAt: Date.now(),
-      });
+      }, { merge: true });
 
       // Mark Code as Used
       await updateDoc(codeDoc.ref, {

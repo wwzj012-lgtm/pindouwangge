@@ -59,8 +59,11 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  isVip: boolean;
-  vipExpireAt: number | null; // ms timestamp
+  member_type: 0 | 1 | 2; // 0=免费用户, 1=普通VIP, 2=商家Pro
+  member_expire: number | null; // ms timestamp
+  member_source?: string | null;
+  isVip: boolean; // backward compatibility
+  vipExpireAt: number | null; // backward compatibility
   freeTrialUsed?: boolean; // New user 1-time free trial used flag
   role: 'user' | 'admin';
   createdAt: number;
@@ -92,8 +95,11 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     email: user.email,
     displayName: user.displayName || user.email?.split('@')[0] || '拼豆玩家',
     photoURL: user.photoURL,
-    isVip: isAdminEmail, // Admin automatically starts with VIP
-    vipExpireAt: isAdminEmail ? Date.now() + 3650 * 86400 * 1000 : null,
+    member_type: isAdminEmail ? 2 : 0,
+    member_expire: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
+    member_source: isAdminEmail ? '系统管理员' : null,
+    isVip: isAdminEmail,
+    vipExpireAt: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
     freeTrialUsed: false,
     role: isAdminEmail ? 'admin' : 'user',
     createdAt: Date.now(),
@@ -112,15 +118,22 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
       let needsUpdate = false;
       const updates: Partial<UserProfile> = { updatedAt: Date.now() };
 
-      if (isAdminEmail && data.role !== 'admin') {
+      if (isAdminEmail && (data.role !== 'admin' || data.member_type !== 2)) {
         updates.role = 'admin';
+        updates.member_type = 2;
         updates.isVip = true;
+        updates.member_expire = Date.now() + 36500 * 86400 * 1000;
+        updates.vipExpireAt = updates.member_expire;
         needsUpdate = true;
       }
 
-      // Check VIP Expiration
-      if (data.isVip && data.vipExpireAt && data.vipExpireAt < Date.now()) {
+      // Check VIP / Pro Expiration
+      const effectiveExpire = data.member_expire || data.vipExpireAt;
+      if (data.role !== 'admin' && data.member_type > 0 && effectiveExpire && effectiveExpire < Date.now()) {
+        updates.member_type = 0;
         updates.isVip = false;
+        updates.member_expire = null;
+        updates.vipExpireAt = null;
         needsUpdate = true;
       }
 
@@ -129,7 +142,11 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
         return { ...data, ...updates };
       }
 
-      return data;
+      return {
+        ...data,
+        member_type: data.member_type ?? (data.isVip ? 1 : 0),
+        member_expire: data.member_expire ?? data.vipExpireAt ?? null,
+      };
     }
   } catch (err) {
     console.warn('Firestore unreachable, using local fallback user profile:', err);

@@ -12,6 +12,8 @@ import {
   HelpCircle,
   Palette,
   RotateCw,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { BeadColor, BeadShape } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -51,7 +53,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   beadShape,
   onOpenAuthModal,
 }) => {
-  const { isVip } = useAuth();
+  const { isVip, isPro, memberType } = useAuth();
 
   // Watermark States
   const [watermarkType, setWatermarkType] = useState<WatermarkType>('double_diagonal');
@@ -69,6 +71,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [selectedBoard, setSelectedBoard] = useState<number | null>(null);
 
   // Tooltips and Modal States
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [showVipTooltip, setShowVipTooltip] = useState(false);
   const [showFreeDownloadModal, setShowFreeDownloadModal] = useState(false);
   const [pendingDownloadType, setPendingDownloadType] = useState<'single' | 'all' | null>(null);
@@ -245,66 +248,128 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[94vh] sm:max-h-[92vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
         
         {/* Header */}
-        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
               <ImageIcon className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-slate-100">导出高清拼豆图纸教程</h3>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="font-bold text-sm text-slate-100 truncate">导出高清拼豆图纸教程</h3>
                 {isVip ? (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
                     <Crown className="w-3 h-3 text-amber-400" />
                     VIP尊享导出
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 border border-slate-700 text-slate-400">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 border border-slate-700 text-slate-400 shrink-0">
                     免费版图纸
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">
+              <p className="text-[11px] text-slate-400 mt-0.5 truncate hidden sm:block">
                 包含标准标尺坐标、色号符号标识与拼豆用量色卡列表
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Responsive Collapsible Button across PC, Tablet, Mobile */}
+            <button
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-xs transition-all cursor-pointer hover:text-white"
+              title={isCollapsed ? '展开参数设置' : '收起参数设置'}
+            >
+              {isCollapsed ? (
+                <>
+                  <ChevronDown className="w-4 h-4 text-purple-400 shrink-0" />
+                  <span className="hidden sm:inline font-bold text-purple-300">展开设置</span>
+                  <span className="sm:hidden font-bold text-purple-300">展开</span>
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="hidden sm:inline">收起设置</span>
+                  <span className="sm:hidden">收起</span>
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
-        {/* Control Area: Watermark Section & Settings */}
-        <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex flex-col gap-3 text-xs">
-          
-          {/* Watermark Section Bar */}
-          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 flex flex-col gap-2.5">
-            
-            {/* Header Title with Permission Indication */}
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
-                <span className="font-bold text-slate-200">
-                  {isVip
-                    ? '防盗水印【VIP 可关闭水印】'
-                    : '防盗水印【免费强制开启，升级 VIP 可去除】'}
-                </span>
-              </div>
-
-              {/* VIP Quick Badge / Action */}
-              {!isVip && (
-                <button
-                  onClick={() => onOpenAuthModal?.()}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-500/30 text-amber-300 font-bold hover:brightness-110 transition-all cursor-pointer text-[11px]"
-                >
-                  <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
-                  <span>开通 VIP 去水印</span>
-                </button>
-              )}
+        {/* Control Area: Watermark Section & Settings (Collapsible) */}
+        {isCollapsed ? (
+          <div className="px-3.5 py-2.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-300">
+              <span className="inline-flex items-center gap-1 font-bold text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+                <ShieldAlert className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                {watermarkType === 'none'
+                  ? '✨ 纯净无水印'
+                  : `🛡️ 水印: 双重斜向 (${Math.round(watermarkOpacity * 100)}%)`}
+              </span>
+              <span className="text-slate-700 hidden sm:inline">|</span>
+              <span className="text-slate-400">
+                {showCoordinates ? '标尺: 开启' : '标尺: 关闭'} • {showSymbols ? '色号: 开启' : '色号: 关闭'}
+              </span>
+              <span className="text-slate-700 hidden sm:inline">|</span>
+              <span className="text-slate-400">
+                视角: {selectedBoard === null ? '全景整张图纸' : `第 ${selectedBoard + 1} 板`}
+              </span>
             </div>
+            <button
+              onClick={() => setIsCollapsed(false)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold hover:bg-purple-500/20 text-[11px] cursor-pointer shrink-0 transition-all"
+            >
+              <ChevronDown className="w-3.5 h-3.5" />
+              <span>展开详细设置</span>
+            </button>
+          </div>
+        ) : (
+          <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex flex-col gap-3 text-xs">
+            
+            {/* Watermark Section Bar */}
+            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 flex flex-col gap-2.5">
+              
+              {/* Header Title with Permission Indication */}
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
+                  <span className="font-bold text-slate-200">
+                    {isVip
+                      ? '防盗水印【VIP 可关闭水印】'
+                      : '防盗水印【免费强制开启，升级 VIP 可去除】'}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {/* VIP Quick Badge / Action */}
+                  {!isVip && (
+                    <button
+                      onClick={() => onOpenAuthModal?.()}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-500/30 text-amber-300 font-bold hover:brightness-110 transition-all cursor-pointer text-[11px]"
+                    >
+                      <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
+                      <span>开通 VIP 去水印</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setIsCollapsed(true)}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-300 text-[11px] font-medium transition-colors cursor-pointer"
+                    title="收起水印设置面板"
+                  >
+                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                    <span className="hidden sm:inline">收起</span>
+                  </button>
+                </div>
+              </div>
 
             {/* Controls Row */}
             <div className="flex flex-wrap items-center gap-3">
@@ -321,8 +386,6 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     } font-medium rounded-lg px-2.5 py-1.5 text-xs outline-none cursor-pointer pr-7`}
                   >
                     <option value="double_diagonal">✦ 双重斜向水印 (全图覆盖)</option>
-                    <option value="corners">✦ 角落水印 (仅四角小字)</option>
-                    <option value="bottom">✦ 底部单行水印 (图纸最下方)</option>
                     <option
                       value="none"
                       disabled={!isVip}
@@ -367,12 +430,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
                     className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
                   >
-                    <option value="0.05">5% (极淡底纹)</option>
                     <option value="0.1">10% (轻柔防盗)</option>
                     <option value="0.18">18% (标准防盗 - 推荐)</option>
                     <option value="0.25">25% (清晰标识)</option>
-                    <option value="0.35">35% (高度显著)</option>
-                    <option value="0.4">40% (强力防盗)</option>
                   </select>
                 </div>
               )}
@@ -556,6 +616,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
 
         </div>
+        )}
 
         {/* Live Canvas Preview Canvas Container */}
         <div className="p-4 flex-1 overflow-auto bg-slate-950 flex items-center justify-center min-h-[300px]">

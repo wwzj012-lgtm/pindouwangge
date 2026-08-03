@@ -43,7 +43,7 @@ export default function App() {
     brand: 'MARD',
     dither: 'none',
     colorLimit: 0,
-    brightness: 0,
+    brightness: -15,
     contrast: 0,
     saturation: 0,
     transparentCutoff: 128,

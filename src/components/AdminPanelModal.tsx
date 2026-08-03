@@ -19,6 +19,8 @@ import {
   Lock,
   ShieldAlert,
   CheckCircle2,
+  Crown,
+  Store,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -48,6 +50,7 @@ interface VipCodeData {
   code: string;
   codeHash?: string;
   days: number;
+  member_type?: 1 | 2; // 1=普通VIP, 2=商家Pro
   channel?: string;
   expireAt?: number;
   used: boolean;
@@ -68,6 +71,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [selectedUserUids, setSelectedUserUids] = useState<string[]>([]);
 
   // Generator state
+  const [codeMemberType, setCodeMemberType] = useState<1 | 2>(1); // 1 = 普通VIP (PV), 2 = 商家Pro (BP)
   const [newCodeDays, setNewCodeDays] = useState<number>(30);
   const [batchCount, setBatchCount] = useState<number>(1);
   const [channelTag, setChannelTag] = useState<string>('淘宝旗舰店');
@@ -128,14 +132,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }
   };
 
-  const handleToggleVip = async (user: UserProfile) => {
+  const handleSetUserMemberType = async (user: UserProfile, targetType: 0 | 1 | 2) => {
     try {
       const userRef = doc(db, 'users', user.uid);
-      const newVip = !user.isVip;
-      const newExpire = newVip ? Date.now() + 30 * 86400 * 1000 : null;
+      const isVip = targetType >= 1;
+      const isPermanent = targetType > 0 && newCodeDays >= 3650;
+      const newExpire = targetType === 0 ? null : (isPermanent ? null : Date.now() + 30 * 86400 * 1000);
+
+      const typeNameMap = { 0: '免费用户', 1: '普通VIP', 2: '商家Pro' };
 
       await updateDoc(userRef, {
-        isVip: newVip,
+        member_type: targetType,
+        member_expire: newExpire,
+        member_source: '管理员手动设置',
+        isVip: isVip,
         vipExpireAt: newExpire,
         updatedAt: Date.now(),
       });
@@ -144,31 +154,47 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         await recordAuditLog(
           currentUser.uid,
           currentUser.email || 'admin',
-          newVip ? 'GRANT_VIP' : 'REVOKE_VIP',
-          `${newVip ? '手动授予' : '手动取消'} 用户 [${user.displayName || user.email}] 的 VIP 权限`
+          'MANUAL_SET_MEMBER_TYPE',
+          `手动设置用户 [${user.displayName || user.email}] 为 【${typeNameMap[targetType]}】`
         );
       }
 
       setUsersList(prev =>
-        prev.map(u => (u.uid === user.uid ? { ...u, isVip: newVip, vipExpireAt: newExpire } : u))
+        prev.map(u =>
+          u.uid === user.uid
+            ? {
+                ...u,
+                member_type: targetType,
+                member_expire: newExpire,
+                isVip: isVip,
+                vipExpireAt: newExpire,
+              }
+            : u
+        )
       );
     } catch (err) {
-      console.error('Failed to toggle VIP:', err);
+      console.error('Failed to set member type:', err);
     }
   };
 
-  const handleBatchGrantVip = async () => {
+  const handleBatchGrantVip = async (targetType: 1 | 2 = 1) => {
     if (selectedUserUids.length === 0) return;
     setLoading(true);
     try {
       const addMs = 30 * 86400 * 1000;
+      const typeName = targetType === 2 ? '商家Pro' : '普通VIP';
+
       for (const uid of selectedUserUids) {
         const u = usersList.find(x => x.uid === uid);
         if (!u) continue;
-        const currentExp = (u.vipExpireAt && u.vipExpireAt > Date.now()) ? u.vipExpireAt : Date.now();
+        const currentExp =
+          u.member_expire && u.member_expire > Date.now() ? u.member_expire : Date.now();
         const newExp = currentExp + addMs;
 
         await updateDoc(doc(db, 'users', uid), {
+          member_type: targetType,
+          member_expire: newExp,
+          member_source: '管理员批量赠送',
           isVip: true,
           vipExpireAt: newExp,
           updatedAt: Date.now(),
@@ -180,7 +206,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           currentUser.uid,
           currentUser.email || 'admin',
           'BATCH_GRANT_VIP',
-          `批量授予 ${selectedUserUids.length} 名用户 30 天 VIP 权限`
+          `批量授予 ${selectedUserUids.length} 名用户 30 天 ${typeName} 权限`
         );
       }
 
@@ -193,7 +219,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }
   };
 
-  // Generate commercial 16-character 3-segment codes
+  // Generate commercial 16-character PV / BP codes
   const handleGenerateCodesBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     setGenSuccessMsg('');
@@ -202,6 +228,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     const createdCodes: VipCodeData[] = [];
     const plainCodesList: string[] = [];
     const codeExpireMs = validDaysLimit > 0 ? Date.now() + validDaysLimit * 86400 * 1000 : undefined;
+    const prefixType = codeMemberType === 2 ? 'BP' : 'PV';
 
     try {
       for (let i = 0; i < countToGen; i++) {
@@ -209,7 +236,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         if (countToGen === 1 && customCodeInput.trim()) {
           codeStr = customCodeInput.trim().toUpperCase();
         } else {
-          codeStr = generateCommercialVipCode(channelTag);
+          codeStr = generateCommercialVipCode(channelTag, prefixType);
         }
 
         const hashed = await sha256(codeStr);
@@ -220,6 +247,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           code: codeStr,
           codeHash: hashed,
           days: newCodeDays,
+          member_type: codeMemberType,
           channel: channelTag,
           expireAt: codeExpireMs,
           used: false,
@@ -231,19 +259,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         plainCodesList.push(codeStr);
       }
 
+      const typeName = codeMemberType === 2 ? '商家Pro (BP码)' : '普通VIP (PV码)';
+
       if (currentUser) {
         await recordAuditLog(
           currentUser.uid,
           currentUser.email || 'admin',
           'BATCH_GEN_CODES',
-          `批量生成 ${countToGen} 张 16 位高阶卡密（渠道: ${channelTag}，VIP天数: ${newCodeDays}天）`
+          `批量生成 ${countToGen} 张 ${typeName} 激活卡密（渠道: ${channelTag}，时长: ${newCodeDays}天）`
         );
       }
 
       setCodesList(prev => [...createdCodes, ...prev]);
       setCustomCodeInput('');
-      setGenSuccessMsg(`成功生成 ${countToGen} 张商业级 VIP 激活卡密！`);
-      
+      setGenSuccessMsg(`成功生成 ${countToGen} 张 ${typeName} 激活卡密！`);
+
       // Open batch plaintext modal
       setLastGeneratedPlaintextCodes(plainCodesList);
       setShowBatchGenModal(true);
@@ -266,10 +296,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     if (codesList.length === 0) return;
 
     try {
-      const headers = ['卡密激活码', 'VIP天数', '发行渠道', '使用状态', '使用人UID', '卡密到期时间', '生成时间'];
+      const headers = ['卡密激活码', '会员类型', '有效时长', '发行渠道', '使用状态', '使用人UID', '卡密截止到期时间', '生成时间'];
       const rows = codesList.map(c => [
         c.code,
-        `${c.days}天`,
+        c.member_type === 2 ? '商家Pro (BP)' : '普通VIP (PV)',
+        c.days >= 3650 ? '终身永久' : `${c.days}天`,
         c.channel || '普通发行',
         c.used ? '已核销' : '未核销',
         c.usedBy || '-',
@@ -284,7 +315,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement('a');
       link.setAttribute('href', encodedUri);
-      link.setAttribute('download', `VIP卡密导出包_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute('download', `VIP_PRO卡密导出包_${new Date().toISOString().slice(0, 10)}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -294,7 +325,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           currentUser.uid,
           currentUser.email || 'admin',
           'EXPORT_VIP_CODES',
-          `导出全量 VIP 卡密明文 CSV 档案（包含 ${codesList.length} 份卡密记录）`
+          `导出全量 VIP/PRO 卡密明文 CSV 档案（包含 ${codesList.length} 份卡密记录）`
         );
       }
 
@@ -555,33 +586,59 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
                       <div className="text-slate-400 font-mono text-[11px] break-all">{user.email}</div>
 
-                      <div className="flex items-center justify-between pt-1 border-t border-slate-900">
-                        <div className="flex items-center gap-1.5">
-                          {user.isVip || user.role === 'admin' ? (
-                            <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
-                              <Zap className="w-3 h-3 fill-current text-amber-400" />
-                              PRO VIP
-                            </span>
-                          ) : (
-                            <span className="text-slate-500 text-[10px]">普通试用</span>
-                          )}
-                          {(user.role === 'admin' || (user.vipExpireAt && user.isVip)) && (
-                            <span className="text-[10px] text-amber-400/80 font-mono font-bold">
-                              ({user.role === 'admin' ? '永久' : new Date(user.vipExpireAt!).toLocaleDateString()})
-                            </span>
-                          )}
+                      <div className="flex flex-col gap-2 pt-1 border-t border-slate-900">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            {user.role === 'admin' ? (
+                              <span className="inline-flex items-center gap-1 text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                                <Crown className="w-3 h-3 text-rose-400" />
+                                管理员 (全功能)
+                              </span>
+                            ) : (user.member_type === 2 || (user.isVip && user.member_type === 2)) ? (
+                              <span className="inline-flex items-center gap-1 text-amber-300 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm">
+                                <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                <Store className="w-3 h-3 text-amber-300" />
+                                商家Pro
+                              </span>
+                            ) : (user.member_type === 1 || user.isVip) ? (
+                              <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                                <Crown className="w-3 h-3 text-amber-400" />
+                                普通VIP
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 text-[10px]">免费用户</span>
+                            )}
+
+                            {(user.role === 'admin' || ((user.member_expire || user.vipExpireAt) && (user.isVip || (user.member_type ?? 0) > 0))) && (
+                              <span className="text-[10px] text-amber-400/80 font-mono font-bold">
+                                ({user.role === 'admin' ? '永久' : new Date((user.member_expire || user.vipExpireAt)!).toLocaleDateString()})
+                              </span>
+                            )}
+                          </div>
                         </div>
 
-                        <button
-                          onClick={() => handleToggleVip(user)}
-                          className={`px-3 py-1.5 rounded-lg font-bold text-xs cursor-pointer transition-all min-h-[40px] ${
-                            user.isVip
-                              ? 'bg-slate-800 text-slate-300'
-                              : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black'
-                          }`}
-                        >
-                          {user.isVip ? '撤销 VIP' : '开通 VIP (+30天)'}
-                        </button>
+                        <div className="flex items-center gap-1.5 justify-end">
+                          <button
+                            onClick={() => handleSetUserMemberType(user, 1)}
+                            className="px-2.5 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] cursor-pointer hover:bg-amber-500/30 transition-all min-h-[36px]"
+                          >
+                            设为普通VIP
+                          </button>
+                          <button
+                            onClick={() => handleSetUserMemberType(user, 2)}
+                            className="px-2.5 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[11px] cursor-pointer hover:brightness-110 transition-all min-h-[36px]"
+                          >
+                            设为商家Pro
+                          </button>
+                          {((user.member_type ?? 0) > 0 || user.isVip) && (
+                            <button
+                              onClick={() => handleSetUserMemberType(user, 0)}
+                              className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-400 font-bold text-[11px] cursor-pointer hover:bg-slate-700 hover:text-slate-200 transition-all min-h-[36px]"
+                            >
+                              重置免费
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -652,32 +709,56 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-1.5">
-                              {user.isVip || user.role === 'admin' ? (
-                                <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded text-[11px] font-bold">
-                                  <Zap className="w-3 h-3 fill-current text-amber-400" />
-                                  PRO VIP
+                              {user.role === 'admin' ? (
+                                <span className="inline-flex items-center gap-1 text-rose-300 bg-rose-500/10 border border-rose-500/30 px-2 py-0.5 rounded text-[11px] font-bold">
+                                  <Crown className="w-3.5 h-3.5 text-rose-400" />
+                                  管理员
+                                </span>
+                              ) : (user.member_type === 2 || (user.isVip && user.member_type === 2)) ? (
+                                <span className="inline-flex items-center gap-1 text-amber-300 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 px-2.5 py-0.5 rounded text-[11px] font-bold shadow-sm">
+                                  <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
+                                  <Store className="w-3.5 h-3.5 text-amber-300" />
+                                  商家Pro
+                                </span>
+                              ) : (user.member_type === 1 || user.isVip) ? (
+                                <span className="inline-flex items-center gap-1 text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 rounded text-[11px] font-bold">
+                                  <Crown className="w-3.5 h-3.5 text-amber-400" />
+                                  普通VIP
                                 </span>
                               ) : (
-                                <span className="text-slate-500 text-[11px]">普通试用</span>
+                                <span className="text-slate-500 text-[11px]">免费用户</span>
                               )}
-                              {(user.role === 'admin' || (user.vipExpireAt && user.isVip)) && (
+
+                              {(user.role === 'admin' || ((user.member_expire || user.vipExpireAt) && (user.isVip || (user.member_type ?? 0) > 0))) && (
                                 <span className="text-[10px] text-amber-400/80 font-mono font-bold">
-                                  ({user.role === 'admin' ? '永久' : new Date(user.vipExpireAt!).toLocaleDateString()})
+                                  ({user.role === 'admin' ? '永久' : new Date((user.member_expire || user.vipExpireAt)!).toLocaleDateString()})
                                 </span>
                               )}
                             </div>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <button
-                              onClick={() => handleToggleVip(user)}
-                              className={`px-3 py-1.5 rounded-lg font-bold text-xs cursor-pointer transition-all ${
-                                user.isVip
-                                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                                  : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 hover:brightness-110 shadow font-black'
-                              }`}
-                            >
-                              {user.isVip ? '取消 VIP 权限' : '一键开通 VIP (+30天)'}
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => handleSetUserMemberType(user, 1)}
+                                className="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-bold text-[11px] cursor-pointer hover:bg-amber-500/30 transition-all"
+                              >
+                                普通VIP
+                              </button>
+                              <button
+                                onClick={() => handleSetUserMemberType(user, 2)}
+                                className="px-2.5 py-1 rounded bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-[11px] cursor-pointer hover:brightness-110 transition-all shadow"
+                              >
+                                商家Pro
+                              </button>
+                              {((user.member_type ?? 0) > 0 || user.isVip) && (
+                                <button
+                                  onClick={() => handleSetUserMemberType(user, 0)}
+                                  className="px-2 py-1 rounded bg-slate-800 text-slate-400 font-bold text-[11px] cursor-pointer hover:bg-slate-700 hover:text-slate-200 transition-all"
+                                >
+                                  重置免费
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -708,19 +789,32 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                   </button>
                 </div>
 
-                <form onSubmit={handleGenerateCodesBatch} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                <form onSubmit={handleGenerateCodesBatch} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-3">
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">发行渠道与前缀</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">会员等级类型</label>
+                    <select
+                      value={codeMemberType}
+                      onChange={e => setCodeMemberType(Number(e.target.value) as 1 | 2)}
+                      className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-bold text-amber-300 focus:outline-none focus:border-amber-500 min-h-[44px]"
+                    >
+                      <option value={1}>普通VIP (PV-前缀)</option>
+                      <option value={2}>商家Pro (BP-前缀)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] text-slate-400 block mb-1">发行渠道</label>
                     <select
                       value={channelTag}
                       onChange={e => setChannelTag(e.target.value)}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 min-h-[44px]"
                     >
-                      <option value="淘宝旗舰店">淘宝旗舰店 (TB-)</option>
-                      <option value="抖音直播间">抖音直播间 (DY-)</option>
-                      <option value="微信私域社群">微信私域社群 (WX-)</option>
-                      <option value="线下代理合作">线下代理合作 (DL-)</option>
-                      <option value="活动赠送卡">活动赠送卡 (HD-)</option>
+                      <option value="淘宝旗舰店">淘宝旗舰店 (TB)</option>
+                      <option value="抖音直播间">抖音直播间 (DY)</option>
+                      <option value="微信私域社群">微信私域社群 (WX)</option>
+                      <option value="线下代理合作">线下代理合作 (DL)</option>
+                      <option value="活动赠送卡">活动赠送卡 (HD)</option>
+                      <option value="分销代理">分销代理 (FX)</option>
                     </select>
                   </div>
 
@@ -731,7 +825,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                       onChange={e => setBatchCount(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 min-h-[44px]"
                     >
-                      <option value={1}>生成 1 张单卡</option>
+                      <option value={1}>1 张单卡</option>
                       <option value={5}>批量 5 张</option>
                       <option value={10}>批量 10 张</option>
                       <option value={20}>批量 20 张</option>
@@ -740,22 +834,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">可得 VIP 权限天数</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">有效时长</label>
                     <select
                       value={newCodeDays}
                       onChange={e => setNewCodeDays(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 min-h-[44px]"
                     >
-                      <option value={7}>7 天体验权限</option>
-                      <option value={30}>30 天月卡权限</option>
-                      <option value={90}>90 天季卡权限</option>
-                      <option value={365}>365 天年卡权限</option>
-                      <option value={3650}>终身永久权限</option>
+                      <option value={30}>30 天 (月卡)</option>
+                      <option value={90}>90 天 (季卡)</option>
+                      <option value={365}>365 天 (年卡)</option>
+                      <option value={36500}>永久版 (终身)</option>
                     </select>
                   </div>
 
                   <div>
-                    <label className="text-[11px] text-slate-400 block mb-1">卡密激活截止有效期</label>
+                    <label className="text-[11px] text-slate-400 block mb-1">卡密激活截止期</label>
                     <select
                       value={validDaysLimit}
                       onChange={e => setValidDaysLimit(Number(e.target.value))}
@@ -768,13 +861,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                     </select>
                   </div>
 
-                  <div className="flex items-end sm:col-span-2 md:col-span-1">
+                  <div className="flex items-end">
                     <button
                       type="submit"
                       className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px]"
                     >
                       <Plus className="w-4 h-4" />
-                      <span>生成商用卡密包</span>
+                      <span>生成卡密</span>
                     </button>
                   </div>
                 </form>
@@ -792,12 +885,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                 <table className="w-full text-left text-xs text-slate-300 min-w-[650px]">
                   <thead className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <tr>
-                      <th className="px-4 py-3">激活码卡密 (已脱敏保护)</th>
+                      <th className="px-4 py-3">激活码卡密 (已脱敏)</th>
+                      <th className="px-4 py-3">会员等级</th>
                       <th className="px-4 py-3">发行渠道</th>
-                      <th className="px-4 py-3">VIP 天数</th>
-                      <th className="px-4 py-3">核销使用状态</th>
-                      <th className="px-4 py-3">截止激活时间</th>
-                      <th className="px-4 py-3 text-right">安全防护与操作</th>
+                      <th className="px-4 py-3">有效时长</th>
+                      <th className="px-4 py-3">核销状态</th>
+                      <th className="px-4 py-3">截止激活</th>
+                      <th className="px-4 py-3 text-right">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
@@ -827,6 +921,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                                   {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
                                 </button>
                               </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              {c.member_type === 2 || c.code.startsWith('BP') ? (
+                                <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
+                                  <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                  商家Pro
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
+                                  <Crown className="w-3 h-3 text-amber-400" />
+                                  普通VIP
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-medium">

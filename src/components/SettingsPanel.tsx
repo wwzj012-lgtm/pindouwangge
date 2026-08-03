@@ -11,7 +11,10 @@ import {
   Pipette,
   Wand2,
   X,
+  Crown,
+  AlertCircle,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { BrandKey, ConvertSettings, DitherMode, ColorMatchAlgo } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
 
@@ -34,6 +37,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onOpenSmartReduceModal,
   onCloseMobile,
 }) => {
+  const { isVip, isPro, memberType } = useAuth();
+
+  // Tier max canvas limits
+  const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 150;
+  const [limitWarning, setLimitWarning] = React.useState<string | null>(null);
   const updateSetting = <K extends keyof ConvertSettings>(key: K, value: ConvertSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
   };
@@ -41,7 +49,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleResetFilters = () => {
     setSettings(prev => ({
       ...prev,
-      brightness: 0,
+      brightness: -15,
       contrast: 0,
       saturation: 0,
       transparentCutoff: 128,
@@ -148,14 +156,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Custom Width / Height Inputs */}
         <div className="flex items-center gap-2 pt-1">
           <div className="flex-1 space-y-1">
-            <span className="text-[10px] text-slate-400">宽度 (W)</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-slate-400">宽度 (W)</span>
+              <span className="text-[9px] font-mono text-slate-500">上限:{maxCanvasLimit}</span>
+            </div>
             <input
               type="number"
               min={10}
-              max={200}
+              max={maxCanvasLimit}
               value={settings.width}
               onChange={e => {
-                const val = parseInt(e.target.value) || 10;
+                let val = parseInt(e.target.value) || 10;
+                if (val > maxCanvasLimit) {
+                  val = maxCanvasLimit;
+                  if (!isVip) {
+                    setLimitWarning('升级普通VIP解锁400×400画布');
+                  } else if (!isPro) {
+                    setLimitWarning('升级商家Pro解锁900×900超大画布');
+                  } else {
+                    setLimitWarning('商家Pro已达上限 900×900');
+                  }
+                } else {
+                  setLimitWarning(null);
+                }
                 setSettings(prev => ({
                   ...prev,
                   width: val,
@@ -179,14 +202,29 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </button>
 
           <div className="flex-1 space-y-1">
-            <span className="text-[10px] text-slate-400">高度 (H)</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-slate-400">高度 (H)</span>
+              <span className="text-[9px] font-mono text-slate-500">上限:{maxCanvasLimit}</span>
+            </div>
             <input
               type="number"
               min={10}
-              max={200}
+              max={maxCanvasLimit}
               value={settings.height}
               onChange={e => {
-                const val = parseInt(e.target.value) || 10;
+                let val = parseInt(e.target.value) || 10;
+                if (val > maxCanvasLimit) {
+                  val = maxCanvasLimit;
+                  if (!isVip) {
+                    setLimitWarning('升级普通VIP解锁400×400画布');
+                  } else if (!isPro) {
+                    setLimitWarning('升级商家Pro解锁900×900超大画布');
+                  } else {
+                    setLimitWarning('商家Pro已达上限 900×900');
+                  }
+                } else {
+                  setLimitWarning(null);
+                }
                 setSettings(prev => ({
                   ...prev,
                   height: val,
@@ -197,6 +235,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             />
           </div>
         </div>
+
+        {limitWarning && (
+          <div className="p-2 rounded-lg bg-amber-950/60 border border-amber-500/40 text-amber-300 text-[10px] flex items-center gap-1.5 font-bold">
+            <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>{limitWarning}</span>
+          </div>
+        )}
       </div>
 
       {/* 2. Color Matching Algorithm */}
@@ -333,14 +378,16 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <div className="space-y-1">
           <div className="flex justify-between text-[11px]">
             <span className="text-slate-400">亮度 (Brightness)</span>
-            <span className="font-mono text-slate-200">{settings.brightness}</span>
+            <span className="font-mono text-slate-200">
+              {settings.brightness + 15 > 0 ? `+${settings.brightness + 15}` : settings.brightness + 15}
+            </span>
           </div>
           <input
             type="range"
             min={-100}
             max={100}
-            value={settings.brightness}
-            onChange={e => updateSetting('brightness', parseInt(e.target.value))}
+            value={settings.brightness + 15}
+            onChange={e => updateSetting('brightness', parseInt(e.target.value) - 15)}
             className="w-full accent-rose-500 cursor-pointer"
           />
         </div>

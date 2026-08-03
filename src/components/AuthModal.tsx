@@ -8,6 +8,7 @@ import {
   KeyRound,
   CheckCircle2,
   Crown,
+  Store,
   LogOut,
   ShieldCheck,
   AlertTriangle,
@@ -42,7 +43,7 @@ interface LocalizedError {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdminPanel }) => {
-  const { currentUser, userProfile, isVip, isAdmin, redeemVipCode } = useAuth();
+  const { currentUser, userProfile, isVip, isPro, memberType, isAdmin, redeemVipCode } = useAuth();
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -287,43 +288,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onOpenAdm
                 </button>
               </div>
 
-              {/* VIP Status Card */}
-              <div className={`p-4 rounded-xl border ${
-                isVip
+              {/* VIP / Pro Membership Status Card */}
+              <div className={`p-4 rounded-xl border relative overflow-hidden ${
+                isPro
+                  ? 'bg-gradient-to-r from-amber-950 via-slate-950 to-amber-950 border-amber-500/60 text-amber-200 shadow-lg shadow-amber-500/10'
+                  : isVip
                   ? 'bg-gradient-to-r from-amber-950/60 via-slate-900 to-amber-950/60 border-amber-500/50 text-amber-200'
                   : 'bg-slate-950 border-slate-800 text-slate-300'
               }`}>
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2 font-bold text-sm">
-                    <Zap className={`w-4 h-4 fill-current ${isVip ? 'text-amber-400' : 'text-slate-500'}`} />
-                    <span>{isVip ? 'PRO VIP 会员状态: 已激活' : 'PRO VIP 会员状态: 未激活'}</span>
+                    {isPro ? (
+                      <>
+                        <Crown className="w-4 h-4 fill-amber-400 text-amber-400" />
+                        <Store className="w-4 h-4 text-amber-300" />
+                        <span className="font-black text-amber-300">商家Pro 会员卡</span>
+                      </>
+                    ) : isVip ? (
+                      <>
+                        <Crown className="w-4 h-4 fill-amber-400 text-amber-400" />
+                        <span className="font-bold text-amber-300">普通VIP 会员卡</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 text-slate-500" />
+                        <span>免费体验账号</span>
+                      </>
+                    )}
                   </div>
-                  {isVip ? (
-                    <span className="text-[10px] bg-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-full">
-                      已解锁全部高级功能
+
+                  {isPro ? (
+                    <span className="text-[10px] bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black px-2 py-0.5 rounded-full shadow">
+                      商用图纸创作者
+                    </span>
+                  ) : isVip ? (
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold px-2 py-0.5 rounded-full">
+                      手工爱好者会员
                     </span>
                   ) : (
                     <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full">
-                      基础普通账号
+                      基础免费模式
                     </span>
                   )}
                 </div>
 
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  {isVip
-                    ? '已为您解锁「VIP 显著性智能抠背景省豆」、「五官高清防模糊锁定」、「边缘精纯去噪点」等全套核心功能。'
-                    : '目前处于普通限制模式。获取激活码兑换即可解锁专属智能减少拼豆与精纯优化算法。'}
+                  {isPro
+                    ? '核心权益：900×900超大画布、3D立体拆解分层、自定义店铺专属水印、采购Excel导出一应俱全！'
+                    : isVip
+                    ? '核心权益：去除防盗水印、400×400画布、200张批量图纸处理、无水印高分辨率导出！'
+                    : '目前支持基础 150×150 画布与强水印导出一览。通过下述激活码即可解锁更多高级功能。'}
                 </p>
 
-                {isVip && (
+                {(isVip || isPro) && (
                   <div className="mt-2.5 pt-2 border-t border-amber-500/20 text-[11px] font-mono text-amber-300/80 flex items-center justify-between">
-                    <span>VIP 到期时间:</span>
+                    <span>会员到期时间:</span>
                     <span className="font-bold text-amber-300">
                       {isAdmin || userProfile.role === 'admin'
-                        ? '永久'
-                        : userProfile.vipExpireAt
-                        ? new Date(userProfile.vipExpireAt).toLocaleDateString()
-                        : '永久'}
+                        ? '永久有效'
+                        : (userProfile.member_expire || userProfile.vipExpireAt)
+                        ? new Date(userProfile.member_expire || userProfile.vipExpireAt!).toLocaleDateString()
+                        : '永久有效'}
                     </span>
                   </div>
                 )}

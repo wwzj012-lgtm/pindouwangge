@@ -321,7 +321,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     } else if (preset === 'clean') {
       setLocalSettings(s => ({
         ...s,
-        brightness: 0,
+        brightness: -15,
         contrast: 0,
         saturation: 0,
         sharpening: 0,
@@ -849,17 +849,19 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
                   <span className="text-slate-400">亮度 (Brightness)</span>
-                  <span className="font-mono text-slate-200">{localSettings.brightness}</span>
+                  <span className="font-mono text-slate-200">
+                    {localSettings.brightness + 15 > 0 ? `+${localSettings.brightness + 15}` : localSettings.brightness + 15}
+                  </span>
                 </div>
                 <input
                   type="range"
                   min={-100}
                   max={100}
-                  value={localSettings.brightness}
+                  value={localSettings.brightness + 15}
                   onChange={e =>
                     setLocalSettings(s => ({
                       ...s,
-                      brightness: parseInt(e.target.value),
+                      brightness: parseInt(e.target.value) - 15,
                     }))
                   }
                   className="w-full accent-rose-500 cursor-pointer"

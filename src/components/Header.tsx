@@ -12,6 +12,7 @@ import {
   BookOpen,
   Zap,
   Crown,
+  Store,
   User,
   Menu,
   X,
@@ -59,7 +60,7 @@ export const Header: React.FC<HeaderProps> = ({
   settings,
   setSettings,
 }) => {
-  const { currentUser, userProfile, isVip, isAdmin } = useAuth();
+  const { currentUser, userProfile, isVip, isPro, memberType, isAdmin } = useAuth();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
@@ -171,18 +172,27 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenAuthModal}
               className={`text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border ${
-                isVip
+                isPro
+                  ? 'bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-amber-300 border-amber-500/60 hover:brightness-125 shadow-md shadow-amber-500/20'
+                  : isVip
                   ? 'bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-500/20 text-amber-300 border-amber-500/50 hover:brightness-125 shadow-md shadow-amber-500/10'
                   : currentUser
                   ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                   : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black border-amber-400 hover:brightness-110 shadow'
               }`}
-              title={currentUser ? '个人账号与VIP管理' : '登录账号解锁PRO VIP权限'}
+              title={currentUser ? '个人账号与会员中心' : '登录账号解锁 VIP / 商家Pro 权限'}
             >
-              {isVip ? (
+              {isPro ? (
+                <>
+                  <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-amber-400" />
+                  <Store className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  <span className="hidden sm:inline font-black">商家Pro</span>
+                  <span className="sm:hidden text-[10px] font-black">Pro</span>
+                </>
+              ) : isVip ? (
                 <>
                   <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-current" />
-                  <span className="hidden sm:inline">PRO VIP</span>
+                  <span className="hidden sm:inline">VIP 会员</span>
                   <span className="sm:hidden text-[10px]">VIP</span>
                 </>
               ) : currentUser ? (

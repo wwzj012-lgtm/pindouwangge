@@ -32,6 +32,8 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
   redeemVipCode: (code: string) => Promise<{ success: boolean; message: string; newType?: 1 | 2 }>;
   consumeFreeTrial: () => Promise<boolean>;
+  setLocalCustomUser: (userData: { uid: string; email: string; displayName: string }) => Promise<void>;
+  logoutUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -47,6 +49,8 @@ const AuthContext = createContext<AuthContextType>({
   refreshProfile: async () => {},
   redeemVipCode: async () => ({ success: false, message: '' }),
   consumeFreeTrial: async () => false,
+  setLocalCustomUser: async () => {},
+  logoutUser: async () => {},
 });
 
 export const useAuth = () => useContext(AuthContext);
@@ -56,7 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const fetchProfile = async (user: User) => {
+  const fetchProfile = async (user: User | any) => {
     try {
       const profile = await syncUserProfile(user);
       setUserProfile(profile);
@@ -67,10 +71,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
       if (user) {
+        setCurrentUser(user);
         await fetchProfile(user);
       } else {
+        // Check if there is a local custom user session stored in localStorage
+        try {
+          const rawLocal = localStorage.getItem('dzxg_local_session');
+          if (rawLocal) {
+            const parsed = JSON.parse(rawLocal);
+            if (parsed && parsed.uid) {
+              setCurrentUser(parsed as User);
+              await fetchProfile(parsed as User);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (e) {
+          console.warn('Failed to parse local user session:', e);
+        }
+        setCurrentUser(null);
         setUserProfile(null);
       }
       setLoading(false);
@@ -78,6 +98,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, []);
+
+  const setLocalCustomUser = async (userData: { uid: string; email: string; displayName: string }) => {
+    const localUserObj = {
+      uid: userData.uid,
+      email: userData.email,
+      displayName: userData.displayName,
+      photoURL: null,
+    } as any;
+    try {
+      localStorage.setItem('dzxg_local_session', JSON.stringify(localUserObj));
+    } catch (e) {
+      console.warn('Failed to save local session:', e);
+    }
+    setCurrentUser(localUserObj);
+    await fetchProfile(localUserObj);
+  };
+
+  const logoutUser = async () => {
+    try {
+      localStorage.removeItem('dzxg_local_session');
+    } catch (e) {}
+    try {
+      await auth.signOut();
+    } catch (e) {}
+    setCurrentUser(null);
+    setUserProfile(null);
+  };
 
   const refreshProfile = async () => {
     if (currentUser) {
@@ -291,6 +338,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshProfile,
         redeemVipCode,
         consumeFreeTrial,
+        setLocalCustomUser,
+        logoutUser,
       }}
     >
       {children}

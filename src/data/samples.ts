@@ -1,4 +1,5 @@
 import { SampleImage } from '../types';
+import anyaPresetImg from '../assets/images/sample_preset_anya_1786081021182.jpg';
 
 // Helper to create a colorful SVG pixel art sample as data URL
 function createSampleSvgUrl(type: 'strawberry' | 'mario' | 'cat' | 'heart' | 'star'): string {
@@ -72,6 +73,7 @@ function createSampleSvgUrl(type: 'strawberry' | 'mario' | 'cat' | 'heart' | 'st
 }
 
 export const SAMPLE_IMAGES: SampleImage[] = [
+  { id: 'anya', name: '安妮亚可爱示例', category: '游戏动漫', url: anyaPresetImg },
   { id: 'strawberry', name: '草莓小拼豆', category: '可爱萌物', url: createSampleSvgUrl('strawberry') },
   { id: 'heart', name: '爱心像素', category: '经典像素', url: createSampleSvgUrl('heart') },
   { id: 'mario', name: '马里奥经典', category: '游戏动漫', url: createSampleSvgUrl('mario') },

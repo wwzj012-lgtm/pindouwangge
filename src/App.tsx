@@ -43,8 +43,8 @@ export default function App() {
 
   // Conversion Settings
   const [settings, setSettings] = useState<ConvertSettings>({
-    width: 29,
-    height: 29,
+    width: 79,
+    height: 44,
     keepAspectRatio: true,
     brand: 'MARD',
     dither: 'none',
@@ -65,7 +65,7 @@ export default function App() {
 
   // Grid Matrix: 2D Array of BeadColor ID (or null for empty peg)
   const [grid, setGrid] = useState<(string | null)[][]>(() =>
-    Array.from({ length: 29 }, () => Array(29).fill(null))
+    Array.from({ length: 44 }, () => Array(79).fill(null))
   );
 
   // Undo / Redo History Stack
@@ -189,20 +189,22 @@ export default function App() {
   };
 
   // Load Sample Preset Image
-  const handleLoadSample = (sampleUrl: string) => {
+  const handleLoadSample = (sampleUrl: string, name = '安妮亚粉发眼镜示例拼豆') => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       setSourceImage(img);
-      setProjectName('可爱草莓示例拼豆');
-      convertImageToGrid(img, settings, activePalette);
+      setProjectName(name);
+      const presetSettings = { ...settings, width: 79, height: 44 };
+      setSettings(presetSettings);
+      convertImageToGrid(img, presetSettings, activePalette);
     };
     img.src = sampleUrl;
   };
 
-  // Load default sample strawberry on first load
+  // Load default sample image on first load
   useEffect(() => {
-    handleLoadSample(SAMPLE_IMAGES[0].url);
+    handleLoadSample(SAMPLE_IMAGES[0].url, SAMPLE_IMAGES[0].name);
   }, []);
 
   // Clear Canvas

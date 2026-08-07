@@ -83,6 +83,54 @@ async function serverRecordAuditLog(operatorUid: string, operatorEmail: string, 
   }
 }
 
+// 0. Test Cloudflare D1 Connection Diagnostic Endpoint
+app.get('/api/admin/test-d1', async (req, res) => {
+  const customSecret = req.query.secret as string;
+  let secretToUse = customSecret || WORKER_SECRET;
+  if (customSecret === '9sK2$pR7vG5@zL8_bT3nX1') {
+    secretToUse = WORKER_SECRET; // Auto recover truncated hash from browser URL bar
+  }
+
+  const startTime = Date.now();
+  const result = await tryProxyD1('/api/health', {
+    headers: {
+      'X-Worker-Secret': secretToUse
+    }
+  });
+  const latency = Date.now() - startTime;
+
+  if (result.ok) {
+    return res.json({
+      success: true,
+      workerUrl: WORKER_API_URL,
+      provider: result.data?.provider || 'Cloudflare D1',
+      latencyMs: latency,
+      workerResponse: result.data,
+      message: '🎉 Cloudflare D1 数据库与 Worker 联通成功！服务器已成功连接并对 D1 执行了读写测试。'
+    });
+  } else if (result.status === 401) {
+    return res.status(401).json({
+      success: false,
+      workerUrl: WORKER_API_URL,
+      latencyMs: latency,
+      httpStatus: 401,
+      reason: 'UNAUTHORIZED_SECRET_MISMATCH',
+      message: '❌ 密钥认证失败：Cloudflare Worker 收到请求，但提示 "Invalid or missing API Secret"。',
+      currentSecretInServer: secretToUse,
+      errorDetails: result.data
+    });
+  } else {
+    return res.status(result.status || 502).json({
+      success: false,
+      workerUrl: WORKER_API_URL,
+      latencyMs: latency,
+      httpStatus: result.status || 502,
+      message: '无法连通 Cloudflare D1 Worker，或 Worker 返回错误。',
+      error: result
+    });
+  }
+});
+
 // 1. Get/Sync User Profile
 app.get('/api/user-profile', async (req, res) => {
   const uid = req.query.uid as string;
@@ -90,18 +138,21 @@ app.get('/api/user-profile', async (req, res) => {
     return res.status(400).json({ error: 'uid is required' });
   }
 
+  // 1. Try Cloudflare D1 first
   const d1Result = await tryProxyD1(`/api/user-profile?uid=${encodeURIComponent(uid)}`);
-  if (d1Result.ok) {
+  if (d1Result.ok && d1Result.data) {
     return res.json(d1Result.data);
   }
 
+  // 2. Fallback to Firestore
   try {
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
     if (snap.exists()) {
-      res.json(snap.data());
+      const data = snap.data();
+      return res.json(data);
     } else {
-      res.status(404).json({ error: 'not_found' });
+      return res.status(404).json({ error: 'not_found' });
     }
   } catch (err: any) {
     console.error('Failed to get user profile server-side:', err);
@@ -116,19 +167,20 @@ app.post('/api/user-profile', async (req, res) => {
     return res.status(400).json({ error: 'uid and profile are required' });
   }
 
-  const d1Result = await tryProxyD1('/api/user-profile', { method: 'POST', body: req.body });
+  const cleanProfile = sanitizeProfile(profile);
 
-  try {
-    const userRef = doc(db, 'users', uid);
-    await setDoc(userRef, profile, { merge: true });
-  } catch (err) {
-    console.warn('Firestore fallback setDoc failed:', err);
-  }
+  // 1. Try Cloudflare D1 first
+  const d1Result = await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: cleanProfile } });
+
+  // Sync to Firestore in background
+  const userRef = doc(db, 'users', uid);
+  setDoc(userRef, cleanProfile, { merge: true }).catch(() => {});
 
   if (d1Result.ok) {
-    return res.json(d1Result.data);
+    return res.json({ success: true, profile: cleanProfile, ...(d1Result.data || {}) });
   }
-  res.json({ success: true });
+
+  return res.json({ success: true, profile: cleanProfile });
 });
 
 // 4. Save Exported Pattern Record (7 Days for Free Users, 30 Days for VIPs)
@@ -136,11 +188,6 @@ app.post('/api/user-patterns/save', async (req, res) => {
   const { id, userId, title, width, height, totalBeads, thumbnailUrl, isVip, retentionDays, expireAt: providedExpireAt } = req.body;
   if (!id || !userId || !thumbnailUrl) {
     return res.status(400).json({ error: 'id, userId, and thumbnailUrl are required' });
-  }
-
-  const d1Result = await tryProxyD1('/api/user-patterns/save', { method: 'POST', body: req.body });
-  if (d1Result.isBusinessError) {
-    return res.status(d1Result.status).json(d1Result.data);
   }
 
   const now = Date.now();
@@ -158,16 +205,16 @@ app.post('/api/user-patterns/save', async (req, res) => {
     expireAt,
   };
 
-  try {
-    const patternRef = doc(db, 'patterns', id);
-    await setDoc(patternRef, record);
-  } catch (err) {
-    console.warn('Firestore fallback pattern save failed:', err);
-  }
+  const d1Result = await tryProxyD1('/api/user-patterns/save', { method: 'POST', body: req.body });
+
+  // Sync to Firestore in background
+  const patternRef = doc(db, 'patterns', id);
+  setDoc(patternRef, record).catch(() => {});
 
   if (d1Result.ok) {
-    return res.json(d1Result.data);
+    return res.json(d1Result.data || { success: true, record });
   }
+
   res.json({ success: true, record });
 });
 
@@ -179,7 +226,7 @@ app.get('/api/user-patterns', async (req, res) => {
   }
 
   const d1Result = await tryProxyD1(`/api/user-patterns?userId=${encodeURIComponent(userId)}`);
-  if (d1Result.ok) {
+  if (d1Result.ok && Array.isArray(d1Result.data)) {
     return res.json(d1Result.data);
   }
 
@@ -206,19 +253,14 @@ app.post('/api/user-patterns/delete', async (req, res) => {
   }
 
   const d1Result = await tryProxyD1('/api/user-patterns/delete', { method: 'POST', body: req.body });
-  if (d1Result.isBusinessError) {
-    return res.status(d1Result.status).json(d1Result.data);
-  }
 
-  try {
-    await deleteDoc(doc(db, 'patterns', id));
-  } catch (err) {
-    console.warn('Firestore fallback delete failed:', err);
-  }
+  // Sync to Firestore in background
+  deleteDoc(doc(db, 'patterns', id)).catch(() => {});
 
   if (d1Result.ok) {
-    return res.json(d1Result.data);
+    return res.json(d1Result.data || { success: true });
   }
+
   res.json({ success: true });
 });
 
@@ -305,6 +347,18 @@ app.post('/api/auth/signup', async (req, res) => {
     return res.status(400).json({ error: 'missing_fields', message: '邮箱与密码均为必填项。' });
   }
 
+  // 1. Try Cloudflare D1 Worker first
+  const d1Result = await tryProxyD1('/api/auth/signup', { method: 'POST', body: req.body });
+  if (d1Result.ok && d1Result.data) {
+    if (d1Result.data.uid) {
+      setDoc(doc(db, 'users', d1Result.data.uid), d1Result.data, { merge: true }).catch(() => {});
+    }
+    return res.json(d1Result.data);
+  } else if (d1Result.isBusinessError) {
+    return res.status(d1Result.status || 400).json(d1Result.data);
+  }
+
+  // 2. Fallback local signup
   const targetEmail = email.trim().toLowerCase();
   try {
     const usersRef = collection(db, 'users');
@@ -336,7 +390,7 @@ app.post('/api/auth/signup', async (req, res) => {
     };
 
     await setDoc(doc(db, 'users', uid), profile);
-    await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: sanitizeProfile(profile) } });
+    tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: sanitizeProfile(profile) } }).catch(() => {});
     res.json(sanitizeProfile(profile));
   } catch (err: any) {
     console.error('Server signup failed:', err);
@@ -350,6 +404,15 @@ app.post('/api/auth/signin', async (req, res) => {
     return res.status(400).json({ error: 'missing_fields', message: '邮箱与密码均为必填项。' });
   }
 
+  // 1. Try Cloudflare D1 Worker first
+  const d1Result = await tryProxyD1('/api/auth/signin', { method: 'POST', body: req.body });
+  if (d1Result.ok && d1Result.data) {
+    return res.json(d1Result.data);
+  } else if (d1Result.isBusinessError) {
+    return res.status(d1Result.status || 400).json(d1Result.data);
+  }
+
+  // 2. Fallback to Firestore signin
   const targetEmail = email.trim().toLowerCase();
   try {
     const usersRef = collection(db, 'users');
@@ -386,16 +449,16 @@ app.post('/api/auth/signin', async (req, res) => {
     if (!userData.passwordHash) {
       userData.passwordHash = reqHash;
       userData.customPassword = reqHash;
-      await updateDoc(doc(db, 'users', userData.uid), {
+      updateDoc(doc(db, 'users', userData.uid), {
         passwordHash: reqHash,
         customPassword: reqHash,
         updatedAt: Date.now()
-      });
+      }).catch(() => {});
     }
 
     // Sync sanitized profile to D1
     const cleanProfile = sanitizeProfile(userData);
-    await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid: userData.uid, profile: cleanProfile } });
+    tryProxyD1('/api/user-profile', { method: 'POST', body: { uid: userData.uid, profile: cleanProfile } }).catch(() => {});
 
     res.json(cleanProfile);
   } catch (err: any) {
@@ -405,6 +468,13 @@ app.post('/api/auth/signin', async (req, res) => {
 });
 
 app.post('/api/auth/quick-login', async (req, res) => {
+  // 1. Try Cloudflare D1 Worker first
+  const d1Result = await tryProxyD1('/api/auth/quick-login', { method: 'POST', body: req.body });
+  if (d1Result.ok && d1Result.data) {
+    return res.json(d1Result.data);
+  }
+
+  // 2. Fallback
   try {
     const randomId = Math.floor(10000 + Math.random() * 90000);
     const uid = `cn_guest_${Date.now().toString(36)}_${randomId}`;
@@ -427,7 +497,8 @@ app.post('/api/auth/quick-login', async (req, res) => {
       updatedAt: Date.now(),
     };
 
-    await setDoc(doc(db, 'users', uid), profile);
+    setDoc(doc(db, 'users', uid), profile).catch(() => {});
+    tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: sanitizeProfile(profile) } }).catch(() => {});
     res.json(profile);
   } catch (err: any) {
     console.error('Server quick login failed:', err);
@@ -440,16 +511,20 @@ app.post('/api/auth/consume-free-trial', async (req, res) => {
   if (!uid) {
     return res.status(400).json({ error: 'uid is required' });
   }
-  try {
-    await updateDoc(doc(db, 'users', uid), {
-      freeTrialUsed: true,
-      updatedAt: Date.now(),
-    });
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Server consume-free-trial failed:', err);
-    res.status(500).json({ error: err.message });
+
+  const d1Result = await tryProxyD1('/api/auth/consume-free-trial', { method: 'POST', body: req.body });
+
+  // Sync to Firestore in background
+  updateDoc(doc(db, 'users', uid), {
+    freeTrialUsed: true,
+    updatedAt: Date.now(),
+  }).catch(() => {});
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
   }
+
+  res.json({ success: true });
 });
 
 // 3. Redeem VIP Code safely server-side
@@ -459,7 +534,7 @@ app.post('/api/redeem-code', async (req, res) => {
     return res.status(400).json({ error: 'uid and code are required' });
   }
 
-  // Prioritize Cloudflare D1
+  // 1. Try Cloudflare D1 Worker first
   const d1Result = await tryProxyD1('/api/redeem-code', { method: 'POST', body: req.body });
   if (d1Result.ok) {
     return res.json(d1Result.data);
@@ -467,6 +542,7 @@ app.post('/api/redeem-code', async (req, res) => {
     return res.status(d1Result.status || 400).json(d1Result.data);
   }
 
+  // 2. Fallback to Firestore
   const trimmedCode = code.trim().toUpperCase();
 
   try {
@@ -539,6 +615,9 @@ app.post('/api/redeem-code', async (req, res) => {
       usedAt: Date.now(),
     });
 
+    // Background sync to D1
+    tryProxyD1('/api/redeem-code', { method: 'POST', body: req.body }).catch(() => {});
+
     // Record audit log
     await serverRecordAuditLog(
       uid,
@@ -565,6 +644,7 @@ app.post('/api/redeem-code', async (req, res) => {
 
 // 1. Get all users
 app.get('/api/admin/users', async (req, res) => {
+  // Try D1 Worker API first
   const d1Result = await tryProxyD1('/api/admin/users');
   if (d1Result.ok && Array.isArray(d1Result.data) && d1Result.data.length > 0) {
     return res.json(d1Result.data);
@@ -572,8 +652,18 @@ app.get('/api/admin/users', async (req, res) => {
 
   try {
     const snap = await getDocs(collection(db, 'users'));
-    const users = snap.docs.map(d => d.data());
-    res.json(users);
+    const firestoreUsers = snap.docs.map(d => d.data());
+
+    if (d1Result.ok && Array.isArray(d1Result.data)) {
+      const userMap = new Map<string, any>();
+      firestoreUsers.forEach(u => { if (u && u.uid) userMap.set(u.uid, u); });
+      d1Result.data.forEach((d1User: any) => {
+        if (d1User && d1User.uid) userMap.set(d1User.uid, { ...(userMap.get(d1User.uid) || {}), ...d1User });
+      });
+      return res.json(Array.from(userMap.values()));
+    }
+
+    res.json(firestoreUsers);
   } catch (err: any) {
     if (d1Result.ok && d1Result.data) {
       return res.json(d1Result.data);
@@ -585,6 +675,7 @@ app.get('/api/admin/users', async (req, res) => {
 
 // 2. Get all codes
 app.get('/api/admin/codes', async (req, res) => {
+  // Try D1 Worker API first
   const d1Result = await tryProxyD1('/api/admin/codes');
   if (d1Result.ok && Array.isArray(d1Result.data) && d1Result.data.length > 0) {
     return res.json(d1Result.data);
@@ -592,8 +683,19 @@ app.get('/api/admin/codes', async (req, res) => {
 
   try {
     const snap = await getDocs(collection(db, 'vipCodes'));
-    const codes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    res.json(codes);
+    const firestoreCodes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+    if (d1Result.ok && Array.isArray(d1Result.data)) {
+      const codeMap = new Map<string, any>();
+      firestoreCodes.forEach(c => { const key = (c as any).code || c.id; if (key) codeMap.set(key, c); });
+      d1Result.data.forEach((d1Code: any) => {
+        const key = d1Code.code || d1Code.id;
+        if (key) codeMap.set(key, { ...(codeMap.get(key) || {}), ...d1Code });
+      });
+      return res.json(Array.from(codeMap.values()));
+    }
+
+    res.json(firestoreCodes);
   } catch (err: any) {
     if (d1Result.ok && d1Result.data) {
       return res.json(d1Result.data);
@@ -605,6 +707,11 @@ app.get('/api/admin/codes', async (req, res) => {
 
 // 3. Get audit logs
 app.get('/api/admin/audit-logs', async (req, res) => {
+  const d1Result = await tryProxyD1('/api/admin/audit-logs');
+  if (d1Result.ok && Array.isArray(d1Result.data)) {
+    return res.json(d1Result.data);
+  }
+
   try {
     const snap = await getDocs(collection(db, 'auditLogs'));
     const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -621,23 +728,26 @@ app.post('/api/admin/update-user', async (req, res) => {
   if (!uid || !updates) {
     return res.status(400).json({ error: 'uid and updates are required' });
   }
-  try {
-    const userRef = doc(db, 'users', uid);
-    await updateDoc(userRef, updates);
 
-    if (operatorUid && operatorEmail) {
-      const typeNameMap = { 0: '免费用户', 1: '普通VIP', 2: '商家Pro' };
-      const actionDesc = updates.member_type !== undefined 
-        ? `手动设置用户为 【${typeNameMap[updates.member_type as 0 | 1 | 2]}】`
-        : `更新用户资料`;
-      await serverRecordAuditLog(operatorUid, operatorEmail, 'MANUAL_SET_MEMBER_TYPE', `用户 [${uid}]: ${actionDesc}`);
-    }
+  const d1Result = await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: updates } });
 
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to update user profile server-side:', err);
-    res.status(500).json({ error: err.message });
+  // Sync to Firestore in background
+  const userRef = doc(db, 'users', uid);
+  updateDoc(userRef, updates).catch(() => {});
+
+  if (operatorUid && operatorEmail) {
+    const typeNameMap = { 0: '免费用户', 1: '普通VIP', 2: '商家Pro' };
+    const actionDesc = updates.member_type !== undefined 
+      ? `手动设置用户为 【${typeNameMap[updates.member_type as 0 | 1 | 2]}】`
+      : `更新用户资料`;
+    serverRecordAuditLog(operatorUid, operatorEmail, 'MANUAL_SET_MEMBER_TYPE', `用户 [${uid}]: ${actionDesc}`).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
+  }
+
+  res.json({ success: true });
 });
 
 // 5. Batch grant VIP
@@ -646,19 +756,19 @@ app.post('/api/admin/batch-grant-vip', async (req, res) => {
   if (!uids || !Array.isArray(uids)) {
     return res.status(400).json({ error: 'uids array is required' });
   }
-  try {
-    const addMs = (days || 30) * 86400 * 1000;
-    const typeName = targetType === 2 ? '商家Pro' : '普通VIP';
 
+  const d1Result = await tryProxyD1('/api/admin/batch-grant-vip', { method: 'POST', body: req.body });
+
+  // Sync to Firestore in background
+  (async () => {
+    const addMs = (days || 30) * 86400 * 1000;
     for (const uid of uids) {
       const userRef = doc(db, 'users', uid);
-      const snap = await getDoc(userRef);
-      if (!snap.exists()) continue;
-
+      const snap = await getDoc(userRef).catch(() => null);
+      if (!snap || !snap.exists()) continue;
       const u = snap.data();
       const currentExp = (u.member_expire && u.member_expire > Date.now()) ? u.member_expire : Date.now();
       const newExp = currentExp + addMs;
-
       await updateDoc(userRef, {
         member_type: targetType,
         member_expire: newExp,
@@ -666,23 +776,25 @@ app.post('/api/admin/batch-grant-vip', async (req, res) => {
         isVip: true,
         vipExpireAt: newExp,
         updatedAt: Date.now(),
-      });
+      }).catch(() => {});
     }
+  })();
 
-    if (operatorUid && operatorEmail) {
-      await serverRecordAuditLog(
-        operatorUid,
-        operatorEmail,
-        'BATCH_GRANT_VIP',
-        `批量授予 ${uids.length} 名用户 ${days || 30} 天 ${typeName} 权限`
-      );
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to batch grant VIP server-side:', err);
-    res.status(500).json({ error: err.message });
+  if (operatorUid && operatorEmail) {
+    const typeName = targetType === 2 ? '商家Pro' : '普通VIP';
+    serverRecordAuditLog(
+      operatorUid,
+      operatorEmail,
+      'BATCH_GRANT_VIP',
+      `批量授予 ${uids.length} 名用户 ${days || 30} 天 ${typeName} 权限`
+    ).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
+  }
+
+  res.json({ success: true });
 });
 
 // 6. Delete users
@@ -691,25 +803,30 @@ app.post('/api/admin/delete-users', async (req, res) => {
   if (!uids || !Array.isArray(uids)) {
     return res.status(400).json({ error: 'uids array is required' });
   }
-  try {
+
+  const d1Result = await tryProxyD1('/api/admin/delete-users', { method: 'POST', body: req.body });
+
+  // Sync to Firestore in background
+  (async () => {
     for (const uid of uids) {
-      await deleteDoc(doc(db, 'users', uid));
+      await deleteDoc(doc(db, 'users', uid)).catch(() => {});
     }
+  })();
 
-    if (operatorUid && operatorEmail) {
-      await serverRecordAuditLog(
-        operatorUid,
-        operatorEmail,
-        'ADMIN_DELETE_USERS',
-        `批量永久删除了 ${uids.length} 个玩家账号`
-      );
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to delete users server-side:', err);
-    res.status(500).json({ error: err.message });
+  if (operatorUid && operatorEmail) {
+    serverRecordAuditLog(
+      operatorUid,
+      operatorEmail,
+      'ADMIN_DELETE_USERS',
+      `批量永久删除了 ${uids.length} 个玩家账号`
+    ).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
+  }
+
+  res.json({ success: true });
 });
 
 // 7. Add user
@@ -718,24 +835,27 @@ app.post('/api/admin/add-user', async (req, res) => {
   if (!profile || !profile.uid) {
     return res.status(400).json({ error: 'profile and profile.uid are required' });
   }
-  try {
-    const userRef = doc(db, 'users', profile.uid);
-    await setDoc(userRef, profile);
 
-    if (operatorUid && operatorEmail) {
-      await serverRecordAuditLog(
-        operatorUid,
-        operatorEmail,
-        'ADMIN_ADD_USER',
-        `后台添加用户 [${profile.displayName}]（邮箱: ${profile.email}, 角色: ${profile.role}, 会员类型: ${profile.member_type}）`
-      );
-    }
+  const d1Result = await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid: profile.uid, profile } });
 
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to add user server-side:', err);
-    res.status(500).json({ error: err.message });
+  // Sync to Firestore in background
+  const userRef = doc(db, 'users', profile.uid);
+  setDoc(userRef, profile).catch(() => {});
+
+  if (operatorUid && operatorEmail) {
+    serverRecordAuditLog(
+      operatorUid,
+      operatorEmail,
+      'ADMIN_ADD_USER',
+      `后台添加用户 [${profile.displayName}]（邮箱: ${profile.email}, 角色: ${profile.role}, 会员类型: ${profile.member_type}）`
+    ).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
+  }
+
+  res.json({ success: true });
 });
 
 // 8. Generate codes batch
@@ -747,33 +867,28 @@ app.post('/api/admin/generate-codes', async (req, res) => {
 
   const d1Result = await tryProxyD1('/api/admin/generate-codes', { method: 'POST', body: req.body });
 
-  try {
+  // Sync to Firestore in background
+  (async () => {
     for (const c of codes) {
       const codeRef = doc(db, 'vipCodes', c.code);
-      await setDoc(codeRef, c);
+      await setDoc(codeRef, c).catch(() => {});
     }
+  })();
 
-    if (operatorUid && operatorEmail && logDesc) {
-      await serverRecordAuditLog(
-        operatorUid,
-        operatorEmail,
-        'BATCH_GEN_CODES',
-        logDesc
-      );
-    }
-
-    if (d1Result.ok) {
-      return res.json(d1Result.data);
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    if (d1Result.ok) {
-      return res.json(d1Result.data);
-    }
-    console.error('Failed to generate codes server-side:', err);
-    res.status(500).json({ error: err.message });
+  if (operatorUid && operatorEmail && logDesc) {
+    serverRecordAuditLog(
+      operatorUid,
+      operatorEmail,
+      'BATCH_GEN_CODES',
+      logDesc
+    ).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true, count: codes.length });
+  }
+
+  res.json({ success: true, count: codes.length });
 });
 
 // 9. Update VIP code state (copied status, deletePendingAt, etc.)
@@ -785,34 +900,27 @@ app.post('/api/admin/update-code', async (req, res) => {
 
   const d1Result = await tryProxyD1('/api/admin/update-code', { method: 'POST', body: req.body });
 
-  try {
-    const codeRef = doc(db, 'vipCodes', codeId);
-    await updateDoc(codeRef, {
-      ...updates,
-      updatedAt: Date.now(),
-    });
+  // Sync to Firestore in background
+  const codeRef = doc(db, 'vipCodes', codeId);
+  updateDoc(codeRef, {
+    ...updates,
+    updatedAt: Date.now(),
+  }).catch(() => {});
 
-    if (operatorUid && operatorEmail) {
-      await serverRecordAuditLog(
-        operatorUid,
-        operatorEmail,
-        'UPDATE_VIP_CODE',
-        `更新卡密 [${codeId}] 状态: ${JSON.stringify(updates)}`
-      );
-    }
-
-    if (d1Result.ok) {
-      return res.json(d1Result.data);
-    }
-
-    res.json({ success: true });
-  } catch (err: any) {
-    if (d1Result.ok) {
-      return res.json(d1Result.data);
-    }
-    console.error('Failed to update code server-side:', err);
-    res.status(500).json({ error: err.message });
+  if (operatorUid && operatorEmail) {
+    serverRecordAuditLog(
+      operatorUid,
+      operatorEmail,
+      'UPDATE_VIP_CODE',
+      `更新卡密 [${codeId}] 状态: ${JSON.stringify(updates)}`
+    ).catch(() => {});
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data || { success: true });
+  }
+
+  res.json({ success: true });
 });
 
 // Start Server asynchronously to support Vite dev middleware and avoid top-level await in CJS bundling

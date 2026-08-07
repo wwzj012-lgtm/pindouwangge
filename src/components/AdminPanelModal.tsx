@@ -720,14 +720,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         });
         if (res.ok) {
           serverSuccess = true;
-          if (currentUser) {
-            await recordAuditLog(
-              currentUser.uid,
-              currentUser.email || 'admin',
-              'BATCH_GEN_CODES',
-              logDesc
-            );
-          }
         }
       } catch (apiErr) {
         console.warn('Server-side code generation failed, falling back to direct Firestore:', apiErr);

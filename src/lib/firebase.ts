@@ -233,13 +233,16 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
 // Helper to record admin audit logs
 export async function recordAuditLog(operatorUid: string, operatorEmail: string, action: string, details: string) {
   try {
-    await addDoc(collection(db, 'auditLogs'), {
-      operatorUid,
-      operatorEmail,
-      action,
-      details,
-      timestamp: Date.now(),
-    });
+    Promise.race([
+      addDoc(collection(db, 'auditLogs'), {
+        operatorUid,
+        operatorEmail,
+        action,
+        details,
+        timestamp: Date.now(),
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Audit log timeout')), 2000))
+    ]).catch(err => console.warn('Client audit log write skipped or timed out:', err));
   } catch (err) {
     console.error('Failed to write audit log:', err);
   }

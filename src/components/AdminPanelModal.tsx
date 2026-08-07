@@ -25,8 +25,10 @@ import {
   Edit3,
   UserPlus,
   Filter,
+  Loader2,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { formatChinaDate } from '../utils/dateUtils';
 import {
   db,
   collection,
@@ -775,8 +777,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         c.channel || '普通发行',
         c.used ? '已核销' : '未核销',
         c.usedBy || '-',
-        c.expireAt ? new Date(c.expireAt).toLocaleDateString() : '永久有效',
-        new Date(c.createdAt).toLocaleDateString(),
+        c.expireAt ? formatChinaDate(c.expireAt, false) : '永久有效',
+        formatChinaDate(c.createdAt, false),
       ]);
 
       const csvContent =
@@ -786,7 +788,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       const encodedUri = encodeURI(csvContent);
       const link = document.createElement('a');
       link.setAttribute('href', encodedUri);
-      link.setAttribute('download', `VIP_PRO卡密导出包_${new Date().toISOString().slice(0, 10)}.csv`);
+      link.setAttribute('download', `VIP_PRO卡密导出包_${formatChinaDate(Date.now(), false).replace(/\//g, '')}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -1068,7 +1070,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
               {/* Mobile Card List View (< sm screens) */}
               <div className="sm:hidden space-y-3">
-                {filteredUsers.length === 0 ? (
+                {loading ? (
+                  <div className="p-8 text-center text-slate-300 text-xs bg-slate-950 rounded-xl border border-slate-800 flex flex-col items-center justify-center gap-2">
+                    <Loader2 className="w-6 h-6 text-sky-400 animate-spin" />
+                    <span className="font-bold">✨ 正在同步玩家账号与权限列表...</span>
+                  </div>
+                ) : filteredUsers.length === 0 ? (
                   <div className="p-8 text-center text-slate-500 text-xs bg-slate-950 rounded-xl border border-slate-800">
                     暂未查找到匹配的用户记录
                   </div>
@@ -1130,7 +1137,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
                             {(user.role === 'admin' || ((user.member_expire || user.vipExpireAt) && (user.isVip || (user.member_type ?? 0) > 0))) && (
                               <span className="text-[10px] text-amber-400/80 font-mono font-bold">
-                                ({user.role === 'admin' ? '永久' : new Date((user.member_expire || user.vipExpireAt)!).toLocaleDateString()})
+                                ({user.role === 'admin' ? '永久' : formatChinaDate(user.member_expire || user.vipExpireAt, false)})
                               </span>
                             )}
                           </div>
@@ -1222,7 +1229,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
-                    {filteredUsers.length === 0 ? (
+                    {loading ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-12 text-center text-slate-300">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <Loader2 className="w-7 h-7 text-sky-400 animate-spin" />
+                            <span className="font-bold text-xs">✨ 正在从服务器安全同步玩家账号与权限数据...</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : filteredUsers.length === 0 ? (
                       <tr>
                         <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                           暂未查找到匹配的用户记录
@@ -1282,7 +1298,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
                               {(user.role === 'admin' || ((user.member_expire || user.vipExpireAt) && (user.isVip || (user.member_type ?? 0) > 0))) && (
                                 <span className="text-[10px] text-amber-400/80 font-mono font-bold">
-                                  ({user.role === 'admin' ? '永久' : new Date((user.member_expire || user.vipExpireAt)!).toLocaleDateString()})
+                                  ({user.role === 'admin' ? '永久' : formatChinaDate(user.member_expire || user.vipExpireAt, false)})
                                 </span>
                               )}
                             </div>
@@ -1474,9 +1490,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
-                    {codesList.length === 0 ? (
+                    {loading ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        <td colSpan={7} className="px-4 py-12 text-center text-slate-300">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <Loader2 className="w-7 h-7 text-amber-400 animate-spin" />
+                            <span className="font-bold text-xs">✨ 正在加载与脱敏卡密数据...</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : codesList.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                           暂未生成任何 VIP 激活兑换码
                         </td>
                       </tr>
@@ -1532,7 +1557,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                               )}
                             </td>
                             <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
-                              {c.expireAt ? new Date(c.expireAt).toLocaleDateString() : '永久有效'}
+                              {c.expireAt ? formatChinaDate(c.expireAt, false) : '永久有效'}
                             </td>
                             <td className="px-4 py-3 text-right">
                               <button
@@ -1580,7 +1605,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800">
-                    {auditLogsList.length === 0 ? (
+                    {loading ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-12 text-center text-slate-300">
+                          <div className="flex flex-col items-center justify-center gap-2">
+                            <Loader2 className="w-7 h-7 text-rose-400 animate-spin" />
+                            <span className="font-bold text-xs">✨ 正在同步运维操作审计日志...</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : auditLogsList.length === 0 ? (
                       <tr>
                         <td colSpan={4} className="px-4 py-8 text-center text-slate-500">
                           暂无审计日志记录
@@ -1590,7 +1624,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                       auditLogsList.map((log, idx) => (
                         <tr key={log.id || idx} className="hover:bg-slate-900/50">
                           <td className="px-4 py-3 font-mono text-slate-400 text-[11px] whitespace-nowrap">
-                            {new Date(log.timestamp).toLocaleString()}
+                            {formatChinaDate(log.timestamp, true)}
                           </td>
                           <td className="px-4 py-3 font-mono text-sky-300">{log.operatorEmail}</td>
                           <td className="px-4 py-3">

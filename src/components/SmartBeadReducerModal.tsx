@@ -26,6 +26,7 @@ import {
   ReductionReport,
 } from '../utils/smartReduceUtils';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface SmartBeadReducerModalProps {
   isOpen: boolean;
@@ -45,6 +46,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   onOpenAuthModal,
 }) => {
   const { isVip, hasFreeTrial, consumeFreeTrial } = useAuth();
+  const { t, formatPrice, language } = useLanguage();
   const [intensity, setIntensity] = useState<ReductionIntensity>('medium');
   const [downscaleRatio, setDownscaleRatio] = useState<number>(1.0); // 1.0, 0.85, 0.70
   const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(true);
@@ -190,13 +192,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <span>👑 VIP 专属 · 显著性智能省豆与精纯优化引擎</span>
+                <span>{t('reducerTitle')}</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black shadow">
-                  PRO VIP 权限
+                  {t('proTag')} VIP
                 </span>
               </h2>
               <p className="text-xs text-amber-200/80">
-                保持主图 100% 五官与细节原汁原味：抠除无用背景 + 净化悬空杂豆 + 连片色块平滑，省豆 20%~50%！
+                {t('reducerDesc')}
               </p>
             </div>
           </div>
@@ -215,16 +217,16 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           <div className="bg-gradient-to-r from-amber-950/50 via-slate-900 to-amber-950/50 border border-amber-500/40 rounded-2xl p-4 text-xs text-amber-100/90 space-y-1.5 shadow-lg relative overflow-hidden">
             <div className="font-bold text-amber-300 text-sm flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>为什么远胜于简单调节网格宽高尺寸？(PRO 专属核心算法)</span>
+              <span>{t('reducerCompTitle')}</span>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] pt-1">
               <div className="bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 text-slate-300">
-                <span className="text-rose-400 font-bold block mb-0.5">❌ 普通直接调节宽高尺寸：</span>
-                等比例强制缩放整个盘面，会导致人物眼睛、眉毛、表情、高光与精致线稿变模糊失真甚至直接消失。
+                <span className="text-rose-400 font-bold block mb-0.5">{t('reducerCompBadTitle')}</span>
+                {t('reducerCompBadDesc')}
               </div>
               <div className="bg-amber-950/40 p-2.5 rounded-xl border border-amber-500/30 text-amber-200">
-                <span className="text-amber-300 font-bold block mb-0.5">✅ VIP 显著性智能省豆引擎：</span>
-                保持图纸 <b>100% 原始网格像素与细节不变</b>，通过 Sobel 边缘锁死五官，自动抠除四周无用背景豆（背景变 0 豆）、净化 1-3px 悬空杂豆，真正做到物超所值！
+                <span className="text-amber-300 font-bold block mb-0.5">{t('reducerCompGoodTitle')}</span>
+                {t('reducerCompGoodDesc')}
               </div>
             </div>
           </div>
@@ -236,10 +238,10 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               <label className="text-xs font-bold text-sky-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Minimize2 className="w-4 h-4 text-sky-400" />
-                  <span>图纸网格度数 (可选微调缩放)</span>
+                  <span>{t('reducerScaleTitle')}</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  {downscaleRatio === 1.0 ? '保持 100% 原尺寸度数' : downscaleRatio === 0.85 ? '精简 -15% 尺寸' : '极致 -30% 尺寸'}
+                  {downscaleRatio === 1.0 ? t('reducerScaleKeep') : downscaleRatio === 0.85 ? t('reducerScale15') : t('reducerScale30')}
                 </span>
               </label>
 
@@ -253,8 +255,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
                 >
-                  <div className="text-amber-300">100% 原网格</div>
-                  <div className="text-[10px] text-slate-400 font-normal">画质零损失</div>
+                  <div className="text-amber-300">{t('reducerScaleKeep')}</div>
+                  <div className="text-[10px] text-slate-400 font-normal">{t('reducerScaleKeepDesc')}</div>
                 </button>
 
                 <button
@@ -266,8 +268,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
                 >
-                  <div>精简 -15% 度数</div>
-                  <div className="text-[10px] text-emerald-400 font-normal">拼豆数直降 ~28%</div>
+                  <div>{t('reducerScale15')}</div>
+                  <div className="text-[10px] text-emerald-400 font-normal">{t('reducerScale15Desc')}</div>
                 </button>
 
                 <button
@@ -279,8 +281,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
                 >
-                  <div className="text-purple-300">极致 -30% 度数</div>
-                  <div className="text-[10px] text-emerald-400 font-normal">拼豆数直降 ~50%</div>
+                  <div className="text-purple-300">{t('reducerScale30')}</div>
+                  <div className="text-[10px] text-emerald-400 font-normal">{t('reducerScale30Desc')}</div>
                 </button>
               </div>
             </div>
@@ -290,20 +292,20 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               <label className="text-xs font-bold text-amber-300 flex items-center justify-between">
                 <span className="flex items-center gap-1.5">
                   <Scissors className="w-4 h-4 text-amber-400" />
-                  <span>智能扣除四周无用背景拼豆</span>
+                  <span>{language === 'zh' ? '智能扣除四周无用背景拼豆' : 'Smart Background Bead Removal'}</span>
                 </span>
                 <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">
-                  暴省拼豆
+                  {language === 'zh' ? '暴省拼豆' : 'Huge Savings'}
                 </span>
               </label>
 
               <label className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 cursor-pointer transition-colors">
                 <div className="space-y-0.5">
                   <div className="text-xs font-bold text-slate-200">
-                    抠除背景色 (底色设为透明, 不铺背景豆)
+                    {language === 'zh' ? '抠除背景色 (底色设为透明, 不铺背景豆)' : 'Remove background color (No background beads)'}
                   </div>
                   <p className="text-[10px] text-slate-400">
-                    自动识别人物/主体四周的单色背景，无需购买并平铺几千颗无用背景豆。
+                    {language === 'zh' ? '自动识别人物/主体四周的单色背景，无需购买并平铺几千颗无用背景豆。' : 'Auto-detect solid backgrounds around the subject to save buying thousands of useless background beads.'}
                   </p>
                 </div>
                 <input
@@ -320,7 +322,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <Sliders className="w-4 h-4 text-sky-400" />
-              <span>色彩区块平滑度与精简档位</span>
+              <span>{language === 'zh' ? '色彩区块平滑度与精简档位' : 'Color Block Smoothing & Reduction level'}</span>
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <button
@@ -333,13 +335,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between font-bold text-sm">
-                  <span className="text-sky-300">1档 · 微调精炼</span>
+                  <span className="text-sky-300">{language === 'zh' ? '1档 · 微调精炼' : 'Level 1 · Light Polish'}</span>
                   <span className="text-[10px] bg-sky-900/60 px-1.5 py-0.5 rounded text-sky-200">
-                    微调色块
+                    {language === 'zh' ? '微调色块' : 'Light Merge'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  保留原始所有微小阴影渐变，仅清除分散游离噪点。
+                  {language === 'zh' ? '保留原始所有微小阴影渐变，仅清除分散游离噪点。' : 'Keep all original shading details, only clean stray individual noise beads.'}
                 </p>
               </button>
 
@@ -354,15 +356,15 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               >
                 <div className="flex items-center justify-between font-bold text-sm">
                   <span className="text-indigo-300 flex items-center gap-1">
-                    <span>2档 · 标准推荐</span>
+                    <span>{language === 'zh' ? '2档 · 标准推荐' : 'Level 2 · Recommended'}</span>
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                   </span>
                   <span className="text-[10px] bg-indigo-900/80 text-indigo-200 px-1.5 py-0.5 rounded">
-                    平衡高画质
+                    {language === 'zh' ? '平衡高画质' : 'Balanced Quality'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">
-                  智能融合相似大面积背景色块，完美保持主体表情清晰。
+                  {language === 'zh' ? '智能融合相似大面积背景色块，完美保持主体表情清晰。' : 'Smart merge similar flat colors, keeping the subject\'s face perfectly clear.'}
                 </p>
               </button>
 
@@ -376,13 +378,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between font-bold text-sm">
-                  <span className="text-purple-300">3档 · 极简平滑</span>
+                  <span className="text-purple-300">{language === 'zh' ? '3档 · 极简平滑' : 'Level 3 · Bold blocks'}</span>
                   <span className="text-[10px] bg-purple-900/60 px-1.5 py-0.5 rounded text-purple-200">
-                    块状纯色化
+                    {language === 'zh' ? '块状纯色化' : 'Bold blocks'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  强力合并近似颜色，图纸更具经典像素风，极速拼搭。
+                  {language === 'zh' ? '强力合并近似颜色，图纸更具经典像素风，极速拼搭。' : 'Strong merge of close colors for a classic bold pixel art style, faster to build.'}
                 </p>
               </button>
             </div>
@@ -392,7 +394,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
             <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
               <ShieldAlert className="w-4 h-4 text-amber-400" />
-              <span>图像通用自适应细节保护机制</span>
+              <span>{language === 'zh' ? '图像通用自适应细节保护机制' : 'Adaptive Detail Protection Options'}</span>
             </span>
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs text-slate-300">
@@ -405,7 +407,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 />
                 <span className="font-semibold flex items-center gap-1 text-sky-200">
                   <Eye className="w-3.5 h-3.5 text-sky-400" />
-                  <span>五官与高反差轮廓锁死</span>
+                  <span>{language === 'zh' ? '五官与高反差轮廓锁死' : 'Face & Contour Lock'}</span>
                 </span>
               </label>
 
@@ -417,7 +419,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-sky-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-200">
-                  💎 核心高饱和色彩纯净保护
+                  {language === 'zh' ? '💎 核心高饱和色彩纯净保护' : '💎 Vibrant Color Protection'}
                 </span>
               </label>
 
@@ -429,7 +431,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-sky-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-200">
-                  🧹 1-3px 悬空噪点清除
+                  {language === 'zh' ? '🧹 1-3px 悬空噪点清除' : '🧹 Remove Stray Noises'}
                 </span>
               </label>
 
@@ -441,7 +443,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-sky-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-200">
-                  🎨 压缩极低频零碎色卡
+                  {language === 'zh' ? '🎨 压缩极低频零碎色卡' : '🎨 Condense Stray Colors'}
                 </span>
               </label>
 
@@ -527,10 +529,10 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               {/* Stats Footer Badge */}
               <div className="w-full bg-sky-950/80 border border-sky-500/40 rounded-xl p-2.5 text-xs text-sky-100 flex items-center justify-between">
                 <div>
-                  减粒后拼豆总数: <strong className="text-amber-300 font-mono text-sm">{report?.optimizedTotalBeads || 0}</strong> 粒
+                  {language === 'zh' ? '减粒后拼豆总数: ' : 'Total beads after reduction: '}<strong className="text-amber-300 font-mono text-sm">{report?.optimizedTotalBeads || 0}</strong> {language === 'zh' ? '粒' : 'beads'}
                 </div>
                 <div className="text-sky-300 font-mono">
-                  精简色卡: <strong className="text-white">{report?.optimizedColorTypesCount || 0}</strong> 种
+                  {language === 'zh' ? '精简色卡: ' : 'Optimized colors: '}<strong className="text-white">{report?.optimizedColorTypesCount || 0}</strong> {language === 'zh' ? '种' : 'colors'}
                 </div>
               </div>
             </div>
@@ -548,11 +550,15 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </div>
                   <div className="space-y-1 flex-1">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-white text-xs">① 抠除背景 & 连片合并 (耗材省豆)</span>
-                      <span className="font-mono font-bold text-amber-300 text-sm">省约 ¥{report.beadMaterialSavedRMB} 元</span>
+                      <span className="font-bold text-white text-xs">{language === 'zh' ? '① 抠除背景 & 连片合并 (耗材省豆)' : '① Background & Clusters (Material Saved)'}</span>
+                      <span className="font-mono font-bold text-amber-300 text-sm">{language === 'zh' ? '省约' : 'Saved ~'} {formatPrice(report.beadMaterialSavedRMB)}</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
-                      抠除背景、合并连片，减少 <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> 颗拼豆耗材 (物理省豆 <strong className="text-emerald-400">{report.savedPercent}%</strong>)
+                      {language === 'zh' ? (
+                        <>抠除背景、合并连片，减少 <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> 颗拼豆耗材 (物理省豆 <strong className="text-emerald-400">{report.savedPercent}%</strong>)</>
+                      ) : (
+                        <>Removed bg/merged clusters, reducing <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> beads (saved <strong className="text-emerald-400">{report.savedPercent}%</strong>)</>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -564,11 +570,15 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </div>
                   <div className="space-y-1 flex-1">
                     <div className="flex items-center justify-between">
-                      <span className="font-bold text-white text-xs">② 精简杂色色卡 (整包清退)</span>
-                      <span className="font-mono font-bold text-purple-300 text-sm">省约 ¥{report.colorPacksSavedRMB} 元</span>
+                      <span className="font-bold text-white text-xs">{language === 'zh' ? '② 精简杂色色卡 (整包清退)' : '② Condense Unused Colors (Packs Saved)'}</span>
+                      <span className="font-mono font-bold text-purple-300 text-sm">{language === 'zh' ? '省约' : 'Saved ~'} {formatPrice(report.colorPacksSavedRMB)}</span>
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
-                      色卡从 <strong className="text-slate-200">{report.originalColorTypesCount}</strong> 种精简至 <strong className="text-emerald-400">{report.optimizedColorTypesCount}</strong> 种，少购入 <strong className="text-purple-300 font-mono">{report.savedColorTypesCount}</strong> 整包杂色拼豆
+                      {language === 'zh' ? (
+                        <>色卡从 <strong className="text-slate-200">{report.originalColorTypesCount}</strong> 种精简至 <strong className="text-emerald-400">{report.optimizedColorTypesCount}</strong> 种，少购入 <strong className="text-purple-300 font-mono">{report.savedColorTypesCount}</strong> 整包杂色拼豆</>
+                      ) : (
+                        <>Reduced color types from <strong className="text-slate-200">{report.originalColorTypesCount}</strong> to <strong className="text-emerald-400">{report.optimizedColorTypesCount}</strong>, avoiding <strong className="text-purple-300 font-mono">{report.savedColorTypesCount}</strong> unused color packs</>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -580,22 +590,31 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   <div className="font-bold text-white flex items-center gap-2 justify-center md:justify-start">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                     <span>
-                      原图 {origW}×{origH} = {report.originalTotalBeads} 粒拼豆 ({report.originalColorTypesCount}色)
-                      <ArrowRight className="w-3.5 h-3.5 inline mx-1.5 text-sky-400" />
-                      PRO 减粒图纸 {optW}×{optH} = {report.optimizedTotalBeads} 粒拼豆 ({report.optimizedColorTypesCount}色)
+                      {language === 'zh' ? (
+                        <>
+                          原图 {origW}×{origH} = {report.originalTotalBeads} 粒拼豆 ({report.originalColorTypesCount}色)
+                          <ArrowRight className="w-3.5 h-3.5 inline mx-1.5 text-sky-400" />
+                          PRO 减粒图纸 {optW}×{optH} = {report.optimizedTotalBeads} 粒拼豆 ({report.optimizedColorTypesCount}色)
+                        </>
+                      ) : (
+                        <>
+                          Original {origW}×{origH} = {report.originalTotalBeads} beads ({report.originalColorTypesCount} colors)
+                          <ArrowRight className="w-3.5 h-3.5 inline mx-1.5 text-sky-400" />
+                          PRO Optimized {optW}×{optH} = {report.optimizedTotalBeads} beads ({report.optimizedColorTypesCount} colors)
+                        </>
+                      )}
                     </span>
                   </div>
                   <div className="text-[11px] text-amber-200/80 font-mono flex items-center gap-1 justify-center md:justify-start">
-                    <span>* 备注计价基准：按市面常规 3 元 / 千粒补充包零售价测算。</span>
+                    <span>{language === 'zh' ? '* 备注计价基准：按市面常规 3 元 / 千粒补充包零售价测算。' : '* Pricing standard benchmark: Estimated based on $0.50 / 1000 beads packs retail price.'}</span>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 px-5 py-2.5 rounded-xl shrink-0 shadow-lg shadow-amber-500/25 border border-amber-300">
                   <DollarSign className="w-5 h-5 fill-current shrink-0" />
                   <div className="flex items-baseline gap-1">
-                    <span className="font-black text-xs">PRO VIP 预计总节省：</span>
-                    <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-slate-950">¥{report.estimatedMoneySavedRMB}</span>
-                    <span className="font-black text-xs">元</span>
+                    <span className="font-black text-xs">{language === 'zh' ? 'PRO VIP 预计总节省：' : 'PRO VIP Est. Savings: '}</span>
+                    <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-slate-950">{formatPrice(report.estimatedMoneySavedRMB)}</span>
                   </div>
                 </div>
               </div>
@@ -610,7 +629,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
             onClick={onClose}
             className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs cursor-pointer transition-colors"
           >
-            取消
+            {language === 'zh' ? '取消' : 'Cancel'}
           </button>
 
           <div className="flex items-center gap-3">
@@ -622,7 +641,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-sky-500 via-indigo-600 to-purple-600 text-white font-bold text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-sky-500/25 transition-all cursor-pointer flex items-center gap-2 disabled:opacity-50"
               >
                 <Zap className="w-4 h-4 fill-current text-amber-300" />
-                <span>应用减粒图纸到当前拼豆画布</span>
+                <span>{language === 'zh' ? '应用减粒图纸到当前拼豆画布' : 'Apply reduced pattern to pegboard'}</span>
               </button>
             ) : hasFreeTrial ? (
               <button
@@ -632,7 +651,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-emerald-500/25 transition-all cursor-pointer flex items-center gap-2 border border-emerald-300"
               >
                 <Gift className="w-4 h-4 fill-current text-slate-950" />
-                <span>消耗 1 次新用户免费体验额度直接应用</span>
+                <span>{language === 'zh' ? '消耗 1 次新用户免费体验额度直接应用' : 'Consume 1 free trial credit to apply directly'}</span>
               </button>
             ) : (
               <button
@@ -642,7 +661,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-amber-500/25 transition-all cursor-pointer flex items-center gap-2 border border-amber-300"
               >
                 <Crown className="w-4 h-4 fill-current text-slate-950" />
-                <span>解锁 PRO VIP 权限 / 激活卡密应用</span>
+                <span>{language === 'zh' ? '解锁 PRO VIP 权限 / 激活卡密应用' : 'Unlock PRO VIP or redeem code to apply'}</span>
               </button>
             )}
           </div>

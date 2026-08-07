@@ -18,7 +18,7 @@ export interface ExportOptions {
   beadShape: BeadShape;
   selectedBoardIndex?: number | null; // null for full image, 0..N for specific sub-board
   watermarkType?: WatermarkType; // Default: 'double_diagonal'
-  watermarkText?: string; // Default: '豆织星格'
+  watermarkText?: string; // Default: '豆织星格' / 'BeadGrid'
   watermarkOpacity?: number; // Default: 0.18
   watermarkColor?: string; // Default: '#A855F7'
   watermarkAngle?: number; // Default: -25
@@ -26,6 +26,7 @@ export interface ExportOptions {
   legendPosition?: LegendPosition; // Default: 'right'
   legendScaleMode?: LegendScaleMode; // Default: 'auto'
   hideEmptyPegs?: boolean; // Default: false
+  isEn?: boolean;
 }
 
 // Flexible watermark overlay function supporting double_diagonal, corners, bottom, or none
@@ -39,9 +40,13 @@ export function drawWatermarkOverlay(
   text: string = '豆织星格',
   opacity: number = 0.18,
   color: string = '#A855F7',
-  angleDegrees: number = -25
+  angleDegrees: number = -25,
+  isEn: boolean = false
 ) {
   if (type === 'none' || opacity <= 0 || rectW <= 0 || rectH <= 0) return;
+
+  const defaultText = isEn ? 'BeadGrid' : '豆织星格';
+  const effectiveText = text && text.trim() ? text.trim() : defaultText;
 
   ctx.save();
   ctx.beginPath();
@@ -49,7 +54,7 @@ export function drawWatermarkOverlay(
   ctx.clip();
 
   ctx.globalAlpha = opacity;
-  const label = text.trim() ? (text.startsWith('✦') ? text : `✦ ${text}`) : '✦ 豆织星格';
+  const label = effectiveText.startsWith('✦') ? effectiveText : `✦ ${effectiveText}`;
 
   if (type === 'double_diagonal') {
     const area = rectW * rectH;
@@ -221,7 +226,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     beadShape,
     selectedBoardIndex,
     watermarkType: rawWatermarkType,
-    watermarkText = '豆织星格',
+    watermarkText = options.isEn ? 'BeadGrid' : '豆织星格',
     watermarkOpacity = 0.18,
     watermarkColor = '#A855F7',
     watermarkAngle = -25,
@@ -229,6 +234,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     legendPosition = 'right',
     legendScaleMode = 'auto',
     hideEmptyPegs = false,
+    isEn = false,
   } = options;
 
   // Resolve effective watermark type
@@ -251,7 +257,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     endX = Math.min(width, (bx + 1) * boardSize);
     startY = by * boardSize;
     endY = Math.min(height, (by + 1) * boardSize);
-    subBoardTitle = ` [拼豆板第 ${selectedBoardIndex + 1} 板 (${bx + 1},${by + 1})]`;
+    subBoardTitle = isEn
+      ? ` [Pegboard #${selectedBoardIndex + 1} (${bx + 1},${by + 1})]`
+      : ` [拼豆板第 ${selectedBoardIndex + 1} 板 (${bx + 1},${by + 1})]`;
   }
 
   const activeWidth = endX - startX;
@@ -369,7 +377,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.fillStyle = '#64748B';
   ctx.font = subTitleFont;
   ctx.fillText(
-    `品牌: ${brandName} | 尺寸: ${width}x${height} 豆 (需 ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} 个 ${boardSize}x${boardSize} 板)`,
+    isEn
+      ? `Brand: ${brandName} | Size: ${width}x${height} Beads (${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} board(s) of ${boardSize}x${boardSize})`
+      : `品牌: ${brandName} | 尺寸: ${width}x${height} 豆 (需 ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} 个 ${boardSize}x${boardSize} 板)`,
     20,
     Math.round(58 * Math.max(1, scale * 0.7))
   );
@@ -467,7 +477,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     watermarkText,
     watermarkOpacity,
     watermarkColor,
-    watermarkAngle
+    watermarkAngle,
+    isEn
   );
 
   // 9. Render Scaled Legend Panel (Right Sidebar or Bottom Block)
@@ -503,7 +514,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     watermarkText,
     Math.min(0.28, watermarkOpacity + 0.04),
     watermarkColor,
-    watermarkAngle
+    watermarkAngle,
+    isEn
   );
 
   // Legend Header Text
@@ -511,12 +523,14 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.font = legendHeaderFont;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
-  ctx.fillText('拼豆用量色号清单', legendX, legendY);
+  ctx.fillText(isEn ? 'Color & Bead Quantity Checklist' : '拼豆用量色号清单', legendX, legendY);
 
   ctx.font = legendSubFont;
   ctx.fillStyle = '#64748B';
   ctx.fillText(
-    `总用豆量: ${totalBeadsInView} 粒 | 共 ${sortedColors.length} 色`,
+    isEn
+      ? `Total Beads: ${totalBeadsInView} | ${sortedColors.length} Colors`
+      : `总用豆量: ${totalBeadsInView} 粒 | 共 ${sortedColors.length} 色`,
     legendX,
     legendY + Math.round(26 * scale)
   );
@@ -588,7 +602,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.font = legendCountFont;
     ctx.fillStyle = '#2563EB';
     ctx.textAlign = 'right';
-    ctx.fillText(`${count} 粒`, itemX + legendColWidth - Math.round(15 * scale), itemY + swatchSize / 2);
+    ctx.fillText(isEn ? `${count}` : `${count} 粒`, itemX + legendColWidth - Math.round(15 * scale), itemY + swatchSize / 2);
   });
 
   // Footer Watermark
@@ -597,7 +611,11 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.font = `500 ${Math.round(12 * Math.max(1, scale * 0.7))}px sans-serif`;
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
-  ctx.fillText('图纸生成自专业拼豆工作台【豆织星格】', totalCanvasWidth - 20, totalCanvasHeight - 10);
+  ctx.fillText(
+    isEn ? 'Pattern generated by BeadGrid Studio' : '图纸生成自专业拼豆工作台【豆织星格】',
+    totalCanvasWidth - 20,
+    totalCanvasHeight - 10
+  );
   ctx.restore();
 
   return canvas;

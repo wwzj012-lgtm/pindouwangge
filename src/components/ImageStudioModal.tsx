@@ -15,6 +15,7 @@ import {
   Crop,
 } from 'lucide-react';
 import { BeadColor, ConvertSettings, ColorMatchAlgo } from '../types';
+import { useLanguage } from '../context/LanguageContext';
 import { imageToGrid } from '../utils/colorUtils';
 import { smartCropSubject } from '../utils/cropUtils';
 
@@ -37,6 +38,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   activePalette,
   onApplyConversion,
 }) => {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
   const [localSettings, setLocalSettings] = useState<ConvertSettings>(settings);
   const [rotation, setRotation] = useState<number>(0); // 0, 90, 180, 270
   const [flipH, setFlipH] = useState<boolean>(false);
@@ -50,6 +53,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   const [cropSavedPercent, setCropSavedPercent] = useState<number | null>(null);
 
   const [previewGrid, setPreviewGrid] = useState<(string | null)[][]>([]);
+  const [isCalculating, setIsCalculating] = useState<boolean>(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'preview' | 'settings'>('preview');
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -122,29 +126,35 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     const activeImage = currentImg || sourceImage;
     if (!isOpen || !activeImage) return;
 
-    const canvas = imageCanvasRef.current;
-    if (!canvas) return;
+    setIsCalculating(true);
+    const timer = setTimeout(() => {
+      const canvas = imageCanvasRef.current;
+      if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
 
-    const sw = activeImage.naturalWidth || activeImage.width;
-    const sh = activeImage.naturalHeight || activeImage.height;
+      const sw = activeImage.naturalWidth || activeImage.width;
+      const sh = activeImage.naturalHeight || activeImage.height;
 
-    const isRotated = rotation === 90 || rotation === 270;
-    canvas.width = isRotated ? sh : sw;
-    canvas.height = isRotated ? sw : sh;
+      const isRotated = rotation === 90 || rotation === 270;
+      canvas.width = isRotated ? sh : sw;
+      canvas.height = isRotated ? sw : sh;
 
-    ctx.save();
-    ctx.translate(canvas.width / 2, canvas.height / 2);
-    ctx.rotate((rotation * Math.PI) / 180);
-    if (flipH) ctx.scale(-1, 1);
-    ctx.drawImage(activeImage, -sw / 2, -sh / 2);
-    ctx.restore();
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate((rotation * Math.PI) / 180);
+      if (flipH) ctx.scale(-1, 1);
+      ctx.drawImage(activeImage, -sw / 2, -sh / 2);
+      ctx.restore();
 
-    // Generate preview pixel grid using current local settings
-    const newGrid = imageToGrid(canvas, localSettings, activePalette || []);
-    setPreviewGrid(newGrid);
+      // Generate preview pixel grid using current local settings
+      const newGrid = imageToGrid(canvas, localSettings, activePalette || []);
+      setPreviewGrid(newGrid);
+      setIsCalculating(false);
+    }, 40);
+
+    return () => clearTimeout(timer);
   }, [isOpen, currentImg, sourceImage, localSettings, rotation, flipH, activePalette]);
 
   if (!isOpen || !sourceImage) return null;
@@ -350,13 +360,13 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
             <div className="min-w-0">
               <h2 className="text-xs sm:text-base font-bold text-slate-100 flex items-center gap-1.5 sm:gap-2 truncate">
-                <span className="truncate">图像增强与转拼豆</span>
+                <span className="truncate">{isEn ? 'Image Studio & Bead Converter' : '图像增强与转拼豆'}</span>
                 <span className="px-1.5 py-0.5 text-[9px] sm:text-[10px] bg-rose-500/20 text-rose-300 rounded-full border border-rose-500/30 shrink-0">
-                  AI & 算法
+                  {isEn ? 'AI & Algorithm' : 'AI & 算法'}
                 </span>
               </h2>
               <p className="text-[10px] sm:text-xs text-slate-400 truncate">
-                修正模糊、杂色与边缘失真问题
+                {isEn ? 'Fix blur, noise, and edge distortion issues' : '修正模糊、杂色与边缘失真问题'}
               </p>
             </div>
           </div>
@@ -379,7 +389,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             }`}
           >
             <Eye className="w-3.5 h-3.5" />
-            <span>1. 效果预览 ({localSettings.width}×{localSettings.height})</span>
+            <span>{isEn ? `1. Preview (${localSettings.width}×${localSettings.height})` : `1. 效果预览 (${localSettings.width}×${localSettings.height})`}</span>
           </button>
           <button
             onClick={() => setActiveMobileTab('settings')}
@@ -390,7 +400,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             }`}
           >
             <Sliders className="w-3.5 h-3.5" />
-            <span>2. 参数与调色</span>
+            <span>{isEn ? '2. Settings' : '2. 参数与调色'}</span>
           </button>
         </div>
 
@@ -406,60 +416,60 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             <div className="flex items-center gap-2 overflow-x-auto pb-1 text-xs scrollbar-none shrink-0">
               <span className="text-slate-400 font-medium shrink-0 flex items-center gap-1 whitespace-nowrap">
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                智能预设:
+                {isEn ? 'Smart Presets:' : '智能预设:'}
               </span>
               <button
                 onClick={handleSmartCrop}
                 className="px-3 py-1 rounded-lg bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 text-white font-bold hover:brightness-110 cursor-pointer transition-all shrink-0 shadow-md shadow-sky-500/20 text-[11px] sm:text-xs flex items-center gap-1.5"
-                title="自动检测并裁切掉大面积空黑/白边框，将像素100%集中在核心主角上，显著提升图纸清晰度并减少拼豆数量"
+                title={isEn ? 'Automatically auto crop blank or black/white borders to focus 100% resolution on subject' : '自动检测并裁切掉大面积空黑/白边框，将像素100%集中在核心主角上，显著提升图纸清晰度并减少拼豆数量'}
               >
                 <Crop className="w-3.5 h-3.5" />
-                <span>🎯 智能主体自动裁剪 (高清省豆)</span>
+                <span>{isEn ? '🎯 Smart Subject Auto Crop' : '🎯 智能主体自动裁剪 (高清省豆)'}</span>
               </button>
               <button
                 onClick={autoDetectAndRemoveBackground}
                 className="px-2.5 py-1 rounded-lg bg-pink-950 border border-pink-500/80 text-pink-200 hover:bg-pink-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs flex items-center gap-1"
-                title="自动识别图像四个角落的背景颜色并扣除，只留主体人物/物品"
+                title={isEn ? 'Auto detect corner background colors and remove them' : '自动识别图像四个角落的背景颜色并扣除，只留主体人物/物品'}
               >
                 <Scissors className="w-3 h-3 text-pink-400" />
-                <span>🪄 智能抠除背景</span>
+                <span>{isEn ? '🪄 Smart Cut BG' : '🪄 智能抠除背景'}</span>
               </button>
               <button
                 onClick={removeWhiteBackground}
                 className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-600 text-slate-200 hover:bg-slate-700 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
-                title="将纯白色/浅色背景替换为透明无豆"
+                title={isEn ? 'Replace white or light background with transparent' : '将纯白色/浅色背景替换为透明无豆'}
               >
-                ☁️ 扣除白色背景
+                {isEn ? '☁️ Remove White BG' : '☁️ 扣除白色背景'}
               </button>
               <button
                 onClick={() => applyPreset('vivid')}
                 className="px-2.5 py-1 rounded-lg bg-amber-950/80 border border-amber-500/80 text-amber-200 hover:bg-amber-900 cursor-pointer transition-all shrink-0 font-bold shadow-sm whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🔥 鲜艳高饱满 (防发白)
+                {isEn ? '🔥 Vibrant & Full' : '🔥 鲜艳高饱满 (防发白)'}
               </button>
               <button
                 onClick={() => applyPreset('anime')}
                 className="px-2.5 py-1 rounded-lg bg-rose-950/60 border border-rose-600/50 text-rose-300 hover:bg-rose-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🎨 动漫/卡通立绘
+                {isEn ? '🎨 Anime / Cartoon' : '🎨 动漫/卡通立绘'}
               </button>
               <button
                 onClick={() => applyPreset('photo')}
                 className="px-2.5 py-1 rounded-lg bg-sky-950/60 border border-sky-600/50 text-sky-300 hover:bg-sky-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                📷 真实照片
+                {isEn ? '📷 Photo Real' : '📷 真实照片'}
               </button>
               <button
                 onClick={() => applyPreset('pixel')}
                 className="px-2.5 py-1 rounded-lg bg-emerald-950/60 border border-emerald-600/50 text-emerald-300 hover:bg-emerald-900/80 cursor-pointer transition-all shrink-0 font-medium whitespace-nowrap text-[11px] sm:text-xs"
               >
-                🕹️ 8-Bit像素
+                {isEn ? '🕹️ 8-Bit Pixel' : '🕹️ 8-Bit像素'}
               </button>
               <button
                 onClick={() => applyPreset('clean')}
                 className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 cursor-pointer transition-all shrink-0 whitespace-nowrap text-[11px] sm:text-xs"
               >
-                <RotateCw className="w-3 h-3 inline mr-1" /> 重置
+                <RotateCw className="w-3 h-3 inline mr-1" /> {isEn ? 'Reset' : '重置'}
               </button>
             </div>
 
@@ -469,14 +479,18 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
                   <span>
-                    已成功裁切掉 <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> 的无效边框背景！图纸分辨率已100%集中于核心主角，清晰度显著提升且大幅省豆！
+                    {isEn ? (
+                      <>Successfully cropped <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> of blank border! Grid resolution is now 100% focused on subject.</>
+                    ) : (
+                      <>已成功裁切掉 <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> 的无效边框背景！图纸分辨率已100%集中于核心主角，清晰度显著提升且大幅省豆！</>
+                    )}
                   </span>
                 </div>
                 <button
                   onClick={handleRestoreOriginal}
                   className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-bold border border-slate-600 shrink-0 cursor-pointer transition-colors"
                 >
-                  ↩️ 恢复完整原图
+                  {isEn ? '↩️ Restore Full Image' : '↩️ 恢复完整原图'}
                 </button>
               </div>
             )}
@@ -488,20 +502,20 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Scissors className="w-3.5 h-3.5 text-sky-400" />
-                    原图变换与预处理
+                    {isEn ? 'Source Transform & Pre-process' : '原图变换与预处理'}
                   </span>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => setRotation(r => (r + 90) % 360)}
                       className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                      title="旋转 90 度"
+                      title={isEn ? 'Rotate 90°' : '旋转 90 度'}
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => setFlipH(f => !f)}
                       className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer"
-                      title="水平镜像翻转"
+                      title={isEn ? 'Horizontal Flip' : '水平镜像翻转'}
                     >
                       <FlipHorizontal className="w-3.5 h-3.5" />
                     </button>
@@ -512,10 +526,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                           ? 'bg-rose-600 text-white animate-pulse'
                           : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
                       }`}
-                      title="点击原图吸取背景色扣除"
+                      title={isEn ? 'Click image to sample background color' : '点击原图吸取背景色扣除'}
                     >
                       <Pipette className="w-3.5 h-3.5" />
-                      <span>{isPickingColor ? '点击图片扣色' : '吸除背景'}</span>
+                      <span>{isPickingColor ? (isEn ? 'Click Image to Pick' : '点击图片扣色') : (isEn ? 'Pick BG Color' : '吸除背景')}</span>
                     </button>
                   </div>
                 </div>
@@ -530,7 +544,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   />
                   {isPickingColor && (
                     <div className="absolute top-2 left-2 bg-rose-600/90 text-white text-[11px] px-2 py-1 rounded-md shadow backdrop-blur pointer-events-none">
-                      点击图像上的任何背景位置以直接扣除该颜色
+                      {isEn ? 'Click any pixel on image to remove color' : '点击图像上的任何背景位置以直接扣除该颜色'}
                     </div>
                   )}
                 </div>
@@ -541,26 +555,41 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Eye className="w-3.5 h-3.5 text-rose-400" />
-                    拼豆图纸预览 ({localSettings.width} × {localSettings.height})
+                    {isEn ? `Pattern Preview (${localSettings.width} × ${localSettings.height})` : `拼豆图纸预览 (${localSettings.width} × ${localSettings.height})`}
                   </span>
                   <div className="text-[11px] text-emerald-400 font-mono font-bold flex items-center gap-1">
-                    <span>实际用豆: {previewGrid.flat().filter(Boolean).length} 粒</span>
+                    <span>{isEn ? `Total Beads: ${previewGrid.flat().filter(Boolean).length} pcs` : `实际用豆: ${previewGrid.flat().filter(Boolean).length} 粒`}</span>
                     {previewGrid.flat().filter(c => c === null).length > 0 && (
                       <span className="text-[10px] text-pink-300 bg-pink-950/80 border border-pink-700/60 px-1.5 py-0.5 rounded font-sans">
-                        (已免算 {previewGrid.flat().filter(c => c === null).length} 空格)
+                        {isEn ? `(${previewGrid.flat().filter(c => c === null).length} transparent)` : `(已免算 ${previewGrid.flat().filter(c => c === null).length} 空格)`}
                       </span>
                     )}
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[220px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
+                <div className="flex-1 min-h-[220px] relative flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
                   {previewGrid.length > 0 ? (
                     <canvas
                       ref={previewCanvasRef}
                       className="max-w-full max-h-[260px] sm:max-h-[320px] object-contain rounded shadow-lg"
                     />
                   ) : (
-                    <div className="text-slate-500 text-xs">正在计算高精度像素...</div>
+                    <div className="text-slate-500 text-xs flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full border-2 border-rose-500/30 border-t-rose-500 animate-spin" />
+                      <span>{isEn ? 'Processing high-precision pixels...' : '正在计算高精度像素...'}</span>
+                    </div>
+                  )}
+
+                  {isCalculating && (
+                    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 z-10">
+                      <div className="relative flex items-center justify-center">
+                        <div className="w-10 h-10 rounded-full border-3 border-rose-500/20 border-t-rose-500 animate-spin" />
+                        <Sparkles className="w-4 h-4 text-amber-400 absolute animate-pulse" />
+                      </div>
+                      <span className="text-xs text-rose-300 font-medium">
+                        {isEn ? 'Recalculating bead pattern...' : '✨ 正在生成最新图纸预览...'}
+                      </span>
+                    </div>
                   )}
                 </div>
               </div>
@@ -573,7 +602,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 border border-slate-700 cursor-pointer transition-colors"
               >
                 <Sliders className="w-4 h-4 text-amber-400" />
-                <span>调节尺寸、锐化、颜色算法等参数 →</span>
+                <span>{isEn ? 'Adjust Grid Dimensions, Sharpening & Color Engine →' : '调节尺寸、锐化、颜色算法等参数 →'}</span>
               </button>
             </div>
           </div>
@@ -586,26 +615,26 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           >
             {/* Mobile Header Banner in settings tab */}
             <div className="xl:hidden pb-3 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-slate-400 text-[11px]">当前拼豆尺寸: <strong className="text-amber-400 font-mono text-xs">{localSettings.width} × {localSettings.height}</strong></span>
+              <span className="text-slate-400 text-[11px]">{isEn ? 'Grid Dimensions:' : '当前拼豆尺寸:'} <strong className="text-amber-400 font-mono text-xs">{localSettings.width} × {localSettings.height}</strong></span>
               <button
                 onClick={() => setActiveMobileTab('preview')}
                 className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
               >
                 <Eye className="w-3.5 h-3.5" />
-                <span>切回效果预览</span>
+                <span>{isEn ? 'Switch to Preview' : '切回效果预览'}</span>
               </button>
             </div>
             {/* Section 0: Grid Target Dimensions */}
             <div className="space-y-2">
               <label className="text-slate-200 font-bold flex items-center justify-between text-xs">
-                <span>转换拼豆目标尺寸</span>
+                <span>{isEn ? 'Target Grid Dimensions' : '转换拼豆目标尺寸'}</span>
                 <span className="text-[11px] text-amber-400 font-mono">
-                  {localSettings.width} x {localSettings.height} 豆
+                  {localSettings.width} x {localSettings.height} {isEn ? 'Beads' : '豆'}
                 </span>
               </label>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <span className="text-[10px] text-slate-400">宽度 (W)</span>
+                  <span className="text-[10px] text-slate-400">{isEn ? 'Width (W)' : '宽度 (W)'}</span>
                   <input
                     type="number"
                     min={10}
@@ -623,7 +652,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   />
                 </div>
                 <div>
-                  <span className="text-[10px] text-slate-400">高度 (H)</span>
+                  <span className="text-[10px] text-slate-400">{isEn ? 'Height (H)' : '高度 (H)'}</span>
                   <input
                     type="number"
                     min={10}
@@ -647,34 +676,34 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             <div className="space-y-2 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold flex items-center gap-1.5 text-xs">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <span>色彩匹配引擎 (Color Engine)</span>
+                <span>{isEn ? 'Color Match Engine' : '色彩匹配引擎 (Color Engine)'}</span>
               </label>
               <div className="space-y-1.5">
                 {[
                   {
                     id: 'ciede2000_bright',
-                    name: '✨ CIEDE2000 亮色与肤色保护',
-                    desc: '超精准区分亮色、白色、浅粉/肤色与发色，防止曝光过度',
+                    name: isEn ? '✨ CIEDE2000 Highlights & Skin Protection' : '✨ CIEDE2000 亮色与肤色保护',
+                    desc: isEn ? 'Ultra-precise protection for bright tints, skin tones, and highlights.' : '超精准区分亮色、白色、浅粉/肤色与发色，防止曝光过度',
                   },
                   {
                     id: 'ciede2000_vivid',
-                    name: 'CIEDE2000 鲜艳饱满 (防发白)',
-                    desc: '优先匹配饱满色彩，强力防止色彩发淡',
+                    name: isEn ? 'CIEDE2000 Vivid & Rich (Anti-fading)' : 'CIEDE2000 鲜艳饱满 (防发白)',
+                    desc: isEn ? 'Prioritizes rich color saturation, prevents washed out output.' : '优先匹配饱满色彩，强力防止色彩发淡',
                   },
                   {
                     id: 'ciede2000',
-                    name: 'CIEDE2000 工业标准柔和',
-                    desc: '符合人眼标准感知，渐变平滑自然',
+                    name: isEn ? 'CIEDE2000 Industrial Standard Soft' : 'CIEDE2000 工业标准柔和',
+                    desc: isEn ? 'Perceptually uniform, smooth natural gradients.' : '符合人眼标准感知，渐变平滑自然',
                   },
                   {
                     id: 'cie76',
-                    name: 'CIE76 标准Lab演算法',
-                    desc: '速度快，色差均匀',
+                    name: isEn ? 'CIE76 Standard Lab Algorithm' : 'CIE76 标准Lab演算法',
+                    desc: isEn ? 'Fast calculation with uniform color delta.' : '速度快，色差均匀',
                   },
                   {
                     id: 'rgb_weighted',
-                    name: '加权RGB 快速高对比',
-                    desc: '锐利强对比，适合二次元/图标',
+                    name: isEn ? 'Weighted RGB High Contrast' : '加权RGB 快速高对比',
+                    desc: isEn ? 'Sharp high contrast, ideal for anime sprite art.' : '锐利强对比，适合二次元/图标',
                   },
                 ].map(algo => (
                   <button
@@ -702,13 +731,13 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             <div className="space-y-3 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold flex items-center gap-1.5 text-xs">
                 <Sliders className="w-4 h-4 text-sky-400" />
-                <span>图像边缘与锐化处理</span>
+                <span>{isEn ? 'Edge Sharpening & Enhancement' : '图像边缘与锐化处理'}</span>
               </label>
 
               {/* Sharpening Slider */}
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-300">锐化与边缘增强</span>
+                  <span className="text-slate-300">{isEn ? 'Sharpening & Edge Enhancement' : '锐化与边缘增强'}</span>
                   <span className="font-mono text-rose-400 font-bold">
                     {localSettings.sharpening}%
                   </span>
@@ -727,7 +756,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   className="w-full accent-rose-500 cursor-pointer"
                 />
                 <p className="text-[10px] text-slate-400">
-                  提升因缩小造成的线条模糊，使像素小点边缘清晰无比。
+                  {isEn ? 'Boosts fine line sharpness caused by downscaling.' : '提升因缩小造成的线条模糊，使像素小点边缘清晰无比。'}
                 </p>
               </div>
 
@@ -742,9 +771,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
                 />
                 <div>
-                  <span className="font-bold text-slate-200">暗色/黑色描边强保护</span>
+                  <span className="font-bold text-slate-200">{isEn ? 'Dark / Black Outline Protection' : '暗色/黑色描边强保护'}</span>
                   <p className="text-[10px] text-slate-400">
-                    防止卡通/游戏主图的角色黑边在缩小时丢失
+                    {isEn ? 'Prevents dark character outlines from fading when downscaling.' : '防止卡通/游戏主图的角色黑边在缩小时丢失'}
                   </p>
                 </div>
               </label>
@@ -755,7 +784,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               <label className="text-slate-200 font-bold flex items-center justify-between text-xs">
                 <span className="flex items-center gap-1.5">
                   <Crop className="w-4 h-4 text-sky-400" />
-                  <span>智能主体裁剪与背景扣除</span>
+                  <span>{isEn ? 'Smart Subject Crop & BG Removal' : '智能主体裁剪与背景扣除'}</span>
                 </span>
                 {pickedChromaColor && (
                   <button
@@ -765,7 +794,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                     }}
                     className="text-[10px] text-rose-400 hover:underline cursor-pointer"
                   >
-                    清除扣色
+                    {isEn ? 'Clear Color' : '清除扣色'}
                   </button>
                 )}
               </label>
@@ -777,10 +806,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               >
                 <span className="flex items-center gap-2">
                   <Crop className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform" />
-                  <span>🎯 智能主体自动裁剪 (自动去除黑/白边框)</span>
+                  <span>{isEn ? '🎯 Smart Subject Auto Crop' : '🎯 智能主体自动裁剪 (自动去除黑/白边框)'}</span>
                 </span>
                 <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/40">
-                  提升清晰度
+                  {isEn ? 'Boost Detail' : '提升清晰度'}
                 </span>
               </button>
 
@@ -791,14 +820,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   className="py-1.5 px-2 rounded-lg bg-pink-950/80 border border-pink-700/80 text-pink-200 text-[11px] font-bold hover:bg-pink-900 cursor-pointer flex items-center justify-center gap-1"
                 >
                   <Scissors className="w-3 h-3 text-pink-400" />
-                  <span>🪄 智能角落抠图</span>
+                  <span>{isEn ? '🪄 Smart Corner Cut' : '🪄 智能角落抠图'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={removeWhiteBackground}
                   className="py-1.5 px-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 text-[11px] font-medium hover:bg-slate-700 cursor-pointer flex items-center justify-center gap-1"
                 >
-                  <span>☁️ 扣除纯白背景</span>
+                  <span>{isEn ? '☁️ Remove White BG' : '☁️ 扣除纯白背景'}</span>
                 </button>
               </div>
 
@@ -809,10 +838,10 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 />
                 <div className="flex-1">
                   <div className="text-[11px] font-bold text-slate-200">
-                    {pickedChromaColor ? `扣除颜色: ${pickedChromaColor}` : '未选择背景色'}
+                    {pickedChromaColor ? (isEn ? `Removed Color: ${pickedChromaColor}` : `扣除颜色: ${pickedChromaColor}`) : (isEn ? 'No BG color selected' : '未选择背景色')}
                   </div>
                   <div className="text-[10px] text-slate-400">
-                    使用左侧吸管或直接输入Hex色号
+                    {isEn ? 'Use pipette tool or enter Hex color code' : '使用左侧吸管或直接输入Hex色号'}
                   </div>
                 </div>
               </div>
@@ -820,7 +849,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               {pickedChromaColor && (
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-300">抠色容差 (Tolerance)</span>
+                    <span className="text-slate-300">{isEn ? 'Chroma Tolerance' : '抠色容差 (Tolerance)'}</span>
                     <span className="font-mono text-rose-400">
                       {localSettings.chromaKeyTolerance}%
                     </span>
@@ -844,11 +873,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
             {/* Section 4: Filters (Brightness, Contrast, Saturation) */}
             <div className="space-y-3 pt-3 border-t border-slate-800">
-              <label className="text-slate-200 font-bold text-xs">基础明暗调色</label>
+              <label className="text-slate-200 font-bold text-xs">{isEn ? 'Basic Color Adjustments' : '基础明暗调色'}</label>
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">亮度 (Brightness)</span>
+                  <span className="text-slate-400">{isEn ? 'Brightness' : '亮度 (Brightness)'}</span>
                   <span className="font-mono text-slate-200">
                     {localSettings.brightness + 15 > 0 ? `+${localSettings.brightness + 15}` : localSettings.brightness + 15}
                   </span>
@@ -870,7 +899,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">对比度 (Contrast)</span>
+                  <span className="text-slate-400">{isEn ? 'Contrast' : '对比度 (Contrast)'}</span>
                   <span className="font-mono text-slate-200">{localSettings.contrast}</span>
                 </div>
                 <input
@@ -890,7 +919,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">饱和度 (Saturation)</span>
+                  <span className="text-slate-400">{isEn ? 'Saturation' : '饱和度 (Saturation)'}</span>
                   <span className="font-mono text-slate-200">{localSettings.saturation}</span>
                 </div>
                 <input
@@ -911,40 +940,40 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
             {/* Section 5: Color Limit & Dithering */}
             <div className="space-y-3 pt-3 border-t border-slate-800">
-              <label className="text-slate-200 font-bold text-xs">用色精简与抖动采样</label>
+              <label className="text-slate-200 font-bold text-xs">{isEn ? 'Color Limits & Dithering' : '用色精简与抖动采样'}</label>
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">抖动算法 (Dither)</span>
+                  <span className="text-slate-400">{isEn ? 'Dithering Algorithm' : '抖动算法 (Dither)'}</span>
                 </div>
                 <select
                   value={localSettings.dither}
                   onChange={e => setLocalSettings(s => ({ ...s, dither: e.target.value as any }))}
                   className="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1.5 text-xs outline-none cursor-pointer"
                 >
-                  <option value="none">无抖动 (保持边缘清晰洁净)</option>
-                  <option value="floyd">Floyd-Steinberg 误差扩散抖动 (平滑渐变)</option>
-                  <option value="atkinson">Atkinson 经典像素风抖动 (细腻复古)</option>
+                  <option value="none">{isEn ? 'None (Clean sharp edges)' : '无抖动 (保持边缘清晰洁净)'}</option>
+                  <option value="floyd">{isEn ? 'Floyd-Steinberg (Smooth gradients)' : 'Floyd-Steinberg 误差扩散抖动 (平滑渐变)'}</option>
+                  <option value="atkinson">{isEn ? 'Atkinson (Retro pixel dithering)' : 'Atkinson 经典像素风抖动 (细腻复古)'}</option>
                 </select>
               </div>
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">用色种类上限</span>
+                  <span className="text-slate-400">{isEn ? 'Max Color Limit' : '用色种类上限'}</span>
                 </div>
                 <select
                   value={localSettings.colorLimit}
                   onChange={e => setLocalSettings(s => ({ ...s, colorLimit: parseInt(e.target.value) }))}
                   className="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1.5 text-xs outline-none cursor-pointer"
                 >
-                  <option value={0}>不设限 (自动匹配色板全色彩)</option>
-                  <option value={8}>最多 8 色 (超简复古)</option>
-                  <option value={12}>最多 12 色</option>
-                  <option value={16}>最多 16 色 (经典16色)</option>
-                  <option value={24}>最多 24 色</option>
-                  <option value={32}>最多 32 色</option>
-                  <option value={48}>最多 48 色</option>
-                  <option value={64}>最多 64 色</option>
+                  <option value={0}>{isEn ? 'Unlimited (Auto match full palette)' : '不设限 (自动匹配色板全色彩)'}</option>
+                  <option value={8}>{isEn ? 'Max 8 colors (Ultra retro)' : '最多 8 色 (超简复古)'}</option>
+                  <option value={12}>{isEn ? 'Max 12 colors' : '最多 12 色'}</option>
+                  <option value={16}>{isEn ? 'Max 16 colors' : '最多 16 色 (经典16色)'}</option>
+                  <option value={24}>{isEn ? 'Max 24 colors' : '最多 24 色'}</option>
+                  <option value={32}>{isEn ? 'Max 32 colors' : '最多 32 色'}</option>
+                  <option value={48}>{isEn ? 'Max 48 colors' : '最多 48 色'}</option>
+                  <option value={64}>{isEn ? 'Max 64 colors' : '最多 64 色'}</option>
                 </select>
               </div>
             </div>
@@ -957,14 +986,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             onClick={onClose}
             className="px-3.5 sm:px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer transition-colors shrink-0"
           >
-            取消
+            {isEn ? 'Cancel' : '取消'}
           </button>
           <button
             onClick={handleApply}
             className="flex-1 sm:flex-initial px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white text-xs font-bold shadow-lg shadow-rose-600/30 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 truncate"
           >
             <Check className="w-4 h-4 shrink-0" />
-            <span className="truncate">应用参数并生成图纸</span>
+            <span className="truncate">{isEn ? 'Apply Parameters & Generate Pattern' : '应用参数并生成图纸'}</span>
           </button>
         </div>
       </div>

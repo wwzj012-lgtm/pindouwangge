@@ -194,13 +194,29 @@ export const BRAND_NAMES: Record<BrandKey, string> = {
   CUSTOM: '自定义专属色板',
 };
 
+export const BRAND_NAMES_EN: Record<BrandKey, string> = {
+  MARD: 'MARD (2.6/5.0mm Standard)',
+  ARTKAL_S: 'ARTKAL S-Series (Soft Beads)',
+  PERLER: 'PERLER (US Classic)',
+  HAMA: 'HAMA (Denmark Classic)',
+  CUSTOM: 'Custom Palette',
+};
+
+export function getBrandNames(isEn: boolean): Record<BrandKey, string> {
+  return isEn ? BRAND_NAMES_EN : BRAND_NAMES;
+}
+
 // Preset Pegboard Sizes
 export const BOARD_PRESETS = [
-  { name: '14x14 (小正方形板)', width: 14, height: 14, boardSize: 14 },
-  { name: '29x29 (标准1板 经典大方板)', width: 29, height: 29, boardSize: 29 },
-  { name: '58x29 (横向2板 58x29)', width: 58, height: 29, boardSize: 29 },
-  { name: '58x58 (田字4板 2x2大图)', width: 58, height: 58, boardSize: 29 },
-  { name: '87x87 (超大号 3x3板 87x87)', width: 87, height: 87, boardSize: 29 },
-  { name: '50x50 (50x50高清板)', width: 50, height: 50, boardSize: 25 },
-  { name: '100x100 (100x100 极高精图)', width: 100, height: 100, boardSize: 50 },
+  { name: '14x14 (小正方形板)', nameEn: '14x14 (Small Square)', width: 14, height: 14, boardSize: 14 },
+  { name: '29x29 (标准1板 经典大方板)', nameEn: '29x29 (Std 1 Board)', width: 29, height: 29, boardSize: 29 },
+  { name: '58x29 (横向2板 58x29)', nameEn: '58x29 (Horizontal 2 Boards)', width: 58, height: 29, boardSize: 29 },
+  { name: '58x58 (田字4板 2x2大图)', nameEn: '58x58 (4 Boards 2x2)', width: 58, height: 58, boardSize: 29 },
+  { name: '87x87 (超大号 3x3板 87x87)', nameEn: '87x87 (Jumbo 3x3)', width: 87, height: 87, boardSize: 29 },
+  { name: '50x50 (50x50高清板)', nameEn: '50x50 (50x50 HD)', width: 50, height: 50, boardSize: 25 },
+  { name: '100x100 (100x100 极高精图)', nameEn: '100x100 (100x100 Ultra HD)', width: 100, height: 100, boardSize: 50 },
 ];
+
+export function getBoardPresetName(preset: (typeof BOARD_PRESETS)[0], isEn: boolean): string {
+  return isEn ? preset.nameEn : preset.name;
+}

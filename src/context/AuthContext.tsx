@@ -6,6 +6,7 @@ import {
   syncUserProfile,
   UserProfile,
   onAuthStateChanged,
+  onSnapshot,
   doc,
   getDoc,
   setDoc,
@@ -71,10 +72,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    let unsubProfileDoc: (() => void) | null = null;
+
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (unsubProfileDoc) {
+        unsubProfileDoc();
+        unsubProfileDoc = null;
+      }
+
       if (user) {
         setCurrentUser(user);
         await fetchProfile(user);
+
+        // Setup real-time listener on the user's Firestore document
+        try {
+          const userRef = doc(db, 'users', user.uid);
+          unsubProfileDoc = onSnapshot(
+            userRef,
+            (docSnap) => {
+              if (docSnap.exists()) {
+                const data = docSnap.data() as UserProfile;
+                const mergedProfile: UserProfile = {
+                  ...data,
+                  member_type: data.member_type ?? (data.isVip ? 1 : 0),
+                  member_expire: data.member_expire ?? data.vipExpireAt ?? null,
+                };
+                setUserProfile(mergedProfile);
+                try {
+                  localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(mergedProfile));
+                } catch (e) {}
+              }
+            },
+            (error) => {
+              console.warn('Real-time user profile sync warning:', error);
+            }
+          );
+        } catch (e) {
+          console.warn('Failed to attach real-time user profile listener:', e);
+        }
       } else {
         // Check if there is a local custom user session stored in localStorage
         try {
@@ -97,7 +132,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubProfileDoc) unsubProfileDoc();
+      unsubscribe();
+    };
   }, []);
 
   const setLocalCustomUser = async (userData: { uid: string; email: string; displayName: string }) => {
@@ -137,6 +175,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!currentUser || !userProfile || userProfile.freeTrialUsed) {
       return false;
     }
+    try {
+      // GFW-bypass proxy first
+      const res = await fetch('/api/auth/consume-free-trial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: currentUser.uid })
+      });
+      if (res.ok) {
+        setUserProfile(prev => prev ? { ...prev, freeTrialUsed: true } : null);
+        return true;
+      }
+    } catch (apiErr) {
+      console.warn('Server free trial consume failed, falling back to client SDK:', apiErr);
+    }
+
     try {
       const userRef = doc(db, 'users', currentUser.uid);
       await updateDoc(userRef, {

@@ -91,6 +91,201 @@ app.post('/api/user-profile', async (req, res) => {
   }
 });
 
+// 4. Save Exported Pattern Record (30 Days Retention)
+app.post('/api/user-patterns/save', async (req, res) => {
+  const { id, userId, title, width, height, totalBeads, thumbnailUrl } = req.body;
+  if (!id || !userId || !thumbnailUrl) {
+    return res.status(400).json({ error: 'id, userId, and thumbnailUrl are required' });
+  }
+  const now = Date.now();
+  const expireAt = now + 30 * 24 * 60 * 60 * 1000; // 30 days retention
+  const record = {
+    id,
+    userId,
+    title: title || '未命名图纸',
+    width: width || 29,
+    height: height || 29,
+    totalBeads: totalBeads || 0,
+    thumbnailUrl,
+    createdAt: now,
+    expireAt,
+  };
+  try {
+    const patternRef = doc(db, 'patterns', id);
+    await setDoc(patternRef, record);
+    res.json({ success: true, record });
+  } catch (err: any) {
+    console.error('Failed to save user pattern server-side:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 5. Get User Exported Patterns
+app.get('/api/user-patterns', async (req, res) => {
+  const userId = req.query.userId as string;
+  if (!userId) {
+    return res.status(400).json({ error: 'userId is required' });
+  }
+  try {
+    const patternsRef = collection(db, 'patterns');
+    const q = query(patternsRef, where('userId', '==', userId));
+    const snap = await getDocs(q);
+    const now = Date.now();
+    const records = snap.docs
+      .map(d => d.data())
+      .filter(p => !p.expireAt || p.expireAt > now); // Filter out expired (> 30 days)
+    res.json(records);
+  } catch (err: any) {
+    console.error('Failed to get user patterns server-side:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 6. Delete User Exported Pattern
+app.post('/api/user-patterns/delete', async (req, res) => {
+  const { id } = req.body;
+  if (!id) {
+    return res.status(400).json({ error: 'id is required' });
+  }
+  try {
+    await deleteDoc(doc(db, 'patterns', id));
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Failed to delete pattern server-side:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Auth proxy routes
+app.post('/api/auth/signup', async (req, res) => {
+  const { email, password, displayName } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'missing_fields', message: '邮箱与密码均为必填项。' });
+  }
+
+  const targetEmail = email.trim().toLowerCase();
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('email', '==', targetEmail));
+    const querySnapshot = await getDocs(q);
+
+    if (!querySnapshot.empty) {
+      return res.status(400).json({ error: 'email_taken', message: '该邮箱/账号已被注册，请直接切换至【登录】模式。' });
+    }
+
+    const uid = `cn_user_${Date.now().toString(36)}_${Math.floor(1000 + Math.random() * 9000)}`;
+    const isAdminEmail = targetEmail === 'wwzj012@gmail.com';
+    const profile = {
+      uid,
+      email: targetEmail,
+      displayName: displayName || targetEmail.split('@')[0],
+      photoURL: null,
+      member_type: isAdminEmail ? 2 : 0,
+      member_expire: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
+      isVip: isAdminEmail,
+      vipExpireAt: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
+      freeTrialUsed: false,
+      role: isAdminEmail ? 'admin' : 'user',
+      customPassword: password,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await setDoc(doc(db, 'users', uid), profile);
+    res.json(profile);
+  } catch (err: any) {
+    console.error('Server signup failed:', err);
+    res.status(500).json({ error: err.message, message: '注册失败，服务器发生异常。' });
+  }
+});
+
+app.post('/api/auth/signin', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'missing_fields', message: '邮箱与密码均为必填项。' });
+  }
+
+  const targetEmail = email.trim().toLowerCase();
+  try {
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('email', '==', targetEmail));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      return res.status(404).json({ error: 'user_not_found', message: '该账号不存在，请切换至【注册新账号】模式。' });
+    }
+
+    const userDoc = querySnapshot.docs[0];
+    const userData = userDoc.data() as any;
+
+    if (userData.customPassword && userData.customPassword !== password) {
+      return res.status(400).json({ error: 'wrong_password', message: '密码错误，请输入正确的密码。' });
+    }
+
+    // Auto set custom password if user existed without one
+    if (!userData.customPassword) {
+      await updateDoc(doc(db, 'users', userData.uid), {
+        customPassword: password,
+        updatedAt: Date.now()
+      });
+      userData.customPassword = password;
+    }
+
+    res.json(userData);
+  } catch (err: any) {
+    console.error('Server signin failed:', err);
+    res.status(500).json({ error: err.message, message: '登录失败，服务器发生异常。' });
+  }
+});
+
+app.post('/api/auth/quick-login', async (req, res) => {
+  try {
+    const randomId = Math.floor(10000 + Math.random() * 90000);
+    const uid = `cn_guest_${Date.now().toString(36)}_${randomId}`;
+    const quickEmail = `cn_guest_${Date.now().toString().slice(-6)}_${randomId}@pindou.cn`;
+    const quickName = `拼豆玩家_${randomId}`;
+
+    const profile = {
+      uid,
+      email: quickEmail,
+      displayName: quickName,
+      photoURL: null,
+      member_type: 0,
+      member_expire: null,
+      isVip: false,
+      vipExpireAt: null,
+      freeTrialUsed: false,
+      role: 'user',
+      customPassword: `Pindou_${randomId}_Pass888`,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    await setDoc(doc(db, 'users', uid), profile);
+    res.json(profile);
+  } catch (err: any) {
+    console.error('Server quick login failed:', err);
+    res.status(500).json({ error: err.message, message: '极速登录失败，服务器发生异常。' });
+  }
+});
+
+app.post('/api/auth/consume-free-trial', async (req, res) => {
+  const { uid } = req.body;
+  if (!uid) {
+    return res.status(400).json({ error: 'uid is required' });
+  }
+  try {
+    await updateDoc(doc(db, 'users', uid), {
+      freeTrialUsed: true,
+      updatedAt: Date.now(),
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Server consume-free-trial failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // 3. Redeem VIP Code safely server-side
 app.post('/api/redeem-code', async (req, res) => {
   const { uid, email, displayName, code, userProfile } = req.body;

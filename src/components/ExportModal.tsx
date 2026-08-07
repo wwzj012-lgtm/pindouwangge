@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { BeadColor, BeadShape } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
+import { saveExportedPatternRecord } from '../utils/patternHistory';
 import {
   generatePatternCanvas,
   downloadCanvasImage,
@@ -53,12 +55,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   beadShape,
   onOpenAuthModal,
 }) => {
-  const { isVip, isPro, memberType } = useAuth();
+  const { currentUser, isVip, isPro, memberType } = useAuth();
+  const { language, t } = useLanguage();
+  const isEn = language === 'en';
 
   // Watermark States
   const [watermarkType, setWatermarkType] = useState<WatermarkType>('double_diagonal');
   const [watermarkOpacity, setWatermarkOpacity] = useState<number>(0.18);
-  const [watermarkText, setWatermarkText] = useState<string>('豆织星格');
+  const [watermarkText, setWatermarkText] = useState<string>(isEn ? 'BeadGrid' : '豆织星格');
   const [watermarkColor, setWatermarkColor] = useState<string>('#A855F7');
   const [watermarkAngle, setWatermarkAngle] = useState<number>(-25);
 
@@ -90,11 +94,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         setWatermarkType('double_diagonal');
       }
       // Force platform default watermark text if non-VIP
-      setWatermarkText('豆织星格');
+      setWatermarkText(isEn ? 'BeadGrid' : '豆织星格');
       setWatermarkColor('#A855F7');
       setWatermarkAngle(-25);
     }
-  }, [isVip, watermarkType]);
+  }, [isVip, watermarkType, isEn]);
 
   // Render Canvas Preview
   useEffect(() => {
@@ -113,13 +117,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       beadShape,
       selectedBoardIndex: selectedBoard,
       watermarkType,
-      watermarkText: isVip ? watermarkText : '豆织星格',
+      watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
       watermarkOpacity,
       watermarkColor: isVip ? watermarkColor : '#A855F7',
       watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
+      isEn,
     };
 
     const canvas = generatePatternCanvas(options);
@@ -167,17 +172,33 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       beadShape,
       selectedBoardIndex: selectedBoard,
       watermarkType,
-      watermarkText: isVip ? watermarkText : '豆织星格',
+      watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
       watermarkOpacity,
       watermarkColor: isVip ? watermarkColor : '#A855F7',
       watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
+      isEn,
     };
     const canvas = generatePatternCanvas(options);
-    const suffix = selectedBoard !== null ? `_板${selectedBoard + 1}` : '_完整图纸';
+    const suffix = selectedBoard !== null
+      ? (isEn ? `_Board${selectedBoard + 1}` : `_板${selectedBoard + 1}`)
+      : (isEn ? '_FullPattern' : '_完整图纸');
     downloadCanvasImage(canvas, `${projectName}${suffix}.png`);
+
+    // Auto archive exported pattern record for user (30 days retention)
+    if (currentUser?.uid) {
+      const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
+      saveExportedPatternRecord({
+        userId: currentUser.uid,
+        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
+        width,
+        height,
+        totalBeads: totalBeadsCount,
+        canvas,
+      }).catch(e => console.warn('Failed to archive pattern record:', e));
+    }
   };
 
   const executeAllBoardsDownload = () => {
@@ -194,15 +215,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       beadShape,
       selectedBoardIndex: null,
       watermarkType,
-      watermarkText: isVip ? watermarkText : '豆织星格',
+      watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
       watermarkOpacity,
       watermarkColor: isVip ? watermarkColor : '#A855F7',
       watermarkAngle: isVip ? watermarkAngle : -25,
       legendPosition,
       legendScaleMode,
       hideEmptyPegs,
+      isEn,
     };
-    downloadCanvasImage(generatePatternCanvas(fullOptions), `${projectName}_完整图纸.png`);
+    const fullCanvas = generatePatternCanvas(fullOptions);
+    downloadCanvasImage(fullCanvas, isEn ? `${projectName}_FullPattern.png` : `${projectName}_完整图纸.png`);
 
     for (let i = 0; i < totalBoards; i++) {
       setTimeout(() => {
@@ -210,8 +233,21 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           ...fullOptions,
           selectedBoardIndex: i,
         };
-        downloadCanvasImage(generatePatternCanvas(subOptions), `${projectName}_板${i + 1}.png`);
+        downloadCanvasImage(generatePatternCanvas(subOptions), isEn ? `${projectName}_Board${i + 1}.png` : `${projectName}_板${i + 1}.png`);
       }, i * 300);
+    }
+
+    // Auto archive exported pattern record for user (30 days retention)
+    if (currentUser?.uid) {
+      const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
+      saveExportedPatternRecord({
+        userId: currentUser.uid,
+        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
+        width,
+        height,
+        totalBeads: totalBeadsCount,
+        canvas: fullCanvas,
+      }).catch(e => console.warn('Failed to archive pattern record:', e));
     }
   };
 
@@ -255,20 +291,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-bold text-sm text-slate-100 truncate">导出高清拼豆图纸教程</h3>
+                <h3 className="font-bold text-sm text-slate-100 truncate">
+                  {isEn ? 'Export Pattern Tutorial' : '导出高清拼豆图纸教程'}
+                </h3>
                 {isVip ? (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400 shrink-0">
                     <Crown className="w-3 h-3 text-amber-400" />
-                    VIP尊享导出
+                    {isEn ? 'VIP Export' : 'VIP尊享导出'}
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 border border-slate-700 text-slate-400 shrink-0">
-                    免费版图纸
+                    {isEn ? 'Free Pattern' : '免费版图纸'}
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5 truncate hidden sm:block">
-                包含标准标尺坐标、色号符号标识与拼豆用量色卡列表
+                {isEn ? 'Includes scale coordinates, color symbols, and bead count checklist' : '包含标准标尺坐标、色号符号标识与拼豆用量色卡列表'}
               </p>
             </div>
           </div>
@@ -278,19 +316,19 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             <button
               onClick={() => setIsCollapsed(!isCollapsed)}
               className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-medium text-xs transition-all cursor-pointer hover:text-white"
-              title={isCollapsed ? '展开参数设置' : '收起参数设置'}
+              title={isCollapsed ? (isEn ? 'Expand Settings' : '展开参数设置') : (isEn ? 'Collapse Settings' : '收起参数设置')}
             >
               {isCollapsed ? (
                 <>
                   <ChevronDown className="w-4 h-4 text-purple-400 shrink-0" />
-                  <span className="hidden sm:inline font-bold text-purple-300">展开设置</span>
-                  <span className="sm:hidden font-bold text-purple-300">展开</span>
+                  <span className="hidden sm:inline font-bold text-purple-300">{isEn ? 'Expand' : '展开设置'}</span>
+                  <span className="sm:hidden font-bold text-purple-300">{isEn ? 'Expand' : '展开'}</span>
                 </>
               ) : (
                 <>
                   <ChevronUp className="w-4 h-4 text-slate-400 shrink-0" />
-                  <span className="hidden sm:inline">收起设置</span>
-                  <span className="sm:hidden">收起</span>
+                  <span className="hidden sm:inline">{isEn ? 'Collapse' : '收起设置'}</span>
+                  <span className="sm:hidden">{isEn ? 'Collapse' : '收起'}</span>
                 </>
               )}
             </button>
@@ -311,16 +349,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <span className="inline-flex items-center gap-1 font-bold text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                 {watermarkType === 'none'
-                  ? '✨ 纯净无水印'
-                  : `🛡️ 水印: 双重斜向 (${Math.round(watermarkOpacity * 100)}%)`}
+                  ? (isEn ? '✨ Watermark Free' : '✨ 纯净无水印')
+                  : (isEn ? `🛡️ Watermark: Diagonal (${Math.round(watermarkOpacity * 100)}%)` : `🛡️ 水印: 双重斜向 (${Math.round(watermarkOpacity * 100)}%)`)}
               </span>
               <span className="text-slate-700 hidden sm:inline">|</span>
               <span className="text-slate-400">
-                {showCoordinates ? '标尺: 开启' : '标尺: 关闭'} • {showSymbols ? '色号: 开启' : '色号: 关闭'}
+                {showCoordinates ? (isEn ? 'Ruler: ON' : '标尺: 开启') : (isEn ? 'Ruler: OFF' : '标尺: 关闭')} • {showSymbols ? (isEn ? 'Symbols: ON' : '色号: 开启') : (isEn ? 'Symbols: OFF' : '色号: 关闭')}
               </span>
               <span className="text-slate-700 hidden sm:inline">|</span>
               <span className="text-slate-400">
-                视角: {selectedBoard === null ? '全景整张图纸' : `第 ${selectedBoard + 1} 板`}
+                {isEn ? 'View:' : '视角:'} {selectedBoard === null ? (isEn ? 'Full Pattern' : '全景整张图纸') : (isEn ? `Board #${selectedBoard + 1}` : `第 ${selectedBoard + 1} 板`)}
               </span>
             </div>
             <button
@@ -328,7 +366,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold hover:bg-purple-500/20 text-[11px] cursor-pointer shrink-0 transition-all"
             >
               <ChevronDown className="w-3.5 h-3.5" />
-              <span>展开详细设置</span>
+              <span>{isEn ? 'Expand Details' : '展开详细设置'}</span>
             </button>
           </div>
         ) : (
@@ -343,8 +381,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
                   <span className="font-bold text-slate-200">
                     {isVip
-                      ? '防盗水印【VIP 可关闭水印】'
-                      : '防盗水印【免费强制开启，升级 VIP 可去除】'}
+                      ? (isEn ? 'Anti-theft Watermark [VIP Can Disable]' : '防盗水印【VIP 可关闭水印】')
+                      : (isEn ? 'Anti-theft Watermark [Free Version, Upgrade VIP to Remove]' : '防盗水印【免费强制开启，升级 VIP 可去除】')}
                   </span>
                 </div>
 
@@ -356,17 +394,17 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-500/30 text-amber-300 font-bold hover:brightness-110 transition-all cursor-pointer text-[11px]"
                     >
                       <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
-                      <span>开通 VIP 去水印</span>
+                      <span>{isEn ? 'Get VIP to Remove Watermark' : '开通 VIP 去水印'}</span>
                     </button>
                   )}
 
                   <button
                     onClick={() => setIsCollapsed(true)}
                     className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-300 text-[11px] font-medium transition-colors cursor-pointer"
-                    title="收起水印设置面板"
+                    title={isEn ? 'Collapse watermark panel' : '收起水印设置面板'}
                   >
                     <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="hidden sm:inline">收起</span>
+                    <span className="hidden sm:inline">{isEn ? 'Collapse' : '收起'}</span>
                   </button>
                 </div>
               </div>
@@ -376,7 +414,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               
               {/* Dropdown 1: Watermark Type */}
               <div className="relative flex items-center gap-1.5">
-                <span className="text-slate-400">样式:</span>
+                <span className="text-slate-400">{isEn ? 'Style:' : '样式:'}</span>
                 <div className="relative inline-block">
                   <select
                     value={watermarkType}
@@ -385,13 +423,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       watermarkType === 'none' ? 'border-emerald-500/50 text-emerald-300' : 'border-purple-500/40 text-purple-200'
                     } font-medium rounded-lg px-2.5 py-1.5 text-xs outline-none cursor-pointer pr-7`}
                   >
-                    <option value="double_diagonal">✦ 双重斜向水印 (全图覆盖)</option>
+                    <option value="double_diagonal">{isEn ? '✦ Double Diagonal Watermark' : '✦ 双重斜向水印 (全图覆盖)'}</option>
                     <option
                       value="none"
                       disabled={!isVip}
                       className={!isVip ? 'text-slate-500 bg-slate-900' : 'text-emerald-400 font-bold'}
                     >
-                      {isVip ? '✨ 无水印图纸 (VIP 已解锁)' : '👑 无水印图纸 (升级 VIP 解锁)'}
+                      {isVip
+                        ? (isEn ? '✨ Watermark Free (VIP Unlocked)' : '✨ 无水印图纸 (VIP 已解锁)')
+                        : (isEn ? '👑 Watermark Free (Upgrade VIP)' : '👑 无水印图纸 (升级 VIP 解锁)')}
                     </option>
                   </select>
                 </div>
@@ -402,9 +442,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                     <div className="flex items-start gap-2">
                       <Crown className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       <div>
-                        <p className="font-bold text-amber-300 mb-0.5">VIP 专属权限</p>
+                        <p className="font-bold text-amber-300 mb-0.5">{isEn ? 'VIP Exclusive' : 'VIP 专属权限'}</p>
                         <p className="text-slate-300 leading-relaxed">
-                          开通 VIP 会员，解锁纯净无水印图纸导出，支持商用摆摊、图纸售卖使用
+                          {isEn ? 'Upgrade to VIP for watermark-free export for commercial use or sales.' : '开通 VIP 会员，解锁纯净无水印图纸导出，支持商用摆摊、图纸售卖使用'}
                         </p>
                         <button
                           onClick={() => {
@@ -413,7 +453,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                           }}
                           className="mt-2 text-xs font-bold text-amber-400 hover:underline flex items-center gap-1"
                         >
-                          立即升级 VIP &rarr;
+                          {isEn ? 'Upgrade to VIP now →' : '立即升级 VIP →'}
                         </button>
                       </div>
                     </div>
@@ -424,15 +464,15 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {/* Opacity Control (Hidden when watermarkType === 'none') */}
               {watermarkType !== 'none' && (
                 <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                  <span className="text-slate-400">透明度:</span>
+                  <span className="text-slate-400">{isEn ? 'Opacity:' : '透明度:'}</span>
                   <select
                     value={watermarkOpacity.toString()}
                     onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
                     className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
                   >
-                    <option value="0.1">10% (轻柔防盗)</option>
-                    <option value="0.18">18% (标准防盗 - 推荐)</option>
-                    <option value="0.25">25% (清晰标识)</option>
+                    <option value="0.1">10% ({isEn ? 'Soft' : '轻柔防盗'})</option>
+                    <option value="0.18">18% ({isEn ? 'Standard' : '标准防盗 - 推荐'})</option>
+                    <option value="0.25">25% ({isEn ? 'Clear' : '清晰标识'})</option>
                   </select>
                 </div>
               )}
@@ -442,14 +482,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 
                 {/* Custom Text */}
                 <div className="flex items-center gap-1">
-                  <span className="text-slate-400">文字:</span>
+                  <span className="text-slate-400">{isEn ? 'Text:' : '文字:'}</span>
                   <div className="relative flex items-center">
                     <input
                       type="text"
                       disabled={!isVip}
-                      value={isVip ? watermarkText : '豆织星格'}
+                      value={isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格')}
                       onChange={e => setWatermarkText(e.target.value)}
-                      placeholder="自定义店铺名称"
+                      placeholder={isEn ? 'Custom store name' : '自定义店铺名称'}
                       className={`px-2 py-1 rounded-lg border text-xs outline-none w-32 ${
                         isVip
                           ? 'bg-slate-800 border-slate-700 text-purple-200 focus:border-purple-500'
@@ -460,7 +500,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       <Lock
                         className="w-3 h-3 text-amber-400/80 absolute right-2 cursor-pointer"
                         onClick={() => onOpenAuthModal?.()}
-                        title="VIP 可自定义店铺底纹"
+                        title={isEn ? 'VIP can customize watermark text' : 'VIP 可自定义店铺底纹'}
                       />
                     )}
                   </div>
@@ -475,10 +515,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       onChange={e => setWatermarkColor(e.target.value)}
                       className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
                     >
-                      <option value="#A855F7">梦幻紫 (#A855F7)</option>
-                      <option value="#F59E0B">尊享金 (#F59E0B)</option>
-                      <option value="#64748B">低调灰 (#64748B)</option>
-                      <option value="#0284C7">天空蓝 (#0284C7)</option>
+                      <option value="#A855F7">{isEn ? 'Purple (#A855F7)' : '梦幻紫 (#A855F7)'}</option>
+                      <option value="#F59E0B">{isEn ? 'Gold (#F59E0B)' : '尊享金 (#F59E0B)'}</option>
+                      <option value="#64748B">{isEn ? 'Gray (#64748B)' : '低调灰 (#64748B)'}</option>
+                      <option value="#0284C7">{isEn ? 'Sky Blue (#0284C7)' : '天空蓝 (#0284C7)'}</option>
                     </select>
                   </div>
                 )}
@@ -492,10 +532,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                       onChange={e => setWatermarkAngle(parseInt(e.target.value))}
                       className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
                     >
-                      <option value="-25">-25° 斜向</option>
-                      <option value="-45">-45° 角斜</option>
-                      <option value="0">0° 横向</option>
-                      <option value="-60">-60° 陡斜</option>
+                      <option value="-25">{isEn ? '-25° Diagonal' : '-25° 斜向'}</option>
+                      <option value="-45">{isEn ? '-45° Corner' : '-45° 角斜'}</option>
+                      <option value="0">{isEn ? '0° Horizontal' : '0° 横向'}</option>
+                      <option value="-60">{isEn ? '-60° Steep' : '-60° 陡斜'}</option>
                     </select>
                   </div>
                 )}
@@ -509,7 +549,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px]">
                 <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
-                  VIP 权益已激活，可关闭防盗水印导出纯净商用图纸，支持自定义店铺水印
+                  {isEn ? 'VIP benefits active: Watermark-free clean pattern export enabled.' : 'VIP 权益已激活，可关闭防盗水印导出纯净商用图纸，支持自定义店铺水印'}
                 </span>
               </div>
             ) : (
@@ -517,14 +557,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 <div className="flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>
-                    您当前为免费账号，导出图纸将添加平台防盗水印，升级 VIP 即可导出无水印高清图纸
+                    {isEn ? 'Free account exports include platform watermark. Upgrade to VIP for clean HD pattern export.' : '您当前为免费账号，导出图纸将添加平台防盗水印，升级 VIP 即可导出无水印高清图纸'}
                   </span>
                 </div>
                 <button
                   onClick={() => onOpenAuthModal?.()}
                   className="text-emerald-400 hover:text-emerald-300 font-bold underline shrink-0 cursor-pointer"
                 >
-                  去升级 VIP &rarr;
+                  {isEn ? 'Upgrade VIP →' : '去升级 VIP →'}
                 </button>
               </div>
             )}
@@ -542,7 +582,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setShowSymbols(e.target.checked)}
                   className="accent-purple-500 rounded cursor-pointer"
                 />
-                <span>显示色号标识</span>
+                <span>{isEn ? 'Show Color Symbols' : '显示色号标识'}</span>
               </label>
 
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
@@ -552,7 +592,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setShowCoordinates(e.target.checked)}
                   className="accent-purple-500 rounded cursor-pointer"
                 />
-                <span>显示标尺坐标 (A..Z / 1..N)</span>
+                <span>{isEn ? 'Show Ruler Coordinates (A..Z / 1..N)' : '显示标尺坐标 (A..Z / 1..N)'}</span>
               </label>
 
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
@@ -562,23 +602,23 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setHideEmptyPegs(e.target.checked)}
                   className="accent-emerald-500 rounded cursor-pointer"
                 />
-                <span>隐藏空位点阵 (仅导出有豆区域)</span>
+                <span>{isEn ? 'Hide Empty Pegs' : '隐藏空位点阵 (仅导出有豆区域)'}</span>
               </label>
 
               {/* Legend Scale & Layout */}
               <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
                 <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-slate-400">色号字号:</span>
+                <span className="text-slate-400">{isEn ? 'Symbol Font Size:' : '色号字号:'}</span>
                 <select
                   value={legendScaleMode}
                   onChange={e => setLegendScaleMode(e.target.value as LegendScaleMode)}
                   className="bg-slate-800 border border-slate-700 text-amber-300 font-bold rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
                 >
-                  <option value="auto">🔥 网格自适应 (推荐)</option>
-                  <option value="1.0">标准 1.0x</option>
-                  <option value="1.5">中度 1.5x</option>
-                  <option value="2.0">放大 2.0x</option>
-                  <option value="2.5">特大 2.5x</option>
+                  <option value="auto">{isEn ? '🔥 Auto Adaptive' : '🔥 网格自适应 (推荐)'}</option>
+                  <option value="1.0">{isEn ? 'Standard 1.0x' : '标准 1.0x'}</option>
+                  <option value="1.5">{isEn ? 'Medium 1.5x' : '中度 1.5x'}</option>
+                  <option value="2.0">{isEn ? 'Large 2.0x' : '放大 2.0x'}</option>
+                  <option value="2.5">{isEn ? 'Extra Large 2.5x' : '特大 2.5x'}</option>
                 </select>
 
                 <select
@@ -586,8 +626,8 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setLegendPosition(e.target.value as LegendPosition)}
                   className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
                 >
-                  <option value="right">右侧多列侧边栏</option>
-                  <option value="bottom">下方横向表格</option>
+                  <option value="right">{isEn ? 'Right Sidebar' : '右侧多列侧边栏'}</option>
+                  <option value="bottom">{isEn ? 'Bottom Table' : '下方横向表格'}</option>
                 </select>
               </div>
 
@@ -595,7 +635,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
             {/* Sub Board View Selector */}
             <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">板块视角:</span>
+              <span className="text-slate-400">{isEn ? 'Board View:' : '板块视角:'}</span>
               <select
                 value={selectedBoard === null ? 'full' : selectedBoard.toString()}
                 onChange={e => {
@@ -604,10 +644,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 }}
                 className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer"
               >
-                <option value="full">全景整张图纸 ({width}x{height})</option>
+                <option value="full">{isEn ? `Full Pattern (${width}x${height})` : `全景整张图纸 (${width}x${height})`}</option>
                 {Array.from({ length: totalBoards }).map((_, idx) => (
                   <option key={idx} value={idx}>
-                    第 {idx + 1} 板图纸 (29x29)
+                    {isEn ? `Board #${idx + 1} Pattern` : `第 ${idx + 1} 板图纸 (29x29)`}
                   </option>
                 ))}
               </select>
@@ -626,7 +666,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         {/* Footer Actions */}
         <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
           <div className="text-slate-400 text-[11px] text-center sm:text-left">
-            当前导出模式: {watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} ({width}x{height} 豆)
+            {isEn ? `Export Mode: ${watermarkType === 'none' ? '✨ Clean Pattern' : '🛡️ Watermark Protected'} (${width}x${height} beads)` : `当前导出模式: ${watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} (${width}x${height} 豆)`}
           </div>
 
           <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
@@ -636,7 +676,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
               >
                 <Download className="w-4 h-4 text-sky-400" />
-                <span>批量全部分板图纸 ({totalBoards + 1}张)</span>
+                <span>{isEn ? `Download All Board Patterns (${totalBoards + 1})` : `批量全部分板图纸 (${totalBoards + 1}张)`}</span>
               </button>
             )}
 
@@ -645,7 +685,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
             >
               <Download className="w-4 h-4" />
-              <span>下载高清 PNG 图纸</span>
+              <span>{isEn ? 'Download HD PNG Pattern' : '下载高清 PNG 图纸'}</span>
             </button>
           </div>
         </div>
@@ -662,9 +702,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
 
             <div>
-              <h4 className="font-bold text-base text-slate-100 mb-1.5">温馨提示</h4>
+              <h4 className="font-bold text-base text-slate-100 mb-1.5">{isEn ? 'Notice' : '温馨提示'}</h4>
               <p className="text-xs text-slate-300 leading-relaxed px-2">
-                免费版本导出图纸自带防盗水印，如需无水印商用图纸，可开通 VIP 会员
+                {isEn ? 'Free exports include a watermark. Upgrade to VIP for clean commercial patterns.' : '免费版本导出图纸自带防盗水印，如需无水印商用图纸，可开通 VIP 会员'}
               </p>
             </div>
 
@@ -677,14 +717,14 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
-                <span>升级 VIP 纯净导出</span>
+                <span>{isEn ? 'Upgrade VIP for Clean Export' : '升级 VIP 纯净导出'}</span>
               </button>
 
               <button
                 onClick={confirmFreeDownload}
                 className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-xs border border-slate-700 transition-colors cursor-pointer"
               >
-                确认直接下载带水印文件
+                {isEn ? 'Download Watermarked File' : '确认直接下载带水印文件'}
               </button>
             </div>
 

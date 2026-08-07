@@ -17,11 +17,14 @@ import {
   Menu,
   X,
   ShieldCheck,
+  Globe,
+  Loader2,
 } from 'lucide-react';
 import { BrandKey, ConvertSettings } from '../types';
-import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
+import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
 import { SAMPLE_IMAGES } from '../data/samples';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 
 interface HeaderProps {
   projectName: string;
@@ -36,6 +39,7 @@ interface HeaderProps {
   onOpenPaletteModal: () => void;
   onOpenGuideModal: () => void;
   onOpenSmartReduceModal?: () => void;
+  onOpenPatternsModal?: () => void;
   onOpenAuthModal?: () => void;
   onClearCanvas: () => void;
   settings: ConvertSettings;
@@ -55,12 +59,16 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPaletteModal,
   onOpenGuideModal,
   onOpenSmartReduceModal,
+  onOpenPatternsModal,
   onOpenAuthModal,
   onClearCanvas,
   settings,
   setSettings,
 }) => {
-  const { currentUser, userProfile, isVip, isPro, memberType, isAdmin } = useAuth();
+  const { currentUser, userProfile, loading: authLoading, isVip, isPro, memberType, isAdmin } = useAuth();
+  const { language, setLanguage, t } = useLanguage();
+  const isEn = language === 'en';
+  const brandNames = getBrandNames(isEn);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
@@ -99,10 +107,10 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
           <div className="flex items-center gap-1.5">
             <span className="text-base md:text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none whitespace-nowrap">
-              豆织星格
+              {t('appName')}
             </span>
             <span className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[9px] font-bold px-1.5 py-0.5 rounded">
-              PRO
+              {t('proTag')}
             </span>
           </div>
         </div>
@@ -120,7 +128,7 @@ export const Header: React.FC<HeaderProps> = ({
               }}
               className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs max-w-[120px] xl:max-w-none truncate"
             >
-              {Object.entries(BRAND_NAMES).map(([key, name]) => (
+              {Object.entries(brandNames).map(([key, name]) => (
                 <option key={key} value={key} className="bg-slate-800 text-white">
                   {name}
                 </option>
@@ -130,7 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Quick Board Size Selector (Desktop XL) */}
           <div className="hidden xl:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg px-2.5 py-1 shrink-0">
-            <span className="text-slate-400 text-xs whitespace-nowrap">拼豆板:</span>
+            <span className="text-slate-400 text-xs whitespace-nowrap">{t('pegboard')}:</span>
             <select
               value={`${settings.width}x${settings.height}`}
               onChange={e => {
@@ -148,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               {BOARD_PRESETS.map(p => (
                 <option key={p.name} value={`${p.width}x${p.height}`} className="bg-slate-800 text-white">
-                  {p.name}
+                  {getBoardPresetName(p, isEn)}
                 </option>
               ))}
             </select>
@@ -160,13 +168,23 @@ export const Header: React.FC<HeaderProps> = ({
             title="管理与禁用色卡"
           >
             <Palette className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="hidden xl:inline">自定义色板</span>
-            <span className="xl:hidden text-[11px]">色板</span>
+            <span className="hidden xl:inline">{t('personalCenter')}</span>
+            <span className="xl:hidden text-[11px]">{t('personalCenter')}</span>
           </button>
         </div>
 
         {/* Right Corner Controls for Mobile & All Devices */}
         <div className="flex items-center gap-1.5">
+          {/* Language Toggle Button */}
+          <button
+            onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+            className="text-xs font-bold px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-xl flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all cursor-pointer shrink-0 active:scale-95"
+            title={language === 'zh' ? 'Switch to English' : '切换为中文'}
+          >
+            <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <span>{language === 'zh' ? 'EN' : '中文'}</span>
+          </button>
+
           {/* User Account & VIP Button */}
           {onOpenAuthModal && (
             <button
@@ -182,30 +200,35 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
               title={currentUser ? '个人账号与会员中心' : '登录账号解锁 VIP / 商家Pro 权限'}
             >
-              {isPro ? (
+              {authLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                  <span className="text-[11px] font-bold text-slate-300">{isEn ? 'Syncing...' : '账号同步中'}</span>
+                </>
+              ) : isPro ? (
                 <>
                   <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-amber-400" />
                   <Store className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                  <span className="hidden sm:inline font-black">商家Pro</span>
-                  <span className="sm:hidden text-[10px] font-black">Pro</span>
+                  <span className="hidden sm:inline font-black">{t('proMember')}</span>
+                  <span className="sm:hidden text-[10px] font-black">{t('proTag')}</span>
                 </>
               ) : isVip ? (
                 <>
                   <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-current" />
-                  <span className="hidden sm:inline">VIP 会员</span>
-                  <span className="sm:hidden text-[10px]">VIP</span>
+                  <span className="hidden sm:inline">{t('vipMember')}</span>
+                  <span className="sm:hidden text-[10px]">{t('vipMember')}</span>
                 </>
               ) : currentUser ? (
                 <>
                   <User className="w-3.5 h-3.5 text-slate-300 shrink-0" />
                   <span className="truncate max-w-[80px] sm:max-w-none">
-                    {userProfile?.displayName || '个人中心'}
+                    {userProfile?.displayName || t('personalCenter')}
                   </span>
                 </>
               ) : (
                 <>
                   <Crown className="w-3.5 h-3.5 shrink-0 fill-current" />
-                  <span>登录/激活</span>
+                  <span>{t('loginActivate')}</span>
                 </>
               )}
             </button>
@@ -228,11 +251,23 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={onOpenGuideModal}
           className="bg-purple-950/90 hover:bg-purple-900 text-purple-200 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-purple-700/80 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
-          title="查看拼豆设计操作指南"
+          title={language === 'zh' ? '查看拼豆设计操作指南' : 'View design guide'}
         >
           <BookOpen className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-          <span className="hidden xl:inline">指南</span>
+          <span className="hidden xl:inline">{t('guide')}</span>
         </button>
+
+        {/* Exported Pattern History Records Button */}
+        {onOpenPatternsModal && (
+          <button
+            onClick={onOpenPatternsModal}
+            className="bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-purple-500/30 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
+            title={language === 'zh' ? '查看导出的拼豆成品图纸记录（保留30天）' : 'View exported pattern history'}
+          >
+            <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+            <span>{language === 'zh' ? '图纸记录' : 'History'}</span>
+          </button>
+        )}
 
         {/* Upload Image Button */}
         <input
@@ -247,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
           className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-md shadow-rose-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
         >
           <Upload className="w-3.5 h-3.5 shrink-0" />
-          <span>上传图片</span>
+          <span>{t('uploadImage')}</span>
         </button>
 
         {/* Smart Bead Reducer Studio Button */}
@@ -258,7 +293,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="智能扣除无用背景与降格微调，真实减少使用拼豆总数(省豆20%~50%)"
           >
             <Zap className="w-3.5 h-3.5 shrink-0 fill-current text-amber-300 animate-pulse" />
-            <span>智能减粒省豆</span>
+            <span>{t('smartReduce')}</span>
           </button>
         )}
 
@@ -266,13 +301,13 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="relative group shrink-0">
           <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap">
             <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>示例</span>
+            <span>{t('samples')}</span>
           </button>
 
           {/* Dropdown Menu */}
           <div className="absolute right-0 top-full mt-1.5 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-2 hidden group-hover:block z-50">
             <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              加载预设样本
+              {language === 'zh' ? '加载预设样本' : 'Load Preset Sample'}
             </div>
             {SAMPLE_IMAGES.map(s => (
               <button
@@ -299,20 +334,20 @@ export const Header: React.FC<HeaderProps> = ({
         <button
           onClick={() => jsonInputRef.current?.click()}
           className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-          title="打开工程"
+          title={language === 'zh' ? '打开工程' : 'Open project file'}
         >
           <FolderOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-          <span className="hidden xl:inline">打开工程</span>
+          <span className="hidden xl:inline">{t('openProject')}</span>
         </button>
 
         {/* Save JSON Project */}
         <button
           onClick={onExportJson}
           className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-          title="保存工程"
+          title={language === 'zh' ? '保存工程' : 'Save project file'}
         >
           <FileJson className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span className="hidden xl:inline">保存工程</span>
+          <span className="hidden xl:inline">{t('saveProject')}</span>
         </button>
 
         {/* High-Res Tutorial Export */}
@@ -321,14 +356,14 @@ export const Header: React.FC<HeaderProps> = ({
           className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-emerald-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
         >
           <Download className="w-3.5 h-3.5 shrink-0" />
-          <span>导出图纸</span>
+          <span>{t('exportPattern')}</span>
         </button>
 
         {/* Clear */}
         <button
           onClick={onClearCanvas}
           className="bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 p-2 rounded-lg border border-slate-700/80 transition-colors cursor-pointer shrink-0"
-          title="清空画布"
+          title={t('clearCanvas')}
         >
           <RotateCcw className="w-3.5 h-3.5 shrink-0" />
         </button>
@@ -342,7 +377,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-500/40 flex items-center justify-center">
                 <img src="/douzhixingge_logo.svg" alt="logo" className="w-full h-full" />
               </div>
-              <span className="font-black text-white text-base">豆织星格 · 功能菜单</span>
+              <span className="font-black text-white text-base">{t('appName')} · {language === 'zh' ? '功能菜单' : 'Menu'}</span>
             </div>
             <button
               onClick={() => setIsMobileMenuOpen(false)}
@@ -357,7 +392,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2">
               <label className="text-xs font-bold text-slate-300 flex items-center gap-2">
                 <Palette className="w-4 h-4 text-pink-400" />
-                <span>选择色卡品牌</span>
+                <span>{t('selectBrand')}</span>
               </label>
               <select
                 value={brand}
@@ -368,7 +403,7 @@ export const Header: React.FC<HeaderProps> = ({
                 }}
                 className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none cursor-pointer font-bold min-h-[48px]"
               >
-                {Object.entries(BRAND_NAMES).map(([key, name]) => (
+                {Object.entries(brandNames).map(([key, name]) => (
                   <option key={key} value={key}>
                     {name}
                   </option>
@@ -387,10 +422,10 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <div className="flex items-center gap-2">
                   <Zap className="w-5 h-5 fill-current text-amber-300 animate-pulse" />
-                  <span>PRO 智能减粒省豆引擎</span>
+                  <span>{t('smartReduce')}</span>
                 </div>
                 <span className="text-xs bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-black">
-                  省豆20%~50%
+                  {language === 'zh' ? '省豆20%~50%' : 'Save 20%~50%'}
                 </span>
               </button>
             )}
@@ -404,7 +439,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full p-3.5 rounded-xl bg-rose-600 text-white font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
             >
               <Upload className="w-5 h-5" />
-              <span>上传原图并转换拼豆</span>
+              <span>{t('uploadImage')}</span>
             </button>
 
             {/* Export Tutorial */}
@@ -416,7 +451,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full p-3.5 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
             >
               <Download className="w-5 h-5" />
-              <span>导出高清图纸与材料清单</span>
+              <span>{t('exportPattern')}</span>
             </button>
 
             {/* Manage Palette */}
@@ -428,7 +463,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
             >
               <Palette className="w-5 h-5 text-amber-400" />
-              <span>自定义色板与屏蔽禁用色号</span>
+              <span>{t('personalCenter')}</span>
             </button>
 
             {/* Open & Save Project */}
@@ -441,7 +476,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
               >
                 <FolderOpen className="w-4 h-4 text-blue-400" />
-                <span>打开工程</span>
+                <span>{t('openProject')}</span>
               </button>
 
               <button
@@ -452,7 +487,7 @@ export const Header: React.FC<HeaderProps> = ({
                 className="p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
               >
                 <FileJson className="w-4 h-4 text-emerald-400" />
-                <span>保存工程</span>
+                <span>{t('saveProject')}</span>
               </button>
             </div>
 
@@ -465,7 +500,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full p-3.5 rounded-xl bg-purple-950/80 text-purple-200 border border-purple-700/60 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px]"
             >
               <BookOpen className="w-5 h-5 text-purple-300" />
-              <span>拼豆设计操作指南</span>
+              <span>{t('guide')}</span>
             </button>
 
             {/* Clear Canvas */}
@@ -477,7 +512,7 @@ export const Header: React.FC<HeaderProps> = ({
               className="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px]"
             >
               <RotateCcw className="w-5 h-5" />
-              <span>清空画布图纸</span>
+              <span>{t('clearCanvas')}</span>
             </button>
           </div>
         </div>

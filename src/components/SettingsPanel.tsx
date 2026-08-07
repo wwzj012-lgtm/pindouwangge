@@ -15,8 +15,9 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLanguage } from '../context/LanguageContext';
 import { BrandKey, ConvertSettings, DitherMode, ColorMatchAlgo } from '../types';
-import { BRAND_NAMES, BOARD_PRESETS } from '../data/palettes';
+import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
 
 interface SettingsPanelProps {
   settings: ConvertSettings;
@@ -38,6 +39,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onCloseMobile,
 }) => {
   const { isVip, isPro, memberType } = useAuth();
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+  const brandNames = getBrandNames(isEn);
 
   // Tier max canvas limits
   const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 150;
@@ -67,22 +71,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <div className="flex items-center gap-2 text-rose-400 font-bold text-sm">
           <Sliders className="w-4 h-4" />
-          <span>拼豆转换参数设置</span>
+          <span>{isEn ? 'Conversion Settings' : '拼豆转换参数设置'}</span>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={handleResetFilters}
             className="text-slate-400 hover:text-white flex items-center gap-1 text-[11px] cursor-pointer"
-            title="重置图像滤镜"
+            title={isEn ? 'Reset image filters' : '重置图像滤镜'}
           >
             <RotateCcw className="w-3 h-3" />
-            <span>重置</span>
+            <span>{isEn ? 'Reset' : '重置'}</span>
           </button>
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
               className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
-              title="关闭"
+              title={isEn ? 'Close' : '关闭'}
             >
               <X className="w-5 h-5" />
             </button>
@@ -98,9 +102,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         >
           <div className="flex items-center gap-2 text-xs">
             <Wand2 className="w-4 h-4" />
-            <span>图像转换与增强工作坊</span>
+            <span>{isEn ? 'Image Studio & Workshop' : '图像转换与增强工作坊'}</span>
           </div>
-          <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">打开</span>
+          <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">{isEn ? 'Open' : '打开'}</span>
         </button>
       )}
 
@@ -115,7 +119,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         >
           <div className="flex items-center gap-2 text-xs">
             <Zap className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform fill-current" />
-            <span className="text-white">⚡ 智能减少拼豆数量 (省豆20%~50%)</span>
+            <span className="text-white">{isEn ? '⚡ Smart Bead Saver (Save 20%~50%)' : '⚡ 智能减少拼豆数量 (省豆20%~50%)'}</span>
           </div>
           <span className="text-[10px] bg-sky-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-sky-500/30">PRO</span>
         </button>
@@ -125,40 +129,43 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="space-y-3">
         <label className="text-slate-300 font-bold flex items-center gap-1.5">
           <LayoutGrid className="w-3.5 h-3.5 text-sky-400" />
-          <span>网格尺寸 (豆数)</span>
+          <span>{isEn ? 'Grid Size (Beads)' : '网格尺寸 (豆数)'}</span>
         </label>
 
         {/* Board Preset Chips */}
         <div className="grid grid-cols-2 gap-1.5">
-          {BOARD_PRESETS.map(p => (
-            <button
-              key={p.name}
-              onClick={() => {
-                setSettings(prev => ({
-                  ...prev,
-                  width: p.width,
-                  height: p.height,
-                  boardSize: p.boardSize,
-                }));
-              }}
-              className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
-                settings.width === p.width && settings.height === p.height
-                  ? 'bg-rose-950/60 border-rose-500 text-rose-200 font-bold'
-                  : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-700/60'
-              }`}
-            >
-              <div className="text-[11px] font-semibold">{p.width} × {p.height}</div>
-              <div className="text-[10px] text-slate-400 truncate">{p.name.split(' ')[1] || p.name}</div>
-            </button>
-          ))}
+          {BOARD_PRESETS.map(p => {
+            const subtitle = isEn ? (p.nameEn.split('(')[1]?.replace(')', '') || p.nameEn) : (p.name.split(' ')[1] || p.name);
+            return (
+              <button
+                key={p.name}
+                onClick={() => {
+                  setSettings(prev => ({
+                    ...prev,
+                    width: p.width,
+                    height: p.height,
+                    boardSize: p.boardSize,
+                  }));
+                }}
+                className={`p-2 rounded-lg border text-left transition-colors cursor-pointer ${
+                  settings.width === p.width && settings.height === p.height
+                    ? 'bg-rose-950/60 border-rose-500 text-rose-200 font-bold'
+                    : 'bg-slate-800/80 border-slate-700/80 text-slate-300 hover:bg-slate-700/60'
+                }`}
+              >
+                <div className="text-[11px] font-semibold">{p.width} × {p.height}</div>
+                <div className="text-[10px] text-slate-400 truncate">{subtitle}</div>
+              </button>
+            );
+          })}
         </div>
 
         {/* Custom Width / Height Inputs */}
         <div className="flex items-center gap-2 pt-1">
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-slate-400">宽度 (W)</span>
-              <span className="text-[9px] font-mono text-slate-500">上限:{maxCanvasLimit}</span>
+              <span className="text-[10px] text-slate-400">{isEn ? 'Width (W)' : '宽度 (W)'}</span>
+              <span className="text-[9px] font-mono text-slate-500">{isEn ? 'Max:' : '上限:'}{maxCanvasLimit}</span>
             </div>
             <input
               type="number"
@@ -170,11 +177,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 if (val > maxCanvasLimit) {
                   val = maxCanvasLimit;
                   if (!isVip) {
-                    setLimitWarning('升级普通VIP解锁400×400画布');
+                    setLimitWarning(isEn ? 'Upgrade to VIP for 400x400 canvas' : '升级普通VIP解锁400×400画布');
                   } else if (!isPro) {
-                    setLimitWarning('升级商家Pro解锁900×900超大画布');
+                    setLimitWarning(isEn ? 'Upgrade to Pro for 900x900 canvas' : '升级商家Pro解锁900×900超大画布');
                   } else {
-                    setLimitWarning('商家Pro已达上限 900×900');
+                    setLimitWarning(isEn ? 'Pro limit reached: 900x900' : '商家Pro已达上限 900×900');
                   }
                 } else {
                   setLimitWarning(null);
@@ -196,15 +203,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 ? 'bg-rose-600 border-rose-500 text-white'
                 : 'bg-slate-800 border-slate-700 text-slate-500'
             }`}
-            title={settings.keepAspectRatio ? '保持原图长宽比已开启' : '自由设置宽高'}
+            title={settings.keepAspectRatio ? (isEn ? 'Keep aspect ratio ON' : '保持原图长宽比已开启') : (isEn ? 'Custom aspect ratio' : '自由设置宽高')}
           >
             {settings.keepAspectRatio ? <Link2 className="w-4 h-4" /> : <Unlink2 className="w-4 h-4" />}
           </button>
 
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] text-slate-400">高度 (H)</span>
-              <span className="text-[9px] font-mono text-slate-500">上限:{maxCanvasLimit}</span>
+              <span className="text-[10px] text-slate-400">{isEn ? 'Height (H)' : '高度 (H)'}</span>
+              <span className="text-[9px] font-mono text-slate-500">{isEn ? 'Max:' : '上限:'}{maxCanvasLimit}</span>
             </div>
             <input
               type="number"
@@ -216,11 +223,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 if (val > maxCanvasLimit) {
                   val = maxCanvasLimit;
                   if (!isVip) {
-                    setLimitWarning('升级普通VIP解锁400×400画布');
+                    setLimitWarning(isEn ? 'Upgrade to VIP for 400x400 canvas' : '升级普通VIP解锁400×400画布');
                   } else if (!isPro) {
-                    setLimitWarning('升级商家Pro解锁900×900超大画布');
+                    setLimitWarning(isEn ? 'Upgrade to Pro for 900x900 canvas' : '升级商家Pro解锁900×900超大画布');
                   } else {
-                    setLimitWarning('商家Pro已达上限 900×900');
+                    setLimitWarning(isEn ? 'Pro limit reached: 900x900' : '商家Pro已达上限 900×900');
                   }
                 } else {
                   setLimitWarning(null);
@@ -249,19 +256,19 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         <label className="text-slate-300 font-bold flex items-center justify-between">
           <span className="flex items-center gap-1.5">
             <Zap className="w-3.5 h-3.5 text-amber-400" />
-            <span>色彩匹配演算法</span>
+            <span>{isEn ? 'Color Match Engine' : '色彩匹配演算法'}</span>
           </span>
-          <span className="text-[10px] text-rose-400 font-normal">防发白/色彩保护</span>
+          <span className="text-[10px] text-rose-400 font-normal">{isEn ? 'Anti-fading / Protection' : '防发白/色彩保护'}</span>
         </label>
         <select
           value={settings.colorMatchAlgo || 'ciede2000_vivid'}
           onChange={e => updateSetting('colorMatchAlgo', e.target.value as ColorMatchAlgo)}
           className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs outline-none focus:border-rose-500 cursor-pointer font-medium"
         >
-          <option value="ciede2000_vivid">🎨 CIEDE2000 鲜艳饱满匹配 (防发白/推荐)</option>
-          <option value="ciede2000">⚖️ CIEDE2000 工业标准柔和匹配</option>
-          <option value="cie76">📐 CIE76 标准Lab空间演算法</option>
-          <option value="rgb_weighted">⚡ 加权RGB 快速高对比度</option>
+          <option value="ciede2000_vivid">{isEn ? '🎨 CIEDE2000 Vivid & Full (Recommended)' : '🎨 CIEDE2000 鲜艳饱满匹配 (防发白/推荐)'}</option>
+          <option value="ciede2000">{isEn ? '⚖️ CIEDE2000 Industrial Standard Soft' : '⚖️ CIEDE2000 工业标准柔和匹配'}</option>
+          <option value="cie76">{isEn ? '📐 CIE76 Standard Lab Algorithm' : '📐 CIE76 标准Lab空间演算法'}</option>
+          <option value="rgb_weighted">{isEn ? '⚡ Weighted RGB High Contrast' : '⚡ 加权RGB 快速高对比度'}</option>
         </select>
       </div>
 
@@ -269,13 +276,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="space-y-3 pt-2 border-t border-slate-800">
         <label className="text-slate-300 font-bold flex items-center gap-1.5">
           <Sliders className="w-3.5 h-3.5 text-rose-400" />
-          <span>边缘锐化与描边保护</span>
+          <span>{isEn ? 'Sharpening & Outlines' : '边缘锐化与描边保护'}</span>
         </label>
 
         {/* Sharpening Slider */}
         <div className="space-y-1">
           <div className="flex justify-between text-[11px]">
-            <span className="text-slate-400">锐化/边缘清晰度</span>
+            <span className="text-slate-400">{isEn ? 'Sharpening / Clarity' : '锐化/边缘清晰度'}</span>
             <span className="font-mono text-rose-400 font-bold">{settings.sharpening}%</span>
           </div>
           <input
@@ -297,9 +304,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             className="w-4 h-4 accent-rose-500 rounded cursor-pointer"
           />
           <div>
-            <span className="font-bold text-slate-200 text-[11px]">暗色/黑色描边保护</span>
+            <span className="font-bold text-slate-200 text-[11px]">{isEn ? 'Dark / Black Outline Protection' : '暗色/黑色描边保护'}</span>
             <p className="text-[10px] text-slate-400 leading-none mt-0.5">
-              防动漫卡通人物黑边丢失
+              {isEn ? 'Prevents dark character outlines from fading' : '防动漫卡通人物黑边丢失'}
             </p>
           </div>
         </label>
@@ -309,17 +316,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       <div className="space-y-3 pt-2 border-t border-slate-800">
         <label className="text-slate-300 font-bold flex items-center gap-1.5">
           <Palette className="w-3.5 h-3.5 text-pink-400" />
-          <span>品牌色卡与色彩限制</span>
+          <span>{isEn ? 'Brand Palette & Color Limit' : '品牌色卡与色彩限制'}</span>
         </label>
 
         <div className="space-y-1">
-          <span className="text-[10px] text-slate-400">选用拼豆色卡</span>
+          <span className="text-[10px] text-slate-400">{isEn ? 'Selected Palette' : '选用拼豆色卡'}</span>
           <select
             value={settings.brand}
             onChange={e => updateSetting('brand', e.target.value as BrandKey)}
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs outline-none focus:border-rose-500 cursor-pointer"
           >
-            {Object.entries(BRAND_NAMES).map(([key, name]) => (
+            {Object.entries(brandNames).map(([key, name]) => (
               <option key={key} value={key}>
                 {name}
               </option>
@@ -328,18 +335,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
 
         <div className="space-y-1">
-          <span className="text-[10px] text-slate-400">最大使用颜色数量限制</span>
+          <span className="text-[10px] text-slate-400">{isEn ? 'Max Color Limit' : '最大使用颜色数量限制'}</span>
           <select
             value={settings.colorLimit}
             onChange={e => updateSetting('colorLimit', parseInt(e.target.value))}
             className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs outline-none focus:border-rose-500 cursor-pointer"
           >
-            <option value={0}>不限制 (智能全配卡)</option>
-            <option value={12}>12 色套组</option>
-            <option value={24}>24 色套组</option>
-            <option value={36}>36 色套组</option>
-            <option value={48}>48 色套组</option>
-            <option value={72}>72 色精简</option>
+            <option value={0}>{isEn ? 'Unlimited (Full Palette)' : '不限制 (智能全配卡)'}</option>
+            <option value={12}>{isEn ? '12 Color Set' : '12 色套组'}</option>
+            <option value={24}>{isEn ? '24 Color Set' : '24 色套组'}</option>
+            <option value={36}>{isEn ? '36 Color Set' : '36 色套组'}</option>
+            <option value={48}>{isEn ? '48 Color Set' : '48 色套组'}</option>
+            <option value={72}>{isEn ? '72 Color Streamlined' : '72 色精简'}</option>
           </select>
         </div>
       </div>
@@ -347,13 +354,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       {/* 5. Dithering Mode */}
       <div className="space-y-2 pt-2 border-t border-slate-800">
         <label className="text-slate-300 font-bold flex items-center justify-between">
-          <span>抖动色彩算法 (Dithering)</span>
+          <span>{isEn ? 'Dithering Algorithm' : '抖动色彩算法 (Dithering)'}</span>
         </label>
         <div className="grid grid-cols-3 gap-1">
           {[
-            { id: 'none', label: '无 (清晰)' },
-            { id: 'floyd', label: 'Floyd 柔和' },
-            { id: 'atkinson', label: 'Atkinson 复古' },
+            { id: 'none', label: isEn ? 'None (Clean)' : '无 (清晰)' },
+            { id: 'floyd', label: isEn ? 'Floyd Soft' : 'Floyd 柔和' },
+            { id: 'atkinson', label: isEn ? 'Atkinson Retro' : 'Atkinson 复古' },
           ].map(d => (
             <button
               key={d.id}
@@ -372,12 +379,12 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
       {/* 6. Image Pre-Process Adjustments */}
       <div className="space-y-3 pt-2 border-t border-slate-800">
-        <label className="text-slate-300 font-bold">基础明暗调色滤镜</label>
+        <label className="text-slate-300 font-bold">{isEn ? 'Basic Color Adjustments' : '基础明暗调色滤镜'}</label>
 
         {/* Brightness */}
         <div className="space-y-1">
           <div className="flex justify-between text-[11px]">
-            <span className="text-slate-400">亮度 (Brightness)</span>
+            <span className="text-slate-400">{isEn ? 'Brightness' : '亮度 (Brightness)'}</span>
             <span className="font-mono text-slate-200">
               {settings.brightness + 15 > 0 ? `+${settings.brightness + 15}` : settings.brightness + 15}
             </span>
@@ -395,7 +402,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Contrast */}
         <div className="space-y-1">
           <div className="flex justify-between text-[11px]">
-            <span className="text-slate-400">对比度 (Contrast)</span>
+            <span className="text-slate-400">{isEn ? 'Contrast' : '对比度 (Contrast)'}</span>
             <span className="font-mono text-slate-200">{settings.contrast}</span>
           </div>
           <input
@@ -411,7 +418,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         {/* Saturation */}
         <div className="space-y-1">
           <div className="flex justify-between text-[11px]">
-            <span className="text-slate-400">饱和度 (Saturation)</span>
+            <span className="text-slate-400">{isEn ? 'Saturation' : '饱和度 (Saturation)'}</span>
             <span className="font-mono text-slate-200">{settings.saturation}</span>
           </div>
           <input
@@ -432,7 +439,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           className="w-full py-2.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-xl shadow-lg shadow-rose-600/20 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 mt-auto"
         >
           <Sparkles className="w-4 h-4" />
-          <span>重新计算拼豆图纸</span>
+          <span>{isEn ? 'Recompute Pattern' : '重新计算拼豆图纸'}</span>
         </button>
       )}
     </div>

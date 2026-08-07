@@ -13,6 +13,7 @@ import {
   RotateCcw,
 } from 'lucide-react';
 import { BeadColor, ColorStat } from '../types';
+import { useLanguage } from '../context/LanguageContext';
 
 interface StatsPanelProps {
   grid: (string | null)[][];
@@ -47,6 +48,8 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   erasedColorCoords,
   onCloseMobile,
 }) => {
+  const { language, t } = useLanguage();
+  const isEn = language === 'en';
   const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
 
@@ -128,8 +131,10 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
   // Copy shopping list
   const handleCopyList = () => {
-    const lines = stats.map(s => `${s.color.code} ${s.color.name}: ${s.count} 粒 (${s.color.hex})`);
-    const text = `拼豆用量统计 (${width}x${height} 豆, 共 ${totalBeads} 粒):\n` + lines.join('\n');
+    const lines = stats.map(s => `${s.color.code} ${s.color.name}: ${s.count} ${isEn ? 'pcs' : '粒'} (${s.color.hex})`);
+    const text = isEn
+      ? `Bead Usage Stats (${width}x${height} grid, ${totalBeads} beads total):\n` + lines.join('\n')
+      : `拼豆用量统计 (${width}x${height} 豆, 共 ${totalBeads} 粒):\n` + lines.join('\n');
     navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -141,23 +146,23 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
           <BarChart3 className="w-4 h-4" />
-          <span>豆数用量统计与色卡清单</span>
+          <span>{isEn ? 'Bead Usage Stats & Palette' : '豆数用量统计与色卡清单'}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopyList}
             className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
-            title="复制用量清单"
+            title={isEn ? 'Copy list' : '复制用量清单'}
           >
             {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? '已复制' : '复制用量'}</span>
+            <span>{copied ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy List' : '复制用量')}</span>
           </button>
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
               className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
-              title="关闭"
+              title={isEn ? 'Close' : '关闭'}
             >
               <X className="w-5 h-5" />
             </button>
@@ -168,16 +173,16 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
       {/* Overview Cards */}
       <div className="grid grid-cols-3 gap-2 my-3">
         <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">总用豆数</div>
+          <div className="text-[10px] text-slate-400">{isEn ? 'Total Beads' : '总用豆数'}</div>
           <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">{totalBeads}</div>
         </div>
         <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">使用色数</div>
+          <div className="text-[10px] text-slate-400">{isEn ? 'Colors Used' : '使用色数'}</div>
           <div className="text-sm font-bold text-rose-400 font-mono mt-0.5">{stats.length}</div>
         </div>
         <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">需拼豆板</div>
-          <div className="text-sm font-bold text-sky-400 font-mono mt-0.5">{totalBoards} 板</div>
+          <div className="text-[10px] text-slate-400">{isEn ? 'Boards Needed' : '需拼豆板'}</div>
+          <div className="text-sm font-bold text-sky-400 font-mono mt-0.5">{totalBoards} {isEn ? 'boards' : '板'}</div>
         </div>
       </div>
 
@@ -186,10 +191,10 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         <button
           onClick={onClearOuterBackground}
           className="w-full mb-3 py-1.5 px-2 bg-pink-950/80 hover:bg-pink-900 border border-pink-600/60 rounded-xl text-pink-200 text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-          title="自动识别边缘相连的背景拼豆并一次性全部抹除 (只留人物/物体主体)"
+          title={isEn ? 'Auto clear connected outer background beads' : '自动识别边缘相连的背景拼豆并一次性全部抹除 (只留人物/物体主体)'}
         >
           <Scissors className="w-3.5 h-3.5 text-pink-400" />
-          <span>🪄 一键清除最外层连通背景豆</span>
+          <span>{isEn ? '🪄 Remove Outer Background Beads' : '🪄 一键清除最外层连通背景豆'}</span>
         </button>
       )}
 
@@ -200,7 +205,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="搜索色号(如 M01 / 纯白)..."
+          placeholder={isEn ? 'Search color code / name...' : '搜索色号(如 M01 / 纯白)...'}
           className="w-full bg-slate-800/80 border border-slate-700/80 rounded-lg pl-8 pr-3 py-1.5 text-slate-200 text-xs outline-none focus:border-emerald-500"
         />
       </div>
@@ -208,12 +213,12 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
       {/* Highlight Active Indicator */}
       {highlightColorId && (
         <div className="bg-rose-950/80 border border-rose-600/80 text-rose-200 p-2 rounded-lg mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-medium">当前正点亮网格中的特定颜色</span>
+          <span className="text-[11px] font-medium">{isEn ? 'Highlighting color on canvas' : '当前正点亮网格中的特定颜色'}</span>
           <button
             onClick={() => onSetHighlightColorId(null)}
             className="text-xs text-rose-300 underline font-bold cursor-pointer"
           >
-            取消点亮
+            {isEn ? 'Unhighlight' : '取消点亮'}
           </button>
         </div>
       )}
@@ -237,7 +242,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 onClick={() => onSelectColor(s.color)}
                 className="w-7 h-7 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer"
                 style={{ backgroundColor: s.color.hex }}
-                title="设为画笔涂色"
+                title={isEn ? 'Set as active paint color' : '设为画笔涂色'}
               >
                 <span className={isLightColor(s.color.hex) ? 'text-black' : 'text-white'}>
                   {s.color.symbol}
@@ -262,7 +267,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
               {/* Count & Percentage */}
               <div className="text-right shrink-0">
-                <div className="font-mono font-bold text-emerald-400 text-xs">{s.count} 粒</div>
+                <div className="font-mono font-bold text-emerald-400 text-xs">{s.count} {isEn ? 'pcs' : '粒'}</div>
                 <div className="text-[10px] text-slate-500">{s.percentage.toFixed(1)}%</div>
               </div>
 
@@ -275,7 +280,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                       ? 'bg-rose-600 text-white'
                       : 'text-slate-400 hover:text-white hover:bg-slate-700'
                   }`}
-                  title="点亮/独占定位网格中的此颜色"
+                  title={isEn ? 'Highlight this color' : '点亮/独占定位网格中的此颜色'}
                 >
                   <Eye className="w-3.5 h-3.5" />
                 </button>
@@ -283,7 +288,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 <button
                   onClick={() => onOpenReplaceModal(s.color)}
                   className="p-1.5 rounded-md text-slate-400 hover:text-amber-300 hover:bg-slate-700 cursor-pointer transition-colors"
-                  title="全板替换此颜色"
+                  title={isEn ? 'Replace this color globally' : '全板替换此颜色'}
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                 </button>
@@ -292,7 +297,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                   <button
                     onClick={() => onEraseColor(s.color.id)}
                     className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-slate-700 cursor-pointer transition-colors"
-                    title="擦除全板此颜色 (变为空白/无豆)"
+                    title={isEn ? 'Erase this color from grid' : '擦除全板此颜色 (变为空白/无豆)'}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -303,7 +308,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         })}
 
         {filteredStats.length === 0 && filteredErasedStats.length === 0 && (
-          <div className="text-center py-8 text-slate-500">未找到匹配的颜色号</div>
+          <div className="text-center py-8 text-slate-500">{isEn ? 'No matching color code found' : '未找到匹配的颜色号'}</div>
         )}
 
         {/* Erased Colors Section (Displayed at the bottom with dimmed visual style) */}
@@ -312,9 +317,9 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
             <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-1 mb-1">
               <span className="flex items-center gap-1.5 text-slate-400">
                 <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
-                已擦除色卡 ({filteredErasedStats.length})
+                {isEn ? `Erased Colors (${filteredErasedStats.length})` : `已擦除色卡 (${filteredErasedStats.length})`}
               </span>
-              <span className="text-[10px] text-slate-500 font-normal">点击右侧恢复入板</span>
+              <span className="text-[10px] text-slate-500 font-normal">{isEn ? 'Click restore' : '点击右侧恢复入板'}</span>
             </div>
 
             {filteredErasedStats.map(s => (
@@ -327,7 +332,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                   onClick={() => onSelectColor(s.color)}
                   className="w-7 h-7 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer opacity-70 group-hover:opacity-100 transition-all"
                   style={{ backgroundColor: s.color.hex }}
-                  title="设为画笔涂色"
+                  title={isEn ? 'Set as active paint color' : '设为画笔涂色'}
                 >
                   <span className={isLightColor(s.color.hex) ? 'text-black' : 'text-white'}>
                     {s.color.symbol}
@@ -341,7 +346,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                     <span className="text-[10px] text-slate-500 truncate">{s.color.name}</span>
                   </div>
                   <div className="text-[10px] text-slate-500 mt-0.5">
-                    已擦除 {s.count > 0 ? `(${s.count} 粒)` : ''}
+                    {isEn ? 'Erased' : '已擦除'} {s.count > 0 ? `(${s.count} ${isEn ? 'pcs' : '粒'})` : ''}
                   </div>
                 </div>
 
@@ -350,10 +355,10 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                   <button
                     onClick={() => onRestoreColor(s.color.id)}
                     className="px-2.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 shadow-sm"
-                    title="点击恢复此颜色到网格原本位置"
+                    title={isEn ? 'Restore this color back to grid' : '点击恢复此颜色到网格原本位置'}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>恢复</span>
+                    <span>{isEn ? 'Restore' : '恢复'}</span>
                   </button>
                 )}
               </div>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette } from 'lucide-react';
+import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2 } from 'lucide-react';
+import { useLanguage } from './context/LanguageContext';
 import {
   BeadColor,
   BeadShape,
@@ -28,12 +29,17 @@ import { UserGuideModal } from './components/UserGuideModal';
 import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
 import { AuthModal } from './components/AuthModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
+import { UserPatternsModal } from './components/UserPatternsModal';
 
 export default function App() {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
+
   // 1. Core State
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
+  const [isConverting, setIsConverting] = useState<boolean>(false);
 
   // Conversion Settings
   const [settings, setSettings] = useState<ConvertSettings>({
@@ -90,6 +96,7 @@ export default function App() {
   const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
+  const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
@@ -134,20 +141,24 @@ export default function App() {
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
     (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[]) => {
-      let targetW = currentSettings.width;
-      let targetH = currentSettings.height;
+      setIsConverting(true);
+      setTimeout(() => {
+        let targetW = currentSettings.width;
+        let targetH = currentSettings.height;
 
-      if (currentSettings.keepAspectRatio && img.width > 0 && img.height > 0) {
-        const ratio = img.height / img.width;
-        targetH = Math.max(10, Math.round(targetW * ratio));
-        setSettings(s => ({ ...s, height: targetH }));
-      }
+        if (currentSettings.keepAspectRatio && img.width > 0 && img.height > 0) {
+          const ratio = img.height / img.width;
+          targetH = Math.max(10, Math.round(targetW * ratio));
+          setSettings(s => ({ ...s, height: targetH }));
+        }
 
-      const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
-      const newGrid = imageToGrid(img, effectiveSettings, currentPalette);
+        const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
+        const newGrid = imageToGrid(img, effectiveSettings, currentPalette);
 
-      setGrid(newGrid);
-      pushHistory(newGrid);
+        setGrid(newGrid);
+        pushHistory(newGrid);
+        setIsConverting(false);
+      }, 50);
     },
     [pushHistory]
   );
@@ -598,6 +609,7 @@ export default function App() {
         onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
+        onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onClearCanvas={handleClearCanvas}
         settings={settings}
@@ -698,6 +710,21 @@ export default function App() {
             onApplyShape={handleApplyShape}
             onEyedropColor={color => setSelectedColor(color)}
           />
+
+          {/* Loading Animation Overlay */}
+          {isConverting && (
+            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-3 transition-opacity duration-200">
+              <div className="relative flex items-center justify-center">
+                <div className="w-14 h-14 rounded-full border-4 border-rose-500/20 border-t-rose-500 animate-spin" />
+                <div className="w-8 h-8 rounded-full border-2 border-amber-400/30 border-b-amber-400 animate-spin absolute" style={{ animationDirection: 'reverse', animationDuration: '0.8s' }} />
+                <Sparkles className="w-5 h-5 text-amber-400 absolute animate-pulse" />
+              </div>
+              <div className="text-xs font-bold text-slate-100 flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-3.5 py-1.5 rounded-full shadow-lg">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                <span>{isEn ? 'Quantizing beads & matching colors...' : '✨ 正在精准计算拼豆像素与色卡匹配...'}</span>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right Panel: Color Statistics (Desktop sidebar + Mobile drawer) */}
@@ -738,7 +765,7 @@ export default function App() {
           }`}
         >
           <LayoutGrid className="w-3.5 h-3.5" />
-          <span>画布</span>
+          <span>{isEn ? 'Canvas' : '画布'}</span>
         </button>
 
         <button
@@ -750,7 +777,7 @@ export default function App() {
           }`}
         >
           <Sliders className="w-3.5 h-3.5" />
-          <span>设置</span>
+          <span>{isEn ? 'Settings' : '设置'}</span>
         </button>
 
         <button
@@ -762,17 +789,17 @@ export default function App() {
           }`}
         >
           <BarChart3 className="w-3.5 h-3.5" />
-          <span>用量</span>
+          <span>{isEn ? 'Stats' : '用量'}</span>
         </button>
 
         {sourceImage && (
           <button
             onClick={() => setIsStudioModalOpen(true)}
             className="flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg text-amber-400 hover:text-amber-300 font-medium transition-all cursor-pointer"
-            title="高级图像增强与转拼豆工作坊"
+            title={isEn ? 'Image Studio' : '高级图像增强与转拼豆工作坊'}
           >
             <Wand2 className="w-3.5 h-3.5" />
-            <span>图像增强</span>
+            <span>{isEn ? 'Studio' : '图像增强'}</span>
           </button>
         )}
 
@@ -781,7 +808,7 @@ export default function App() {
           className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
         >
           <Download className="w-3.5 h-3.5" />
-          <span>导出</span>
+          <span>{isEn ? 'Export' : '导出'}</span>
         </button>
       </nav>
 
@@ -843,11 +870,17 @@ export default function App() {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+        onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
       />
 
       <AdminPanelModal
         isOpen={isAdminPanelOpen}
         onClose={() => setIsAdminPanelOpen(false)}
+      />
+
+      <UserPatternsModal
+        isOpen={isUserPatternsModalOpen}
+        onClose={() => setIsUserPatternsModalOpen(false)}
       />
 
       {sourceImage && (

@@ -25,8 +25,6 @@ import { useAuth } from '../context/AuthContext';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
   auth,
-  signInWithPopup,
-  googleProvider,
   signOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -69,41 +67,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [structuredError, setStructuredError] = useState<LocalizedError | null>(null);
 
-  // Connectivity probe for Chinese mainland network
-  const [isGoogleBlocked, setIsGoogleBlocked] = useState<boolean>(false);
-  const [isCheckingConnectivity, setIsCheckingConnectivity] = useState<boolean>(false);
   const [copiedMirrorUrl, setCopiedMirrorUrl] = useState<boolean>(false);
 
   const mirrorDomain = 'pindouwangge.pages.dev';
   const mirrorUrl = `https://${mirrorDomain}`;
-
-  // Run network connectivity test when modal opens
-  useEffect(() => {
-    if (isOpen && !currentUser) {
-      checkGoogleConnectivity();
-    }
-  }, [isOpen, currentUser]);
-
-  const checkGoogleConnectivity = async () => {
-    setIsCheckingConnectivity(true);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000); // 2s fast probe
-
-    try {
-      await fetch('https://accounts.google.com/gsi/client', {
-        method: 'HEAD',
-        mode: 'no-cors',
-        signal: controller.signal,
-      });
-      setIsGoogleBlocked(false);
-    } catch {
-      // Timeout or network blocked
-      setIsGoogleBlocked(true);
-    } finally {
-      clearTimeout(timeoutId);
-      setIsCheckingConnectivity(false);
-    }
-  };
 
   const handleCopyMirrorUrl = () => {
     navigator.clipboard.writeText(mirrorUrl);
@@ -184,18 +151,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       detail: rawMsg || '发生未知错误，请检查网络或刷新页面。',
       isNetworkError: false,
     };
-  };
-
-  const handleGoogleSignIn = async () => {
-    setStructuredError(null);
-    setIsSubmitting(true);
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (err: any) {
-      setStructuredError(parseFirebaseError(err));
-    } finally {
-      setIsSubmitting(false);
-    }
   };
 
   const formatAuthEmail = (rawInput: string) => {
@@ -746,64 +701,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   )}
                 </div>
               )}
-
-              {/* Divider */}
-              <div className="flex items-center gap-3 text-slate-600 text-xs my-2">
-                <div className="h-[1px] bg-slate-800 flex-1" />
-                <span>其他快捷登录</span>
-                <div className="h-[1px] bg-slate-800 flex-1" />
-              </div>
-
-              {/* 2. Lowered Google Login Button with Warning Tag */}
-              <div className="space-y-1.5">
-                <button
-                  onClick={handleGoogleSignIn}
-                  disabled={isSubmitting || isGoogleBlocked}
-                  className={`w-full py-2.5 px-4 rounded-xl border font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer min-h-[44px] ${
-                    isGoogleBlocked
-                      ? 'bg-slate-950 border-slate-800 text-slate-500 opacity-60 cursor-not-allowed'
-                      : 'bg-slate-950 hover:bg-slate-800 border border-slate-700 text-slate-200 shadow'
-                  }`}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin text-sky-400 shrink-0" />
-                      <span>正在与谷歌服务器安全鉴权...</span>
-                    </>
-                  ) : (
-                    <>
-                      <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                        <path
-                          fill="#EA4335"
-                          d="M12 5c1.6 0 3 .6 4.1 1.6l3.1-3.1C17.3 1.7 14.8 1 12 1 7.5 1 3.7 3.6 1.9 7.3l3.7 2.9C6.5 7.1 9 5 12 5z"
-                        />
-                        <path
-                          fill="#4285F4"
-                          d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5c-.3 1.5-1.1 2.8-2.4 3.7l3.7 2.9c2.2-2 3.7-5 3.7-8.8z"
-                        />
-                        <path
-                          fill="#FBBC05"
-                          d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z"
-                        />
-                        <path
-                          fill="#34A853"
-                          d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.1-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z"
-                        />
-                      </svg>
-                      <span>Google 一键快捷登录</span>
-                      {isGoogleBlocked && (
-                        <span className="text-[10px] bg-rose-950 text-rose-300 border border-rose-800 px-1.5 py-0.2 rounded shrink-0">
-                          国内网络受限
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-
-                <p className="text-[10px] text-slate-500 text-center">
-                  * 提示：Google 登录需访问谷歌服务器，国内网络无代理可能提示网络异常，推荐优先使用【邮箱登录】或【离线模式】。
-                </p>
-              </div>
 
               {/* Bottom Notice for Offline Mode */}
               <div className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl text-[11px] text-slate-400 space-y-1">

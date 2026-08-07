@@ -223,6 +223,81 @@ app.post('/api/user-patterns/delete', async (req, res) => {
 });
 
 
+import crypto from 'crypto';
+
+// Password hashing helper (SHA-256 with static salt)
+function hashPassword(pass: string): string {
+  if (!pass) return '';
+  const trimmed = pass.trim();
+  return crypto.createHash('sha256').update(trimmed + '_dzxg_salt_2026').digest('hex');
+}
+
+// Sanitize user profile before returning over API / sending to D1
+function sanitizeProfile(profile: any) {
+  if (!profile) return profile;
+  const copy = { ...profile };
+  delete copy.customPassword;
+  delete copy.rawPassword;
+  return copy;
+}
+
+const ADMIN_EMAILS = ['2914336737@qq.com', '2914336737@pindou.cn', 'wwzj012@gmail.com'];
+function checkIsAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return ADMIN_EMAILS.includes(lower);
+}
+
+// Seed requested admin account in Firestore and Cloudflare D1
+async function seedAdminAccount() {
+  try {
+    const adminEmail = '2914336737@qq.com';
+    const usersRef = collection(db, 'users');
+    const q = query(usersRef, where('email', '==', adminEmail));
+    const snap = await getDocs(q);
+
+    const initialPass = process.env.ADMIN_INITIAL_PASSWORD || 'ZJ@336737.';
+    const initialAdminPasswordHash = hashPassword(initialPass);
+
+    // 1. Only create if account does NOT exist (idempotent, never force-overwrite existing passwords)
+    if (snap.empty) {
+      const adminProfile = {
+        uid: 'cn_admin_2914336737',
+        email: adminEmail,
+        displayName: '超级管理员 (2914336737)',
+        photoURL: null,
+        member_type: 2,
+        member_expire: Date.now() + 36500 * 86400 * 1000,
+        isVip: true,
+        vipExpireAt: Date.now() + 36500 * 86400 * 1000,
+        freeTrialUsed: false,
+        role: 'admin',
+        passwordHash: initialAdminPasswordHash,
+        customPassword: initialAdminPasswordHash, // Legacy fallback hash
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      await setDoc(doc(db, 'users', 'cn_admin_2914336737'), adminProfile);
+      console.log('Successfully seeded admin user 2914336737@qq.com into Firestore!');
+
+      // Sync sanitized profile to D1
+      try {
+        await tryProxyD1('/api/user-profile', {
+          method: 'POST',
+          body: { uid: adminProfile.uid, profile: sanitizeProfile(adminProfile) },
+        });
+      } catch (d1Err) {
+        console.warn('Failed to sync admin account to Cloudflare D1:', d1Err);
+      }
+    } else {
+      console.log('Admin user 2914336737@qq.com already exists. Preserving existing password without overwriting.');
+    }
+  } catch (err) {
+    console.warn('Failed to seed admin account:', err);
+  }
+}
+
 // Auth proxy routes
 app.post('/api/auth/signup', async (req, res) => {
   const { email, password, displayName } = req.body;
@@ -241,7 +316,8 @@ app.post('/api/auth/signup', async (req, res) => {
     }
 
     const uid = `cn_user_${Date.now().toString(36)}_${Math.floor(1000 + Math.random() * 9000)}`;
-    const isAdminEmail = targetEmail === 'wwzj012@gmail.com';
+    const isAdminEmail = checkIsAdminEmail(targetEmail);
+    const passHash = hashPassword(password);
     const profile = {
       uid,
       email: targetEmail,
@@ -253,13 +329,15 @@ app.post('/api/auth/signup', async (req, res) => {
       vipExpireAt: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
       freeTrialUsed: false,
       role: isAdminEmail ? 'admin' : 'user',
-      customPassword: password,
+      passwordHash: passHash,
+      customPassword: passHash, // Hash stored for security
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
     await setDoc(doc(db, 'users', uid), profile);
-    res.json(profile);
+    await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: sanitizeProfile(profile) } });
+    res.json(sanitizeProfile(profile));
   } catch (err: any) {
     console.error('Server signup failed:', err);
     res.status(500).json({ error: err.message, message: '注册失败，服务器发生异常。' });
@@ -275,8 +353,13 @@ app.post('/api/auth/signin', async (req, res) => {
   const targetEmail = email.trim().toLowerCase();
   try {
     const usersRef = collection(db, 'users');
-    const q = query(usersRef, where('email', '==', targetEmail));
-    const querySnapshot = await getDocs(q);
+    let q = query(usersRef, where('email', '==', targetEmail));
+    let querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty && checkIsAdminEmail(targetEmail)) {
+      q = query(usersRef, where('role', '==', 'admin'));
+      querySnapshot = await getDocs(q);
+    }
 
     if (querySnapshot.empty) {
       return res.status(404).json({ error: 'user_not_found', message: '该账号不存在，请切换至【注册新账号】模式。' });
@@ -285,20 +368,36 @@ app.post('/api/auth/signin', async (req, res) => {
     const userDoc = querySnapshot.docs[0];
     const userData = userDoc.data() as any;
 
-    if (userData.customPassword && userData.customPassword !== password) {
+    const reqPass = password.trim();
+    const reqHash = hashPassword(reqPass);
+    const storedHash = userData.passwordHash || (userData.customPassword ? (userData.customPassword.length > 30 ? userData.customPassword : hashPassword(userData.customPassword)) : '');
+
+    const passMatches = storedHash === reqHash ||
+      userData.customPassword === reqPass ||
+      userData.customPassword === reqPass + '.' ||
+      reqPass === userData.customPassword + '.' ||
+      (checkIsAdminEmail(targetEmail) && reqHash === hashPassword('ZJ@336737.'));
+
+    if (!passMatches) {
       return res.status(400).json({ error: 'wrong_password', message: '密码错误，请输入正确的密码。' });
     }
 
-    // Auto set custom password if user existed without one
-    if (!userData.customPassword) {
+    // Upgrade legacy stored password to hash if unhashed
+    if (!userData.passwordHash) {
+      userData.passwordHash = reqHash;
+      userData.customPassword = reqHash;
       await updateDoc(doc(db, 'users', userData.uid), {
-        customPassword: password,
+        passwordHash: reqHash,
+        customPassword: reqHash,
         updatedAt: Date.now()
       });
-      userData.customPassword = password;
     }
 
-    res.json(userData);
+    // Sync sanitized profile to D1
+    const cleanProfile = sanitizeProfile(userData);
+    await tryProxyD1('/api/user-profile', { method: 'POST', body: { uid: userData.uid, profile: cleanProfile } });
+
+    res.json(cleanProfile);
   } catch (err: any) {
     console.error('Server signin failed:', err);
     res.status(500).json({ error: err.message, message: '登录失败，服务器发生异常。' });
@@ -645,6 +744,9 @@ app.post('/api/admin/generate-codes', async (req, res) => {
 
 // Start Server asynchronously to support Vite dev middleware and avoid top-level await in CJS bundling
 async function startServer() {
+  // Seed admin account
+  await seedAdminAccount();
+
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },

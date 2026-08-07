@@ -88,9 +88,16 @@ export async function sha256(message: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+const ADMIN_EMAILS = ['2914336737@qq.com', '2914336737@pindou.cn', 'wwzj012@gmail.com'];
+export function isSystemAdminEmail(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return ADMIN_EMAILS.includes(lower);
+}
+
 // User Profile Listener / Helper with Offline Support (Server-Side Proxy First for GFW Bypass)
 export async function syncUserProfile(user: User): Promise<UserProfile> {
-  const isAdminEmail = user.email === 'wwzj012@gmail.com';
+  const isAdminEmail = isSystemAdminEmail(user.email);
 
   // Load cached profile from localStorage if available
   let cachedProfile: UserProfile | null = null;

@@ -534,11 +534,12 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[220px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
+                <div className="flex-1 min-h-[260px] sm:min-h-[300px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
                   <canvas
                     ref={imageCanvasRef}
                     onClick={handleCanvasClick}
-                    className={`max-w-full max-h-[260px] sm:max-h-[320px] object-contain rounded ${
+                    style={{ imageRendering: 'pixelated' }}
+                    className={`max-w-full max-h-full object-contain rounded ${
                       isPickingColor ? 'cursor-crosshair ring-2 ring-rose-500' : ''
                     }`}
                   />
@@ -567,11 +568,12 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[220px] relative flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
+                <div className="flex-1 min-h-[260px] sm:min-h-[300px] relative flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
                   {previewGrid.length > 0 ? (
                     <canvas
                       ref={previewCanvasRef}
-                      className="max-w-full max-h-[260px] sm:max-h-[320px] object-contain rounded shadow-lg"
+                      style={{ imageRendering: 'pixelated' }}
+                      className="max-w-full max-h-full object-contain rounded shadow-lg"
                     />
                   ) : (
                     <div className="text-slate-500 text-xs flex items-center gap-2">

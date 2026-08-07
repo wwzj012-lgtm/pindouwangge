@@ -106,50 +106,59 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
     const paletteMap = new Map<string, string>();
     palette.forEach(c => paletteMap.set(c.id, c.hex));
 
-    // Render Original Canvas
-    const origCanvas = origCanvasRef.current;
-    if (origCanvas && grid.length > 0) {
-      const h = grid.length;
-      const w = grid[0].length;
-      origCanvas.width = w;
-      origCanvas.height = h;
-      const ctx = origCanvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, w, h);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const cid = grid[y][x];
-            if (cid) {
-              ctx.fillStyle = paletteMap.get(cid) || cid;
-              ctx.fillRect(x, y, 1, 1);
-            }
-          }
-        }
-      }
-    }
+    const drawGridToCanvas = (
+      canvas: HTMLCanvasElement | null,
+      gridData: string[][]
+    ) => {
+      if (!canvas || !gridData || gridData.length === 0) return;
+      const h = gridData.length;
+      const w = gridData[0].length;
+      if (w === 0 || h === 0) return;
 
-    // Render Optimized Canvas
-    const optCanvas = optCanvasRef.current;
-    if (optCanvas && report.optimizedGrid.length > 0) {
-      const optGrid = report.optimizedGrid;
-      const h = optGrid.length;
-      const w = optGrid[0].length;
-      optCanvas.width = w;
-      optCanvas.height = h;
-      const ctx = optCanvas.getContext('2d');
-      if (ctx) {
-        ctx.clearRect(0, 0, w, h);
-        for (let y = 0; y < h; y++) {
-          for (let x = 0; x < w; x++) {
-            const cid = optGrid[y][x];
-            if (cid) {
-              ctx.fillStyle = paletteMap.get(cid) || cid;
-              ctx.fillRect(x, y, 1, 1);
+      // Calculate high-definition cell size so canvas bitmap is crisp (600-800px wide)
+      const maxDim = Math.max(w, h);
+      const cellSize = Math.max(5, Math.min(14, Math.floor(640 / maxDim)));
+
+      canvas.width = w * cellSize;
+      canvas.height = h * cellSize;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Canvas background
+      ctx.fillStyle = '#0F172A';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const cid = gridData[y][x];
+          const px = x * cellSize;
+          const py = y * cellSize;
+
+          if (cid) {
+            const hex = paletteMap.get(cid) || cid;
+            ctx.fillStyle = hex;
+            ctx.fillRect(px, py, cellSize, cellSize);
+
+            if (cellSize >= 6) {
+              // Subtle pixel grid gridlines for ultra clarity
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+              ctx.fillRect(px + cellSize - 1, py, 1, cellSize);
+              ctx.fillRect(px, py + cellSize - 1, cellSize, 1);
             }
+          } else {
+            // Transparent checkerboard pattern for removed background beads
+            ctx.fillStyle = (x + y) % 2 === 0 ? '#1E293B' : '#0F172A';
+            ctx.fillRect(px, py, cellSize, cellSize);
           }
         }
       }
-    }
+    };
+
+    drawGridToCanvas(origCanvasRef.current, grid);
+    drawGridToCanvas(optCanvasRef.current, report.optimizedGrid);
   }, [isOpen, report, grid, palette]);
 
   if (!isOpen) return null;
@@ -182,8 +191,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-3 sm:p-5 overflow-y-auto">
-      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-2 sm:p-4 md:p-6 overflow-y-auto">
+      <div className="relative w-full max-w-7xl xl:max-w-[1400px] bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[96vh]">
         {/* Header */}
         <div className="px-5 py-4 bg-gradient-to-r from-slate-950 via-amber-950/40 to-slate-950 border-b border-amber-500/30 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -476,10 +485,11 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               </div>
 
               {/* Canvas Preview Container */}
-              <div className="w-full h-64 sm:h-72 bg-slate-900/90 rounded-xl p-2 flex items-center justify-center overflow-hidden border border-slate-800 relative">
+              <div className="w-full h-80 sm:h-[400px] bg-slate-900/90 rounded-xl p-3 flex items-center justify-center overflow-hidden border border-slate-800 relative">
                 <canvas
                   ref={origCanvasRef}
-                  className="max-w-full max-h-full object-contain image-rendering-pixelated shadow-lg rounded"
+                  style={{ imageRendering: 'pixelated' }}
+                  className="max-w-full max-h-full object-contain shadow-lg rounded"
                 />
               </div>
 
@@ -512,7 +522,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               </div>
 
               {/* Canvas Preview Container */}
-              <div className="w-full h-64 sm:h-72 bg-slate-900/90 rounded-xl p-2 flex items-center justify-center overflow-hidden border border-sky-500/30 relative">
+              <div className="w-full h-80 sm:h-[400px] bg-slate-900/90 rounded-xl p-3 flex items-center justify-center overflow-hidden border border-sky-500/30 relative">
                 {isCalculating ? (
                   <div className="flex flex-col items-center gap-2 text-sky-300 text-xs font-medium">
                     <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
@@ -521,7 +531,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 ) : (
                   <canvas
                     ref={optCanvasRef}
-                    className="max-w-full max-h-full object-contain image-rendering-pixelated shadow-lg rounded ring-1 ring-sky-500/30"
+                    style={{ imageRendering: 'pixelated' }}
+                    className="max-w-full max-h-full object-contain shadow-lg rounded ring-1 ring-sky-500/30"
                   />
                 )}
               </div>

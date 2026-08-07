@@ -187,7 +187,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       : (isEn ? '_FullPattern' : '_完整图纸');
     downloadCanvasImage(canvas, `${projectName}${suffix}.png`);
 
-    // Auto archive exported pattern record for user (30 days retention)
+    // Auto archive exported pattern record for user (Free: 7 days, VIP: 30 days)
     if (currentUser?.uid) {
       const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
       saveExportedPatternRecord({
@@ -197,6 +197,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         height,
         totalBeads: totalBeadsCount,
         canvas,
+        isVip: Boolean(isVip || isPro || (memberType ?? 0) > 0),
       }).catch(e => console.warn('Failed to archive pattern record:', e));
     }
   };
@@ -237,7 +238,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       }, i * 300);
     }
 
-    // Auto archive exported pattern record for user (30 days retention)
+    // Auto archive exported pattern record for user (Free: 7 days, VIP: 30 days)
     if (currentUser?.uid) {
       const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
       saveExportedPatternRecord({
@@ -247,6 +248,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         height,
         totalBeads: totalBeadsCount,
         canvas: fullCanvas,
+        isVip: Boolean(isVip || isPro || (memberType ?? 0) > 0),
       }).catch(e => console.warn('Failed to archive pattern record:', e));
     }
   };

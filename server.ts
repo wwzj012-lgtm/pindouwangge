@@ -91,14 +91,15 @@ app.post('/api/user-profile', async (req, res) => {
   }
 });
 
-// 4. Save Exported Pattern Record (30 Days Retention)
+// 4. Save Exported Pattern Record (7 Days for Free Users, 30 Days for VIPs)
 app.post('/api/user-patterns/save', async (req, res) => {
-  const { id, userId, title, width, height, totalBeads, thumbnailUrl } = req.body;
+  const { id, userId, title, width, height, totalBeads, thumbnailUrl, isVip, retentionDays, expireAt: providedExpireAt } = req.body;
   if (!id || !userId || !thumbnailUrl) {
     return res.status(400).json({ error: 'id, userId, and thumbnailUrl are required' });
   }
   const now = Date.now();
-  const expireAt = now + 30 * 24 * 60 * 60 * 1000; // 30 days retention
+  const days = retentionDays || (isVip ? 30 : 7);
+  const expireAt = providedExpireAt || (now + days * 24 * 60 * 60 * 1000);
   const record = {
     id,
     userId,

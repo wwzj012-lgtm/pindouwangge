@@ -297,58 +297,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {/* Built-in Samples Dropdown */}
-        <div className="relative group shrink-0">
-          <button className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap">
-            <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span>{t('samples')}</span>
-          </button>
 
-          {/* Dropdown Menu */}
-          <div className="absolute right-0 top-full mt-1.5 w-48 bg-slate-800 border border-slate-700 rounded-xl shadow-xl py-2 hidden group-hover:block z-50">
-            <div className="px-3 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-              {language === 'zh' ? '加载预设样本' : 'Load Preset Sample'}
-            </div>
-            {SAMPLE_IMAGES.map(s => (
-              <button
-                key={s.id}
-                onClick={() => onLoadSample(s.url)}
-                className="w-full text-left px-3 py-1.5 text-xs text-slate-200 hover:bg-slate-700 flex items-center gap-2 transition-colors cursor-pointer"
-              >
-                <ImageIcon className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                <span className="truncate">{s.name}</span>
-                <span className="ml-auto text-[10px] text-slate-400 shrink-0">{s.category}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Import JSON */}
-        <input
-          type="file"
-          ref={jsonInputRef}
-          onChange={handleJsonChange}
-          accept=".json,.perler"
-          className="hidden"
-        />
-        <button
-          onClick={() => jsonInputRef.current?.click()}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-          title={language === 'zh' ? '打开工程' : 'Open project file'}
-        >
-          <FolderOpen className="w-3.5 h-3.5 text-blue-400 shrink-0" />
-          <span className="hidden xl:inline">{t('openProject')}</span>
-        </button>
-
-        {/* Save JSON Project */}
-        <button
-          onClick={onExportJson}
-          className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap"
-          title={language === 'zh' ? '保存工程' : 'Save project file'}
-        >
-          <FileJson className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-          <span className="hidden xl:inline">{t('saveProject')}</span>
-        </button>
 
         {/* High-Res Tutorial Export */}
         <button

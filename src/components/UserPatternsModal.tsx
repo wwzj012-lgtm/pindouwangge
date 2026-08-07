@@ -28,9 +28,10 @@ interface UserPatternsModalProps {
 }
 
 export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, isVip, isPro, memberType } = useAuth();
   const { language } = useLanguage();
   const isEn = language === 'en';
+  const isVipUser = Boolean(isVip || isPro || (memberType ?? 0) > 0);
 
   const [records, setRecords] = useState<ExportedPatternRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -111,14 +112,14 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({ isOpen, on
                 <h3 className="font-bold text-sm sm:text-base text-slate-100">
                   {isEn ? 'My Exported Pattern History' : '我的导出图纸记录'}
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 border border-amber-500/30 text-amber-400">
-                  {isEn ? '30 Days Auto Cache' : '云端缓存 30 天'}
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${isVipUser ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400' : 'bg-slate-800 border border-slate-700 text-slate-300'}`}>
+                  {isEn ? (isVipUser ? 'VIP 30 Days Retention' : 'Free 7 Days Retention') : (isVipUser ? 'VIP尊享 30天缓存' : '普通用户 7天缓存')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
                 {isEn
-                  ? 'Automatically archives exported patterns for 30 days for easy redownload and preview.'
-                  : '每当您确认并下载拼豆图纸后，系统将在此自动保存成品记录 30 天，支持随时回看与重新下载'}
+                  ? (isVipUser ? 'VIP account archives exported patterns for 30 days.' : 'Ordinary accounts store exported patterns for 7 days (Upgrade to VIP for 30 days).')
+                  : (isVipUser ? '导出图纸自动保存成品快照 30 天，支持多设备实时同步回看与重新下载' : '普通账号导出图纸自动保存成品快照 7 天（激活 VIP 可升级解锁 30 天超长云端留存）')}
               </p>
             </div>
           </div>
@@ -137,8 +138,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({ isOpen, on
             <Clock className="w-4 h-4 text-purple-400 shrink-0" />
             <span>
               {isEn
-                ? `Total archived: ${records.length} patterns. Records are automatically cleared after 30 days.`
-                : `您当前账号共有 ${records.length} 份归档图纸成品。为保障存储性能，每张图纸将在导出 30 天后自动清理。`}
+                ? `Total archived: ${records.length} patterns. (VIP: 30 days, Free: 7 days)`
+                : `共有 ${records.length} 份图纸记录。普通用户保存 7 天，VIP 用户支持 30 天云端图纸快照存储。`}
             </span>
           </div>
           <button

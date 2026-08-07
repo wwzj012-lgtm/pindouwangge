@@ -38,7 +38,7 @@ export function generateThumbnailDataUrl(canvas: HTMLCanvasElement, maxDim: numb
 }
 
 /**
- * Save an exported pattern record for the user (retained up to 30 days)
+ * Save an exported pattern record for the user (Ordinary user: 7 days, VIP user: 30 days)
  */
 export async function saveExportedPatternRecord(params: {
   userId: string;
@@ -47,12 +47,14 @@ export async function saveExportedPatternRecord(params: {
   height: number;
   totalBeads: number;
   canvas: HTMLCanvasElement;
+  isVip?: boolean;
 }): Promise<ExportedPatternRecord | null> {
   if (!params.userId) return null;
 
   const recordId = `pat_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const now = Date.now();
-  const expireAt = now + RETENTION_MS;
+  const retentionDays = params.isVip ? 30 : 7;
+  const expireAt = now + retentionDays * 24 * 60 * 60 * 1000;
   const thumbnailUrl = generateThumbnailDataUrl(params.canvas);
 
   const record: ExportedPatternRecord = {

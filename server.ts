@@ -459,6 +459,14 @@ app.post('/api/redeem-code', async (req, res) => {
     return res.status(400).json({ error: 'uid and code are required' });
   }
 
+  // Prioritize Cloudflare D1
+  const d1Result = await tryProxyD1('/api/redeem-code', { method: 'POST', body: req.body });
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  } else if (d1Result.isBusinessError) {
+    return res.status(d1Result.status || 400).json(d1Result.data);
+  }
+
   const trimmedCode = code.trim().toUpperCase();
 
   try {
@@ -557,11 +565,19 @@ app.post('/api/redeem-code', async (req, res) => {
 
 // 1. Get all users
 app.get('/api/admin/users', async (req, res) => {
+  const d1Result = await tryProxyD1('/api/admin/users');
+  if (d1Result.ok && Array.isArray(d1Result.data) && d1Result.data.length > 0) {
+    return res.json(d1Result.data);
+  }
+
   try {
     const snap = await getDocs(collection(db, 'users'));
     const users = snap.docs.map(d => d.data());
     res.json(users);
   } catch (err: any) {
+    if (d1Result.ok && d1Result.data) {
+      return res.json(d1Result.data);
+    }
     console.error('Failed to get users list server-side:', err);
     res.status(500).json({ error: err.message });
   }
@@ -569,11 +585,19 @@ app.get('/api/admin/users', async (req, res) => {
 
 // 2. Get all codes
 app.get('/api/admin/codes', async (req, res) => {
+  const d1Result = await tryProxyD1('/api/admin/codes');
+  if (d1Result.ok && Array.isArray(d1Result.data) && d1Result.data.length > 0) {
+    return res.json(d1Result.data);
+  }
+
   try {
     const snap = await getDocs(collection(db, 'vipCodes'));
     const codes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     res.json(codes);
   } catch (err: any) {
+    if (d1Result.ok && d1Result.data) {
+      return res.json(d1Result.data);
+    }
     console.error('Failed to get codes list server-side:', err);
     res.status(500).json({ error: err.message });
   }
@@ -720,6 +744,9 @@ app.post('/api/admin/generate-codes', async (req, res) => {
   if (!codes || !Array.isArray(codes)) {
     return res.status(400).json({ error: 'codes array is required' });
   }
+
+  const d1Result = await tryProxyD1('/api/admin/generate-codes', { method: 'POST', body: req.body });
+
   try {
     for (const c of codes) {
       const codeRef = doc(db, 'vipCodes', c.code);
@@ -735,9 +762,55 @@ app.post('/api/admin/generate-codes', async (req, res) => {
       );
     }
 
+    if (d1Result.ok) {
+      return res.json(d1Result.data);
+    }
+
     res.json({ success: true });
   } catch (err: any) {
+    if (d1Result.ok) {
+      return res.json(d1Result.data);
+    }
     console.error('Failed to generate codes server-side:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 9. Update VIP code state (copied status, deletePendingAt, etc.)
+app.post('/api/admin/update-code', async (req, res) => {
+  const { codeId, updates, operatorUid, operatorEmail } = req.body;
+  if (!codeId || !updates) {
+    return res.status(400).json({ error: 'codeId and updates are required' });
+  }
+
+  const d1Result = await tryProxyD1('/api/admin/update-code', { method: 'POST', body: req.body });
+
+  try {
+    const codeRef = doc(db, 'vipCodes', codeId);
+    await updateDoc(codeRef, {
+      ...updates,
+      updatedAt: Date.now(),
+    });
+
+    if (operatorUid && operatorEmail) {
+      await serverRecordAuditLog(
+        operatorUid,
+        operatorEmail,
+        'UPDATE_VIP_CODE',
+        `更新卡密 [${codeId}] 状态: ${JSON.stringify(updates)}`
+      );
+    }
+
+    if (d1Result.ok) {
+      return res.json(d1Result.data);
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    if (d1Result.ok) {
+      return res.json(d1Result.data);
+    }
+    console.error('Failed to update code server-side:', err);
     res.status(500).json({ error: err.message });
   }
 });

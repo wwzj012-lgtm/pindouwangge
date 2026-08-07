@@ -26,6 +26,8 @@ import {
   UserPlus,
   Filter,
   Loader2,
+  RotateCcw,
+  Clock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { formatChinaDate } from '../utils/dateUtils';
@@ -64,6 +66,8 @@ interface VipCodeData {
   usedBy?: string;
   usedAt?: number;
   createdAt: number;
+  copied?: boolean; // 标记卡密已被复制发售(黄色字体，不售后)
+  deletePendingAt?: number | null; // 标记卡密申请删除时间戳(3天缓冲等待期，期间可撤销)
 }
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClose }) => {
@@ -85,6 +89,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [customCodeInput, setCustomCodeInput] = useState<string>('');
   const [validDaysLimit, setValidDaysLimit] = useState<number>(90);
   const [genSuccessMsg, setGenSuccessMsg] = useState<string>('');
+  const [isGeneratingCodes, setIsGeneratingCodes] = useState<boolean>(false);
 
   // Plaintext batch modal state (for initial display right after batch creation)
   const [showBatchGenModal, setShowBatchGenModal] = useState<boolean>(false);
@@ -663,6 +668,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const handleGenerateCodesBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     setGenSuccessMsg('');
+    setIsGeneratingCodes(true);
 
     const countToGen = Math.min(Math.max(batchCount, 1), 50);
     const createdCodes: VipCodeData[] = [];
@@ -753,6 +759,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       setBatchCopied(false);
     } catch (err) {
       console.error('Failed to generate codes batch:', err);
+    } finally {
+      setIsGeneratingCodes(false);
     }
   };
 
@@ -816,10 +824,141 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }));
   };
 
-  const handleCopyRowCode = (code: string, id: string) => {
-    navigator.clipboard.writeText(code);
-    setCopiedRowId(id);
+  // Toggle copied / after-sales status (yellow font toggle)
+  const handleToggleCopiedState = async (c: VipCodeData) => {
+    const newCopied = !c.copied;
+    setCodesList(prev =>
+      prev.map(item => (item.id === c.id ? { ...item, copied: newCopied } : item))
+    );
+
+    try {
+      await fetch('/api/admin/update-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codeId: c.id,
+          updates: { copied: newCopied },
+          operatorUid: currentUser?.uid,
+          operatorEmail: currentUser?.email || 'admin'
+        })
+      });
+    } catch (err) {
+      console.warn('Server code status update failed, fallback to direct Firestore:', err);
+      try {
+        const codeRef = doc(db, 'vipCodes', c.id);
+        await updateDoc(codeRef, { copied: newCopied });
+      } catch (fsErr) {
+        console.error('Firestore code update failed:', fsErr);
+      }
+    }
+  };
+
+  // Copy code to clipboard AND mark as copied (yellow font)
+  const handleCopyRowCode = async (c: VipCodeData) => {
+    navigator.clipboard.writeText(c.code);
+    setCopiedRowId(c.id);
     setTimeout(() => setCopiedRowId(null), 2000);
+
+    if (!c.copied) {
+      setCodesList(prev =>
+        prev.map(item => (item.id === c.id ? { ...item, copied: true } : item))
+      );
+
+      try {
+        await fetch('/api/admin/update-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            codeId: c.id,
+            updates: { copied: true },
+            operatorUid: currentUser?.uid,
+            operatorEmail: currentUser?.email || 'admin'
+          })
+        });
+      } catch (err) {
+        try {
+          const codeRef = doc(db, 'vipCodes', c.id);
+          await updateDoc(codeRef, { copied: true });
+        } catch (fsErr) {
+          console.error('Firestore update failed:', fsErr);
+        }
+      }
+    }
+  };
+
+  // Initiate 3-day deletion countdown
+  const handleRequestDeleteCode = async (c: VipCodeData) => {
+    const deleteTime = Date.now() + 3 * 24 * 60 * 60 * 1000; // 3 days buffer
+    setCodesList(prev =>
+      prev.map(item => (item.id === c.id ? { ...item, deletePendingAt: deleteTime } : item))
+    );
+
+    try {
+      await fetch('/api/admin/update-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codeId: c.id,
+          updates: { deletePendingAt: deleteTime },
+          operatorUid: currentUser?.uid,
+          operatorEmail: currentUser?.email || 'admin'
+        })
+      });
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'DELETE_VIP_CODE_PENDING',
+          `申请删除卡密 [${c.code}]，卡密进入 3 天等待销毁期`
+        );
+      }
+    } catch (err) {
+      console.warn('Server delete request failed, fallback to direct Firestore:', err);
+      try {
+        const codeRef = doc(db, 'vipCodes', c.id);
+        await updateDoc(codeRef, { deletePendingAt: deleteTime });
+      } catch (fsErr) {
+        console.error('Firestore delete request failed:', fsErr);
+      }
+    }
+  };
+
+  // Cancel deletion request
+  const handleCancelDeleteCode = async (c: VipCodeData) => {
+    setCodesList(prev =>
+      prev.map(item => (item.id === c.id ? { ...item, deletePendingAt: null } : item))
+    );
+
+    try {
+      await fetch('/api/admin/update-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codeId: c.id,
+          updates: { deletePendingAt: null },
+          operatorUid: currentUser?.uid,
+          operatorEmail: currentUser?.email || 'admin'
+        })
+      });
+
+      if (currentUser) {
+        await recordAuditLog(
+          currentUser.uid,
+          currentUser.email || 'admin',
+          'CANCEL_DELETE_VIP_CODE',
+          `撤销了卡密 [${c.code}] 的删除申请，卡密已恢复正常有效状态`
+        );
+      }
+    } catch (err) {
+      console.warn('Server cancel delete failed, fallback to direct Firestore:', err);
+      try {
+        const codeRef = doc(db, 'vipCodes', c.id);
+        await updateDoc(codeRef, { deletePendingAt: null });
+      } catch (fsErr) {
+        console.error('Firestore cancel delete failed:', fsErr);
+      }
+    }
   };
 
   if (!isOpen || !isAdmin) return null;
@@ -1459,10 +1598,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                   <div className="flex items-end">
                     <button
                       type="submit"
-                      className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px]"
+                      disabled={isGeneratingCodes}
+                      className="w-full py-2.5 px-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5 min-h-[44px]"
                     >
-                      <Plus className="w-4 h-4" />
-                      <span>生成卡密</span>
+                      {isGeneratingCodes ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                          <span>正在生成卡密...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          <span>生成卡密</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>
@@ -1477,14 +1626,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
               {/* Codes Table with Masking Protection */}
               <div className="border border-slate-800 rounded-xl overflow-x-auto bg-slate-950">
-                <table className="w-full text-left text-xs text-slate-300 min-w-[650px]">
+                <table className="w-full text-left text-xs text-slate-300 min-w-[720px]">
                   <thead className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <tr>
-                      <th className="px-4 py-3">激活码卡密 (已脱敏)</th>
+                      <th className="px-4 py-3">激活码卡密 (点击文字切换黄色标记)</th>
                       <th className="px-4 py-3">会员等级</th>
                       <th className="px-4 py-3">发行渠道</th>
                       <th className="px-4 py-3">有效时长</th>
-                      <th className="px-4 py-3">核销状态</th>
+                      <th className="px-4 py-3">核销与销毁状态</th>
                       <th className="px-4 py-3">截止激活</th>
                       <th className="px-4 py-3 text-right">操作</th>
                     </tr>
@@ -1499,91 +1648,149 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           </div>
                         </td>
                       </tr>
-                    ) : codesList.length === 0 ? (
+                    ) : codesList.filter(c => !c.deletePendingAt || c.deletePendingAt > Date.now()).length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                           暂未生成任何 VIP 激活兑换码
                         </td>
                       </tr>
                     ) : (
-                      codesList.map(c => {
-                        const isRevealed = !!revealedCodeIds[c.id];
-                        const isCopied = copiedRowId === c.id;
+                      codesList
+                        .filter(c => !c.deletePendingAt || c.deletePendingAt > Date.now())
+                        .map(c => {
+                          const isRevealed = !!revealedCodeIds[c.id];
+                          const isCopied = copiedRowId === c.id;
+                          const isPendingDelete = !!(c.deletePendingAt && c.deletePendingAt > Date.now());
 
-                        return (
-                          <tr key={c.id} className="hover:bg-slate-900/50 transition-colors">
-                            <td className="px-4 py-3">
-                              <div className="flex items-center gap-2">
-                                <span className={`font-mono font-bold text-sm ${isRevealed ? 'text-amber-300' : 'text-slate-400'}`}>
-                                  {isRevealed ? c.code : maskCardCode(c.code)}
-                                </span>
-                                <button
-                                  onClick={() => toggleRevealRow(c.id)}
-                                  className="p-1 text-slate-500 hover:text-slate-200 transition-colors cursor-pointer"
-                                  title={isRevealed ? '隐藏明文' : '查看完整卡密'}
-                                >
-                                  {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                                </button>
-                              </div>
-                            </td>
-                            <td className="px-4 py-3">
-                              {c.member_type === 2 || c.code.startsWith('BP') ? (
-                                <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
-                                  <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
-                                  商家Pro
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
-                                  <Crown className="w-3 h-3 text-amber-400" />
-                                  普通VIP
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-medium">
-                                {c.channel || '普通发行'}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 font-mono font-bold text-slate-200">{c.days} 天</td>
-                            <td className="px-4 py-3">
-                              {c.used ? (
-                                <span className="bg-slate-800 text-slate-500 px-2 py-0.5 rounded text-[10px]">
-                                  已核销 ({c.usedBy ? c.usedBy.slice(0, 6) : '未知'})
-                                </span>
-                              ) : (
-                                <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
-                                  未核销 (有效)
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
-                              {c.expireAt ? formatChinaDate(c.expireAt, false) : '永久有效'}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <button
-                                onClick={() => handleCopyRowCode(c.code, c.id)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ml-auto cursor-pointer ${
-                                  isCopied
-                                    ? 'bg-emerald-500 text-slate-950 font-black'
-                                    : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                                }`}
-                              >
-                                {isCopied ? (
-                                  <>
-                                    <Check className="w-3 h-3" />
-                                    <span>已复制</span>
-                                  </>
+                          // Calculate remaining time for deletion
+                          let deleteTimeStr = '';
+                          if (isPendingDelete && c.deletePendingAt) {
+                            const diffMs = c.deletePendingAt - Date.now();
+                            const days = Math.floor(diffMs / (86400 * 1000));
+                            const hours = Math.floor((diffMs % (86400 * 1000)) / (3600 * 1000));
+                            deleteTimeStr = days > 0 ? `剩 ${days} 天 ${hours} 小时` : `剩 ${Math.max(1, hours)} 小时`;
+                          }
+
+                          return (
+                            <tr key={c.id} className="hover:bg-slate-900/50 transition-colors">
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    onClick={() => handleToggleCopiedState(c)}
+                                    className={`font-mono font-bold text-sm cursor-pointer transition-all ${
+                                      c.copied
+                                        ? 'text-amber-400 font-extrabold drop-shadow-xs'
+                                        : isRevealed
+                                        ? 'text-amber-300'
+                                        : 'text-slate-400 hover:text-slate-200'
+                                    }`}
+                                    title={
+                                      c.copied
+                                        ? '该卡密已复制发售（黄色标记：不售后）。点击文字可恢复普通字体'
+                                        : '点击卡密文字可手动标记为黄色（已发售/不售后）'
+                                    }
+                                  >
+                                    {isRevealed ? c.code : maskCardCode(c.code)}
+                                  </span>
+                                  {c.copied && (
+                                    <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-1.5 py-0.2 rounded font-bold shrink-0">
+                                      已发售/不售后
+                                    </span>
+                                  )}
+                                  <button
+                                    onClick={() => toggleRevealRow(c.id)}
+                                    className="p-1 text-slate-500 hover:text-slate-200 transition-colors cursor-pointer"
+                                    title={isRevealed ? '隐藏明文' : '查看完整卡密'}
+                                  >
+                                    {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                  </button>
+                                </div>
+                              </td>
+                              <td className="px-4 py-3">
+                                {c.member_type === 2 || c.code.startsWith('BP') ? (
+                                  <span className="inline-flex items-center gap-1 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
+                                    商家Pro
+                                  </span>
                                 ) : (
-                                  <>
-                                    <Copy className="w-3 h-3" />
-                                    <span>复制卡密</span>
-                                  </>
+                                  <span className="inline-flex items-center gap-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    <Crown className="w-3 h-3 text-amber-400" />
+                                    普通VIP
+                                  </span>
                                 )}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
+                              </td>
+                              <td className="px-4 py-3">
+                                <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded text-[10px] font-medium">
+                                  {c.channel || '普通发行'}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 font-mono font-bold text-slate-200">{c.days} 天</td>
+                              <td className="px-4 py-3">
+                                {isPendingDelete ? (
+                                  <span className="inline-flex items-center gap-1 bg-rose-950/80 text-rose-300 border border-rose-500/50 px-2 py-0.5 rounded text-[10px] font-bold animate-pulse">
+                                    <Clock className="w-3 h-3 text-rose-400 shrink-0" />
+                                    <span>待销毁 ({deleteTimeStr})</span>
+                                  </span>
+                                ) : c.used ? (
+                                  <span className="bg-slate-800 text-slate-500 px-2 py-0.5 rounded text-[10px]">
+                                    已核销 ({c.usedBy ? c.usedBy.slice(0, 6) : '未知'})
+                                  </span>
+                                ) : (
+                                  <span className="bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    未核销 (有效)
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-slate-400 font-mono text-[11px]">
+                                {c.expireAt ? formatChinaDate(c.expireAt, false) : '永久有效'}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {isPendingDelete ? (
+                                    <button
+                                      onClick={() => handleCancelDeleteCode(c)}
+                                      className="px-2.5 py-1 rounded-lg text-xs font-bold transition-all bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 flex items-center gap-1 cursor-pointer"
+                                      title="撤销删除请求，恢复正常有效卡密"
+                                    >
+                                      <RotateCcw className="w-3 h-3" />
+                                      <span>取消删除</span>
+                                    </button>
+                                  ) : (
+                                    <>
+                                      <button
+                                        onClick={() => handleCopyRowCode(c)}
+                                        className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                          isCopied
+                                            ? 'bg-emerald-500 text-slate-950 font-black'
+                                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                                        }`}
+                                      >
+                                        {isCopied ? (
+                                          <>
+                                            <Check className="w-3 h-3" />
+                                            <span>已复制</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="w-3 h-3" />
+                                            <span>复制卡密</span>
+                                          </>
+                                        )}
+                                      </button>
+                                      <button
+                                        onClick={() => handleRequestDeleteCode(c)}
+                                        className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 border border-transparent hover:border-rose-800/50 transition-all cursor-pointer shrink-0"
+                                        title="申请删除卡密（系统将提供 3 天等待缓冲区，期满自动彻底销毁，期间支持随时撤销）"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
                     )}
                   </tbody>
                 </table>

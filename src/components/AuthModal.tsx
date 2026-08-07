@@ -84,8 +84,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     if (code === 'auth/network-request-failed' || rawMsg.includes('network-request-failed') || rawMsg.includes('network')) {
       return {
-        title: '当前网络无法连接账号服务',
-        detail: '国内网络环境无法直连谷歌 Firebase 服务器，建议改用【国内镜像入口】或直接使用【离线免登录模式】创作。',
+        title: '网络连接异常',
+        detail: '无法连接至认证服务器，请检查您的网络设置后重试。',
         isNetworkError: true,
       };
     }
@@ -217,47 +217,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         uid,
         email: targetEmail,
         displayName: autoDisplayName,
-      });
-      onClose();
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Quick 1-click Chinese user login without complex passwords
-  const handleQuickChinaLogin = async () => {
-    setStructuredError(null);
-    setIsSubmitting(true);
-    try {
-      // 100% GFW-bypass quick login via server-side API proxy
-      const response = await fetch('/api/auth/quick-login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.message || errData.error || '极速登录失败');
-      }
-
-      const userProfile = await response.json();
-      await setLocalCustomUser({
-        uid: userProfile.uid,
-        email: userProfile.email,
-        displayName: userProfile.displayName,
-      });
-      onClose();
-    } catch (err: any) {
-      console.warn('Server quick login failed, falling back to instant local guest session:', err);
-      // Seamless local guest session login fallback if API is unreachable
-      const randomId = Math.floor(10000 + Math.random() * 90000);
-      const quickEmail = `cn_guest_${Date.now().toString().slice(-6)}_${randomId}@pindou.cn`;
-      const quickName = `拼豆玩家_${randomId}`;
-      const uid = `cn_guest_${Date.now().toString(36)}_${randomId}`;
-      await setLocalCustomUser({
-        uid,
-        email: quickEmail,
-        displayName: quickName,
       });
       onClose();
     } finally {
@@ -402,7 +361,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     ? '核心权益：900×900超大画布、3D立体拆解分层、自定义店铺专属水印、采购Excel导出一应俱全！'
                     : isVip
                     ? '核心权益：去除防盗水印、400×400画布、200张批量图纸处理、无水印高分辨率导出！'
-                    : '目前支持基础 150×150 画布与强水印导出一览。通过下述激活码即可解锁更多高级功能。'}
+                    : '目前支持基础 100×100 画布与强水印导出一览。通过下述激活码即可解锁更多高级功能。'}
                 </p>
 
                 {(isVip || isPro) && (
@@ -436,9 +395,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <button
                     type="submit"
                     disabled={isSubmitting || !redeemCodeInput.trim()}
-                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer shrink-0 min-h-[44px]"
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow hover:brightness-110 disabled:opacity-50 transition-all cursor-pointer shrink-0 min-h-[44px] flex items-center justify-center gap-1.5"
                   >
-                    立即兑换
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-950" />
+                        <span>兑换中...</span>
+                      </>
+                    ) : (
+                      <span>立即兑换</span>
+                    )}
                   </button>
                 </div>
                 {redeemMsg && (
@@ -486,31 +452,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               )}
             </div>
           ) : (
-            /* Sign In / Sign Up Form (Email First + Google Lowered + Offline Fallback) */
+            /* Sign In / Sign Up Form */
             <div className="space-y-4">
-              {/* Top Banner: Offline Direct Entry Quick Button */}
-              <div className="bg-slate-950 border border-indigo-500/30 p-3 rounded-xl flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2">
-                  <HardDrive className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <div>
-                    <span className="font-bold text-white block">无需账号？离线免登录使用</span>
-                    <span className="text-[10px] text-slate-400">所有图纸直接保存在本地浏览器缓存</span>
-                  </div>
-                </div>
-                <button
-                  onClick={onClose}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg shadow cursor-pointer shrink-0 transition-all min-h-[38px]"
-                >
-                  免登录直达图纸
-                </button>
-              </div>
-
-              {/* 1. Main Form: Flexible Phone/Email/Account Auth */}
+              {/* Main Form: Flexible Phone/Email/Account Auth */}
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
                     <User className="w-3.5 h-3.5 text-sky-400" />
-                    <span>{mode === 'signin' ? '国内手机 / 邮箱 / 账号登录' : '注册新账号 (手机号/邮箱/用户名)'}</span>
+                    <span>{mode === 'signin' ? '手机号 / 邮箱 / 账号登录' : '注册新账号 (手机号/邮箱/用户名)'}</span>
                   </span>
                   <div className="text-xs">
                     {mode === 'signin' ? (
@@ -572,7 +521,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       />
                     </div>
                     <p className="text-[10px] text-slate-500 mt-1">
-                      * 支持国内任意手机号或常见邮箱，无需繁琐邮箱激活链接。
+                      * 支持手机号或常见邮箱，无需繁琐激活流程。
                     </p>
                   </div>
 
@@ -606,31 +555,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     )}
                   </button>
                 </form>
-
-                {/* 1-Click China Quick Authorization Button */}
-                <div className="pt-2 border-t border-slate-800">
-                  <button
-                    type="button"
-                    onClick={handleQuickChinaLogin}
-                    disabled={isSubmitting}
-                    className="w-full py-2.5 px-3 bg-slate-950 hover:bg-slate-800 border border-emerald-500/40 text-emerald-300 font-bold text-xs rounded-xl shadow flex items-center justify-center gap-2 cursor-pointer transition-all min-h-[44px]"
-                  >
-                    {isSubmitting ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                        <span>正在生成快捷创作者凭证...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400" />
-                        <span>国内玩家 1 秒快捷免密码授权登录</span>
-                      </>
-                    )}
-                  </button>
-                  <p className="text-[10px] text-slate-500 text-center mt-1">
-                    点击一键即可快速生成玩家凭证，即刻体验图纸制作与卡密兑换
-                  </p>
-                </div>
               </div>
 
               {/* Structured Localized Error Panel */}
@@ -644,74 +568,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {structuredError.detail}
                   </p>
 
-                  {/* Layered Domestic Diversion Guidance (If network fails) */}
                   {structuredError.isNetworkError && (
                     <div className="pt-2 border-t border-rose-800/60 space-y-2 text-[11px]">
-                      <div className="font-bold text-amber-300">💡 推荐国内访问解决方案 (二选一)：</div>
-                      <div className="grid grid-cols-1 gap-2">
-                        {/* Option A: Cloudflare Mirror */}
-                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
-                          <div className="font-bold text-slate-200 flex items-center justify-between">
-                            <span className="flex items-center gap-1 text-sky-300">
-                              <Globe className="w-3.5 h-3.5 text-sky-400" />
-                              方案 A：使用 Cloudflare 镜像分站
-                            </span>
-                            <button
-                              onClick={handleCopyMirrorUrl}
-                              className="text-[10px] text-sky-400 hover:underline flex items-center gap-1"
-                            >
-                              {copiedMirrorUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                              <span>{copiedMirrorUrl ? '已复制网址' : '复制网址'}</span>
-                            </button>
-                          </div>
-                          <p className="text-slate-400 text-[10px]">
-                            镜像分站域名已部署国内 CDN 加速，无需翻墙直连使用：
-                          </p>
-                          <a
-                            href={mirrorUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-mono text-amber-300 font-bold underline flex items-center gap-1 hover:text-amber-200"
-                          >
-                            <span>{mirrorDomain}</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
-                        </div>
-
-                        {/* Option B: Offline Mode */}
-                        <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
-                          <div className="font-bold text-slate-200 flex items-center justify-between">
-                            <span className="flex items-center gap-1 text-emerald-300">
-                              <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                              方案 B：免登录直接开始画图
-                            </span>
-                          </div>
-                          <p className="text-slate-400 text-[10px]">
-                            不登录账号也能正常使用绘制网格、加载素材、导出图纸全套功能。
-                          </p>
+                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
+                        <div className="font-bold text-slate-200 flex items-center justify-between">
+                          <span className="flex items-center gap-1 text-sky-300">
+                            <Globe className="w-3.5 h-3.5 text-sky-400" />
+                            镜像分站
+                          </span>
                           <button
-                            onClick={onClose}
-                            className="w-full mt-1 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded text-[11px] cursor-pointer"
+                            onClick={handleCopyMirrorUrl}
+                            className="text-[10px] text-sky-400 hover:underline flex items-center gap-1"
                           >
-                            开启离线免登录模式
+                            {copiedMirrorUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedMirrorUrl ? '已复制网址' : '复制网址'}</span>
                           </button>
                         </div>
+                        <a
+                          href={mirrorUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-amber-300 font-bold underline flex items-center gap-1 hover:text-amber-200"
+                        >
+                          <span>{mirrorDomain}</span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
                       </div>
                     </div>
                   )}
                 </div>
               )}
-
-              {/* Bottom Notice for Offline Mode */}
-              <div className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl text-[11px] text-slate-400 space-y-1">
-                <div className="flex items-center gap-1.5 font-bold text-slate-300">
-                  <Info className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                  <span>离线画图说明</span>
-                </div>
-                <p className="text-[10px] text-slate-500 leading-relaxed">
-                  本画板支持完整的单机离线创作模式。离线生成的图纸保存在浏览器 LocalStorage 中，随时可以导出 PNG / JSON 工程。账号登录仅用于跨设备云存储与兑换 PRO 核心减粒权限。
-                </p>
-              </div>
             </div>
           )}
         </div>

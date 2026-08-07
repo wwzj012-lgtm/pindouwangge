@@ -44,7 +44,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const brandNames = getBrandNames(isEn);
 
   // Tier max canvas limits
-  const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 150;
+  const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 100;
   const [limitWarning, setLimitWarning] = React.useState<string | null>(null);
   const updateSetting = <K extends keyof ConvertSettings>(key: K, value: ConvertSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));

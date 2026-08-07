@@ -1,0 +1,7 @@
+# Cloudflare Pages Proxy & SPA Redirects
+
+# 1. Proxy API routes to Cloudflare Worker D1 Backend
+/api/* https://stellabean-api.wwzj012.workers.dev/api/:splat 200
+
+# 2. SPA Route Fallback for single page app routing
+/* /index.html 200

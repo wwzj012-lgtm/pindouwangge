@@ -201,7 +201,7 @@ export async function deleteExportedPatternRecord(id: string, userId: string): P
     await fetch('/api/user-patterns/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, userId }),
     });
   } catch (apiErr) {
     console.warn('Server pattern delete endpoint failed:', apiErr);

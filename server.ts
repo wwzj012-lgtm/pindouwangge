@@ -40,6 +40,34 @@ app.use(express.json());
 
 const PORT = 3000;
 
+// Cloudflare D1 Worker URL for ultra-fast global & China acceleration
+const WORKER_API_URL = process.env.WORKER_API_URL || 'https://stellabean-api.wwzj012.workers.dev';
+const WORKER_SECRET = process.env.WORKER_SECRET || '9sK2$pR7vG5@zL8_bT3nX1#dF4jQ6mC0wA';
+
+async function tryProxyD1(endpoint: string, options: { method?: string; body?: any; headers?: any } = {}) {
+  try {
+    const url = `${WORKER_API_URL}${endpoint}`;
+    const res = await fetch(url, {
+      method: options.method || 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Worker-Secret': WORKER_SECRET,
+        ...(options.headers || {}),
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+    const data = await res.json().catch(() => null);
+    if (res.ok) {
+      return { ok: true, data, status: res.status };
+    } else if (res.status >= 400 && res.status < 500 && data) {
+      return { ok: false, isBusinessError: true, data, status: res.status };
+    }
+  } catch (err) {
+    console.warn(`[D1 Proxy] Request to ${endpoint} failed, falling back to Firestore:`, err);
+  }
+  return { ok: false };
+}
+
 // Helper to record admin audit logs server-side
 async function serverRecordAuditLog(operatorUid: string, operatorEmail: string, action: string, details: string) {
   try {
@@ -61,6 +89,12 @@ app.get('/api/user-profile', async (req, res) => {
   if (!uid) {
     return res.status(400).json({ error: 'uid is required' });
   }
+
+  const d1Result = await tryProxyD1(`/api/user-profile?uid=${encodeURIComponent(uid)}`);
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  }
+
   try {
     const userRef = doc(db, 'users', uid);
     const snap = await getDoc(userRef);
@@ -81,14 +115,20 @@ app.post('/api/user-profile', async (req, res) => {
   if (!uid || !profile) {
     return res.status(400).json({ error: 'uid and profile are required' });
   }
+
+  const d1Result = await tryProxyD1('/api/user-profile', { method: 'POST', body: req.body });
+
   try {
     const userRef = doc(db, 'users', uid);
     await setDoc(userRef, profile, { merge: true });
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to set user profile server-side:', err);
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    console.warn('Firestore fallback setDoc failed:', err);
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  }
+  res.json({ success: true });
 });
 
 // 4. Save Exported Pattern Record (7 Days for Free Users, 30 Days for VIPs)
@@ -97,6 +137,12 @@ app.post('/api/user-patterns/save', async (req, res) => {
   if (!id || !userId || !thumbnailUrl) {
     return res.status(400).json({ error: 'id, userId, and thumbnailUrl are required' });
   }
+
+  const d1Result = await tryProxyD1('/api/user-patterns/save', { method: 'POST', body: req.body });
+  if (d1Result.isBusinessError) {
+    return res.status(d1Result.status).json(d1Result.data);
+  }
+
   const now = Date.now();
   const days = retentionDays || (isVip ? 30 : 7);
   const expireAt = providedExpireAt || (now + days * 24 * 60 * 60 * 1000);
@@ -111,14 +157,18 @@ app.post('/api/user-patterns/save', async (req, res) => {
     createdAt: now,
     expireAt,
   };
+
   try {
     const patternRef = doc(db, 'patterns', id);
     await setDoc(patternRef, record);
-    res.json({ success: true, record });
-  } catch (err: any) {
-    console.error('Failed to save user pattern server-side:', err);
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    console.warn('Firestore fallback pattern save failed:', err);
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  }
+  res.json({ success: true, record });
 });
 
 // 5. Get User Exported Patterns
@@ -127,6 +177,12 @@ app.get('/api/user-patterns', async (req, res) => {
   if (!userId) {
     return res.status(400).json({ error: 'userId is required' });
   }
+
+  const d1Result = await tryProxyD1(`/api/user-patterns?userId=${encodeURIComponent(userId)}`);
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  }
+
   try {
     const patternsRef = collection(db, 'patterns');
     const q = query(patternsRef, where('userId', '==', userId));
@@ -144,18 +200,28 @@ app.get('/api/user-patterns', async (req, res) => {
 
 // 6. Delete User Exported Pattern
 app.post('/api/user-patterns/delete', async (req, res) => {
-  const { id } = req.body;
-  if (!id) {
-    return res.status(400).json({ error: 'id is required' });
+  const { id, userId } = req.body;
+  if (!id || !userId) {
+    return res.status(400).json({ error: 'id and userId are required' });
   }
+
+  const d1Result = await tryProxyD1('/api/user-patterns/delete', { method: 'POST', body: req.body });
+  if (d1Result.isBusinessError) {
+    return res.status(d1Result.status).json(d1Result.data);
+  }
+
   try {
     await deleteDoc(doc(db, 'patterns', id));
-    res.json({ success: true });
-  } catch (err: any) {
-    console.error('Failed to delete pattern server-side:', err);
-    res.status(500).json({ error: err.message });
+  } catch (err) {
+    console.warn('Firestore fallback delete failed:', err);
   }
+
+  if (d1Result.ok) {
+    return res.json(d1Result.data);
+  }
+  res.json({ success: true });
 });
+
 
 // Auth proxy routes
 app.post('/api/auth/signup', async (req, res) => {

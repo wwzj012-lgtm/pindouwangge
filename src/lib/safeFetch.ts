@@ -9,12 +9,36 @@ export interface SafeFetchResult<T = any> {
   error?: string;
 }
 
+const DEFAULT_WORKER_API_BASE = 'https://stellabean-api.wwzj012.workers.dev';
+
+function resolveApiUrl(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+
+  if (url.startsWith('/api')) {
+    // 1. Check custom environment variable VITE_API_BASE_URL if set
+    const envApiBase = import.meta.env.VITE_API_BASE_URL;
+    if (envApiBase) {
+      return `${envApiBase.replace(/\/$/, '')}${url}`;
+    }
+
+    // 2. If running on Cloudflare Pages (pages.dev), route /api requests to the API Worker
+    if (typeof window !== 'undefined' && window.location.hostname.includes('pages.dev')) {
+      return `${DEFAULT_WORKER_API_BASE}${url}`;
+    }
+  }
+
+  return url;
+}
+
 export async function safeFetchJson<T = any>(
   url: string,
   options?: RequestInit
 ): Promise<SafeFetchResult<T>> {
   try {
-    const res = await fetch(url, options);
+    const targetUrl = resolveApiUrl(url);
+    const res = await fetch(targetUrl, options);
     const contentType = res.headers.get('content-type') || '';
 
     // Check if server returned HTML (e.g., 404/405 page or SPA fallback index.html)
@@ -49,3 +73,4 @@ export async function safeFetchJson<T = any>(
     };
   }
 }
+

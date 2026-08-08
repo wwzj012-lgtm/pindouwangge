@@ -23,10 +23,8 @@ function resolveApiUrl(url: string): string {
       return `${envApiBase.replace(/\/$/, '')}${url}`;
     }
 
-    // 2. If running on Cloudflare Pages (pages.dev), route /api requests to the API Worker
-    if (typeof window !== 'undefined' && window.location.hostname.includes('pages.dev')) {
-      return `${DEFAULT_WORKER_API_BASE}${url}`;
-    }
+    // 2. Default: relative /api path (works with Cloudflare Pages Functions in functions/api/[[path]].ts)
+    return url;
   }
 
   return url;
@@ -34,11 +32,22 @@ function resolveApiUrl(url: string): string {
 
 export async function safeFetchJson<T = any>(
   url: string,
-  options?: RequestInit
+  options?: RequestInit,
+  timeoutMs: number = 8000
 ): Promise<SafeFetchResult<T>> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const targetUrl = resolveApiUrl(url);
-    const res = await fetch(targetUrl, options);
+    const combinedOptions: RequestInit = {
+      ...options,
+      signal: options?.signal || controller.signal,
+    };
+
+    const res = await fetch(targetUrl, combinedOptions);
+    clearTimeout(timeoutId);
+
     const contentType = res.headers.get('content-type') || '';
 
     // Check if server returned HTML (e.g., 404/405 page or SPA fallback index.html)
@@ -66,10 +75,12 @@ export async function safeFetchJson<T = any>(
       };
     }
   } catch (err: any) {
+    clearTimeout(timeoutId);
+    const isTimeout = err?.name === 'AbortError';
     return {
       ok: false,
       status: 0,
-      error: err?.message || 'Network request failed'
+      error: isTimeout ? `Request timed out (${timeoutMs}ms)` : (err?.message || 'Network request failed')
     };
   }
 }

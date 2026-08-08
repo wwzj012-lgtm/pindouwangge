@@ -20,6 +20,7 @@ import {
 } from '../lib/firebase';
 
 import { verifyCardChecksum, getMemberTypeFromCode } from '../utils/vipCodeUtils';
+import { safeFetchJson } from '../lib/safeFetch';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -177,7 +178,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     try {
       // GFW-bypass proxy first
-      const res = await fetch('/api/auth/consume-free-trial', {
+      const res = await safeFetchJson('/api/auth/consume-free-trial', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: currentUser.uid })
@@ -252,7 +253,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Try Server-Side API first for 100% GFW-bypass and reliable authorization
     try {
-      const res = await fetch('/api/redeem-code', {
+      const res = await safeFetchJson<any>('/api/redeem-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -264,19 +265,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
+      if (res.ok && res.data) {
         await refreshProfile();
         return {
           success: true,
-          message: data.message,
-          newType: data.profile?.member_type,
+          message: res.data.message || '兑换成功！',
+          newType: res.data.profile?.member_type,
         };
-      } else {
-        const errData = await res.json();
+      } else if (res.error && res.status !== 404 && res.status !== 405) {
         return {
           success: false,
-          message: errData.message || errData.error || '兑换过程遇到问题，请核对后重试',
+          message: res.error,
         };
       }
     } catch (apiErr) {

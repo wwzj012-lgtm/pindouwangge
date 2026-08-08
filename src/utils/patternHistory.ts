@@ -1,4 +1,5 @@
 import { db, doc, setDoc, collection, getDocs, query, where, deleteDoc } from '../lib/firebase';
+import { safeFetchJson } from '../lib/safeFetch';
 
 export interface ExportedPatternRecord {
   id: string;
@@ -86,7 +87,7 @@ export async function saveExportedPatternRecord(params: {
 
   // 2. Try Server API Proxy
   try {
-    const res = await fetch('/api/user-patterns/save', {
+    const res = await safeFetchJson('/api/user-patterns/save', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record),
@@ -132,23 +133,21 @@ export async function getUserExportedPatterns(userId: string): Promise<ExportedP
 
   // 2. Try Server API Proxy
   try {
-    const res = await fetch(`/api/user-patterns?userId=${encodeURIComponent(userId)}`);
-    if (res.ok) {
-      const serverRecords = await res.json() as ExportedPatternRecord[];
-      if (Array.isArray(serverRecords) && serverRecords.length > 0) {
-        // Merge server records with local
-        const recordMap = new Map<string, ExportedPatternRecord>();
-        [...records, ...serverRecords].forEach(r => {
-          if (r.expireAt > now) {
-            recordMap.set(r.id, r);
-          }
-        });
-        const merged = Array.from(recordMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-        try {
-          localStorage.setItem(`dzxg_patterns_${userId}`, JSON.stringify(merged));
-        } catch (e) {}
-        return merged;
-      }
+    const res = await safeFetchJson<ExportedPatternRecord[]>(`/api/user-patterns?userId=${encodeURIComponent(userId)}`);
+    if (res.ok && res.data && Array.isArray(res.data) && res.data.length > 0) {
+      const serverRecords = res.data;
+      // Merge server records with local
+      const recordMap = new Map<string, ExportedPatternRecord>();
+      [...records, ...serverRecords].forEach(r => {
+        if (r.expireAt > now) {
+          recordMap.set(r.id, r);
+        }
+      });
+      const merged = Array.from(recordMap.values()).sort((a, b) => b.createdAt - a.createdAt);
+      try {
+        localStorage.setItem(`dzxg_patterns_${userId}`, JSON.stringify(merged));
+      } catch (e) {}
+      return merged;
     }
   } catch (apiErr) {
     console.warn('Server pattern get endpoint failed, trying direct Firestore SDK:', apiErr);
@@ -198,7 +197,7 @@ export async function deleteExportedPatternRecord(id: string, userId: string): P
 
   // 2. Call Server API Proxy
   try {
-    await fetch('/api/user-patterns/delete', {
+    await safeFetchJson('/api/user-patterns/delete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, userId }),

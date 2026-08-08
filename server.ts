@@ -59,6 +59,9 @@ async function tryProxyD1(endpoint: string, options: { method?: string; body?: a
     const data = await res.json().catch(() => null);
     if (res.ok) {
       return { ok: true, data, status: res.status };
+    } else if (res.status === 404 && (data?.error === 'Endpoint not found' || data?.error === 'not_found')) {
+      // Endpoint route not implemented on Worker yet, fallback to server/Firestore
+      return { ok: false, isBusinessError: false, status: 404, data };
     } else if (res.status >= 400 && res.status < 500 && data) {
       return { ok: false, isBusinessError: true, data, status: res.status };
     }
@@ -358,8 +361,28 @@ app.post('/api/auth/signup', async (req, res) => {
     return res.status(d1Result.status || 400).json(d1Result.data);
   }
 
-  // 2. Fallback local signup
+  // 2. Strict Firestore write
   const targetEmail = email.trim().toLowerCase();
+  const uid = `cn_user_${Date.now().toString(36)}_${Math.floor(1000 + Math.random() * 9000)}`;
+  const isAdminEmail = checkIsAdminEmail(targetEmail);
+  const passHash = hashPassword(password);
+  const profile = {
+    uid,
+    email: targetEmail,
+    displayName: displayName || targetEmail.split('@')[0],
+    photoURL: null,
+    member_type: isAdminEmail ? 2 : 0,
+    member_expire: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
+    isVip: isAdminEmail,
+    vipExpireAt: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
+    freeTrialUsed: false,
+    role: isAdminEmail ? 'admin' : 'user',
+    passwordHash: passHash,
+    customPassword: passHash,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  };
+
   try {
     const usersRef = collection(db, 'users');
     const q = query(usersRef, where('email', '==', targetEmail));
@@ -369,32 +392,20 @@ app.post('/api/auth/signup', async (req, res) => {
       return res.status(400).json({ error: 'email_taken', message: '该邮箱/账号已被注册，请直接切换至【登录】模式。' });
     }
 
-    const uid = `cn_user_${Date.now().toString(36)}_${Math.floor(1000 + Math.random() * 9000)}`;
-    const isAdminEmail = checkIsAdminEmail(targetEmail);
-    const passHash = hashPassword(password);
-    const profile = {
-      uid,
-      email: targetEmail,
-      displayName: displayName || targetEmail.split('@')[0],
-      photoURL: null,
-      member_type: isAdminEmail ? 2 : 0,
-      member_expire: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
-      isVip: isAdminEmail,
-      vipExpireAt: isAdminEmail ? Date.now() + 36500 * 86400 * 1000 : null,
-      freeTrialUsed: false,
-      role: isAdminEmail ? 'admin' : 'user',
-      passwordHash: passHash,
-      customPassword: passHash, // Hash stored for security
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-
+    // Save strictly to Firestore
     await setDoc(doc(db, 'users', uid), profile);
+
+    // Sync to Cloudflare D1 in background
     tryProxyD1('/api/user-profile', { method: 'POST', body: { uid, profile: sanitizeProfile(profile) } }).catch(() => {});
-    res.json(sanitizeProfile(profile));
+
+    return res.json(sanitizeProfile(profile));
   } catch (err: any) {
-    console.error('Server signup failed:', err);
-    res.status(500).json({ error: err.message, message: '注册失败，服务器发生异常。' });
+    console.error('Firestore signup write failed:', err);
+    return res.status(500).json({
+      error: 'database_write_error',
+      message: '无法连通云端数据库 (Firestore/D1)，无法完成账号注册。请检查网络环境或开启代理重试。',
+      details: err?.message || String(err)
+    });
   }
 });
 
@@ -412,8 +423,11 @@ app.post('/api/auth/signin', async (req, res) => {
     return res.status(d1Result.status || 400).json(d1Result.data);
   }
 
-  // 2. Fallback to Firestore signin
+  // 2. Strict Firestore authentication
   const targetEmail = email.trim().toLowerCase();
+  const reqPass = password.trim();
+  const reqHash = hashPassword(reqPass);
+
   try {
     const usersRef = collection(db, 'users');
     let q = query(usersRef, where('email', '==', targetEmail));
@@ -431,8 +445,6 @@ app.post('/api/auth/signin', async (req, res) => {
     const userDoc = querySnapshot.docs[0];
     const userData = userDoc.data() as any;
 
-    const reqPass = password.trim();
-    const reqHash = hashPassword(reqPass);
     const storedHash = userData.passwordHash || (userData.customPassword ? (userData.customPassword.length > 30 ? userData.customPassword : hashPassword(userData.customPassword)) : '');
 
     const passMatches = storedHash === reqHash ||
@@ -445,25 +457,18 @@ app.post('/api/auth/signin', async (req, res) => {
       return res.status(400).json({ error: 'wrong_password', message: '密码错误，请输入正确的密码。' });
     }
 
-    // Upgrade legacy stored password to hash if unhashed
-    if (!userData.passwordHash) {
-      userData.passwordHash = reqHash;
-      userData.customPassword = reqHash;
-      updateDoc(doc(db, 'users', userData.uid), {
-        passwordHash: reqHash,
-        customPassword: reqHash,
-        updatedAt: Date.now()
-      }).catch(() => {});
-    }
-
     // Sync sanitized profile to D1
     const cleanProfile = sanitizeProfile(userData);
     tryProxyD1('/api/user-profile', { method: 'POST', body: { uid: userData.uid, profile: cleanProfile } }).catch(() => {});
 
-    res.json(cleanProfile);
+    return res.json(cleanProfile);
   } catch (err: any) {
-    console.error('Server signin failed:', err);
-    res.status(500).json({ error: err.message, message: '登录失败，服务器发生异常。' });
+    console.error('Firestore signin error:', err);
+    return res.status(500).json({
+      error: 'database_connect_error',
+      message: '登录失败：无法连通云端数据库，请检查您的网络连接或代理设置。',
+      details: err?.message || String(err)
+    });
   }
 });
 

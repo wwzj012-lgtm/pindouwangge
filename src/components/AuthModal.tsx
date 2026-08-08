@@ -22,6 +22,7 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { safeFetchJson } from '../lib/safeFetch';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
   auth,
@@ -185,7 +186,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       // Direct Server-Side Auth Proxy (100% bypass GFW)
       const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/signin';
-      const response = await fetch(endpoint, {
+      const res = await safeFetchJson<any>(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -195,12 +196,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         })
       });
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.message || errData.error || '认证失败');
+      if (!res.ok || !res.data) {
+        throw new Error(res.error || '认证失败，请检查账号密码或网络连接。');
       }
 
-      const userProfile = await response.json();
+      const userProfile = res.data;
       await setLocalCustomUser({
         uid: userProfile.uid,
         email: userProfile.email,

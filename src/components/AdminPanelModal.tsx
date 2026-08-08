@@ -30,6 +30,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { safeFetchJson } from '../lib/safeFetch';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
   db,
@@ -149,14 +150,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       let serverLoaded = false;
 
       try {
-        const usersRes = await fetch('/api/admin/users');
-        const codesRes = await fetch('/api/admin/codes');
-        const logsRes = await fetch('/api/admin/audit-logs');
+        const usersRes = await safeFetchJson<UserProfile[]>('/api/admin/users');
+        const codesRes = await safeFetchJson<VipCodeData[]>('/api/admin/codes');
+        const logsRes = await safeFetchJson<AuditLog[]>('/api/admin/audit-logs');
 
-        if (usersRes.ok && codesRes.ok && logsRes.ok) {
-          uList = await usersRes.json();
-          cList = await codesRes.json();
-          lList = await logsRes.json();
+        if (usersRes.ok && codesRes.ok && logsRes.ok && Array.isArray(usersRes.data) && Array.isArray(codesRes.data) && Array.isArray(logsRes.data)) {
+          uList = usersRes.data;
+          cList = codesRes.data;
+          lList = logsRes.data;
           serverLoaded = true;
         }
       } catch (apiErr) {
@@ -824,7 +825,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     );
 
     try {
-      await fetch('/api/admin/update-code', {
+      const res = await safeFetchJson('/api/admin/update-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -834,6 +835,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           operatorEmail: currentUser?.email || 'admin'
         })
       });
+      if (!res.ok) {
+        throw new Error(res.error || 'Server update failed');
+      }
     } catch (err) {
       console.warn('Server code status update failed, fallback to direct Firestore:', err);
       try {
@@ -857,7 +861,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       );
 
       try {
-        await fetch('/api/admin/update-code', {
+        const res = await safeFetchJson('/api/admin/update-code', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -867,6 +871,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
             operatorEmail: currentUser?.email || 'admin'
           })
         });
+        if (!res.ok) {
+          throw new Error(res.error || 'Server update failed');
+        }
       } catch (err) {
         try {
           const codeRef = doc(db, 'vipCodes', c.id);
@@ -886,7 +893,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     );
 
     try {
-      await fetch('/api/admin/update-code', {
+      const res = await safeFetchJson('/api/admin/update-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -896,6 +903,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           operatorEmail: currentUser?.email || 'admin'
         })
       });
+
+      if (!res.ok) {
+        throw new Error(res.error || 'Server delete request failed');
+      }
 
       if (currentUser) {
         await recordAuditLog(
@@ -923,7 +934,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     );
 
     try {
-      await fetch('/api/admin/update-code', {
+      const res = await safeFetchJson('/api/admin/update-code', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -933,6 +944,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
           operatorEmail: currentUser?.email || 'admin'
         })
       });
+
+      if (!res.ok) {
+        throw new Error(res.error || 'Server cancel delete failed');
+      }
 
       if (currentUser) {
         await recordAuditLog(

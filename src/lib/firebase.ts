@@ -25,6 +25,7 @@ import {
   onSnapshot,
   enableIndexedDbPersistence,
 } from 'firebase/firestore';
+import { safeFetchJson } from './safeFetch';
 import firebaseConfigJson from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -128,16 +129,15 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
 
   // Try Server-Side API Proxy First (100% reliable GFW-bypass for Chinese Users)
   try {
-    const res = await fetch(`/api/user-profile?uid=${user.uid}`);
-    if (res.ok) {
-      const serverProfile = await res.json() as UserProfile;
+    const res = await safeFetchJson<UserProfile>(`/api/user-profile?uid=${user.uid}`);
+    if (res.ok && res.data) {
       try {
-        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(serverProfile));
+        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(res.data));
       } catch (e) {}
-      return serverProfile;
+      return res.data;
     } else if (res.status === 404) {
       // Create profile on server
-      await fetch('/api/user-profile', {
+      await safeFetchJson('/api/user-profile', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uid: user.uid, profile: defaultProfile })

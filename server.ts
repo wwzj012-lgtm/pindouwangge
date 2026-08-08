@@ -134,6 +134,117 @@ app.get('/api/admin/test-d1', async (req, res) => {
   }
 });
 
+// Migration tool: Migrate all Firestore collections (users, vipCodes, auditLogs, userPatterns) to Cloudflare D1
+app.post('/api/admin/migrate-firestore-to-d1', async (req, res) => {
+  const stats = {
+    users: { totalInFirestore: 0, migratedToD1: 0, errors: [] as string[] },
+    vipCodes: { totalInFirestore: 0, migratedToD1: 0, errors: [] as string[] },
+    auditLogs: { totalInFirestore: 0, migratedToD1: 0, errors: [] as string[] },
+    patterns: { totalInFirestore: 0, migratedToD1: 0, errors: [] as string[] },
+  };
+
+  try {
+    // 1. Migrate Users
+    try {
+      const snap = await getDocs(collection(db, 'users'));
+      stats.users.totalInFirestore = snap.docs.length;
+      for (const docSnap of snap.docs) {
+        const uData = docSnap.data();
+        if (uData && uData.uid) {
+          const resD1 = await tryProxyD1('/api/user-profile', {
+            method: 'POST',
+            body: { uid: uData.uid, profile: uData }
+          });
+          if (resD1.ok) {
+            stats.users.migratedToD1++;
+          } else {
+            stats.users.errors.push(`User ${uData.uid} sync failed: ${JSON.stringify(resD1.data || resD1.status)}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      stats.users.errors.push(`Firestore read users failed: ${err.message}`);
+    }
+
+    // 2. Migrate VIP Codes
+    try {
+      const snap = await getDocs(collection(db, 'vipCodes'));
+      stats.vipCodes.totalInFirestore = snap.docs.length;
+      for (const docSnap of snap.docs) {
+        const cData = { id: docSnap.id, ...docSnap.data() } as any;
+        const codeKey = cData.code || cData.id;
+        if (codeKey) {
+          const resD1 = await tryProxyD1('/api/admin/update-code', {
+            method: 'POST',
+            body: { codeId: codeKey, updates: cData }
+          });
+          if (resD1.ok) {
+            stats.vipCodes.migratedToD1++;
+          } else {
+            stats.vipCodes.errors.push(`Code ${codeKey} sync failed: ${JSON.stringify(resD1.data || resD1.status)}`);
+          }
+        }
+      }
+    } catch (err: any) {
+      stats.vipCodes.errors.push(`Firestore read vipCodes failed: ${err.message}`);
+    }
+
+    // 3. Migrate Audit Logs
+    try {
+      const snap = await getDocs(collection(db, 'auditLogs'));
+      stats.auditLogs.totalInFirestore = snap.docs.length;
+      for (const docSnap of snap.docs) {
+        const logData = docSnap.data();
+        const resD1 = await tryProxyD1('/api/admin/record-audit-log', {
+          method: 'POST',
+          body: logData
+        });
+        if (resD1.ok) {
+          stats.auditLogs.migratedToD1++;
+        } else {
+          stats.auditLogs.errors.push(`Log ${docSnap.id} sync failed: ${JSON.stringify(resD1.data || resD1.status)}`);
+        }
+      }
+    } catch (err: any) {
+      stats.auditLogs.errors.push(`Firestore read auditLogs failed: ${err.message}`);
+    }
+
+    // 4. Migrate Patterns
+    try {
+      for (const colName of ['userPatterns', 'patterns']) {
+        try {
+          const snap = await getDocs(collection(db, colName));
+          stats.patterns.totalInFirestore += snap.docs.length;
+          for (const docSnap of snap.docs) {
+            const pData = docSnap.data();
+            if (pData && pData.id && pData.userId) {
+              const resD1 = await tryProxyD1('/api/user-patterns/save', {
+                method: 'POST',
+                body: pData
+              });
+              if (resD1.ok) {
+                stats.patterns.migratedToD1++;
+              } else {
+                stats.patterns.errors.push(`Pattern ${pData.id} sync failed: ${JSON.stringify(resD1.data || resD1.status)}`);
+              }
+            }
+          }
+        } catch (e) {}
+      }
+    } catch (err: any) {
+      stats.patterns.errors.push(`Firestore read patterns failed: ${err.message}`);
+    }
+
+    return res.json({
+      success: true,
+      message: 'Firestore 数据迁移到 Cloudflare D1 执行完毕',
+      stats
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message, stats });
+  }
+});
+
 // 1. Get/Sync User Profile
 app.get('/api/user-profile', async (req, res) => {
   const uid = req.query.uid as string;

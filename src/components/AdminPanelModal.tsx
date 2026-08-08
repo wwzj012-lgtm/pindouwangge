@@ -170,30 +170,6 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         setCodesList(cList);
         lList.sort((a, b) => b.timestamp - a.timestamp);
         setAuditLogsList(lList);
-      } else {
-        // Fallback: Direct Firestore SDK
-        const usersSnap = await getDocs(collection(db, 'users'));
-        const directUsers: UserProfile[] = [];
-        usersSnap.forEach(d => {
-          directUsers.push(d.data() as UserProfile);
-        });
-        setUsersList(directUsers);
-
-        const codesSnap = await getDocs(collection(db, 'vipCodes'));
-        const directCodes: VipCodeData[] = [];
-        codesSnap.forEach(d => {
-          directCodes.push({ id: d.id, ...d.data() } as VipCodeData);
-        });
-        directCodes.sort((a, b) => b.createdAt - a.createdAt);
-        setCodesList(directCodes);
-
-        const logsSnap = await getDocs(collection(db, 'auditLogs'));
-        const directLogs: AuditLog[] = [];
-        logsSnap.forEach(d => {
-          directLogs.push({ id: d.id, ...d.data() } as AuditLog);
-        });
-        directLogs.sort((a, b) => b.timestamp - a.timestamp);
-        setAuditLogsList(directLogs);
       }
     } catch (err) {
       console.error('Failed to load admin data:', err);
@@ -212,7 +188,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/update-user', {
+        const res = await safeFetchJson('/api/admin/update-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -284,7 +260,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/batch-grant-vip', {
+        const res = await safeFetchJson('/api/admin/batch-grant-vip', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -370,7 +346,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/add-user', {
+        const res = await safeFetchJson('/api/admin/add-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -451,7 +427,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/update-user', {
+        const res = await safeFetchJson('/api/admin/update-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -505,7 +481,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     try {
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/delete-users', {
+        const res = await safeFetchJson('/api/admin/delete-users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -551,7 +527,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     try {
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/delete-users', {
+        const res = await safeFetchJson('/api/admin/delete-users', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -613,7 +589,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/update-user', {
+        const res = await safeFetchJson('/api/admin/update-user', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -709,7 +685,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
       let serverSuccess = false;
       try {
-        const res = await fetch('/api/admin/generate-codes', {
+        const res = await safeFetchJson('/api/admin/generate-codes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -127,7 +127,7 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
     updatedAt: Date.now(),
   };
 
-  // Try Server-Side API Proxy First (100% reliable GFW-bypass for Chinese Users)
+  // Server-Side API Proxy (Worker / D1 - 100% reliable GFW-bypass for Chinese Users)
   try {
     const res = await safeFetchJson<UserProfile>(`/api/user-profile?uid=${user.uid}`);
     if (res.ok && res.data) {
@@ -148,101 +148,26 @@ export async function syncUserProfile(user: User): Promise<UserProfile> {
       return defaultProfile;
     }
   } catch (apiErr) {
-    console.warn('Server API failed or timed out, falling back to direct Firestore SDK:', apiErr);
+    console.warn('Server API failed, using cached/default profile:', apiErr);
   }
 
-  // Skip Firestore entirely for guest/local-fallback users to be fast, but sync in background if online
-  if (user.uid.startsWith('cn_guest_') && cachedProfile) {
-    const userRef = doc(db, 'users', user.uid);
-    setDoc(userRef, cachedProfile, { merge: true }).catch(e => console.warn('Background sync failed for guest user:', e));
-    return cachedProfile;
-  }
-
-  // Fast connection timeout for Firestore (1.5 seconds)
-  const timeoutMs = isAdminEmail ? 3000 : 1500;
-
-  try {
-    const userRef = doc(db, 'users', user.uid);
-    
-    // Race getDoc against a fast timeout
-    const snap = await Promise.race([
-      getDoc(userRef),
-      new Promise<null>((_, reject) => setTimeout(() => reject(new Error('Firestore connection timeout')), timeoutMs))
-    ]).catch((err) => {
-      console.warn('getDoc timed out or failed, utilizing fallback profile:', err);
-      return null;
-    });
-
-    if (!snap || !snap.exists()) {
-      // Create profile in Firestore asynchronously so we don't block
-      setDoc(userRef, defaultProfile).catch(e => console.warn('Offline mode: skipped setDoc', e));
-      
-      try {
-        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(defaultProfile));
-      } catch (e) {}
-      
-      return defaultProfile;
-    } else {
-      const data = snap.data() as UserProfile;
-      let needsUpdate = false;
-      const updates: Partial<UserProfile> = { updatedAt: Date.now() };
-
-      if (isAdminEmail && (data.role !== 'admin' || data.member_type !== 2)) {
-        updates.role = 'admin';
-        updates.member_type = 2;
-        updates.isVip = true;
-        updates.member_expire = Date.now() + 36500 * 86400 * 1000;
-        updates.vipExpireAt = updates.member_expire;
-        needsUpdate = true;
-      }
-
-      // Check VIP / Pro Expiration
-      const effectiveExpire = data.member_expire || data.vipExpireAt;
-      if (data.role !== 'admin' && data.member_type > 0 && effectiveExpire && effectiveExpire < Date.now()) {
-        updates.member_type = 0;
-        updates.isVip = false;
-        updates.member_expire = null;
-        updates.vipExpireAt = null;
-        needsUpdate = true;
-      }
-
-      const mergedProfile: UserProfile = {
-        ...data,
-        member_type: data.member_type ?? (data.isVip ? 1 : 0),
-        member_expire: data.member_expire ?? data.vipExpireAt ?? null,
-        ...(needsUpdate ? updates : {}),
-      };
-
-      if (needsUpdate) {
-        updateDoc(userRef, updates).catch(e => console.warn('Offline mode: skipped updateDoc', e));
-      }
-
-      // Update cache
-      try {
-        localStorage.setItem(`dzxg_user_profile_${user.uid}`, JSON.stringify(mergedProfile));
-      } catch (e) {}
-
-      return mergedProfile;
-    }
-  } catch (err) {
-    console.warn('Firestore unreachable, using local fallback user profile:', err);
-    return defaultProfile;
-  }
+  return defaultProfile;
 }
 
-// Helper to record admin audit logs
+// Helper to record admin audit logs via Worker API
 export async function recordAuditLog(operatorUid: string, operatorEmail: string, action: string, details: string) {
   try {
-    Promise.race([
-      addDoc(collection(db, 'auditLogs'), {
+    safeFetchJson('/api/admin/record-audit-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         operatorUid,
         operatorEmail,
         action,
         details,
         timestamp: Date.now(),
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Audit log timeout')), 2000))
-    ]).catch(err => console.warn('Client audit log write skipped or timed out:', err));
+      })
+    }).catch(err => console.warn('Audit log write skipped:', err));
   } catch (err) {
     console.error('Failed to write audit log:', err);
   }

@@ -96,15 +96,7 @@ export async function saveExportedPatternRecord(params: {
       return record;
     }
   } catch (apiErr) {
-    console.warn('Server pattern save endpoint failed, trying direct Firestore:', apiErr);
-  }
-
-  // 3. Fallback to Direct Firestore SDK
-  try {
-    const patternRef = doc(db, 'patterns', recordId);
-    await setDoc(patternRef, record);
-  } catch (fsErr) {
-    console.warn('Firestore pattern save failed:', fsErr);
+    console.warn('Server pattern save endpoint failed:', apiErr);
   }
 
   return record;
@@ -150,29 +142,7 @@ export async function getUserExportedPatterns(userId: string): Promise<ExportedP
       return merged;
     }
   } catch (apiErr) {
-    console.warn('Server pattern get endpoint failed, trying direct Firestore SDK:', apiErr);
-  }
-
-  // 3. Fallback to Direct Firestore SDK
-  try {
-    const patternsRef = collection(db, 'patterns');
-    const q = query(patternsRef, where('userId', '==', userId));
-    const snap = await getDocs(q);
-    const fsRecords = snap.docs.map(d => d.data() as ExportedPatternRecord).filter(p => p.expireAt > now);
-
-    const recordMap = new Map<string, ExportedPatternRecord>();
-    [...records, ...fsRecords].forEach(r => {
-      if (r.expireAt > now) {
-        recordMap.set(r.id, r);
-      }
-    });
-    const merged = Array.from(recordMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-    try {
-      localStorage.setItem(`dzxg_patterns_${userId}`, JSON.stringify(merged));
-    } catch (e) {}
-    return merged;
-  } catch (fsErr) {
-    console.warn('Firestore pattern fetch failed:', fsErr);
+    console.warn('Server pattern get endpoint failed:', apiErr);
   }
 
   return records.sort((a, b) => b.createdAt - a.createdAt);

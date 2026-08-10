@@ -26,6 +26,8 @@ import {
   WatermarkType,
   LegendPosition,
   LegendScaleMode,
+  SymbolDisplayType,
+  ExportQuality,
 } from '../utils/exportUtils';
 
 interface ExportModalProps {
@@ -68,6 +70,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   // Layout & Display States
   const [showSymbols, setShowSymbols] = useState(true);
+  const [symbolDisplayType, setSymbolDisplayType] = useState<SymbolDisplayType>('code');
+  const [symbolFontScale, setSymbolFontScale] = useState<number>(1.0);
+  const [exportQuality, setExportQuality] = useState<ExportQuality>('high');
   const [showCoordinates, setShowCoordinates] = useState(true);
   const [legendPosition, setLegendPosition] = useState<LegendPosition>('right');
   const [legendScaleMode, setLegendScaleMode] = useState<LegendScaleMode>('auto');
@@ -93,12 +98,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       if (watermarkType === 'none') {
         setWatermarkType('double_diagonal');
       }
+      // Revert 4K Ultra to 2K High if non-VIP
+      if (exportQuality === 'ultra') {
+        setExportQuality('high');
+      }
       // Force platform default watermark text if non-VIP
       setWatermarkText(isEn ? 'BeadGrid' : '豆织星格');
       setWatermarkColor('#A855F7');
       setWatermarkAngle(-25);
     }
-  }, [isVip, watermarkType, isEn]);
+  }, [isVip, watermarkType, exportQuality, isEn]);
 
   // Render Canvas Preview
   useEffect(() => {
@@ -113,6 +122,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       brandName,
       projectName,
       showSymbols,
+      symbolDisplayType,
+      symbolFontScale,
+      exportQuality,
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
@@ -141,6 +153,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     brandName,
     projectName,
     showSymbols,
+    symbolDisplayType,
+    symbolFontScale,
+    exportQuality,
     showCoordinates,
     beadShape,
     selectedBoard,
@@ -168,6 +183,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       brandName,
       projectName,
       showSymbols,
+      symbolDisplayType,
+      symbolFontScale,
+      exportQuality,
       showCoordinates,
       beadShape,
       selectedBoardIndex: selectedBoard,
@@ -212,6 +230,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       brandName,
       projectName,
       showSymbols,
+      symbolDisplayType,
+      symbolFontScale,
+      exportQuality,
       showCoordinates,
       beadShape,
       selectedBoardIndex: null,
@@ -577,15 +598,63 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
             <div className="flex items-center gap-3 flex-wrap">
               
+              {/* Show Color Symbols Checkbox */}
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
                 <input
                   type="checkbox"
                   checked={showSymbols}
-                  onChange={e => setShowSymbols(e.target.checked)}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setShowSymbols(checked);
+                    if (checked) {
+                      setSymbolDisplayType('code');
+                    } else {
+                      setSymbolDisplayType('none');
+                    }
+                  }}
                   className="accent-purple-500 rounded cursor-pointer"
                 />
-                <span>{isEn ? 'Show Color Symbols' : '显示色号标识'}</span>
+                <span className="font-bold">{isEn ? 'Show Color Code' : '显示色号标识'}</span>
               </label>
+
+              {/* Marker Size Selector */}
+              {showSymbols && (
+                <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/80">
+                  <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span className="text-slate-300 font-bold">{isEn ? 'Marker Size:' : '标识大小:'}</span>
+                  <select
+                    value={symbolFontScale.toString()}
+                    onChange={e => setSymbolFontScale(parseFloat(e.target.value))}
+                    className="bg-slate-900 border border-slate-700 text-amber-300 font-bold rounded-md px-2 py-0.5 text-xs outline-none cursor-pointer"
+                  >
+                    <option value="0.75">{isEn ? '75% Small' : '75% 偏小'}</option>
+                    <option value="1.0">{isEn ? '100% Standard' : '100% 标准 (推荐)'}</option>
+                    <option value="1.25">{isEn ? '125% Large' : '125% 放大'}</option>
+                    <option value="1.5">{isEn ? '150% Extra Large' : '150% 特大'}</option>
+                  </select>
+                </div>
+              )}
+
+              {/* Export Clarity / Resolution */}
+              <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/80">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span className="text-slate-300 font-bold">{isEn ? 'Clarity:' : '画质:'}</span>
+                <select
+                  value={exportQuality}
+                  onChange={e => {
+                    const val = e.target.value as ExportQuality;
+                    if (val === 'ultra' && !isVip) {
+                      setShowVipTooltip(true);
+                      return;
+                    }
+                    setExportQuality(val);
+                  }}
+                  className="bg-slate-900 border border-slate-700 text-emerald-300 font-bold rounded-md px-2 py-0.5 text-xs outline-none cursor-pointer"
+                >
+                  <option value="high">{isEn ? '⚡ 2K HD (Free Recommended)' : '⚡ 2K 超清 (免费推荐)'}</option>
+                  <option value="ultra">{isEn ? '💎 4K Ultra HD (VIP Exclusive)' : '💎 4K 极清 (VIP专享)'}</option>
+                </select>
+              </div>
 
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
                 <input
@@ -594,7 +663,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setShowCoordinates(e.target.checked)}
                   className="accent-purple-500 rounded cursor-pointer"
                 />
-                <span>{isEn ? 'Show Ruler Coordinates (A..Z / 1..N)' : '显示标尺坐标 (A..Z / 1..N)'}</span>
+                <span>{isEn ? 'Show Coordinates' : '显示标尺坐标'}</span>
               </label>
 
               <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
@@ -604,25 +673,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                   onChange={e => setHideEmptyPegs(e.target.checked)}
                   className="accent-emerald-500 rounded cursor-pointer"
                 />
-                <span>{isEn ? 'Hide Empty Pegs' : '隐藏空位点阵 (仅导出有豆区域)'}</span>
+                <span>{isEn ? 'Hide Empty Pegs' : '隐藏空位点阵'}</span>
               </label>
 
               {/* Legend Scale & Layout */}
               <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                <span className="text-slate-400">{isEn ? 'Symbol Font Size:' : '色号字号:'}</span>
-                <select
-                  value={legendScaleMode}
-                  onChange={e => setLegendScaleMode(e.target.value as LegendScaleMode)}
-                  className="bg-slate-800 border border-slate-700 text-amber-300 font-bold rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                >
-                  <option value="auto">{isEn ? '🔥 Auto Adaptive' : '🔥 网格自适应 (推荐)'}</option>
-                  <option value="1.0">{isEn ? 'Standard 1.0x' : '标准 1.0x'}</option>
-                  <option value="1.5">{isEn ? 'Medium 1.5x' : '中度 1.5x'}</option>
-                  <option value="2.0">{isEn ? 'Large 2.0x' : '放大 2.0x'}</option>
-                  <option value="2.5">{isEn ? 'Extra Large 2.5x' : '特大 2.5x'}</option>
-                </select>
-
+                <span className="text-slate-400">{isEn ? 'Legend:' : '图例位置:'}</span>
                 <select
                   value={legendPosition}
                   onChange={e => setLegendPosition(e.target.value as LegendPosition)}

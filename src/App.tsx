@@ -79,7 +79,7 @@ export default function App() {
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
 
   // Display Mode & Backdrop Settings
-  const [beadShape, setBeadShape] = useState<BeadShape>('fuse_3d');
+  const [beadShape, setBeadShape] = useState<BeadShape>('square');
   const [canvasBackdrop, setCanvasBackdrop] = useState<CanvasBackdrop>('dark_grid');
   const [showSymbols, setShowSymbols] = useState(true);
   const [showGridLines, setShowGridLines] = useState(true);
@@ -630,7 +630,7 @@ export default function App() {
         onRedo={handleRedo}
         zoom={zoom}
         onZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
-        onZoomOut={() => setZoom(z => Math.max(0.3, z * 0.85))}
+        onZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
         onResetZoom={() => setZoom(1.0)}
         beadShape={beadShape}
         setBeadShape={setBeadShape}

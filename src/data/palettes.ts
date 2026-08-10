@@ -7,14 +7,16 @@ export function hexToRgb(hex: string): [number, number, number] {
   return [(num >> 16) & 255, (num >> 8) & 255, num & 255];
 }
 
-// Generate distinct printable symbols for grid printouts (Avoid solid black blobs for light colors like white)
+// Clean concise alphanumeric symbols for color identification (No large icons or emoji symbols)
 export const SYMBOL_LIST = [
-  '⚪', '■', '▲', '★', '♦', '♥', '♠', '♣', '✦', '✖',
-  '◆', '▼', '◄', '►', '⬢', '⬟', '⬣', '⊕', '⊗', '⊙',
-  '⊛', '⊜', '⊝', '1', '2', '3', '4', '5', '6', '7',
-  '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
-  'J', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T',
-  'U', 'V', 'W', 'X', 'Y', 'Z', 'α', 'β', 'γ', 'δ'
+  '1', '2', '3', '4', '5', '6', '7', '8', '9', '10',
+  '11', '12', '13', '14', '15', '16', '17', '18', '19', '20',
+  '21', '22', '23', '24', '25', '26', '27', '28', '29', '30',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K',
+  'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'U', 'V',
+  'W', 'X', 'Y', 'Z', 'a', 'b', 'c', 'd', 'e', 'f',
+  'g', 'h', 'j', 'k', 'm', 'n', 'p', 'q', 'r', 's',
+  't', 'u', 'v', 'w', 'x', 'y', 'z'
 ];
 
 // Helper to attach hex and symbol
@@ -26,7 +28,7 @@ function makePalette(brand: BrandKey, rawList: Array<{ code: string; name: strin
     hex: item.hex,
     rgb: hexToRgb(item.hex),
     brand,
-    symbol: SYMBOL_LIST[idx % SYMBOL_LIST.length],
+    symbol: item.code,
     enabled: true,
   }));
 }

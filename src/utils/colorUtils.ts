@@ -123,69 +123,121 @@ export function deltaE2000(
 }
 
 // 3. Find closest BeadColor in active palette with selectable distance algorithm
+export interface PreparedPaletteColor {
+  color: BeadColor;
+  lab: [number, number, number];
+  chroma: number;
+}
+
+export function preparePaletteLab(palette: BeadColor[]): PreparedPaletteColor[] {
+  return palette
+    .filter(c => c.enabled !== false)
+    .map(c => {
+      const lab = rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]);
+      const chroma = Math.hypot(lab[1], lab[2]);
+      return { color: c, lab, chroma };
+    });
+}
+
 export function findClosestBeadColor(
   r: number,
   g: number,
   b: number,
-  palette: BeadColor[],
+  palette: BeadColor[] | PreparedPaletteColor[],
   algo: ColorMatchAlgo = 'ciede2000_bright'
 ): BeadColor {
   if (palette.length === 0) {
     throw new Error('Palette cannot be empty');
   }
 
+  // Normalize input to PreparedPaletteColor list
+  const preparedPalette: PreparedPaletteColor[] =
+    typeof palette[0] === 'object' && 'lab' in palette[0]
+      ? (palette as PreparedPaletteColor[])
+      : (palette as BeadColor[]).filter(c => c.enabled !== false).map(c => {
+          const lab = rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]);
+          return { color: c, lab, chroma: Math.hypot(lab[1], lab[2]) };
+        });
+
+  if (preparedPalette.length === 0) {
+    throw new Error('No enabled palette colors available');
+  }
+
   const isLabAlgo = algo === 'ciede2000' || algo === 'ciede2000_vivid' || algo === 'ciede2000_bright' || algo === 'cie76';
   const targetLab = isLabAlgo ? rgbToLab(r, g, b) : null;
+  const targetL = targetLab ? targetLab[0] : 0;
+  const targetChroma = targetLab ? Math.hypot(targetLab[1], targetLab[2]) : 0;
+
   let minDistance = Infinity;
-  let closest = palette[0];
+  let closest = preparedPalette[0].color;
 
-  for (const color of palette) {
-    if (color.enabled === false) continue;
-
+  for (const item of preparedPalette) {
     let dist = Infinity;
 
     if (algo === 'ciede2000_bright') {
-      // High-Fidelity Brightness & Skin Tone Mode:
-      // Heightens lightness and hue sensitivity in high lightness regions (L* > 65 / bright colors / skin / white hair)
-      // Ensures white, off-white, light peach/skin tones, and light gray shading remain distinctly matched to correct beads
-      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      const targetL = targetLab![0];
+      // High-Fidelity Lightness & Skin Protection Mode
       if (targetL > 65) {
-        dist = deltaE2000(targetLab!, colorLab, 0.8, 0.85, 0.85);
+        dist = deltaE2000(targetLab!, item.lab, 0.85, 0.85, 0.85);
       } else {
-        dist = deltaE2000(targetLab!, colorLab, 1.0, 0.85, 1.0);
+        dist = deltaE2000(targetLab!, item.lab, 1.0, 0.9, 0.95);
       }
     } else if (algo === 'ciede2000_vivid') {
-      // Vivid mode:
-      // Avoids squashing bright skin/hair colors into pure white by keeping kL reasonable when L* > 75
-      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      const targetL = targetLab![0];
-      if (targetL > 75) {
-        dist = deltaE2000(targetLab!, colorLab, 0.9, 0.7, 0.9);
+      // Vivid Mode: Balanced contrast without sacrificing lightness fidelity
+      if (targetL > 70) {
+        dist = deltaE2000(targetLab!, item.lab, 0.95, 0.75, 0.9);
       } else {
-        dist = deltaE2000(targetLab!, colorLab, 1.35, 0.65, 1.0);
+        dist = deltaE2000(targetLab!, item.lab, 1.05, 0.75, 0.95);
       }
     } else if (algo === 'ciede2000') {
-      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      dist = deltaE2000(targetLab!, colorLab, 1.0, 1.0, 1.0);
+      dist = deltaE2000(targetLab!, item.lab, 1.0, 1.0, 1.0);
     } else if (algo === 'cie76') {
-      const colorLab = rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]);
-      const dL = targetLab![0] - colorLab[0];
-      const da = targetLab![1] - colorLab[1];
-      const db = targetLab![2] - colorLab[2];
+      const dL = targetLab![0] - item.lab[0];
+      const da = targetLab![1] - item.lab[1];
+      const db = targetLab![2] - item.lab[2];
       dist = dL * dL + da * da + db * db;
     } else {
-      // Weighted RGB (fast & sharp)
-      const dr = r - color.rgb[0];
-      const dg = g - color.rgb[1];
-      const db = b - color.rgb[2];
-      const meanR = (r + color.rgb[0]) / 2;
+      // Weighted RGB
+      const dr = r - item.color.rgb[0];
+      const dg = g - item.color.rgb[1];
+      const db = b - item.color.rgb[2];
+      const meanR = (r + item.color.rgb[0]) / 2;
       dist = (2 + meanR / 256) * dr * dr + 4 * dg * dg + (2 + (255 - meanR) / 256) * db * db;
+    }
+
+    // -------------------------------------------------------------
+    // Enhanced Color Perception & Noise Protection Penalty Rules
+    // -------------------------------------------------------------
+    if (isLabAlgo && targetLab) {
+      // 1. Low-chroma (monochrome / white / light skin / gray) protection:
+      // Prevents random colorful (pink, cyan, green) beads from bleeding into neutral white/gray/shadow regions
+      if (targetChroma < 9) {
+        if (item.chroma > 15) {
+          dist += (item.chroma - 15) * 2.2;
+        }
+      } else if (targetChroma > 22) {
+        // 2. High-vividness protection:
+        // Prevents vivid colorful regions from mapping into dull gray beads
+        if (item.chroma < 8) {
+          dist += (targetChroma - 8) * 1.5;
+        }
+      }
+
+      // 3. Highlight / Pure White Protection (L* > 92):
+      // Strongly prefers bright white / off-white beads over gray/dark beads
+      if (targetL > 92 && item.lab[0] < 82) {
+        dist += (92 - item.lab[0]) * 3.2;
+      }
+
+      // 4. Deep Shadow / Black Line Protection (L* < 18):
+      // Strongly prefers pure black or dark charcoal beads over light colors
+      if (targetL < 18 && item.lab[0] > 30) {
+        dist += (item.lab[0] - 18) * 3.2;
+      }
     }
 
     if (dist < minDistance) {
       minDistance = dist;
-      closest = color;
+      closest = item.color;
     }
   }
 
@@ -285,7 +337,7 @@ function applySharpening(
   }
 }
 
-// 6. High-Precision Linear-RGB Area Downsampling & Grid Conversion
+// 6. High-Precision Linear-RGB Sub-Pixel Area Downsampling & Grid Conversion
 export function imageToGrid(
   img: HTMLImageElement | HTMLCanvasElement,
   settings: ConvertSettings,
@@ -293,6 +345,9 @@ export function imageToGrid(
 ): (string | null)[][] {
   const activePalette = palette.filter(c => c.enabled !== false);
   if (activePalette.length === 0) return [];
+
+  // Pre-compute LAB & Chroma values for active palette for maximum mobile CPU performance
+  const preparedPalette = preparePaletteLab(activePalette);
 
   const {
     width: targetW,
@@ -335,6 +390,8 @@ export function imageToGrid(
   const srcCtx = srcCanvas.getContext('2d', { willReadFrequently: true });
   if (!srcCtx) return [];
 
+  srcCtx.imageSmoothingEnabled = true;
+  srcCtx.imageSmoothingQuality = 'high';
   srcCtx.drawImage(img, 0, 0, renderW, renderH);
   const srcImgData = srcCtx.getImageData(0, 0, renderW, renderH);
   const srcData = srcImgData.data;
@@ -348,24 +405,41 @@ export function imageToGrid(
   const keyRgb = chromaKeyColor ? hexToRgb(chromaKeyColor) : null;
   const maxChromaDist = (chromaKeyTolerance / 100) * 441.67;
 
-  // Perform Linear-RGB Area Box Downsampling
+  // Floating-point Continuous Area Box Downsampling with Sub-pixel Overlap Weighting
+  const scaleX = renderW / targetW;
+  const scaleY = renderH / targetH;
+
   for (let gy = 0; gy < targetH; gy++) {
+    const srcY0 = gy * scaleY;
+    const srcY1 = (gy + 1) * scaleY;
+    const y0 = Math.floor(srcY0);
+    const y1 = Math.min(renderH, Math.ceil(srcY1));
+
     for (let gx = 0; gx < targetW; gx++) {
       const gIdx = gy * targetW + gx;
 
-      const x0 = Math.floor((gx * renderW) / targetW);
-      const x1 = Math.max(x0 + 1, Math.floor(((gx + 1) * renderW) / targetW));
-      const y0 = Math.floor((gy * renderH) / targetH);
-      const y1 = Math.max(y0 + 1, Math.floor(((gy + 1) * renderH) / targetH));
+      const srcX0 = gx * scaleX;
+      const srcX1 = (gx + 1) * scaleX;
+      const x0 = Math.floor(srcX0);
+      const x1 = Math.min(renderW, Math.ceil(srcX1));
 
       let sumR_lin = 0;
       let sumG_lin = 0;
       let sumB_lin = 0;
-      let validPixelCount = 0;
-      let totalAlpha = 0;
+      let totalArea = 0;
+      let validArea = 0;
 
       for (let sy = y0; sy < y1; sy++) {
+        const weightY = Math.max(0, Math.min(sy + 1, srcY1) - Math.max(sy, srcY0));
+        if (weightY <= 0) continue;
+
         for (let sx = x0; sx < x1; sx++) {
+          const weightX = Math.max(0, Math.min(sx + 1, srcX1) - Math.max(sx, srcX0));
+          const w = weightX * weightY;
+          if (w <= 0) continue;
+
+          totalArea += w;
+
           const sIdx = (sy * renderW + sx) * 4;
           let alpha = srcData[sIdx + 3];
           const sr = srcData[sIdx];
@@ -375,34 +449,34 @@ export function imageToGrid(
           // Chroma key background check
           if (keyRgb && alpha >= transparentCutoff) {
             const dist = Math.sqrt(
-              Math.pow(sr - keyRgb[0], 2) +
-              Math.pow(sg - keyRgb[1], 2) +
-              Math.pow(sb - keyRgb[2], 2)
+              (sr - keyRgb[0]) ** 2 +
+              (sg - keyRgb[1]) ** 2 +
+              (sb - keyRgb[2]) ** 2
             );
             if (dist <= maxChromaDist) {
               alpha = 0;
             }
           }
 
-          totalAlpha += alpha;
-
           if (alpha >= transparentCutoff) {
-            sumR_lin += srgbToLinear(sr);
-            sumG_lin += srgbToLinear(sg);
-            sumB_lin += srgbToLinear(sb);
-            validPixelCount++;
+            const normAlpha = alpha / 255;
+            const wAlpha = w * normAlpha;
+            sumR_lin += srgbToLinear(sr) * wAlpha;
+            sumG_lin += srgbToLinear(sg) * wAlpha;
+            sumB_lin += srgbToLinear(sb) * wAlpha;
+            validArea += wAlpha;
           }
         }
       }
 
-      const avgAlpha = validPixelCount > 0 ? 255 : 0;
+      const avgAlpha = (validArea / Math.max(1e-5, totalArea)) > 0.35 ? 255 : 0;
       bufferA[gIdx] = avgAlpha;
 
-      if (validPixelCount > 0) {
-        // Linear RGB average
-        const avgR_lin = sumR_lin / validPixelCount;
-        const avgG_lin = sumG_lin / validPixelCount;
-        const avgB_lin = sumB_lin / validPixelCount;
+      if (validArea > 0) {
+        // Linear RGB area average
+        const avgR_lin = sumR_lin / validArea;
+        const avgG_lin = sumG_lin / validArea;
+        const avgB_lin = sumB_lin / validArea;
 
         // Convert back to sRGB
         const sR = linearToSrgb(avgR_lin);
@@ -443,14 +517,17 @@ export function imageToGrid(
   let darkestColor = activePalette[0];
   if (outlineBoost) {
     let minL = Infinity;
-    for (const c of activePalette) {
-      const lab = rgbToLab(c.rgb[0], c.rgb[1], c.rgb[2]);
-      if (lab[0] < minL) {
-        minL = lab[0];
-        darkestColor = c;
+    for (const c of preparedPalette) {
+      if (c.lab[0] < minL) {
+        minL = c.lab[0];
+        darkestColor = c.color;
       }
     }
   }
+
+  // Dithering parameters: Dampened factor & error clamping prevent noise blowup
+  const ditherFactor = 0.65;
+  const maxError = 24;
 
   // Map to closest bead colors with error diffusion
   for (let y = 0; y < targetH; y++) {
@@ -471,13 +548,13 @@ export function imageToGrid(
         continue;
       }
 
-      const closest = findClosestBeadColor(curR, curG, curB, activePalette, colorMatchAlgo);
+      const closest = findClosestBeadColor(curR, curG, curB, preparedPalette, colorMatchAlgo);
       resultGrid[y][x] = closest.id;
 
       if (dither !== 'none') {
-        const errR = curR - closest.rgb[0];
-        const errG = curG - closest.rgb[1];
-        const errB = curB - closest.rgb[2];
+        const errR = Math.max(-maxError, Math.min(maxError, (curR - closest.rgb[0]) * ditherFactor));
+        const errG = Math.max(-maxError, Math.min(maxError, (curG - closest.rgb[1]) * ditherFactor));
+        const errB = Math.max(-maxError, Math.min(maxError, (curB - closest.rgb[2]) * ditherFactor));
 
         const addError = (nx: number, ny: number, weight: number) => {
           if (nx >= 0 && nx < targetW && ny >= 0 && ny < targetH) {
@@ -507,12 +584,64 @@ export function imageToGrid(
     }
   }
 
+  // Clean isolated single-pixel noise (despeckling pass)
+  cleanIsolatedNoise(resultGrid, targetW, targetH);
+
   // Apply color limit if configured (> 0)
   if (settings.colorLimit > 0) {
     return applyColorLimit(resultGrid, activePalette, settings.colorLimit, colorMatchAlgo);
   }
 
   return resultGrid;
+}
+
+/**
+ * Isolated single-pixel noise cleaner (Despeckling Filter)
+ * Removes isolated single-bead noise specks surrounded by uniform neighbors
+ */
+function cleanIsolatedNoise(grid: (string | null)[][], width: number, height: number): void {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const cur = grid[y][x];
+      if (!cur) continue;
+
+      const neighborCounts = new Map<string, number>();
+      let totalValidNeighbors = 0;
+
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            const nb = grid[ny][nx];
+            if (nb) {
+              totalValidNeighbors++;
+              neighborCounts.set(nb, (neighborCounts.get(nb) || 0) + 1);
+            }
+          }
+        }
+      }
+
+      // If surrounded by at least 5 valid neighbors, but NONE (or at most 1) match current color,
+      // and there is a clear dominant neighbor color with >= 5 occurrences => adopt dominant color
+      const curCount = neighborCounts.get(cur) || 0;
+      if (curCount <= 1 && totalValidNeighbors >= 5) {
+        let maxCount = 0;
+        let dominantColor: string | null = null;
+        neighborCounts.forEach((count, colorId) => {
+          if (count > maxCount) {
+            maxCount = count;
+            dominantColor = colorId;
+          }
+        });
+
+        if (dominantColor && maxCount >= 5) {
+          grid[y][x] = dominantColor;
+        }
+      }
+    }
+  }
 }
 
 // Reduce color count to capped limit if requested

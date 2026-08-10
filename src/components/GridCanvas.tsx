@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Focus, Hand, Pencil } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
 
@@ -24,6 +24,7 @@ interface GridCanvasProps {
   onEyedropColor: (color: BeadColor) => void;
   symmetryMode?: SymmetryMode;
   canvasBackdrop?: CanvasBackdrop;
+  sourceImage?: HTMLImageElement | null;
   overlayImage?: HTMLImageElement | null;
   showOverlay?: boolean;
 }
@@ -137,6 +138,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onEyedropColor,
   symmetryMode = 'none',
   canvasBackdrop = 'dark_grid',
+  sourceImage = null,
   overlayImage = null,
   showOverlay = false,
 }) => {
@@ -150,6 +152,40 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Remember last drawing tool before switching to hand
   const [lastDrawTool, setLastDrawTool] = useState<ToolType>('pencil');
+
+  // Original image reference preview state
+  const effectiveImage = sourceImage || overlayImage;
+  const [isEnlargedModalOpen, setIsEnlargedModalOpen] = useState(false);
+  const [modalImageScale, setModalImageScale] = useState(1);
+  const [isThumbnailMinimized, setIsThumbnailMinimized] = useState(false);
+
+  // Fullscreen Full Pattern Preview State
+  const [isFullscreenPreview, setIsFullscreenPreview] = useState<boolean>(false);
+
+  const toggleFullscreenPreview = useCallback(() => {
+    if (!isFullscreenPreview) {
+      setIsFullscreenPreview(true);
+      if (containerRef.current && containerRef.current.requestFullscreen) {
+        containerRef.current.requestFullscreen().catch(() => {});
+      }
+    } else {
+      setIsFullscreenPreview(false);
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }, [isFullscreenPreview]);
+
+  useEffect(() => {
+    const handleFsChange = () => {
+      const isFs = !!document.fullscreenElement;
+      if (!isFs && isFullscreenPreview) {
+        setIsFullscreenPreview(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
+  }, [isFullscreenPreview]);
 
   useEffect(() => {
     if (activeTool !== 'hand') {
@@ -236,7 +272,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     const scaleX = availW / totalGridW;
     const scaleY = availH / totalGridH;
-    const bestZoom = Math.min(3.5, Math.max(0.25, Math.min(scaleX, scaleY)));
+    const bestZoom = Math.min(3.5, Math.max(0.1, Math.min(scaleX, scaleY)));
 
     setZoom(bestZoom);
 
@@ -252,6 +288,13 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   useEffect(() => {
     fitToView();
   }, [width, height]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      fitToView();
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [isFullscreenPreview, fitToView]);
 
   // Handle Touch Gestures (Pinch to zoom & two-finger / hand panning)
   useEffect(() => {
@@ -307,7 +350,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         if (state.initialDist > 0) {
           const scale = dist / state.initialDist;
-          const newZoom = Math.min(4.5, Math.max(0.2, state.initialZoom * scale));
+          const newZoom = Math.min(4.5, Math.max(0.1, state.initialZoom * scale));
 
           const rect = container.getBoundingClientRect();
           const focusX = state.initialMidX - rect.left - state.initialPanX;
@@ -362,7 +405,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const newZoom = Math.min(4.5, Math.max(0.2, zoom * zoomFactor));
+    const newZoom = Math.min(4.5, Math.max(0.1, zoom * zoomFactor));
 
     const rect = canvasRef.current?.getBoundingClientRect();
     if (rect) {
@@ -420,8 +463,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const canvasWidth = canvas.width / dpr;
+    const canvasHeight = canvas.height / dpr;
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
 
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
@@ -469,10 +516,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     ctx.fillRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
     // 3. Render Source Image Semi-transparent Overlay if enabled
-    if (showOverlay && overlayImage) {
+    if (showOverlay && effectiveImage) {
       ctx.save();
       ctx.globalAlpha = 0.35;
-      ctx.drawImage(overlayImage, startX, startY, gridPixelWidth, gridPixelHeight);
+      ctx.drawImage(effectiveImage, startX, startY, gridPixelWidth, gridPixelHeight);
       ctx.restore();
     }
 
@@ -518,7 +565,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         } else if (colorId) {
           const bead = paletteMap.get(colorId);
           const colorHex = bead ? bead.hex : '#CCCCCC';
-          const symbolStr = showSymbols && bead ? (bead.symbol || bead.code) : null;
+          const symbolStr = showSymbols && bead ? (bead.code || bead.symbol) : null;
 
           const isDimmed = highlightColorId !== null && colorId !== highlightColorId;
 
@@ -643,6 +690,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     ctx.strokeStyle = '#64748B';
     ctx.lineWidth = 2;
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
+
+    ctx.restore();
   }, [
     grid,
     paletteMap,
@@ -674,8 +723,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const handleResize = () => {
       if (containerRef.current && canvasRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
-        canvasRef.current.width = clientWidth;
-        canvasRef.current.height = clientHeight;
+        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        canvasRef.current.width = Math.floor(clientWidth * dpr);
+        canvasRef.current.height = Math.floor(clientHeight * dpr);
+        canvasRef.current.style.width = `${clientWidth}px`;
+        canvasRef.current.style.height = `${clientHeight}px`;
         renderCanvas();
       }
     };
@@ -786,12 +838,30 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none ${
+      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none transition-all ${
+        isFullscreenPreview ? 'fixed inset-0 z-[9999] bg-slate-950 w-screen h-screen' : ''
+      } ${
         activeTool === 'hand' ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'
       }`}
       onWheel={handleWheel}
       onContextMenu={e => e.preventDefault()}
     >
+      {/* Fullscreen Pattern Preview Top Banner */}
+      {isFullscreenPreview && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-slate-900/90 border border-sky-500/50 text-white px-4 py-1.5 rounded-full shadow-2xl backdrop-blur-md">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="text-xs font-bold text-sky-300">全屏全图预览模式</span>
+          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(按 ESC 或点击退出)</span>
+          <button
+            onClick={toggleFullscreenPreview}
+            className="p-1 hover:bg-rose-500/20 text-rose-400 rounded-full cursor-pointer transition-colors"
+            title="退出全屏"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
@@ -861,16 +931,17 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           <Focus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
 
-        {/* Reset 100% Zoom */}
+        {/* Fullscreen Full Pattern Preview Button */}
         <button
-          onClick={() => {
-            setZoom(1.0);
-            setPan({ x: 40, y: 40 });
-          }}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
-          title="重置 100%"
+          onClick={toggleFullscreenPreview}
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all border ${
+            isFullscreenPreview
+              ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/30 ring-2 ring-rose-400/50'
+              : 'bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 border-slate-700/80'
+          }`}
+          title={isFullscreenPreview ? '退出全屏预览' : '全屏全图预览'}
         >
-          <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          {isFullscreenPreview ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />}
         </button>
 
         <span className="text-[9px] sm:text-[10px] font-mono font-bold text-sky-400 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
@@ -879,7 +950,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         {/* Zoom Out */}
         <button
-          onClick={() => setZoom(Math.max(0.2, zoom * 0.8))}
+          onClick={() => setZoom(Math.max(0.1, zoom * 0.8))}
           className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
           title="缩小"
         >
@@ -895,6 +966,170 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
+
+      {/* Top Right Original Image Thumbnail Box ("这边放原图，点击可以放大") */}
+      {effectiveImage && (
+        <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-20 flex flex-col items-end gap-1 pointer-events-auto">
+          {!isThumbnailMinimized ? (
+            <div className="bg-slate-900/90 border border-slate-700/80 hover:border-sky-500/80 rounded-lg p-1 shadow-xl backdrop-blur-md transition-all flex flex-col gap-1 max-w-[140px] sm:max-w-[180px]">
+              {/* Ultra Compact Header Bar */}
+              <div className="flex items-center justify-between text-[10px] font-bold text-slate-200 px-0.5 pb-0.5 border-b border-slate-800/80">
+                <div className="flex items-center gap-1 text-sky-400">
+                  <ImageIcon className="w-3 h-3" />
+                  <span className="leading-none">原图参考</span>
+                </div>
+                <div className="flex items-center gap-0.5">
+                  <button
+                    onClick={() => {
+                      setModalImageScale(1);
+                      setIsEnlargedModalOpen(true);
+                    }}
+                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-sky-300 transition-colors cursor-pointer"
+                    title="点击放大查看"
+                  >
+                    <ZoomIn className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => setIsThumbnailMinimized(true)}
+                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
+                    title="最小化"
+                  >
+                    <ChevronUp className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Clickable Image Container - Fits tight around image ratio without extra blank space */}
+              <div
+                onClick={() => {
+                  setModalImageScale(1);
+                  setIsEnlargedModalOpen(true);
+                }}
+                className="relative group rounded overflow-hidden bg-slate-950 border border-slate-800/80 cursor-pointer shadow-xs transition-transform active:scale-98 flex items-center justify-center"
+              >
+                <img
+                  src={effectiveImage.src}
+                  alt="原图参考"
+                  className="max-h-[90px] sm:max-h-[110px] w-auto h-auto max-w-full object-contain block"
+                />
+
+                {/* Hover Overlay with "点击放大" */}
+                <div className="absolute inset-0 bg-slate-950/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5 text-slate-100 backdrop-blur-xs p-1">
+                  <ZoomIn className="w-4 h-4 text-sky-400" />
+                  <span className="text-[9px] font-bold text-sky-300 text-center leading-tight">点击放大原图</span>
+                </div>
+
+                {/* Small "点击放大" hint badge */}
+                <div className="absolute bottom-0.5 right-0.5 bg-slate-950/85 text-[8px] text-slate-300 px-1 py-0.2 rounded font-sans pointer-events-none group-hover:hidden border border-slate-700/60 leading-none">
+                  点击放大
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsThumbnailMinimized(false)}
+              className="bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-sky-400 text-[11px] px-2 py-1 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1 font-bold transition-all cursor-pointer"
+              title="展开原图对比"
+            >
+              <ImageIcon className="w-3.5 h-3.5" />
+              <span>显示原图</span>
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Enlarged Original Image Lightbox Modal */}
+      {isEnlargedModalOpen && effectiveImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in"
+          onClick={() => setIsEnlargedModalOpen(false)}
+        >
+          <div
+            className="relative bg-slate-900/95 border border-slate-800 rounded-2xl max-w-5xl max-h-[92vh] w-full flex flex-col overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/50">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
+                  <ImageIcon className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
+                    原图高清对比与查看
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    分辨率: {effectiveImage.naturalWidth || effectiveImage.width} × {effectiveImage.naturalHeight || effectiveImage.height} px
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setModalImageScale(s => Math.max(0.4, s - 0.25))}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                  title="缩小"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <span className="text-xs font-mono text-sky-400 min-w-[40px] text-center font-bold">
+                  {Math.round(modalImageScale * 100)}%
+                </span>
+                <button
+                  onClick={() => setModalImageScale(s => Math.min(3, s + 0.25))}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                  title="放大"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setModalImageScale(1)}
+                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition-colors cursor-pointer"
+                  title="恢复 100%"
+                >
+                  100%
+                </button>
+                <div className="w-px h-5 bg-slate-800 mx-1" />
+                <button
+                  onClick={() => setIsEnlargedModalOpen(false)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-slate-300 hover:text-white transition-colors border border-slate-700 cursor-pointer"
+                  title="关闭"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body: Scrollable / Zoomable image preview */}
+            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950/90 min-h-[320px] select-none">
+              <div className="relative border border-slate-800 rounded-xl overflow-hidden shadow-2xl bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] max-w-full max-h-full flex items-center justify-center">
+                <img
+                  src={effectiveImage.src}
+                  alt="原图放大预览"
+                  style={{
+                    transform: `scale(${modalImageScale})`,
+                    transformOrigin: 'center center',
+                    transition: 'transform 0.15s ease-out'
+                  }}
+                  className="max-h-[68vh] max-w-full object-contain pointer-events-auto"
+                />
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-4 py-2.5 border-t border-slate-800 bg-slate-950/50 flex items-center justify-between text-xs text-slate-400">
+              <span className="hidden sm:inline">提示：点击顶部 +/- 或按钮自由放大/缩小原图细节</span>
+              <button
+                onClick={() => setIsEnlargedModalOpen(false)}
+                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium transition-colors shadow-md ml-auto cursor-pointer"
+              >
+                关闭预览
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

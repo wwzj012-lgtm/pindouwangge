@@ -4,6 +4,8 @@ export type WatermarkType = 'double_diagonal' | 'corners' | 'bottom' | 'none';
 export type WatermarkPosition = WatermarkType | 'grid_and_legend' | 'legend_only' | 'grid_center';
 export type LegendPosition = 'right' | 'bottom';
 export type LegendScaleMode = 'auto' | '1.0' | '1.5' | '2.0' | '2.5' | '3.0';
+export type SymbolDisplayType = 'code' | 'symbol' | 'none';
+export type ExportQuality = 'normal' | 'high' | 'ultra';
 
 export interface ExportOptions {
   grid: (string | null)[][];
@@ -27,6 +29,9 @@ export interface ExportOptions {
   legendScaleMode?: LegendScaleMode; // Default: 'auto'
   hideEmptyPegs?: boolean; // Default: false
   isEn?: boolean;
+  symbolDisplayType?: SymbolDisplayType; // 'code' (normal code e.g. M01), 'symbol' (icons e.g. ★), 'none'
+  symbolFontScale?: number; // 0.7 to 1.5, default 1.0
+  exportQuality?: ExportQuality; // 'normal' (1x), 'high' (1.4x HD), 'ultra' (2.0x Ultra HD)
 }
 
 // Flexible watermark overlay function supporting double_diagonal, corners, bottom, or none
@@ -144,13 +149,14 @@ export function drawBeadOnCanvas(
   size: number,
   colorHex: string,
   shape: BeadShape,
-  symbolStr?: string | null
+  symbolStr?: string | null,
+  symbolFontScale: number = 1.0
 ) {
   if (shape === 'square') {
     ctx.fillStyle = colorHex;
     ctx.fillRect(x, y, size, size);
     ctx.strokeStyle = '#00000022';
-    ctx.lineWidth = 0.5;
+    ctx.lineWidth = Math.max(0.5, size * 0.02);
     ctx.strokeRect(x, y, size, size);
   } else if (shape === 'circle_flat') {
     ctx.beginPath();
@@ -158,7 +164,7 @@ export function drawBeadOnCanvas(
     ctx.fillStyle = colorHex;
     ctx.fill();
     ctx.strokeStyle = '#00000033';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = Math.max(0.5, size * 0.03);
     ctx.stroke();
   } else {
     // 'fuse_3d' Realistic fuse bead with center peg hole
@@ -183,31 +189,50 @@ export function drawBeadOnCanvas(
     ctx.fillStyle = '#00000033';
     ctx.fill();
     ctx.strokeStyle = '#00000022';
-    ctx.lineWidth = 0.5;
+    ctx.lineWidth = Math.max(0.5, size * 0.02);
     ctx.stroke();
   }
 
-  // Symbol or short code text inside cell
-  if (symbolStr && size >= 8) {
-    // Determine text color based on background contrast with soft alpha transparency for comfortable legibility
+  // Symbol or short color code text inside cell (ultra-clean, sharp & thin font)
+  if (symbolStr && size >= 6) {
     const hex = colorHex.replace('#', '');
     const r = parseInt(hex.substring(0, 2), 16) || 255;
     const g = parseInt(hex.substring(2, 4), 16) || 255;
     const b = parseInt(hex.substring(4, 6), 16) || 255;
     const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    const textColor = brightness > 140 ? 'rgba(0, 0, 0, 0.72)' : 'rgba(255, 255, 255, 0.88)';
+    const maxC = Math.max(r, g, b);
+    const minC = Math.min(r, g, b);
+    const maxSaturation = maxC > 0 ? (maxC - minC) / maxC : 0;
 
+    // Contrast & Color Logic (as specified):
+    // 1. Dark blocks: pure white text with 0.9 opacity
+    // 2. Light/bright blocks: soft dark #222222 (not harsh black)
+    // 3. High-saturation vivid blocks: white text with 0.85 opacity
+    let textColor = 'rgba(255, 255, 255, 0.9)';
+    if (brightness > 155 && maxSaturation < 0.6) {
+      textColor = 'rgba(34, 34, 34, 0.92)';
+    } else if (maxSaturation >= 0.6 && brightness > 100) {
+      textColor = 'rgba(255, 255, 255, 0.85)';
+    } else if (brightness <= 155) {
+      textColor = 'rgba(255, 255, 255, 0.9)';
+    }
+
+    ctx.save();
     ctx.fillStyle = textColor;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    
-    // Dynamically adjust font size based on string length for perfect balance & clear readability
-    const len = symbolStr.length;
-    const scale = len <= 1 ? 0.46 : len === 2 ? 0.40 : 0.34;
-    const fontSize = Math.max(7, Math.floor(size * scale));
 
-    ctx.font = `700 ${fontSize}px system-ui, -apple-system, sans-serif`;
-    ctx.fillText(symbolStr, x + size / 2, y + size / 2);
+    const len = symbolStr.length;
+    // Scale font size based on string length & symbolFontScale
+    const baseScale = len <= 1 ? 0.52 : len === 2 ? 0.42 : len === 3 ? 0.34 : 0.27;
+    const fontSize = Math.max(6, Math.floor(size * baseScale * symbolFontScale));
+
+    if (fontSize >= 5) {
+      // Clean thin/light font stack for crisp non-overlapping numbers & icons
+      ctx.font = `300 ${fontSize}px "Roboto Light", "Roboto", "JetBrains Mono", system-ui, -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif`;
+      ctx.fillText(symbolStr, x + size / 2, y + size / 2 + 0.5);
+    }
+    ctx.restore();
   }
 }
 
@@ -265,16 +290,21 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   const activeWidth = endX - startX;
   const activeHeight = endY - startY;
 
-  // Sizing parameters: dynamically adjust cellSize based on grid dimensions to prevent canvas size limit failures
+  // Sizing parameters: dynamically adjust cellSize based on grid dimensions & exportQuality
+  const exportQuality = options.exportQuality || 'high';
+  const qualityMultiplier = exportQuality === 'normal' ? 1.0 : exportQuality === 'ultra' ? 2.0 : 1.4;
+
   const maxGridBeadsInView = Math.max(activeWidth, activeHeight);
-  let cellSize = 24; // 24px per bead cell for standard boards
-  if (maxGridBeadsInView > 80) {
-    cellSize = 12;
-  } else if (maxGridBeadsInView > 50) {
-    cellSize = 16;
-  } else if (maxGridBeadsInView > 32) {
-    cellSize = 20;
+  let baseCellSize = 28;
+  if (maxGridBeadsInView > 120) {
+    baseCellSize = 18;
+  } else if (maxGridBeadsInView > 80) {
+    baseCellSize = 22;
+  } else if (maxGridBeadsInView > 40) {
+    baseCellSize = 25;
   }
+
+  const cellSize = Math.round(baseCellSize * qualityMultiplier);
 
   const gridPixelWidth = activeWidth * cellSize;
   const gridPixelHeight = activeHeight * cellSize;
@@ -420,6 +450,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   }
 
   // Draw Beads or Peg Dots on top of the background grid
+  const symbolDisplayType = options.symbolDisplayType ?? (showSymbols ? 'code' : 'none');
+  const symbolFontScale = options.symbolFontScale ?? 1.0;
+
   for (let y = startY; y < endY; y++) {
     for (let x = startX; x < endX; x++) {
       const px = startGridX + (x - startX) * cellSize;
@@ -429,13 +462,22 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
       if (cellId) {
         const bead = paletteMap.get(cellId);
         const colorHex = bead ? bead.hex : '#CCCCCC';
-        const label = showSymbols && bead ? (bead.symbol || bead.code) : null;
+        let label: string | null = null;
+        if (bead) {
+          if (symbolDisplayType === 'code') {
+            label = bead.code || bead.symbol || null;
+          } else if (symbolDisplayType === 'symbol') {
+            label = bead.symbol || bead.code || null;
+          } else if (symbolDisplayType === 'none') {
+            label = null;
+          }
+        }
 
-        drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label);
+        drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label, symbolFontScale);
       } else if (!hideEmptyPegs) {
         // Simple elegant peg dot inside empty cell (rendered beautifully over the grey background grid)
         ctx.beginPath();
-        ctx.arc(px + cellSize / 2, py + cellSize / 2, 1.8, 0, Math.PI * 2);
+        ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1.8, cellSize * 0.08), 0, Math.PI * 2);
         ctx.fillStyle = '#CBD5E1';
         ctx.fill();
       }
@@ -570,8 +612,13 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.lineWidth = Math.max(1, Math.round(1 * scale));
     ctx.strokeRect(itemX, itemY, swatchSize, swatchSize);
 
-    // Symbol inside swatch
-    if (bead.symbol && showSymbols) {
+    // Symbol / Code inside swatch
+    let swatchLabel: string | null = null;
+    if (symbolDisplayType === 'code') swatchLabel = bead.code;
+    else if (symbolDisplayType === 'symbol') swatchLabel = bead.symbol;
+    else if (symbolDisplayType !== 'none' && showSymbols) swatchLabel = bead.symbol || bead.code;
+
+    if (swatchLabel && symbolDisplayType !== 'none') {
       const hex = bead.hex.replace('#', '');
       const r = parseInt(hex.substring(0, 2), 16) || 255;
       const g = parseInt(hex.substring(2, 4), 16) || 255;
@@ -579,10 +626,11 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
       const brightness = (r * 299 + g * 587 + b * 114) / 1000;
 
       ctx.fillStyle = brightness > 140 ? '#000000' : '#FFFFFF';
-      ctx.font = `bold ${Math.round(11 * scale)}px sans-serif`;
+      const swatchFontScale = swatchLabel.length > 2 ? 0.75 : 1.0;
+      ctx.font = `bold ${Math.round(10 * scale * swatchFontScale)}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(bead.symbol, itemX + swatchSize / 2, itemY + swatchSize / 2);
+      ctx.fillText(swatchLabel, itemX + swatchSize / 2, itemY + swatchSize / 2);
     }
 
     // Code

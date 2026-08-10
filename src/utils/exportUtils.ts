@@ -669,10 +669,22 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   return canvas;
 }
 
-// Download canvas as PNG image (utilizes toBlob with object URL for maximum memory efficiency, especially on large grids)
-export function downloadCanvasImage(canvas: HTMLCanvasElement, filename: string) {
+export function isWeChatBrowser(): boolean {
+  return typeof navigator !== 'undefined' && /MicroMessenger/i.test(navigator.userAgent);
+}
+
+// Download canvas as PNG image (utilizes toBlob with object URL, handles WeChat restrictions)
+export function downloadCanvasImage(canvas: HTMLCanvasElement, filename: string, onWeChatSaveNotice?: (dataUrl: string) => void) {
   const finalFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
   
+  if (isWeChatBrowser()) {
+    const dataUrl = canvas.toDataURL('image/png');
+    if (onWeChatSaveNotice) {
+      onWeChatSaveNotice(dataUrl);
+      return;
+    }
+  }
+
   try {
     canvas.toBlob((blob) => {
       if (!blob) {

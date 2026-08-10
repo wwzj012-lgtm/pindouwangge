@@ -80,10 +80,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [selectedBoard, setSelectedBoard] = useState<number | null>(null);
 
   // Tooltips and Modal States
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() => typeof window !== 'undefined' && window.innerWidth < 640);
   const [showVipTooltip, setShowVipTooltip] = useState(false);
   const [showFreeDownloadModal, setShowFreeDownloadModal] = useState(false);
   const [pendingDownloadType, setPendingDownloadType] = useState<'single' | 'all' | null>(null);
+  const [wechatPreviewUrl, setWechatPreviewUrl] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -203,7 +204,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     const suffix = selectedBoard !== null
       ? (isEn ? `_Board${selectedBoard + 1}` : `_板${selectedBoard + 1}`)
       : (isEn ? '_FullPattern' : '_完整图纸');
-    downloadCanvasImage(canvas, `${projectName}${suffix}.png`);
+    downloadCanvasImage(canvas, `${projectName}${suffix}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
 
     // Auto archive exported pattern record for user (Free: 7 days, VIP: 30 days)
     if (currentUser?.uid) {
@@ -247,7 +248,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       isEn,
     };
     const fullCanvas = generatePatternCanvas(fullOptions);
-    downloadCanvasImage(fullCanvas, isEn ? `${projectName}_FullPattern.png` : `${projectName}_完整图纸.png`);
+    downloadCanvasImage(fullCanvas, isEn ? `${projectName}_FullPattern.png` : `${projectName}_完整图纸.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
 
     for (let i = 0; i < totalBoards; i++) {
       setTimeout(() => {
@@ -255,7 +256,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           ...fullOptions,
           selectedBoardIndex: i,
         };
-        downloadCanvasImage(generatePatternCanvas(subOptions), isEn ? `${projectName}_Board${i + 1}.png` : `${projectName}_板${i + 1}.png`);
+        downloadCanvasImage(generatePatternCanvas(subOptions), isEn ? `${projectName}_Board${i + 1}.png` : `${projectName}_板${i + 1}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
       }, i * 300);
     }
 
@@ -303,11 +304,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[94vh] sm:max-h-[92vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-1 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl sm:rounded-2xl w-full max-w-4xl max-h-[96vh] sm:max-h-[92vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
         
         {/* Header */}
-        <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 gap-2">
+        <div className="p-2.5 sm:p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/90 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 shrink-0">
               <ImageIcon className="w-5 h-5" />
@@ -365,11 +366,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
           </div>
         </div>
 
-        {/* Control Area: Watermark Section & Settings (Collapsible) */}
+        {/* Control Area: Watermark & Settings (Collapsible) */}
         {isCollapsed ? (
           <div className="px-3.5 py-2.5 bg-slate-950/90 border-b border-slate-800 flex items-center justify-between gap-2 text-xs">
             <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-300">
-              <span className="inline-flex items-center gap-1 font-bold text-purple-300 bg-purple-500/10 px-2 py-0.5 rounded-lg border border-purple-500/20">
+              <span className="inline-flex items-center gap-1 font-bold text-purple-300 bg-purple-500/10 px-2.5 py-1 rounded-lg border border-purple-500/20">
                 <ShieldAlert className="w-3.5 h-3.5 text-purple-400 shrink-0" />
                 {watermarkType === 'none'
                   ? (isEn ? '✨ Watermark Free' : '✨ 纯净无水印')
@@ -386,88 +387,234 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </div>
             <button
               onClick={() => setIsCollapsed(false)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold hover:bg-purple-500/20 text-[11px] cursor-pointer shrink-0 transition-all"
+              className="flex items-center gap-1 px-3 py-1 rounded-lg bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold hover:bg-purple-500/20 text-[11px] cursor-pointer shrink-0 transition-all"
             >
               <ChevronDown className="w-3.5 h-3.5" />
-              <span>{isEn ? 'Expand Details' : '展开详细设置'}</span>
+              <span>{isEn ? 'Expand Details' : '展开参数设置'}</span>
             </button>
           </div>
         ) : (
           <div className="p-3.5 bg-slate-950/90 border-b border-slate-800 flex flex-col gap-3 text-xs">
             
-            {/* Watermark Section Bar */}
-            <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800/80 flex flex-col gap-2.5">
+            {/* Top Row: Two Clean Setting Group Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               
-              {/* Header Title with Permission Indication */}
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-purple-400 shrink-0" />
-                  <span className="font-bold text-slate-200">
-                    {isVip
-                      ? (isEn ? 'Anti-theft Watermark [VIP Can Disable]' : '防盗水印【VIP 可关闭水印】')
-                      : (isEn ? 'Anti-theft Watermark [Free Version, Upgrade VIP to Remove]' : '防盗水印【免费强制开启，升级 VIP 可去除】')}
-                  </span>
+              {/* Card 1: Pattern Layout & Markers */}
+              <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-800/80 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between text-slate-300 font-bold text-[11px]">
+                  <div className="flex items-center gap-1.5 text-purple-300">
+                    <Sliders className="w-3.5 h-3.5 text-purple-400" />
+                    <span>{isEn ? 'Pattern & Display Options' : '图纸排版与显示'}</span>
+                  </div>
+                  {totalBoards > 1 && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400 text-[10px]">{isEn ? 'Board:' : '视角:'}</span>
+                      <select
+                        value={selectedBoard === null ? 'full' : selectedBoard.toString()}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSelectedBoard(val === 'full' ? null : parseInt(val));
+                        }}
+                        className="bg-slate-800 border border-slate-700 text-purple-200 rounded px-1.5 py-0.5 text-[11px] outline-none cursor-pointer"
+                      >
+                        <option value="full">{isEn ? 'Full Pattern' : '全景整图'}</option>
+                        {Array.from({ length: totalBoards }).map((_, idx) => (
+                          <option key={idx} value={idx}>
+                            {isEn ? `Board #${idx + 1}` : `第 ${idx + 1} 板`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* VIP Quick Badge / Action */}
-                  {!isVip && (
-                    <button
-                      onClick={() => onOpenAuthModal?.()}
-                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-purple-500/20 border border-amber-500/30 text-amber-300 font-bold hover:brightness-110 transition-all cursor-pointer text-[11px]"
-                    >
-                      <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20" />
-                      <span>{isEn ? 'Get VIP to Remove Watermark' : '开通 VIP 去水印'}</span>
-                    </button>
-                  )}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 pt-0.5 text-[11px]">
+                  {/* Color Symbol Toggle & Font Scale */}
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={showSymbols}
+                        onChange={e => {
+                          const checked = e.target.checked;
+                          setShowSymbols(checked);
+                          if (checked) {
+                            setSymbolDisplayType('code');
+                          } else {
+                            setSymbolDisplayType('none');
+                          }
+                        }}
+                        className="accent-purple-500 rounded cursor-pointer w-3.5 h-3.5"
+                      />
+                      <span className="font-semibold text-slate-200">{isEn ? 'Show Color Code' : '显示色号标识'}</span>
+                    </label>
 
-                  <button
-                    onClick={() => setIsCollapsed(true)}
-                    className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 border border-slate-700/80 text-slate-300 text-[11px] font-medium transition-colors cursor-pointer"
-                    title={isEn ? 'Collapse watermark panel' : '收起水印设置面板'}
-                  >
-                    <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="hidden sm:inline">{isEn ? 'Collapse' : '收起'}</span>
-                  </button>
+                    {showSymbols && (
+                      <select
+                        value={symbolFontScale.toString()}
+                        onChange={e => setSymbolFontScale(parseFloat(e.target.value))}
+                        className="bg-slate-800 border border-slate-700 text-amber-300 font-medium rounded px-1.5 py-0.5 text-[10px] outline-none cursor-pointer"
+                      >
+                        <option value="0.75">{isEn ? '75% Small' : '75% 偏小'}</option>
+                        <option value="1.0">{isEn ? '100% Standard' : '100% 标准'}</option>
+                        <option value="1.25">{isEn ? '125% Large' : '125% 放大'}</option>
+                        <option value="1.5">{isEn ? '150% XL' : '150% 特大'}</option>
+                      </select>
+                    )}
+                  </div>
+
+                  {/* Ruler Coordinates */}
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={showCoordinates}
+                      onChange={e => setShowCoordinates(e.target.checked)}
+                      className="accent-purple-500 rounded cursor-pointer w-3.5 h-3.5"
+                    />
+                    <span className="text-slate-300">{isEn ? 'Show Coordinates' : '显示标尺'}</span>
+                  </label>
+
+                  {/* Hide Empty Pegs */}
+                  <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={hideEmptyPegs}
+                      onChange={e => setHideEmptyPegs(e.target.checked)}
+                      className="accent-emerald-500 rounded cursor-pointer w-3.5 h-3.5"
+                    />
+                    <span className="text-slate-300">{isEn ? 'Hide Empty Pegs' : '隐藏空位'}</span>
+                  </label>
+
+                  {/* Legend Position */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">{isEn ? 'Legend:' : '图例:'}</span>
+                    <select
+                      value={legendPosition}
+                      onChange={e => setLegendPosition(e.target.value as LegendPosition)}
+                      className="bg-slate-800 border border-slate-700 text-slate-200 rounded px-1.5 py-0.5 text-[10px] outline-none cursor-pointer"
+                    >
+                      <option value="right">{isEn ? 'Right' : '右侧'}</option>
+                      <option value="bottom">{isEn ? 'Bottom' : '下方'}</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-            {/* Controls Row */}
-            <div className="flex flex-wrap items-center gap-3">
-              
-              {/* Dropdown 1: Watermark Type */}
-              <div className="relative flex items-center gap-1.5">
-                <span className="text-slate-400">{isEn ? 'Style:' : '样式:'}</span>
-                <div className="relative inline-block">
-                  <select
-                    value={watermarkType}
-                    onChange={handleWatermarkTypeSelect}
-                    className={`bg-slate-800 border ${
-                      watermarkType === 'none' ? 'border-emerald-500/50 text-emerald-300' : 'border-purple-500/40 text-purple-200'
-                    } font-medium rounded-lg px-2.5 py-1.5 text-xs outline-none cursor-pointer pr-7`}
-                  >
-                    <option value="double_diagonal">{isEn ? '✦ Double Diagonal Watermark' : '✦ 双重斜向水印 (全图覆盖)'}</option>
-                    <option
-                      value="none"
-                      disabled={!isVip}
-                      className={!isVip ? 'text-slate-500 bg-slate-900' : 'text-emerald-400 font-bold'}
+              {/* Card 2: Watermark & Quality Export Options */}
+              <div className="bg-slate-900/60 rounded-xl p-3 border border-slate-800/80 flex flex-col gap-2.5">
+                <div className="flex items-center justify-between text-slate-300 font-bold text-[11px]">
+                  <div className="flex items-center gap-1.5 text-emerald-300">
+                    <ShieldAlert className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>{isEn ? 'Watermark & Resolution' : '水印防护与画质'}</span>
+                  </div>
+
+                  {/* Export Resolution */}
+                  <div className="flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <select
+                      value={exportQuality}
+                      onChange={e => {
+                        const val = e.target.value as ExportQuality;
+                        if (val === 'ultra' && !isVip) {
+                          setShowVipTooltip(true);
+                          return;
+                        }
+                        setExportQuality(val);
+                      }}
+                      className="bg-slate-800 border border-slate-700 text-emerald-300 font-medium rounded px-1.5 py-0.5 text-[10px] outline-none cursor-pointer"
                     >
-                      {isVip
-                        ? (isEn ? '✨ Watermark Free (VIP Unlocked)' : '✨ 无水印图纸 (VIP 已解锁)')
-                        : (isEn ? '👑 Watermark Free (Upgrade VIP)' : '👑 无水印图纸 (升级 VIP 解锁)')}
-                    </option>
-                  </select>
+                      <option value="high">{isEn ? '⚡ 2K HD' : '⚡ 2K 超清 (推荐)'}</option>
+                      <option value="ultra">{isEn ? '💎 4K Ultra (VIP)' : '💎 4K 极清 (VIP专享)'}</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-0.5 text-[11px]">
+                  {/* Style Select */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">{isEn ? 'Style:' : '水印:'}</span>
+                    <select
+                      value={watermarkType}
+                      onChange={handleWatermarkTypeSelect}
+                      className={`bg-slate-800 border ${
+                        watermarkType === 'none' ? 'border-emerald-500/50 text-emerald-300' : 'border-purple-500/40 text-purple-200'
+                      } font-medium rounded px-2 py-0.5 text-[10px] outline-none cursor-pointer`}
+                    >
+                      <option value="double_diagonal">{isEn ? 'Double Diagonal' : '双重斜向水印'}</option>
+                      <option
+                        value="none"
+                        disabled={!isVip}
+                        className={!isVip ? 'text-slate-500 bg-slate-900' : 'text-emerald-400 font-bold'}
+                      >
+                        {isVip
+                          ? (isEn ? '✨ Watermark Free' : '✨ 无水印图纸 (VIP)')
+                          : (isEn ? '👑 Watermark Free (VIP)' : '👑 无水印图纸 (VIP)')}
+                      </option>
+                    </select>
+                  </div>
+
+                  {/* Opacity Select */}
+                  {watermarkType !== 'none' && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-400">{isEn ? 'Opacity:' : '不透明:'}</span>
+                      <select
+                        value={watermarkOpacity.toString()}
+                        onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
+                        className="bg-slate-800 border border-slate-700 text-slate-300 rounded px-1.5 py-0.5 text-[10px] outline-none cursor-pointer"
+                      >
+                        <option value="0.1">10%</option>
+                        <option value="0.18">18%</option>
+                        <option value="0.25">25%</option>
+                      </select>
+                    </div>
+                  )}
+
+                  {/* Custom Watermark Text (VIP) */}
+                  <div className="flex items-center gap-1">
+                    <span className="text-slate-400">{isEn ? 'Text:' : '底纹文字:'}</span>
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        disabled={!isVip}
+                        value={isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格')}
+                        onChange={e => setWatermarkText(e.target.value)}
+                        placeholder={isEn ? 'Store name' : '自定义店铺名'}
+                        className={`px-1.5 py-0.5 rounded border text-[10px] outline-none w-24 ${
+                          isVip
+                            ? 'bg-slate-800 border-slate-700 text-purple-200 focus:border-purple-500'
+                            : 'bg-slate-800/50 border-slate-800 text-slate-500 cursor-not-allowed'
+                        }`}
+                      />
+                      {!isVip && (
+                        <Lock
+                          className="w-3 h-3 text-amber-400/80 absolute right-1.5 cursor-pointer"
+                          onClick={() => onOpenAuthModal?.()}
+                          title={isEn ? 'VIP can customize watermark text' : 'VIP 可自定义店铺底纹'}
+                        />
+                      )}
+                    </div>
+                  </div>
+
+                  {!isVip && (
+                    <button
+                      onClick={() => onOpenAuthModal?.()}
+                      className="ml-auto text-amber-400 hover:text-amber-300 font-bold text-[10px] flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Crown className="w-3 h-3" />
+                      <span>{isEn ? 'Upgrade VIP' : '升级VIP'}</span>
+                    </button>
+                  )}
                 </div>
 
                 {/* VIP Lock Hover Tooltip Notice */}
                 {showVipTooltip && (
-                  <div className="absolute top-full left-0 mt-2 z-50 bg-slate-800 border border-amber-500/50 text-amber-200 text-[11px] p-2.5 rounded-xl shadow-2xl w-64 animate-in fade-in slide-in-from-top-1">
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-50 bg-slate-800 border border-amber-500/50 text-amber-200 text-[11px] p-2.5 rounded-xl shadow-2xl w-64 animate-in fade-in slide-in-from-top-1">
                     <div className="flex items-start gap-2">
                       <Crown className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                       <div>
                         <p className="font-bold text-amber-300 mb-0.5">{isEn ? 'VIP Exclusive' : 'VIP 专属权限'}</p>
                         <p className="text-slate-300 leading-relaxed">
-                          {isEn ? 'Upgrade to VIP for watermark-free export for commercial use or sales.' : '开通 VIP 会员，解锁纯净无水印图纸导出，支持商用摆摊、图纸售卖使用'}
+                          {isEn ? 'Upgrade to VIP for watermark-free export for commercial use or sales.' : '开通 VIP 会员，解锁纯净无水印图纸与 4K 极清导出'}
                         </p>
                         <button
                           onClick={() => {
@@ -484,103 +631,22 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 )}
               </div>
 
-              {/* Opacity Control (Hidden when watermarkType === 'none') */}
-              {watermarkType !== 'none' && (
-                <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                  <span className="text-slate-400">{isEn ? 'Opacity:' : '透明度:'}</span>
-                  <select
-                    value={watermarkOpacity.toString()}
-                    onChange={e => setWatermarkOpacity(parseFloat(e.target.value))}
-                    className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1.5 text-xs outline-none cursor-pointer"
-                  >
-                    <option value="0.1">10% ({isEn ? 'Soft' : '轻柔防盗'})</option>
-                    <option value="0.18">18% ({isEn ? 'Standard' : '标准防盗 - 推荐'})</option>
-                    <option value="0.25">25% ({isEn ? 'Clear' : '清晰标识'})</option>
-                  </select>
-                </div>
-              )}
-
-              {/* VIP Custom Watermark Features (VIP Exclusives) */}
-              <div className="flex items-center gap-2 border-l border-slate-800 pl-3 flex-wrap">
-                
-                {/* Custom Text */}
-                <div className="flex items-center gap-1">
-                  <span className="text-slate-400">{isEn ? 'Text:' : '文字:'}</span>
-                  <div className="relative flex items-center">
-                    <input
-                      type="text"
-                      disabled={!isVip}
-                      value={isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格')}
-                      onChange={e => setWatermarkText(e.target.value)}
-                      placeholder={isEn ? 'Custom store name' : '自定义店铺名称'}
-                      className={`px-2 py-1 rounded-lg border text-xs outline-none w-32 ${
-                        isVip
-                          ? 'bg-slate-800 border-slate-700 text-purple-200 focus:border-purple-500'
-                          : 'bg-slate-800/50 border-slate-800 text-slate-500 cursor-not-allowed'
-                      }`}
-                    />
-                    {!isVip && (
-                      <Lock
-                        className="w-3 h-3 text-amber-400/80 absolute right-2 cursor-pointer"
-                        onClick={() => onOpenAuthModal?.()}
-                        title={isEn ? 'VIP can customize watermark text' : 'VIP 可自定义店铺底纹'}
-                      />
-                    )}
-                  </div>
-                </div>
-
-                {/* Custom Color Selector (VIP only) */}
-                {isVip && watermarkType === 'double_diagonal' && (
-                  <div className="flex items-center gap-1 border-l border-slate-800 pl-2">
-                    <Palette className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <select
-                      value={watermarkColor}
-                      onChange={e => setWatermarkColor(e.target.value)}
-                      className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                    >
-                      <option value="#A855F7">{isEn ? 'Purple (#A855F7)' : '梦幻紫 (#A855F7)'}</option>
-                      <option value="#F59E0B">{isEn ? 'Gold (#F59E0B)' : '尊享金 (#F59E0B)'}</option>
-                      <option value="#64748B">{isEn ? 'Gray (#64748B)' : '低调灰 (#64748B)'}</option>
-                      <option value="#0284C7">{isEn ? 'Sky Blue (#0284C7)' : '天空蓝 (#0284C7)'}</option>
-                    </select>
-                  </div>
-                )}
-
-                {/* Custom Angle Selector (VIP only) */}
-                {isVip && watermarkType === 'double_diagonal' && (
-                  <div className="flex items-center gap-1">
-                    <RotateCw className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <select
-                      value={watermarkAngle.toString()}
-                      onChange={e => setWatermarkAngle(parseInt(e.target.value))}
-                      className="bg-slate-800 border border-slate-700 text-slate-300 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                    >
-                      <option value="-25">{isEn ? '-25° Diagonal' : '-25° 斜向'}</option>
-                      <option value="-45">{isEn ? '-45° Corner' : '-45° 角斜'}</option>
-                      <option value="0">{isEn ? '0° Horizontal' : '0° 横向'}</option>
-                      <option value="-60">{isEn ? '-60° Steep' : '-60° 陡斜'}</option>
-                    </select>
-                  </div>
-                )}
-
-              </div>
-
             </div>
 
-            {/* Global Permanent Banner (Below Watermark Module) */}
+            {/* VIP Status Permanent Banner */}
             {isVip ? (
-              <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px]">
-                <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px]">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>
-                  {isEn ? 'VIP benefits active: Watermark-free clean pattern export enabled.' : 'VIP 权益已激活，可关闭防盗水印导出纯净商用图纸，支持自定义店铺水印'}
+                  {isEn ? 'VIP benefits active: Watermark-free clean pattern export enabled.' : 'VIP 权益已激活，可关闭防盗水印导出纯净商用图纸'}
                 </span>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px]">
+              <div className="flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px]">
                 <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <ShieldAlert className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                   <span>
-                    {isEn ? 'Free account exports include platform watermark. Upgrade to VIP for clean HD pattern export.' : '您当前为免费账号，导出图纸将添加平台防盗水印，升级 VIP 即可导出无水印高清图纸'}
+                    {isEn ? 'Free account exports include watermark. Upgrade to VIP for clean HD pattern export.' : '免费账号导出带防盗水印，升级 VIP 可一键导出无水印超清图纸'}
                   </span>
                 </div>
                 <button
@@ -593,157 +659,36 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             )}
 
           </div>
-
-          {/* Grid, Coordinates, and Layout Controls Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs pt-1">
-            <div className="flex items-center gap-3 flex-wrap">
-              
-              {/* Show Color Symbols Checkbox */}
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                <input
-                  type="checkbox"
-                  checked={showSymbols}
-                  onChange={e => {
-                    const checked = e.target.checked;
-                    setShowSymbols(checked);
-                    if (checked) {
-                      setSymbolDisplayType('code');
-                    } else {
-                      setSymbolDisplayType('none');
-                    }
-                  }}
-                  className="accent-purple-500 rounded cursor-pointer"
-                />
-                <span className="font-bold">{isEn ? 'Show Color Code' : '显示色号标识'}</span>
-              </label>
-
-              {/* Marker Size Selector */}
-              {showSymbols && (
-                <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/80">
-                  <Sliders className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="text-slate-300 font-bold">{isEn ? 'Marker Size:' : '标识大小:'}</span>
-                  <select
-                    value={symbolFontScale.toString()}
-                    onChange={e => setSymbolFontScale(parseFloat(e.target.value))}
-                    className="bg-slate-900 border border-slate-700 text-amber-300 font-bold rounded-md px-2 py-0.5 text-xs outline-none cursor-pointer"
-                  >
-                    <option value="0.75">{isEn ? '75% Small' : '75% 偏小'}</option>
-                    <option value="1.0">{isEn ? '100% Standard' : '100% 标准 (推荐)'}</option>
-                    <option value="1.25">{isEn ? '125% Large' : '125% 放大'}</option>
-                    <option value="1.5">{isEn ? '150% Extra Large' : '150% 特大'}</option>
-                  </select>
-                </div>
-              )}
-
-              {/* Export Clarity / Resolution */}
-              <div className="flex items-center gap-1.5 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700/80">
-                <Sparkles className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="text-slate-300 font-bold">{isEn ? 'Clarity:' : '画质:'}</span>
-                <select
-                  value={exportQuality}
-                  onChange={e => {
-                    const val = e.target.value as ExportQuality;
-                    if (val === 'ultra' && !isVip) {
-                      setShowVipTooltip(true);
-                      return;
-                    }
-                    setExportQuality(val);
-                  }}
-                  className="bg-slate-900 border border-slate-700 text-emerald-300 font-bold rounded-md px-2 py-0.5 text-xs outline-none cursor-pointer"
-                >
-                  <option value="high">{isEn ? '⚡ 2K HD (Free Recommended)' : '⚡ 2K 超清 (免费推荐)'}</option>
-                  <option value="ultra">{isEn ? '💎 4K Ultra HD (VIP Exclusive)' : '💎 4K 极清 (VIP专享)'}</option>
-                </select>
-              </div>
-
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors">
-                <input
-                  type="checkbox"
-                  checked={showCoordinates}
-                  onChange={e => setShowCoordinates(e.target.checked)}
-                  className="accent-purple-500 rounded cursor-pointer"
-                />
-                <span>{isEn ? 'Show Coordinates' : '显示标尺坐标'}</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer hover:text-white transition-colors border-l border-slate-800 pl-3">
-                <input
-                  type="checkbox"
-                  checked={hideEmptyPegs}
-                  onChange={e => setHideEmptyPegs(e.target.checked)}
-                  className="accent-emerald-500 rounded cursor-pointer"
-                />
-                <span>{isEn ? 'Hide Empty Pegs' : '隐藏空位点阵'}</span>
-              </label>
-
-              {/* Legend Scale & Layout */}
-              <div className="flex items-center gap-1.5 border-l border-slate-800 pl-3">
-                <span className="text-slate-400">{isEn ? 'Legend:' : '图例位置:'}</span>
-                <select
-                  value={legendPosition}
-                  onChange={e => setLegendPosition(e.target.value as LegendPosition)}
-                  className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2 py-1 text-xs outline-none cursor-pointer"
-                >
-                  <option value="right">{isEn ? 'Right Sidebar' : '右侧多列侧边栏'}</option>
-                  <option value="bottom">{isEn ? 'Bottom Table' : '下方横向表格'}</option>
-                </select>
-              </div>
-
-            </div>
-
-            {/* Sub Board View Selector */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-400">{isEn ? 'Board View:' : '板块视角:'}</span>
-              <select
-                value={selectedBoard === null ? 'full' : selectedBoard.toString()}
-                onChange={e => {
-                  const val = e.target.value;
-                  setSelectedBoard(val === 'full' ? null : parseInt(val));
-                }}
-                className="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1 text-xs outline-none cursor-pointer"
-              >
-                <option value="full">{isEn ? `Full Pattern (${width}x${height})` : `全景整张图纸 (${width}x${height})`}</option>
-                {Array.from({ length: totalBoards }).map((_, idx) => (
-                  <option key={idx} value={idx}>
-                    {isEn ? `Board #${idx + 1} Pattern` : `第 ${idx + 1} 板图纸 (29x29)`}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-          </div>
-
-        </div>
         )}
 
         {/* Live Canvas Preview Canvas Container */}
-        <div className="p-4 flex-1 overflow-auto bg-slate-950 flex items-center justify-center min-h-[300px]">
+        <div className="p-1 sm:p-4 flex-1 overflow-auto bg-slate-950 flex items-center justify-center min-h-[200px]">
           <div ref={previewContainerRef} className="w-full h-full flex items-center justify-center" />
         </div>
 
         {/* Footer Actions */}
-        <div className="p-3 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
-          <div className="text-slate-400 text-[11px] text-center sm:text-left">
+        <div className="p-2 sm:p-3 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <div className="text-slate-400 text-[10px] sm:text-[11px] text-center sm:text-left hidden sm:block">
             {isEn ? `Export Mode: ${watermarkType === 'none' ? '✨ Clean Pattern' : '🛡️ Watermark Protected'} (${width}x${height} beads)` : `当前导出模式: ${watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} (${width}x${height} 豆)`}
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+          <div className="flex flex-row items-center gap-2 w-full sm:w-auto">
             {totalBoards > 1 && (
               <button
                 onClick={() => handleDownloadClick('all')}
-                className="w-full sm:w-auto bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-3 py-2 rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-2.5 py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors text-xs"
               >
-                <Download className="w-4 h-4 text-sky-400" />
-                <span>{isEn ? `Download All Board Patterns (${totalBoards + 1})` : `批量全部分板图纸 (${totalBoards + 1}张)`}</span>
+                <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span className="truncate">{isEn ? `Download All (${totalBoards + 1})` : `批量全部分板 (${totalBoards + 1}张)`}</span>
               </button>
             )}
 
             <button
               onClick={() => handleDownloadClick('single')}
-              className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+              className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95 text-xs whitespace-nowrap"
             >
-              <Download className="w-4 h-4" />
-              <span>{isEn ? 'Download HD PNG Pattern' : '下载高清 PNG 图纸'}</span>
+              <Download className="w-3.5 h-3.5 shrink-0" />
+              <span>{isEn ? 'Download PNG' : '下载高清 PNG 图纸'}</span>
             </button>
           </div>
         </div>
@@ -786,6 +731,48 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* WeChat Browser Download Guide / Long-press Save Modal */}
+      {wechatPreviewUrl && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 max-w-lg w-full max-h-[92vh] flex flex-col gap-3 shadow-2xl text-slate-200 relative overflow-hidden">
+            <button
+              onClick={() => setWechatPreviewUrl(null)}
+              className="absolute top-3 right-3 p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+              <ShieldAlert className="w-5 h-5 shrink-0" />
+              <span>微信导出保存指南</span>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl">
+              微信内置浏览器限制网页自动文件下载。<br />
+              <strong className="text-amber-300 font-semibold">【操作说明】</strong>：请<strong className="text-white underline underline-offset-2">长按下方图片</strong>选择<span className="text-emerald-400 font-bold">【保存图片】</span>存入手机相册；或点击微信右上角<strong className="text-sky-300">【···】</strong>选择<span className="text-sky-400 font-bold">【在浏览器打开】</span>以一键批量下载。
+            </p>
+
+            <div className="flex-1 overflow-auto rounded-xl border border-slate-800 bg-slate-950 p-2 flex items-center justify-center min-h-[220px]">
+              <img
+                src={wechatPreviewUrl}
+                alt="高清拼豆图纸"
+                className="max-h-[58vh] w-auto object-contain rounded-lg shadow-lg select-none"
+              />
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1 text-xs">
+              <span className="text-[11px] text-slate-400">💡 提示：长按上方图纸即可直接保存相册</span>
+              <button
+                onClick={() => setWechatPreviewUrl(null)}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl transition-all cursor-pointer text-xs"
+              >
+                完成
+              </button>
+            </div>
           </div>
         </div>
       )}

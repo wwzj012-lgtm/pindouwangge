@@ -6,17 +6,12 @@ import {
   Mail,
   Zap,
   KeyRound,
-  CheckCircle2,
   Crown,
   Store,
   LogOut,
   ShieldCheck,
   AlertTriangle,
-  Globe,
   HardDrive,
-  Copy,
-  Check,
-  ExternalLink,
   Info,
   Loader2,
   Image as ImageIcon,
@@ -62,17 +57,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [redeemMsg, setRedeemMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [structuredError, setStructuredError] = useState<LocalizedError | null>(null);
-
-  const [copiedMirrorUrl, setCopiedMirrorUrl] = useState<boolean>(false);
-
-  const mirrorDomain = 'pindouwangge.pages.dev';
-  const mirrorUrl = `https://${mirrorDomain}`;
-
-  const handleCopyMirrorUrl = () => {
-    navigator.clipboard.writeText(mirrorUrl);
-    setCopiedMirrorUrl(true);
-    setTimeout(() => setCopiedMirrorUrl(false), 2000);
-  };
 
   const parseAuthError = (error: unknown): LocalizedError => {
     const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
@@ -561,34 +545,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {structuredError.detail}
                   </p>
 
-                  {structuredError.isNetworkError && (
-                    <div className="pt-2 border-t border-rose-800/60 space-y-2 text-[11px]">
-                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 space-y-1">
-                        <div className="font-bold text-slate-200 flex items-center justify-between">
-                          <span className="flex items-center gap-1 text-sky-300">
-                            <Globe className="w-3.5 h-3.5 text-sky-400" />
-                            镜像分站
-                          </span>
-                          <button
-                            onClick={handleCopyMirrorUrl}
-                            className="text-[10px] text-sky-400 hover:underline flex items-center gap-1"
-                          >
-                            {copiedMirrorUrl ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                            <span>{copiedMirrorUrl ? '已复制网址' : '复制网址'}</span>
-                          </button>
-                        </div>
-                        <a
-                          href={mirrorUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-mono text-amber-300 font-bold underline flex items-center gap-1 hover:text-amber-200"
-                        >
-                          <span>{mirrorDomain}</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>

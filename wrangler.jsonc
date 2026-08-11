@@ -3,6 +3,9 @@
   "name": "stellabean",
   "compatibility_date": "2026-08-11",
   "pages_build_output_dir": "./dist",
+  "vars": {
+    "VITE_WORKER_API_URL": "https://stellabean.pages.dev"
+  },
   "services": [
     {
       "binding": "BACKEND_API",

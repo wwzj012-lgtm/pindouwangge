@@ -18,10 +18,12 @@ import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { BrandKey, ConvertSettings, DitherMode } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
+import type { ConversionDiagnostics } from '../utils/imagePipeline';
 
 interface SettingsPanelProps {
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
+  conversionDiagnostics: ConversionDiagnostics | null;
   onReconvert: () => void;
   hasImage: boolean;
   onOpenImageStudio: () => void;
@@ -33,6 +35,7 @@ interface SettingsPanelProps {
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   setSettings,
+  conversionDiagnostics,
   onReconvert,
   hasImage,
   onOpenImageStudio,
@@ -55,7 +58,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleResetFilters = () => {
     setSettings(prev => ({
       ...prev,
-      brightness: -15,
+      brightness: 0,
       contrast: 0,
       saturation: 0,
       transparentCutoff: 128,
@@ -109,6 +112,14 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
           <span className="text-[10px] bg-black/20 px-1.5 py-0.5 rounded">{isEn ? 'Open' : '打开'}</span>
         </button>
+      )}
+
+      {conversionDiagnostics && (
+        <div className="-mt-3 text-[10px] font-mono text-slate-400 flex flex-wrap gap-x-2 gap-y-0.5" title="Latest conversion diagnostics">
+          <span>V2 {conversionDiagnostics.pipeline.toUpperCase()}</span>
+          <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
+          <span>ΔE {conversionDiagnostics.meanDeltaE.toFixed(1)}</span>
+        </div>
       )}
 
       {/* Smart Bead Reducer Studio Trigger */}
@@ -434,15 +445,15 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="flex justify-between text-[11px]">
             <span className="text-slate-400">{isEn ? 'Brightness' : '亮度 (Brightness)'}</span>
             <span className="font-mono text-slate-200">
-              {settings.brightness + 15 > 0 ? `+${settings.brightness + 15}` : settings.brightness + 15}
+              {settings.brightness > 0 ? `+${settings.brightness}` : settings.brightness}
             </span>
           </div>
           <input
             type="range"
             min={-100}
             max={100}
-            value={settings.brightness + 15}
-            onChange={e => updateSetting('brightness', parseInt(e.target.value) - 15)}
+            value={settings.brightness}
+            onChange={e => updateSetting('brightness', parseInt(e.target.value))}
             className="w-full accent-rose-500 cursor-pointer"
           />
         </div>

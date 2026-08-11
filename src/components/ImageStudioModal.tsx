@@ -286,7 +286,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     } else if (preset === 'clean') {
       setLocalSettings(s => ({
         ...s,
-        brightness: -15,
+        brightness: 0,
         contrast: 0,
         saturation: 0,
         sharpening: 0,
@@ -529,6 +529,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                     <span>{conversionDiagnostics.effectiveColorCount} colors</span>
                     <span>{Math.round(conversionDiagnostics.confidence * 100)}%</span>
                     <span>bg -{conversionDiagnostics.backgroundPixelsRemoved}</span>
+                    <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
+                    <span>ΔE {conversionDiagnostics.meanDeltaE.toFixed(1)}</span>
                     {conversionDiagnostics.background && <span>bg {conversionDiagnostics.background.color}</span>}
                   </div>
                 )}
@@ -814,18 +816,18 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex justify-between text-[11px]">
                   <span className="text-slate-400">{isEn ? 'Brightness' : '亮度 (Brightness)'}</span>
                   <span className="font-mono text-slate-200">
-                    {localSettings.brightness + 15 > 0 ? `+${localSettings.brightness + 15}` : localSettings.brightness + 15}
+                    {localSettings.brightness > 0 ? `+${localSettings.brightness}` : localSettings.brightness}
                   </span>
                 </div>
                 <input
                   type="range"
                   min={-100}
                   max={100}
-                  value={localSettings.brightness + 15}
+                  value={localSettings.brightness}
                   onChange={e =>
                     setLocalSettings(s => ({
                       ...s,
-                      brightness: parseInt(e.target.value) - 15,
+                      brightness: parseInt(e.target.value),
                     }))
                   }
                   className="w-full accent-rose-500 cursor-pointer"

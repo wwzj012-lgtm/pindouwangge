@@ -201,6 +201,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   // Cell size base in pixels
   const baseCellSize = 20;
   const cellSize = baseCellSize * zoom;
+  const minSymbolCellSize = 18;
   const coordOffset = showCoordinates ? 28 : 0;
 
   // Refs for touch gesture sync
@@ -565,7 +566,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         } else if (colorId) {
           const bead = paletteMap.get(colorId);
           const colorHex = bead ? bead.hex : '#CCCCCC';
-          const symbolStr = showSymbols && bead ? (bead.code || bead.symbol) : null;
+          const symbolStr = showSymbols && cellSize >= minSymbolCellSize && bead
+            ? (bead.code || bead.symbol)
+            : null;
 
           const isDimmed = highlightColorId !== null && colorId !== highlightColorId;
 

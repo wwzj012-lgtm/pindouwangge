@@ -170,6 +170,10 @@ export function imageToGridWithDiagnostics(
         confidence: 0,
         backgroundPixelsRemoved: 0,
         background: null,
+        meanSourceLightness: 0,
+        meanMatchedLightness: 0,
+        lightnessBias: 0,
+        meanDeltaE: 0,
         matches: [],
       },
     };

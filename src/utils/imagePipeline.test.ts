@@ -335,3 +335,73 @@ describe('detail preservation and deterministic output', () => {
     expect(truncated.grid).toEqual([]);
   });
 });
+
+describe('image adjustment and lightness regression', () => {
+  const noBackgroundSettings = {
+    ...baseSettings,
+    pipelineOverride: 'photo' as const,
+    dither: 'none' as const,
+    chromaKeyColor: '#00FFFF',
+    chromaKeyTolerance: 0,
+    sharpening: 0,
+    outlineBoost: false,
+  };
+
+  it('treats brightness zero as neutral and changes lightness in the requested direction', () => {
+    const data = makePixels(1, 1, [128, 128, 128]);
+    const neutral = convertImageDataToGrid(data, 1, 1, { ...noBackgroundSettings, width: 1, height: 1, brightness: 0 }, palette);
+    const brighter = convertImageDataToGrid(data, 1, 1, { ...noBackgroundSettings, width: 1, height: 1, brightness: 20 }, palette);
+    const darker = convertImageDataToGrid(data, 1, 1, { ...noBackgroundSettings, width: 1, height: 1, brightness: -20 }, palette);
+
+    expect(neutral.diagnostics.matches[0][0]?.sourceLab).toEqual(rgbToLab([128, 128, 128]));
+    expect(neutral.diagnostics.meanSourceLightness).toBeCloseTo(neutral.diagnostics.meanMatchedLightness, 6);
+    expect(brighter.diagnostics.meanSourceLightness).toBeGreaterThan(neutral.diagnostics.meanSourceLightness);
+    expect(darker.diagnostics.meanSourceLightness).toBeLessThan(neutral.diagnostics.meanSourceLightness);
+  });
+
+  it('keeps sharpening at zero as an identity and sharpens high-contrast edges without overshoot', () => {
+    const data = makePixels(3, 3, [80, 80, 80]);
+    setPixel(data, 3, 1, 1, [220, 220, 220, 255]);
+    const neutral = convertImageDataToGrid(data, 3, 3, { ...noBackgroundSettings, width: 3, height: 3 }, palette);
+    const sharpened = convertImageDataToGrid(data, 3, 3, { ...noBackgroundSettings, width: 3, height: 3, sharpening: 100 }, palette);
+    const neutralCenter = neutral.diagnostics.matches[1][1]!;
+    const sharpenedCenter = sharpened.diagnostics.matches[1][1]!;
+
+    expect(neutralCenter.sourceLab).toEqual(rgbToLab([220, 220, 220]));
+    expect(sharpenedCenter.sourceLab[0]).toBeGreaterThan(neutralCenter.sourceLab[0]);
+    expect(sharpenedCenter.sourceLab[0]).toBeLessThanOrEqual(100);
+    expect(sharpenedCenter.matchingLab[0]).toBeLessThanOrEqual(100);
+  });
+
+  it('only boosts a strongly contrasted dark outline and leaves a flat dark shadow intact', () => {
+    const data = makePixels(5, 3, [65, 65, 65]);
+    for (let y = 0; y < 3; y += 1) {
+      setPixel(data, 5, 3, y, [20, 20, 20, 255]);
+      setPixel(data, 5, 4, y, [230, 230, 230, 255]);
+    }
+    const normal = convertImageDataToGrid(data, 5, 3, { ...noBackgroundSettings, width: 5, height: 3 }, palette);
+    const protectedResult = convertImageDataToGrid(data, 5, 3, { ...noBackgroundSettings, width: 5, height: 3, outlineBoost: true }, palette);
+
+    expect(protectedResult.diagnostics.matches[1][1]?.sourceLab[0]).toBeCloseTo(normal.diagnostics.matches[1][1]?.sourceLab[0] ?? 0, 6);
+    expect(protectedResult.diagnostics.matches[1][3]?.sourceLab[0]).toBeLessThan(normal.diagnostics.matches[1][3]?.sourceLab[0] ?? 0);
+  });
+
+  it('does not significantly darken a bright photo mapped to an exact available palette', () => {
+    const brightPalette: BeadColor[] = [
+      [255, 220, 220], [220, 255, 220], [220, 220, 255], [255, 255, 200], [250, 220, 255], [210, 245, 245],
+    ].map((rgb, index) => ({ id: `bright-${index}`, code: `P${index}`, name: `Bright ${index}`, hex: '#FFFFFF', rgb: rgb as [number, number, number], brand: 'MARD' }));
+    const data = makePixels(6, 1);
+    brightPalette.forEach((color, x) => setPixel(data, 6, x, 0, [...color.rgb, 255]));
+    const result = convertImageDataToGrid(data, 6, 1, {
+      ...noBackgroundSettings,
+      width: 6,
+      height: 1,
+      pipelineOverride: 'auto',
+    }, brightPalette);
+
+    expect(result.diagnostics.pipeline).toBe('photo');
+    expect(result.diagnostics.meanSourceLightness).toBeGreaterThan(75);
+    expect(Math.abs(result.diagnostics.lightnessBias)).toBeLessThanOrEqual(0.5);
+    expect(result.diagnostics.meanDeltaE).toBeCloseTo(0, 6);
+  });
+});

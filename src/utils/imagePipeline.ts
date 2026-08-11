@@ -37,6 +37,10 @@ export interface ConversionDiagnostics extends ImageClassification {
   pipelineOverridden: boolean;
   backgroundPixelsRemoved: number;
   background: BackgroundInference | null;
+  meanSourceLightness: number;
+  meanMatchedLightness: number;
+  lightnessBias: number;
+  meanDeltaE: number;
   matches: (ColorMatchDiagnostic | null)[][];
 }
 
@@ -465,6 +469,52 @@ function adjustColor(rgb: Rgb, settings: ConvertSettings): Rgb {
   return [clampByte(r), clampByte(g), clampByte(b)];
 }
 
+function edgeAwareEnhance(
+  pixels: GridPixel[],
+  width: number,
+  height: number,
+  settings: ConvertSettings,
+): void {
+  const sharpening = Math.max(0, Math.min(100, normalizedSetting(settings.sharpening)));
+  if (sharpening === 0 && !settings.outlineBoost) return;
+
+  const labs = pixels.map((pixel) => pixel.alpha === 0 ? null : rgbToLab([pixel.r, pixel.g, pixel.b]));
+  const enhanced: Array<Lab | null> = labs.map((lab) => lab ? [...lab] as Lab : null);
+  const amount = sharpening / 100 * 0.75;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const lab = labs[index];
+      if (!lab) continue;
+      const neighbours: Lab[] = [];
+      if (x > 0 && labs[index - 1]) neighbours.push(labs[index - 1]!);
+      if (x + 1 < width && labs[index + 1]) neighbours.push(labs[index + 1]!);
+      if (y > 0 && labs[index - width]) neighbours.push(labs[index - width]!);
+      if (y + 1 < height && labs[index + width]) neighbours.push(labs[index + width]!);
+      if (neighbours.length === 0) continue;
+
+      const neighbourMean = neighbours.reduce((sum, neighbour) => sum + neighbour[0], 0) / neighbours.length;
+      const gradient = neighbours.reduce((maximum, neighbour) => Math.max(maximum, Math.abs(lab[0] - neighbour[0])), 0);
+      const edgeFactor = clampUnit((gradient - 4) / 36);
+      const lightnessDelta = Math.max(-12, Math.min(12, (lab[0] - neighbourMean) * amount * edgeFactor));
+      const outlineDelta = settings.outlineBoost && lab[0] <= 58 && gradient >= 32
+        ? -Math.min(8, 2 + (gradient - 32) * 0.12)
+        : 0;
+      enhanced[index]![0] = Math.max(0, Math.min(100, lab[0] + lightnessDelta + outlineDelta));
+    }
+  }
+
+  for (let index = 0; index < pixels.length; index += 1) {
+    const lab = enhanced[index];
+    if (!lab) continue;
+    const rgb = labToRgb(lab);
+    pixels[index].r = clampByte(rgb[0]);
+    pixels[index].g = clampByte(rgb[1]);
+    pixels[index].b = clampByte(rgb[2]);
+  }
+}
+
 function selectPalette(pixels: GridPixel[], palette: PaletteEntry[], colorLimit: number, algorithm: 'cie76' | 'ciede2000'): PaletteEntry[] {
   const normalizedColorLimit = normalizeColorLimit(colorLimit);
   if (normalizedColorLimit === 0 || palette.length <= normalizedColorLimit) return palette;
@@ -505,6 +555,10 @@ function emptyResult(): ConversionResult {
       confidence: 0,
       backgroundPixelsRemoved: 0,
       background: null,
+      meanSourceLightness: 0,
+      meanMatchedLightness: 0,
+      lightnessBias: 0,
+      meanDeltaE: 0,
       matches: [],
     },
   };
@@ -581,6 +635,8 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     }
   }
 
+  edgeAwareEnhance(targetPixels, settings.width, settings.height, settings);
+
   const matchAlgorithm: 'cie76' | 'ciede2000' = pipeline === 'logo' ? 'cie76' : 'ciede2000';
   const selectedPalette = selectPalette(targetPixels, activePalette, settings.colorLimit, matchAlgorithm);
   const mappingPalette = selectedPalette.length > 0 ? selectedPalette : activePalette;
@@ -589,6 +645,10 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const working = targetPixels.map((pixel) => ({ ...pixel }));
   const grid = Array.from({ length: settings.height }, () => Array<string | null>(settings.width).fill(null));
   const matches = Array.from({ length: settings.height }, () => Array<ColorMatchDiagnostic | null>(settings.width).fill(null));
+  let sourceLightnessTotal = 0;
+  let matchedLightnessTotal = 0;
+  let deltaETotal = 0;
+  let matchedPixels = 0;
   const ditherStrength = clampUnit(settings.ditherStrength ?? 0.65);
   const useFloydSteinberg = pipeline === 'photo' && settings.dither === 'floyd' && ditherStrength > 0;
   for (let y = 0; y < settings.height; y += 1) {
@@ -606,6 +666,10 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       const matched = ranked[0].entry.color;
       grid[y][x] = matched.id;
       matches[y][x] = diagnostic;
+      sourceLightnessTotal += sourceLab[0];
+      matchedLightnessTotal += ranked[0].entry.lab[0];
+      deltaETotal += ranked[0].distance;
+      matchedPixels += 1;
       if (!useFloydSteinberg) continue;
       const error: Rgb = [pixel.r - matched.rgb[0], pixel.g - matched.rgb[1], pixel.b - matched.rgb[2]];
       const diffuse = (nextX: number, nextY: number, weight: number) => {
@@ -636,6 +700,10 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       confidence: detected.confidence,
       backgroundPixelsRemoved: backgroundResult.mask.reduce((sum, value) => sum + value, 0),
       background: backgroundResult.inference,
+      meanSourceLightness: matchedPixels > 0 ? sourceLightnessTotal / matchedPixels : 0,
+      meanMatchedLightness: matchedPixels > 0 ? matchedLightnessTotal / matchedPixels : 0,
+      lightnessBias: matchedPixels > 0 ? (matchedLightnessTotal - sourceLightnessTotal) / matchedPixels : 0,
+      meanDeltaE: matchedPixels > 0 ? deltaETotal / matchedPixels : 0,
       matches,
     },
   };

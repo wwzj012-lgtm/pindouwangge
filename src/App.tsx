@@ -13,7 +13,8 @@ import {
 } from './types';
 import { BRAND_PALETTES } from './data/palettes';
 import { SAMPLE_IMAGES } from './data/samples';
-import { imageToGrid } from './utils/colorUtils';
+import { imageToGridWithDiagnostics } from './utils/colorUtils';
+import type { ConversionDiagnostics } from './utils/imagePipeline';
 import { smartCropSubject } from './utils/cropUtils';
 
 import { Header } from './components/Header';
@@ -41,6 +42,7 @@ export default function App() {
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
   const [isConverting, setIsConverting] = useState<boolean>(false);
+  const [conversionDiagnostics, setConversionDiagnostics] = useState<ConversionDiagnostics | null>(null);
 
   // Conversion Settings
   const [settings, setSettings] = useState<ConvertSettings>({
@@ -50,7 +52,7 @@ export default function App() {
     brand: 'MARD',
     dither: 'none',
     colorLimit: 0,
-    brightness: -15,
+    brightness: 0,
     contrast: 0,
     saturation: 0,
     transparentCutoff: 128,
@@ -155,9 +157,11 @@ export default function App() {
         }
 
         const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
-        const newGrid = imageToGrid(img, effectiveSettings, currentPalette);
+        const conversion = imageToGridWithDiagnostics(img, effectiveSettings, currentPalette);
+        const newGrid = conversion.grid;
 
         setGrid(newGrid);
+        setConversionDiagnostics(conversion.diagnostics);
         pushHistory(newGrid);
         setIsConverting(false);
       }, 50);
@@ -676,6 +680,7 @@ export default function App() {
           <SettingsPanel
             settings={settings}
             setSettings={setSettings}
+            conversionDiagnostics={conversionDiagnostics}
             onReconvert={handleReconvert}
             hasImage={sourceImage !== null}
             onOpenImageStudio={() => {
@@ -919,4 +924,3 @@ export default function App() {
     </div>
   );
 }
-

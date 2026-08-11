@@ -4,6 +4,7 @@ recovery/
 build/
 dist/
 coverage/
+artifacts/
 .DS_Store
 *.log
 .vite-dev-*.log

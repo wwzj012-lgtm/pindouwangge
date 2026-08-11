@@ -12,6 +12,20 @@ export interface ApiResult<T> {
 }
 
 const SESSION_TOKEN_KEY = 'beadgrid_worker_jwt';
+let adminApiSecret: string | null = null;
+
+export function setAdminApiSecret(secret: string): void {
+  const normalizedSecret = secret.trim();
+  adminApiSecret = normalizedSecret || null;
+}
+
+export function clearAdminApiSecret(): void {
+  adminApiSecret = null;
+}
+
+export function hasAdminApiSecret(): boolean {
+  return adminApiSecret !== null;
+}
 
 export function setApiToken(token: string): void {
   localStorage.setItem(SESSION_TOKEN_KEY, token);
@@ -63,6 +77,9 @@ async function apiRequest<T>(
     const headers = new Headers({ Accept: 'application/json' });
     const token = getApiToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
+    if (path.startsWith('/api/admin/') && adminApiSecret) {
+      headers.set('X-Worker-Secret', adminApiSecret);
+    }
     if (method === 'POST') headers.set('Content-Type', 'application/json');
 
     const response = await fetch(apiUrl(path, params), {

@@ -123,6 +123,9 @@ async function run() {
   const brightCodes = ['M01', 'M03', 'M04', 'M11', 'M12', 'M32', 'M33'];
   const individualDark = Object.fromEntries(darkCodes.map((code) => [code, ratio(counts.get(code) ?? 0, totalCells)]));
   const report = {
+    sourceSize: { width: decoded.info.width, height: decoded.info.height },
+    gridSize: { width: gridWidth, height: gridHeight, cells: gridWidth * gridHeight },
+    previewSize: { width: previewWidth, height: previewHeight, scale: previewScale },
     detectedPipeline: result.diagnostics.detectedPipeline,
     effectivePipeline: result.diagnostics.pipeline,
     effectiveColorCount: result.diagnostics.effectiveColorCount,

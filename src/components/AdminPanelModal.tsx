@@ -30,7 +30,13 @@ import {
   Clock,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { apiGet, apiPost } from '../utils/api';
+import {
+  apiGet,
+  apiPost,
+  clearAdminApiSecret,
+  hasAdminApiSecret,
+  setAdminApiSecret,
+} from '../utils/api';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
   UserProfile,
@@ -74,6 +80,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [codesList, setCodesList] = useState<VipCodeData[]>([]);
   const [auditLogsList, setAuditLogsList] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
+  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
+  const [adminSecretInput, setAdminSecretInput] = useState<string>('');
+  const [adminSecretError, setAdminSecretError] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUserUids, setSelectedUserUids] = useState<string[]>([]);
 
@@ -130,12 +139,29 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string>('');
 
   useEffect(() => {
-    if (isOpen && isAdmin) {
-      loadData();
+    if (!isOpen || !isAdmin) {
+      clearAdminApiSecret();
+      setIsAdminUnlocked(false);
+      setAdminSecretInput('');
+      setAdminSecretError('');
+      return;
+    }
+
+    const unlocked = hasAdminApiSecret();
+    setIsAdminUnlocked(unlocked);
+    setAdminSecretError('');
+    if (unlocked) {
+      void loadData();
     }
   }, [isOpen, isAdmin]);
 
-  const loadData = async () => {
+  useEffect(() => {
+    return () => {
+      clearAdminApiSecret();
+    };
+  }, []);
+
+  const loadData = async (): Promise<boolean> => {
     setLoading(true);
     try {
       const [usersRes, codesRes, logsRes] = await Promise.all([
@@ -143,6 +169,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         apiGet<VipCodeData[]>('/api/admin/codes'),
         apiGet<AuditLog[]>('/api/admin/audit-logs'),
       ]);
+      if ([usersRes, codesRes, logsRes].some(result => result.status === 401)) {
+        clearAdminApiSecret();
+        setIsAdminUnlocked(false);
+        setAdminSecretError('管理员密钥无效或登录状态已失效，请重试');
+        return false;
+      }
       if (!usersRes.ok || !codesRes.ok || !logsRes.ok) {
         throw new Error(usersRes.error ?? codesRes.error ?? logsRes.error ?? '后台数据加载失败');
       }
@@ -154,11 +186,40 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       setCodesList(cList);
       lList.sort((a, b) => b.timestamp - a.timestamp);
       setAuditLogsList(lList);
+      setAdminSecretError('');
+      return true;
     } catch (err) {
       console.error('Failed to load admin data:', err);
+      setAdminSecretError(err instanceof Error ? err.message : '后台数据加载失败，请重试');
+      return false;
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAdminUnlock = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const secret = adminSecretInput.trim();
+    if (!secret) {
+      setAdminSecretError('请输入管理员密钥');
+      return;
+    }
+
+    setAdminSecretError('');
+    setAdminApiSecret(secret);
+    const loaded = await loadData();
+    if (loaded) {
+      setIsAdminUnlocked(true);
+      setAdminSecretInput('');
+    }
+  };
+
+  const handleAdminClose = () => {
+    clearAdminApiSecret();
+    setIsAdminUnlocked(false);
+    setAdminSecretInput('');
+    setAdminSecretError('');
+    onClose();
   };
 
   const handleSetUserMemberType = async (user: UserProfile, targetType: 0 | 1 | 2) => {
@@ -628,6 +689,66 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
   if (!isOpen || !isAdmin) return null;
 
+  if (!isAdminUnlocked) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+        <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+          <div className="px-5 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-rose-500 to-indigo-600 flex items-center justify-center text-white shadow-md">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-white">后台控制中心</h2>
+                <p className="text-xs text-slate-400">请输入管理员密钥解锁</p>
+              </div>
+            </div>
+            <button
+              onClick={handleAdminClose}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+              aria-label="关闭后台"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <form onSubmit={handleAdminUnlock} className="p-5 space-y-4">
+            <label className="block">
+              <span className="mb-2 block text-sm font-medium text-slate-200">管理员密钥</span>
+              <div className="relative">
+                <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                <input
+                  type="password"
+                  value={adminSecretInput}
+                  onChange={event => setAdminSecretInput(event.target.value)}
+                  placeholder="输入后台访问密钥"
+                  autoComplete="off"
+                  autoFocus
+                  className="w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-3 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-indigo-500"
+                  disabled={loading}
+                />
+              </div>
+            </label>
+            {adminSecretError && (
+              <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
+                <span>{adminSecretError}</span>
+              </div>
+            )}
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+              {loading ? '验证中...' : '解锁后台'}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   const filteredUsers = usersList.filter(u => {
     const matchesSearch =
       (u.displayName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -684,7 +805,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button
-              onClick={onClose}
+              onClick={handleAdminClose}
               className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
             >
               <X className="w-5 h-5" />

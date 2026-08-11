@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Global sleek dark scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(168, 85, 247, 0.6);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Firefox scrollbar support */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.35) rgba(15, 23, 42, 0.5);
+}
+
+/* Bead Grid Symbol Adaptive Font Clamping (0.34rem ~ 0.46rem) */
+.bead-symbol-adaptive {
+  font-size: clamp(0.34rem, 1.1vw, 0.46rem);
+  line-height: 1;
+}
+
+/* Mobile & Tablet 48px Minimum Touch Target Utilities */
+@media (max-width: 1023px) {
+  .touch-target-min {
+    min-height: 48px;
+    min-width: 48px;
+  }
+}
+
+/* Touch Active Feedback without Lingering Hover States */
+@media (hover: none) {
+  .touch-feedback:active {
+    transform: scale(0.96);
+    filter: brightness(0.9);
+  }
+}
+

@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FAF8FF"/>
+      <stop offset="100%" stop-color="#F2EEFC"/>
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#8B5CF6" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="500" height="500" rx="32" fill="url(#bgGrad)"/>
+
+  <!-- Icon Container Box -->
+  <g transform="translate(100, 30)">
+    <rect width="300" height="300" rx="64" fill="#FFFFFF" stroke="#B19CD9" stroke-width="12" filter="url(#softShadow)"/>
+    
+    <!-- Grid Lines -->
+    <g stroke="#E5E0F2" stroke-width="4">
+      <!-- Horizontal lines -->
+      <line x1="30" y1="50" x2="270" y2="50"/>
+      <line x1="30" y1="100" x2="270" y2="100"/>
+      <line x1="30" y1="150" x2="270" y2="150"/>
+      <line x1="30" y1="200" x2="270" y2="200"/>
+      <line x1="30" y1="250" x2="270" y2="250"/>
+
+      <!-- Vertical lines -->
+      <line x1="50" y1="30" x2="50" y2="270"/>
+      <line x1="100" y1="30" x2="100" y2="270"/>
+      <line x1="150" y1="30" x2="150" y2="270"/>
+      <line x1="200" y1="30" x2="200" y2="270"/>
+      <line x1="250" y1="30" x2="250" y2="270"/>
+    </g>
+
+    <!-- Star Dashed Outline -->
+    <polygon points="150,50 180,110 250,110 195,155 215,220 150,180 85,220 105,155 50,110 120,110" 
+             fill="none" stroke="#B19CD9" stroke-width="5" stroke-dasharray="10 8" stroke-linejoin="round"/>
+
+    <!-- Beads Matrix -->
+    <!-- Top Row -->
+    <circle cx="100" cy="50" r="16" fill="#C4B5FD" stroke="#A78BFA" stroke-width="3"/>
+    <circle cx="150" cy="50" r="16" fill="#FFFFFF" stroke="#93C5FD" stroke-width="3"/>
+    <circle cx="200" cy="50" r="16" fill="#FDE68A" stroke="#F59E0B" stroke-width="3"/>
+
+    <!-- 2nd Row -->
+    <circle cx="50" cy="100" r="16" fill="#DDD6FE" stroke="#A78BFA" stroke-width="3"/>
+    <circle cx="100" cy="100" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+    <circle cx="150" cy="100" r="16" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="3"/>
+    <circle cx="200" cy="100" r="16" fill="#BAE6FD" stroke="#38BDF8" stroke-width="3"/>
+    <circle cx="250" cy="100" r="16" fill="#C4B5FD" stroke="#8B5CF6" stroke-width="3"/>
+
+    <!-- 3rd Row -->
+    <circle cx="50" cy="150" r="16" fill="#FFFFFF" stroke="#A78BFA" stroke-width="3"/>
+    <circle cx="100" cy="150" r="16" fill="#C4B5FD" stroke="#8B5CF6" stroke-width="3"/>
+    <circle cx="150" cy="150" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+    <circle cx="200" cy="150" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+    <circle cx="250" cy="150" r="16" fill="#FFFFFF" stroke="#8B5CF6" stroke-width="3"/>
+
+    <!-- 4th Row -->
+    <circle cx="50" cy="200" r="16" fill="#BAE6FD" stroke="#0284C7" stroke-width="3"/>
+    <circle cx="100" cy="200" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+    <circle cx="150" cy="200" r="16" fill="#C4B5FD" stroke="#7C3AED" stroke-width="3"/>
+    <circle cx="200" cy="200" r="16" fill="#DDD6FE" stroke="#7C3AED" stroke-width="3"/>
+    <circle cx="250" cy="200" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+
+    <!-- 5th Row -->
+    <circle cx="100" cy="250" r="16" fill="#BAE6FD" stroke="#0284C7" stroke-width="3"/>
+    <circle cx="150" cy="250" r="16" fill="#FEF08A" stroke="#EAB308" stroke-width="3"/>
+    <circle cx="200" cy="250" r="16" fill="#FFFFFF" stroke="#94A3B8" stroke-width="3"/>
+    <circle cx="250" cy="250" r="16" fill="#BAE6FD" stroke="#0284C7" stroke-width="3"/>
+  </g>
+
+  <!-- Typography Label: 豆织星格 -->
+  <text x="250" y="430" font-family="'PingFang SC', 'Microsoft YaHei', 'SimHei', sans-serif" font-size="64" font-weight="bold" fill="#7E68A8" text-anchor="middle" letter-spacing="8">豆织星格</text>
+</svg>

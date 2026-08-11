@@ -1,0 +1,6 @@
+{
+  "name": "豆织星格",
+  "description": "【豆织星格】专业的拼豆(Perler/Artkal/Mard)网格转换与像素编辑器，支持图像转拼豆图纸、色号精准匹配、豆数统计、自定义色板与高清图纸导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

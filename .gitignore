@@ -1,0 +1,11 @@
+node_modules/
+.pnpm-store/
+recovery/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.vite-dev-*.log
+.env*
+!.env.example

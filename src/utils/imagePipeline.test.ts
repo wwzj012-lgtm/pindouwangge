@@ -1,0 +1,337 @@
+import { describe, expect, it } from 'vitest';
+import type { BeadColor, ConvertSettings } from '../types';
+import {
+  classifyImageColors,
+  convertImageDataToGrid,
+  deltaE2000,
+  edgeConnectedBackgroundMask,
+  inferEdgeBackground,
+  rgbToLab,
+} from './imagePipeline';
+
+const palette: BeadColor[] = [
+  { id: 'black', code: 'B', name: 'Black', hex: '#000000', rgb: [0, 0, 0], brand: 'MARD' },
+  { id: 'gray', code: 'N', name: 'Gray', hex: '#808080', rgb: [128, 128, 128], brand: 'MARD' },
+  { id: 'white', code: 'W', name: 'White', hex: '#FFFFFF', rgb: [255, 255, 255], brand: 'MARD' },
+  { id: 'red', code: 'R', name: 'Red', hex: '#FF0000', rgb: [255, 0, 0], brand: 'MARD' },
+  { id: 'green', code: 'G', name: 'Green', hex: '#00FF00', rgb: [0, 255, 0], brand: 'MARD' },
+  { id: 'blue', code: 'U', name: 'Blue', hex: '#0000FF', rgb: [0, 0, 255], brand: 'MARD' },
+  { id: 'yellow', code: 'Y', name: 'Yellow', hex: '#FFFF00', rgb: [255, 255, 0], brand: 'MARD' },
+];
+
+const baseSettings: ConvertSettings = {
+  width: 5,
+  height: 5,
+  keepAspectRatio: true,
+  brand: 'MARD',
+  dither: 'floyd',
+  colorLimit: 0,
+  brightness: 0,
+  contrast: 0,
+  saturation: 0,
+  transparentCutoff: 16,
+  boardSize: 29,
+  colorMatchAlgo: 'ciede2000',
+  sharpening: 0,
+  outlineBoost: false,
+  chromaKeyColor: null,
+  chromaKeyTolerance: 20,
+};
+
+function makePixels(width: number, height: number, color: [number, number, number] = [255, 255, 255]): Uint8ClampedArray {
+  const data = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) data.set([...color, 255], index * 4);
+  return data;
+}
+
+function setPixel(data: Uint8ClampedArray, width: number, x: number, y: number, rgba: [number, number, number, number]): void {
+  data.set(rgba, (y * width + x) * 4);
+}
+
+function fromAscii(lines: string[]): Uint8ClampedArray {
+  const width = lines[0].length;
+  const data = makePixels(width, lines.length);
+  lines.forEach((line, y) => [...line].forEach((cell, x) => {
+    if (cell === '#') setPixel(data, width, x, y, [0, 0, 0, 255]);
+  }));
+  return data;
+}
+
+describe('CIEDE2000', () => {
+  const vectors: Array<[[number, number, number], [number, number, number], number]> = [
+    [[50, 2.6772, -79.7751], [50, 0, -82.7485], 2.0425],
+    [[50, 3.1571, -77.2803], [50, 0, -82.7485], 2.8615],
+    [[50, 2.8361, -74.0200], [50, 0, -82.7485], 3.4412],
+    [[50, -1.3802, -84.2814], [50, 0, -82.7485], 1.0],
+    [[50, -1.1848, -84.8006], [50, 0, -82.7485], 1.0],
+    [[50, 2.49, -0.001], [50, -2.49, 0.0009], 7.1792],
+  ];
+
+  it.each(vectors)('matches published reference %j to %j', (first, second, expected) => {
+    expect(deltaE2000(first, second)).toBeCloseTo(expected, 4);
+  });
+});
+
+describe('pipeline classification and palette matching', () => {
+  it('routes five effective colours to logo and six to photo', () => {
+    const five = makePixels(5, 1);
+    const six = makePixels(6, 1);
+    const colors: Array<[number, number, number]> = [
+      [0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
+    ];
+    colors.slice(0, 5).forEach((rgb, x) => setPixel(five, 5, x, 0, [...rgb, 255]));
+    colors.forEach((rgb, x) => setPixel(six, 6, x, 0, [...rgb, 255]));
+    expect(classifyImageColors(five, 5, 1).pipeline).toBe('logo');
+    expect(classifyImageColors(six, 6, 1).pipeline).toBe('photo');
+  });
+
+  it('maps each palette RGB back to its own bead id', () => {
+    for (const color of palette) {
+      const data = makePixels(1, 1, color.rgb);
+      const result = convertImageDataToGrid(data, 1, 1, { ...baseSettings, width: 1, height: 1 }, palette);
+      expect(result.grid[0][0]).toBe(color.id);
+    }
+  });
+
+  it('keeps neutral input neutral rather than introducing coloured bead noise', () => {
+    const data = makePixels(3, 1);
+    setPixel(data, 3, 0, 0, [0, 0, 0, 255]);
+    setPixel(data, 3, 1, 0, [128, 128, 128, 255]);
+    const result = convertImageDataToGrid(data, 3, 1, { ...baseSettings, width: 3, height: 1 }, palette);
+    expect(result.grid[0]).toEqual(['black', 'gray', 'white']);
+  });
+});
+
+describe('topology-preserving background removal', () => {
+  it('reports auto and manual edge-background decisions without treating either as a global chroma key', () => {
+    const data = makePixels(5, 5, [255, 255, 255]);
+    setPixel(data, 5, 2, 2, [0, 0, 0, 255]);
+
+    const auto = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: null }, palette);
+    const manual = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: '#FFFFFF' }, palette);
+
+    expect(auto.diagnostics.background?.source).toBe('auto');
+    expect(manual.diagnostics.background).toMatchObject({ source: 'manual', color: '#FFFFFF' });
+    expect(auto.diagnostics.backgroundPixelsRemoved).toBe(24);
+    expect(manual.diagnostics.backgroundPixelsRemoved).toBe(24);
+    expect(auto.grid[2][2]).toBe('black');
+    expect(manual.grid[2][2]).toBe('black');
+  });
+
+  it('removes the outer white background while retaining the hole in a black ring', () => {
+    const data = fromAscii([
+      '.......',
+      '.#####.',
+      '.#...#.',
+      '.#...#.',
+      '.#...#.',
+      '.#####.',
+      '.......',
+    ]);
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, '#FFFFFF', 20, 16);
+    expect(mask[0]).toBe(1);
+    expect(mask[3 * 7 + 3]).toBe(0);
+  });
+
+  it.each([
+    ['O', ['.###.', '#...#', '#...#', '#...#', '.###.']],
+    ['A', ['.###.', '#...#', '#####', '#...#', '#...#']],
+    ['B', ['####.', '#...#', '####.', '#...#', '####.']],
+    ['P', ['####.', '#...#', '####.', '#....', '#....']],
+    ['R', ['####.', '#...#', '####.', '#.#..', '#..#.']],
+  ])('preserves enclosed white counters in %s', (_letter, glyph) => {
+    const padded = ['.......', ...glyph.map((row) => `.${row}.`), '.......'];
+    const data = fromAscii(padded);
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, '#FFFFFF', 20, 16);
+    expect(mask[0]).toBe(1);
+    expect(mask[2 * 7 + 3]).toBe(0);
+  });
+
+  it('keeps a non-edge foreground region even when it is the exact background colour', () => {
+    const data = fromAscii([
+      '.......',
+      '.#####.',
+      '.#...#.',
+      '.#...#.',
+      '.#...#.',
+      '.#####.',
+      '.......',
+    ]);
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, '#FFFFFF', 20, 16);
+    expect(mask[3 * 7 + 3]).toBe(0);
+  });
+
+  it('honours source alpha and never treats transparent pixels as chroma-key candidates', () => {
+    const data = makePixels(5, 5, [255, 255, 255]);
+    for (let y = 0; y < 5; y += 1) {
+      for (let x = 0; x < 5; x += 1) {
+        if (x === 0 || x === 4 || y === 0 || y === 4) setPixel(data, 5, x, y, [255, 255, 255, 0]);
+      }
+    }
+    const mask = edgeConnectedBackgroundMask(data, 5, 5, '#FFFFFF', 20, 16);
+    expect(mask[0]).toBe(0);
+    expect(mask[2 * 5 + 2]).toBe(0);
+  });
+
+  it('does not leak through diagonal-only contact', () => {
+    const data = makePixels(8, 8, [0, 0, 0]);
+    [[0, 0], [1, 0], [0, 1], [0, 2], [0, 3]].forEach(([x, y]) => setPixel(data, 8, x, y, [255, 255, 255, 255]));
+    // (2, 1) only touches the removed component diagonally via (1, 0).
+    setPixel(data, 8, 2, 1, [255, 255, 255, 255]);
+    const mask = edgeConnectedBackgroundMask(data, 8, 8, '#FFFFFF', 20, 16);
+    expect(mask[0]).toBe(1);
+    expect(mask[1 * 8 + 2]).toBe(0);
+  });
+
+  it('keeps a foreground region that touches the edge when its colour differs from the background', () => {
+    const data = makePixels(7, 7, [255, 255, 255]);
+    [[0, 2], [0, 3], [0, 4], [1, 3]].forEach(([x, y]) => setPixel(data, 7, x, y, [0, 0, 0, 255]));
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, '#FFFFFF', 20, 16);
+    expect(mask[0]).toBe(1);
+    expect(mask[3 * 7]).toBe(0);
+  });
+
+  it('infers a JPEG-like edge background in Lab space without deleting the different-colour subject', () => {
+    const data = makePixels(7, 7, [251, 251, 249]);
+    const edgeColours: Array<[number, number, number]> = [[248, 249, 247], [252, 251, 250], [250, 252, 249], [253, 252, 251]];
+    let colourIndex = 0;
+    for (let y = 0; y < 7; y += 1) {
+      for (let x = 0; x < 7; x += 1) {
+        if (x === 0 || x === 6 || y === 0 || y === 6) {
+          const rgb = edgeColours[colourIndex % edgeColours.length];
+          setPixel(data, 7, x, y, [...rgb, 255]);
+          colourIndex += 1;
+        }
+      }
+    }
+    setPixel(data, 7, 3, 3, [0, 0, 0, 255]);
+    const inferred = inferEdgeBackground(data, 7, 7, 16);
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, null, 20, 16);
+    expect(inferred?.source).toBe('auto');
+    expect(inferred?.confidence).toBeGreaterThan(0.7);
+    expect(mask[0]).toBe(1);
+    expect(mask[3 * 7 + 3]).toBe(0);
+  });
+});
+
+describe('detail preservation and deterministic output', () => {
+  it('keeps one-pixel line endpoints and closed outlines in logo mode', () => {
+    const line = makePixels(5, 5);
+    for (let x = 1; x <= 3; x += 1) setPixel(line, 5, x, 2, [0, 0, 0, 255]);
+    const result = convertImageDataToGrid(line, 5, 5, baseSettings, palette);
+    expect(result.diagnostics.pipeline).toBe('logo');
+    expect(result.grid[2][1]).toBe('black');
+    expect(result.grid[2][3]).toBe('black');
+
+    const outline = fromAscii(['.....', '.###.', '.#.#.', '.###.', '.....']);
+    const outlined = convertImageDataToGrid(outline, 5, 5, baseSettings, palette);
+    expect(outlined.grid[1][1]).toBe('black');
+    expect(outlined.grid[3][3]).toBe('black');
+  });
+
+  it('disables dithering for logo input', () => {
+    const data = makePixels(5, 5);
+    setPixel(data, 5, 2, 2, [0, 0, 0, 255]);
+    const dithered = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: '#FFFFFF', dither: 'floyd' }, palette);
+    const flat = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: '#FFFFFF', dither: 'none' }, palette);
+    expect(dithered.diagnostics.pipeline).toBe('logo');
+    expect(dithered.grid).toEqual(flat.grid);
+  });
+
+  it('uses the photo pipeline deterministically and retains transparent grid cells', () => {
+    const data = makePixels(6, 6);
+    const colors: Array<[number, number, number]> = [
+      [0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
+    ];
+    for (let index = 0; index < 36; index += 1) {
+      const rgb = colors[index % colors.length];
+      data.set([...rgb, 255], index * 4);
+    }
+    setPixel(data, 6, 2, 2, [255, 255, 255, 0]);
+    const settings = { ...baseSettings, width: 6, height: 6, dither: 'floyd' as const };
+    const first = convertImageDataToGrid(data, 6, 6, settings, palette);
+    const second = convertImageDataToGrid(data, 6, 6, settings, palette);
+    expect(first.diagnostics.pipeline).toBe('photo');
+    expect(first.grid).toEqual(second.grid);
+    expect(first.grid[2][2]).toBeNull();
+  });
+
+  it('exposes first and second palette candidates for each non-transparent output cell', () => {
+    const data = makePixels(1, 1, [255, 0, 0]);
+    const result = convertImageDataToGrid(data, 1, 1, { ...baseSettings, width: 1, height: 1, pipelineOverride: 'photo', dither: 'none' }, palette);
+    const match = result.diagnostics.matches[0][0];
+    expect(match).not.toBeNull();
+    expect(match?.sourceLab).toHaveLength(3);
+    expect(match?.matchingLab).toEqual(match?.sourceLab);
+    expect(match?.matchedColorId).toBe('red');
+    expect(match?.matchedColorCode).toBe('R');
+    expect(match?.deltaE).toBeCloseTo(0, 6);
+    expect(match?.secondColorId).not.toBeNull();
+    expect(match?.secondDeltaE).toBeGreaterThan(match?.deltaE ?? 0);
+    expect(match?.deltaEDifference).toBeGreaterThan(0);
+  });
+
+  it('honours a manual pipeline override while retaining automatic classification diagnostics', () => {
+    const data = makePixels(5, 1);
+    const colors: Array<[number, number, number]> = [[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255]];
+    colors.forEach((rgb, x) => setPixel(data, 5, x, 0, [...rgb, 255]));
+    const result = convertImageDataToGrid(data, 5, 1, { ...baseSettings, width: 5, height: 1, pipelineOverride: 'photo' }, palette);
+    expect(result.diagnostics.detectedPipeline).toBe('logo');
+    expect(result.diagnostics.pipeline).toBe('photo');
+    expect(result.diagnostics.pipelineOverridden).toBe(true);
+    expect(result.diagnostics.effectiveColorCount).toBe(5);
+  });
+
+  it('treats zero Floyd-Steinberg strength exactly like no dithering', () => {
+    const data = makePixels(6, 6);
+    const colors: Array<[number, number, number]> = [[0, 0, 0], [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0]];
+    for (let index = 0; index < 36; index += 1) data.set([...colors[index % colors.length], 255], index * 4);
+    const floydZero = convertImageDataToGrid(data, 6, 6, { ...baseSettings, width: 6, height: 6, dither: 'floyd', ditherStrength: 0 }, palette);
+    const none = convertImageDataToGrid(data, 6, 6, { ...baseSettings, width: 6, height: 6, dither: 'none' }, palette);
+    expect(floydZero.diagnostics.pipeline).toBe('photo');
+    expect(floydZero.grid).toEqual(none.grid);
+  });
+
+  it('keeps source diagnostics anchored to the adjusted sample after error diffusion', () => {
+    const data = makePixels(6, 1);
+    const colors: Array<[number, number, number]> = [
+      [70, 70, 70], [70, 70, 70], [255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 255, 0],
+    ];
+    colors.forEach((rgb, x) => setPixel(data, 6, x, 0, [...rgb, 255]));
+    const result = convertImageDataToGrid(data, 6, 1, {
+      ...baseSettings,
+      width: 6,
+      height: 1,
+      pipelineOverride: 'photo',
+      dither: 'floyd',
+      ditherStrength: 1,
+    }, palette);
+    const first = result.diagnostics.matches[0][0];
+    const second = result.diagnostics.matches[0][1];
+
+    expect(first?.sourceLab).toEqual(rgbToLab([70, 70, 70]));
+    expect(second?.sourceLab).toEqual(rgbToLab([70, 70, 70]));
+    expect(second?.matchingLab).not.toEqual(second?.sourceLab);
+  });
+
+  it('limits the candidate palette before final mapping', () => {
+    const data = makePixels(2, 1);
+    setPixel(data, 2, 0, 0, [255, 0, 0, 255]);
+    setPixel(data, 2, 1, 0, [0, 255, 0, 255]);
+    const result = convertImageDataToGrid(data, 2, 1, { ...baseSettings, width: 2, height: 1, colorLimit: 1, dither: 'none' }, palette);
+    expect(new Set(result.grid[0].filter((color): color is string => color !== null))).toEqual(new Set(['red']));
+  });
+
+  it('normalizes fractional color limits and rejects empty or truncated image input safely', () => {
+    const data = makePixels(2, 1);
+    setPixel(data, 2, 0, 0, [255, 0, 0, 255]);
+    setPixel(data, 2, 1, 0, [0, 255, 0, 255]);
+    const limited = convertImageDataToGrid(data, 2, 1, { ...baseSettings, width: 2, height: 1, colorLimit: 0.5 }, palette);
+    const emptyPalette = convertImageDataToGrid(data, 2, 1, { ...baseSettings, width: 2, height: 1 }, []);
+    const truncated = convertImageDataToGrid(new Uint8ClampedArray(0), 1, 1, { ...baseSettings, width: 1, height: 1 }, palette);
+
+    expect(limited.grid[0].every((color) => color !== null)).toBe(true);
+    expect(emptyPalette.grid).toEqual([]);
+    expect(truncated.grid).toEqual([]);
+  });
+});

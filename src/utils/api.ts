@@ -9,7 +9,30 @@ export interface ApiResult<T> {
   status: number;
   data?: T;
   error?: string;
+  isNetworkError?: boolean;
 }
+
+export interface ApiRequestOptions {
+  timeoutMs?: number;
+  networkRetries?: number;
+  retryDelayMs?: number;
+}
+
+export const DEFAULT_API_TIMEOUT_MS = 8_000;
+export const AUTH_API_TIMEOUT_MS = 15_000;
+export const HEALTH_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
+  networkRetries: 1,
+  retryDelayMs: 300,
+};
+export const SIGNIN_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
+  timeoutMs: AUTH_API_TIMEOUT_MS,
+  networkRetries: 1,
+  retryDelayMs: 400,
+};
+export const SIGNUP_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
+  timeoutMs: AUTH_API_TIMEOUT_MS,
+  networkRetries: 0,
+};
 
 const SESSION_TOKEN_KEY = 'beadgrid_worker_jwt';
 let adminApiSecret: string | null = null;
@@ -27,16 +50,20 @@ export function hasAdminApiSecret(): boolean {
   return adminApiSecret !== null;
 }
 
+function getLocalStorage(): Storage | null {
+  return typeof localStorage === 'undefined' ? null : localStorage;
+}
+
 export function setApiToken(token: string): void {
-  localStorage.setItem(SESSION_TOKEN_KEY, token);
+  getLocalStorage()?.setItem(SESSION_TOKEN_KEY, token);
 }
 
 export function clearApiToken(): void {
-  localStorage.removeItem(SESSION_TOKEN_KEY);
+  getLocalStorage()?.removeItem(SESSION_TOKEN_KEY);
 }
 
 export function getApiToken(): string | null {
-  return localStorage.getItem(SESSION_TOKEN_KEY);
+  return getLocalStorage()?.getItem(SESSION_TOKEN_KEY) ?? null;
 }
 
 function apiBaseUrl(): string {
@@ -63,26 +90,74 @@ function isApiResp<T>(value: unknown): value is ApiResp<T> {
   );
 }
 
-async function apiRequest<T>(
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function isFetchNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /failed to fetch|networkerror|network request failed|load failed/i.test(error.message);
+}
+
+function networkErrorMessage(error: unknown): string {
+  if (isAbortError(error)) return '连接超时，请检查网络后重试';
+  if (isFetchNetworkError(error)) return '无法连接后端，请检查网络或稍后重试';
+  return '网络请求失败，请检查网络后重试';
+}
+
+function normalizedTimeout(timeoutMs?: number): number {
+  if (timeoutMs === undefined) return DEFAULT_API_TIMEOUT_MS;
+  return Math.max(1, Math.floor(timeoutMs));
+}
+
+function normalizedRetries(retries?: number): number {
+  return Math.max(0, Math.floor(retries ?? 0));
+}
+
+function allowedNetworkRetries(method: 'GET' | 'POST', path: string, requestedRetries?: number): number {
+  if (method === 'GET' || (method === 'POST' && path === '/api/auth/signin')) {
+    return normalizedRetries(requestedRetries);
+  }
+  return 0;
+}
+
+function waitForRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, delayMs)));
+}
+
+async function apiRequestOnce<T>(
   method: 'GET' | 'POST',
   path: string,
-  body?: unknown,
-  params?: Record<string, string>,
-  timeoutMs = 8000,
+  body: unknown,
+  params: Record<string, string> | undefined,
+  timeoutMs: number,
 ): Promise<ApiResult<T>> {
+  let url: URL;
+  try {
+    url = apiUrl(path, params);
+  } catch (error: unknown) {
+    return {
+      ok: false,
+      status: 0,
+      error: error instanceof Error ? error.message : '请求配置错误',
+      isNetworkError: false,
+    };
+  }
+
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const headers = new Headers({ Accept: 'application/json' });
     const token = getApiToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
+    // The manually entered secret is never attached to public or user routes.
     if (path.startsWith('/api/admin/') && adminApiSecret) {
       headers.set('X-Worker-Secret', adminApiSecret);
     }
     if (method === 'POST') headers.set('Content-Type', 'application/json');
 
-    const response = await fetch(apiUrl(path, params), {
+    const response = await fetch(url, {
       method,
       headers,
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
@@ -102,30 +177,51 @@ async function apiRequest<T>(
     }
     return { ok: true, status: response.status, data: payload.data };
   } catch (error: unknown) {
-    const timedOut = error instanceof DOMException && error.name === 'AbortError';
+    const networkError = isAbortError(error) || isFetchNetworkError(error);
     return {
       ok: false,
       status: 0,
-      error: timedOut
-        ? `请求超时 (${timeoutMs}ms)`
-        : error instanceof Error
-          ? error.message
-          : '网络请求失败',
+      error: networkError ? networkErrorMessage(error) : '网络请求失败，请检查网络后重试',
+      isNetworkError: networkError,
     };
   } finally {
-    window.clearTimeout(timeoutId);
+    globalThis.clearTimeout(timeoutId);
   }
 }
 
-export function apiGet<T>(path: string, params?: Record<string, string>): Promise<ApiResult<T>> {
-  return apiRequest<T>('GET', path, undefined, params);
+async function apiRequest<T>(
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+  params?: Record<string, string>,
+  options: ApiRequestOptions = {},
+): Promise<ApiResult<T>> {
+  const timeoutMs = normalizedTimeout(options.timeoutMs);
+  const networkRetries = allowedNetworkRetries(method, path, options.networkRetries);
+  const retryDelayMs = Math.max(0, Math.floor(options.retryDelayMs ?? 300));
+
+  for (let attempt = 0; attempt <= networkRetries; attempt += 1) {
+    const result = await apiRequestOnce<T>(method, path, body, params, timeoutMs);
+    if (!result.isNetworkError || result.status !== 0 || attempt === networkRetries) return result;
+    await waitForRetry(retryDelayMs);
+  }
+
+  return { ok: false, status: 0, error: '网络请求失败，请检查网络后重试', isNetworkError: true };
 }
 
-export function apiPost<T>(path: string, body?: unknown): Promise<ApiResult<T>> {
-  return apiRequest<T>('POST', path, body);
+export function apiGet<T>(
+  path: string,
+  params?: Record<string, string>,
+  options?: ApiRequestOptions,
+): Promise<ApiResult<T>> {
+  return apiRequest<T>('GET', path, undefined, params, options);
+}
+
+export function apiPost<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
+  return apiRequest<T>('POST', path, body, undefined, options);
 }
 
 export async function checkApiHealth(): Promise<boolean> {
-  const result = await apiGet<{ status: string }>('/api/health');
+  const result = await apiGet<{ status: string }>('/api/health', undefined, HEALTH_REQUEST_OPTIONS);
   return result.ok && result.data?.status === 'ok';
 }

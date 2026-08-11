@@ -22,7 +22,11 @@ import {
   Image as ImageIcon,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { apiPost } from '../utils/api';
+import {
+  apiPost,
+  SIGNIN_REQUEST_OPTIONS,
+  SIGNUP_REQUEST_OPTIONS,
+} from '../utils/api';
 import type { AuthSession } from '../lib/accountApi';
 import { formatChinaDate } from '../utils/dateUtils';
 
@@ -75,7 +79,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     const code = typeof details.code === 'string' ? details.code : '';
     const rawMsg = error instanceof Error ? error.message : String(error ?? '');
 
-    if (code === 'auth/network-request-failed' || rawMsg.includes('network-request-failed') || rawMsg.includes('network')) {
+    if (
+      code === 'auth/network-request-failed'
+      || rawMsg.includes('network-request-failed')
+      || rawMsg.includes('network')
+      || /无法连接后端|连接超时|网络请求失败/.test(rawMsg)
+    ) {
       return {
         title: '网络连接异常',
         detail: '无法连接至认证服务器，请检查您的网络设置后重试。',
@@ -176,15 +185,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     setIsSubmitting(true);
     try {
-      // Direct Server-Side Auth Proxy (100% bypass GFW)
       const endpoint = mode === 'signup' ? '/api/auth/signup' : '/api/auth/signin';
+      const requestOptions = mode === 'signin'
+        ? SIGNIN_REQUEST_OPTIONS
+        : SIGNUP_REQUEST_OPTIONS;
       const res = await apiPost<AuthSession>(endpoint, {
         email: targetEmail,
         password,
         displayName: autoDisplayName,
-      });
+      }, requestOptions);
 
       if (!res.ok || !res.data) {
+        if (mode === 'signup' && res.isNetworkError) {
+          setStructuredError({
+            title: '注册结果待确认',
+            detail: '无法连接后端，结果可能已提交，可尝试直接登录。',
+            isNetworkError: true,
+          });
+          return;
+        }
         throw new Error(res.error || '认证失败，请检查账号密码或网络连接。');
       }
 

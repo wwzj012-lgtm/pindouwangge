@@ -5,6 +5,8 @@ import {
   checkApiHealth,
   clearAdminApiSecret,
   clearApiToken,
+  getApiToken,
+  setApiToken,
   setAdminApiSecret,
 } from './api';
 
@@ -15,12 +17,38 @@ function successResponse<T>(data: T): Response {
   });
 }
 
+function createStorage(): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length(): number {
+      return values.size;
+    },
+    clear(): void {
+      values.clear();
+    },
+    getItem(key: string): string | null {
+      return values.get(key) ?? null;
+    },
+    key(index: number): string | null {
+      return Array.from(values.keys())[index] ?? null;
+    },
+    removeItem(key: string): void {
+      values.delete(key);
+    },
+    setItem(key: string, value: string): void {
+      values.set(key, value);
+    },
+  };
+}
+
 describe('Worker API client', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
     vi.stubEnv('VITE_WORKER_API_URL', 'https://stellabean.pages.dev');
     vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('localStorage', createStorage());
+    vi.stubGlobal('sessionStorage', createStorage());
     fetchMock.mockReset();
     clearApiToken();
     clearAdminApiSecret();
@@ -41,6 +69,23 @@ describe('Worker API client', () => {
     const headers = new Headers(request.headers);
     expect(headers.get('X-Worker-Secret')).toBeNull();
     expect(headers.get('Authorization')).toBeNull();
+  });
+
+  it('stores remembered tokens in localStorage only', () => {
+    setApiToken('persistent-token', true);
+
+    expect(getApiToken()).toBe('persistent-token');
+    expect(localStorage.getItem('beadgrid_worker_jwt')).toBe('persistent-token');
+    expect(sessionStorage.getItem('beadgrid_worker_jwt')).toBeNull();
+  });
+
+  it('stores non-remembered tokens in sessionStorage only', () => {
+    localStorage.setItem('beadgrid_worker_jwt', 'old-persistent-token');
+    setApiToken('session-token', false);
+
+    expect(getApiToken()).toBe('session-token');
+    expect(localStorage.getItem('beadgrid_worker_jwt')).toBeNull();
+    expect(sessionStorage.getItem('beadgrid_worker_jwt')).toBe('session-token');
   });
 
   it('retries sign-in exactly once after a network failure', async () => {

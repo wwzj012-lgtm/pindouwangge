@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   type AuthSession,
   type UserProfile,
@@ -11,6 +11,8 @@ interface SessionUser {
   displayName: string | null;
   photoURL: string | null;
 }
+
+export type AuthSessionPersistence = 'persistent' | 'session';
 
 interface AuthContextType {
   currentUser: SessionUser | null;
@@ -25,11 +27,60 @@ interface AuthContextType {
   refreshProfile: () => Promise<void>;
   redeemVipCode: (code: string) => Promise<{ success: boolean; message: string; newType?: 1 | 2 }>;
   consumeFreeTrial: () => Promise<boolean>;
-  setLocalCustomUser: (session: AuthSession) => Promise<void>;
+  setLocalCustomUser: (session: AuthSession, persistence?: AuthSessionPersistence) => Promise<void>;
   logoutUser: () => Promise<void>;
 }
 
 const LOCAL_SESSION_KEY = 'beadgrid_local_session';
+
+function getStorage(persistence: AuthSessionPersistence): Storage | null {
+  try {
+    if (persistence === 'persistent') {
+      return typeof localStorage === 'undefined' ? null : localStorage;
+    }
+    return typeof sessionStorage === 'undefined' ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function isAuthSession(value: unknown): value is AuthSession {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as { token?: unknown; profile?: unknown };
+  if (typeof candidate.token !== 'string' || !candidate.token || !candidate.profile) return false;
+  if (typeof candidate.profile !== 'object') return false;
+  return typeof (candidate.profile as { uid?: unknown }).uid === 'string';
+}
+
+function readStoredSession(persistence: AuthSessionPersistence): AuthSession | null {
+  try {
+    const raw = getStorage(persistence)?.getItem(LOCAL_SESSION_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isAuthSession(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearStoredSessions(): void {
+  for (const persistence of ['persistent', 'session'] as const) {
+    try {
+      getStorage(persistence)?.removeItem(LOCAL_SESSION_KEY);
+    } catch {
+      // Storage can be unavailable in private browsing contexts.
+    }
+  }
+}
+
+function writeStoredSession(session: AuthSession, persistence: AuthSessionPersistence): void {
+  clearStoredSessions();
+  try {
+    getStorage(persistence)?.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // The in-memory auth state remains usable when Web Storage is blocked.
+  }
+}
 
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
@@ -63,29 +114,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const sessionPersistenceRef = useRef<AuthSessionPersistence | null>(null);
 
-  const applySession = (session: AuthSession, persist: boolean): void => {
-    setApiToken(session.token);
+  const applySession = (session: AuthSession, persistence: AuthSessionPersistence): void => {
+    setApiToken(session.token, persistence === 'persistent');
+    sessionPersistenceRef.current = persistence;
     setCurrentUser(sessionUser(session.profile));
     setUserProfile(session.profile);
-    if (persist) localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify(session));
+    writeStoredSession(session, persistence);
   };
 
   useEffect(() => {
     const restoreSession = async (): Promise<void> => {
       try {
-        const saved = localStorage.getItem(LOCAL_SESSION_KEY);
+        const persistentSession = readStoredSession('persistent');
+        const sessionSession = readStoredSession('session');
+        const saved = persistentSession
+          ? { session: persistentSession, persistence: 'persistent' as const }
+          : sessionSession
+          ? { session: sessionSession, persistence: 'session' as const }
+          : null;
         if (saved) {
-          const session = JSON.parse(saved) as AuthSession;
-          if (session.token && session.profile?.uid) {
-            applySession(session, false);
-            await refreshProfileFromServer(session.profile);
-          }
+          applySession(saved.session, saved.persistence);
+          await refreshProfileFromServer(saved.session.profile);
         }
       } catch (error) {
         console.error('Authentication initialization failed:', error);
         clearApiToken();
-        localStorage.removeItem(LOCAL_SESSION_KEY);
+        clearStoredSessions();
+        sessionPersistenceRef.current = null;
         setCurrentUser(null);
         setUserProfile(null);
       } finally {
@@ -103,10 +160,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setUserProfile(result.data);
     setCurrentUser(sessionUser(result.data));
-    const raw = localStorage.getItem(LOCAL_SESSION_KEY);
-    if (raw) {
-      const saved = JSON.parse(raw) as AuthSession;
-      localStorage.setItem(LOCAL_SESSION_KEY, JSON.stringify({ ...saved, profile: result.data }));
+    const persistence = sessionPersistenceRef.current;
+    if (persistence) {
+      const saved = readStoredSession(persistence);
+      if (saved) writeStoredSession({ ...saved, profile: result.data }, persistence);
     }
   };
 
@@ -114,13 +171,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentUser) await refreshProfileFromServer();
   };
 
-  const setLocalCustomUser = async (session: AuthSession): Promise<void> => {
-    applySession(session, true);
+  const setLocalCustomUser = async (
+    session: AuthSession,
+    persistence: AuthSessionPersistence = 'persistent',
+  ): Promise<void> => {
+    applySession(session, persistence);
   };
 
   const logoutUser = async (): Promise<void> => {
     clearApiToken();
-    localStorage.removeItem(LOCAL_SESSION_KEY);
+    clearStoredSessions();
+    sessionPersistenceRef.current = null;
     setCurrentUser(null);
     setUserProfile(null);
   };

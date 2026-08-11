@@ -51,19 +51,58 @@ export function hasAdminApiSecret(): boolean {
 }
 
 function getLocalStorage(): Storage | null {
-  return typeof localStorage === 'undefined' ? null : localStorage;
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    return localStorage;
+  } catch {
+    return null;
+  }
 }
 
-export function setApiToken(token: string): void {
-  getLocalStorage()?.setItem(SESSION_TOKEN_KEY, token);
+function getSessionStorage(): Storage | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+function removeApiToken(storage: Storage | null): void {
+  try {
+    storage?.removeItem(SESSION_TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in private browsing contexts.
+  }
+}
+
+export function setApiToken(token: string, persist = true): void {
+  const persistentStorage = getLocalStorage();
+  const sessionStorage = getSessionStorage();
+  const targetStorage = persist ? persistentStorage : sessionStorage;
+  const otherStorage = persist ? sessionStorage : persistentStorage;
+
+  removeApiToken(otherStorage);
+  try {
+    targetStorage?.setItem(SESSION_TOKEN_KEY, token);
+  } catch {
+    // The in-memory auth state remains usable when Web Storage is blocked.
+  }
 }
 
 export function clearApiToken(): void {
-  getLocalStorage()?.removeItem(SESSION_TOKEN_KEY);
+  removeApiToken(getLocalStorage());
+  removeApiToken(getSessionStorage());
 }
 
 export function getApiToken(): string | null {
-  return getLocalStorage()?.getItem(SESSION_TOKEN_KEY) ?? null;
+  try {
+    return getLocalStorage()?.getItem(SESSION_TOKEN_KEY)
+      ?? getSessionStorage()?.getItem(SESSION_TOKEN_KEY)
+      ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function apiBaseUrl(): string {

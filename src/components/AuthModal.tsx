@@ -16,7 +16,7 @@ import {
   Loader2,
   Image as ImageIcon,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
+import { type AuthSessionPersistence, useAuth } from '../context/AuthContext';
 import {
   apiPost,
   SIGNIN_REQUEST_OPTIONS,
@@ -24,6 +24,7 @@ import {
 } from '../utils/api';
 import type { AuthSession } from '../lib/accountApi';
 import { formatChinaDate } from '../utils/dateUtils';
+import { AUTH_AUTOCOMPLETE, saveBrowserPasswordCredential } from '../utils/authCredentials';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -52,6 +53,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(true);
 
   const [redeemCodeInput, setRedeemCodeInput] = useState('');
   const [redeemMsg, setRedeemMsg] = useState<{ text: string; isError: boolean } | null>(null);
@@ -191,7 +193,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         throw new Error(res.error || '认证失败，请检查账号密码或网络连接。');
       }
 
-      await setLocalCustomUser(res.data);
+      const persistence: AuthSessionPersistence = mode === 'signup' || rememberLogin
+        ? 'persistent'
+        : 'session';
+      await setLocalCustomUser(res.data, persistence);
+      if (mode === 'signin' && rememberLogin) {
+        await saveBrowserPasswordCredential(targetEmail, password);
+      }
+      setPassword('');
       onClose();
     } catch (error: unknown) {
       const parsed = parseAuthError(error);
@@ -465,7 +474,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 </div>
 
-                <form onSubmit={handleEmailAuth} className="space-y-3">
+                <form onSubmit={handleEmailAuth} className="space-y-3" autoComplete="on">
                   {mode === 'signup' && (
                     <div>
                       <label className="text-[11px] text-slate-400 block mb-1">个性昵称 / 拼豆店名</label>
@@ -473,6 +482,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         <User className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                         <input
                           type="text"
+                          name="name"
+                          autoComplete="name"
                           value={displayName}
                           onChange={e => setDisplayName(e.target.value)}
                           placeholder="例如: 拼豆小当家 / 像素创作者"
@@ -490,6 +501,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                       <input
                         type="text"
+                        name="username"
+                        autoComplete={AUTH_AUTOCOMPLETE.username}
                         value={email}
                         onChange={e => setEmail(e.target.value)}
                         placeholder="支持 11位手机号、QQ邮箱或自定义用户名"
@@ -508,6 +521,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
                       <input
                         type="password"
+                        name="password"
+                        autoComplete={mode === 'signin'
+                          ? AUTH_AUTOCOMPLETE.signinPassword
+                          : AUTH_AUTOCOMPLETE.signupPassword}
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         placeholder="请输入至少 6 位密码"
@@ -516,6 +533,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       />
                     </div>
                   </div>
+
+                  {mode === 'signin' && (
+                    <label htmlFor="remember-login" className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                      <input
+                        id="remember-login"
+                        type="checkbox"
+                        name="rememberLogin"
+                        checked={rememberLogin}
+                        onChange={e => setRememberLogin(e.target.checked)}
+                        className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-sky-500 accent-sky-500 focus:ring-sky-500/40"
+                      />
+                      <span>记住登录状态</span>
+                    </label>
+                  )}
 
                   <button
                     type="submit"

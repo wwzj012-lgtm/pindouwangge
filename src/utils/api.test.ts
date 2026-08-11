@@ -19,7 +19,7 @@ describe('Worker API client', () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {
-    vi.stubEnv('VITE_WORKER_API_URL', 'https://api.stellabean.test');
+    vi.stubEnv('VITE_WORKER_API_URL', 'https://stellabean.pages.dev');
     vi.stubGlobal('fetch', fetchMock);
     fetchMock.mockReset();
     clearApiToken();

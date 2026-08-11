@@ -1,0 +1,12 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "stellabean",
+  "compatibility_date": "2026-08-11",
+  "pages_build_output_dir": "./dist",
+  "services": [
+    {
+      "binding": "BACKEND_API",
+      "service": "stellabean-api"
+    }
+  ]
+}

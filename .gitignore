@@ -8,5 +8,6 @@ artifacts/
 .DS_Store
 *.log
 .vite-dev-*.log
+.wrangler-xdg/
 .env*
 !.env.example

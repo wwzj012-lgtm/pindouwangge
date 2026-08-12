@@ -15,7 +15,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import { BeadColor, BeadShape } from '../types';
+import { BeadColor, BeadShape, BrandKey, ConvertSettings } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { saveExportedPatternRecord } from '../utils/patternHistory';
@@ -38,9 +38,13 @@ interface ExportModalProps {
   width: number;
   height: number;
   boardSize: number;
-  brandName: string;
+  brandName: BrandKey;
   projectName: string;
   beadShape: BeadShape;
+  activePalette: BeadColor[];
+  activePatternId: string | null;
+  settings: ConvertSettings;
+  onPatternArchived: (id: string) => void;
   onOpenAuthModal?: () => void;
 }
 
@@ -55,9 +59,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   brandName,
   projectName,
   beadShape,
+  activePalette,
+  activePatternId,
+  settings,
+  onPatternArchived,
   onOpenAuthModal,
 }) => {
-  const { currentUser, isVip, isPro, memberType } = useAuth();
+  const { currentUser, isVip } = useAuth();
   const { language, t } = useLanguage();
   const isEn = language === 'en';
 
@@ -85,6 +93,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [showFreeDownloadModal, setShowFreeDownloadModal] = useState(false);
   const [pendingDownloadType, setPendingDownloadType] = useState<'single' | 'all' | null>(null);
   const [wechatPreviewUrl, setWechatPreviewUrl] = useState<string | null>(null);
+  const [archiveMessage, setArchiveMessage] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
 
@@ -173,6 +182,35 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
   if (!isOpen) return null;
 
+  const archiveEditablePattern = async (): Promise<void> => {
+    const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
+    try {
+      const record = await saveExportedPatternRecord({
+        id: activePatternId ?? undefined,
+        userId: currentUser?.uid ?? null,
+        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
+        width,
+        height,
+        totalBeads: totalBeadsCount,
+        boardSize,
+        brand: brandName,
+        settings,
+        grid,
+        palette: activePalette,
+      });
+      onPatternArchived(record.id);
+      if (record.syncState === 'synced') {
+        setArchiveMessage(isEn ? 'Editable pattern saved locally and synced to cloud.' : '完整可编辑图纸已保存到本机并同步云端。');
+      } else if (record.syncState === 'local-only') {
+        setArchiveMessage(isEn ? 'Editable pattern saved only on this device. Sign in to sync it.' : '完整可编辑图纸仅保存到本机。登录后可同步云端。');
+      } else {
+        setArchiveMessage(isEn ? 'Editable pattern is saved locally. Cloud sync can be retried from history.' : '完整可编辑图纸已保存到本机，云端同步可在图纸记录中重试。');
+      }
+    } catch (error) {
+      setArchiveMessage(error instanceof Error ? error.message : (isEn ? 'Offline pattern save failed.' : '本机图纸保存失败。'));
+    }
+  };
+
   // Actual Download Execution
   const executeSingleDownload = () => {
     const options: ExportOptions = {
@@ -206,19 +244,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       : (isEn ? '_FullPattern' : '_完整图纸');
     downloadCanvasImage(canvas, `${projectName}${suffix}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
 
-    // Auto archive exported pattern record for user (Free: 7 days, VIP: 30 days)
-    if (currentUser?.uid) {
-      const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
-      saveExportedPatternRecord({
-        userId: currentUser.uid,
-        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
-        width,
-        height,
-        totalBeads: totalBeadsCount,
-        canvas,
-        isVip: Boolean(isVip || isPro || (memberType ?? 0) > 0),
-      }).catch(e => console.warn('Failed to archive pattern record:', e));
-    }
+    void archiveEditablePattern();
   };
 
   const executeAllBoardsDownload = () => {
@@ -260,19 +286,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
       }, i * 300);
     }
 
-    // Auto archive exported pattern record for user (Free: 7 days, VIP: 30 days)
-    if (currentUser?.uid) {
-      const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
-      saveExportedPatternRecord({
-        userId: currentUser.uid,
-        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
-        width,
-        height,
-        totalBeads: totalBeadsCount,
-        canvas: fullCanvas,
-        isVip: Boolean(isVip || isPro || (memberType ?? 0) > 0),
-      }).catch(e => console.warn('Failed to archive pattern record:', e));
-    }
+    void archiveEditablePattern();
   };
 
   // Download Trigger Handler with VIP check
@@ -365,6 +379,12 @@ export const ExportModal: React.FC<ExportModalProps> = ({
             </button>
           </div>
         </div>
+
+        {archiveMessage && (
+          <div className="border-b border-sky-500/20 bg-sky-950/50 px-4 py-2 text-[11px] text-sky-200">
+            {archiveMessage}
+          </div>
+        )}
 
         {/* Control Area: Watermark & Settings (Collapsible) */}
         {isCollapsed ? (

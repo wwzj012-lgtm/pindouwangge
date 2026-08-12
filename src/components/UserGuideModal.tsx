@@ -73,7 +73,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 欢迎体验【豆织星格】拼豆专业级像素创意工作台
               </h3>
               <p className="text-slate-300 text-xs mt-1 leading-relaxed">
-                【豆织星格】是专为拼豆（Perler、MARD融合豆、ARTKAL、MIDO、COCO等）发烧友、像素画插画家、像素二次元周边的创作者设计的专业电脑与触屏双端工作台。我们不仅集成了<strong>高精度的像素级手绘编辑器</strong>，更提供了<strong>工业级AI像素转图、二次元描边轮廓锁死、多轴镜像花纹绘制、VIP智能精纯省豆降噪、精准物料采购袋数预算以及高清拼接大图分幅标尺导出</strong>等全链路数字解决方案。
+                【豆织星格】面向拼豆爱好者与像素创作者，提供图像转换、网格编辑、色卡管理、物料统计和图纸导出。桌面端左侧用于转换设置、顶部工具栏用于编辑、右侧用于用量统计；手机端通过底栏切换这些工作区。
               </p>
             </div>
           </div>
@@ -124,7 +124,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
               <div className="bg-slate-800/60 p-4 rounded-xl border border-slate-700/60 space-y-2">
                 <div className="font-bold text-sky-300 flex items-center justify-between border-b border-slate-700/40 pb-1.5">
                   <span>✦ 触屏手势、高级平移与缩放</span>
-                  <span className="text-[10px] text-slate-400">平板/手机/电脑跨端完美自适应</span>
+                  <span className="text-[10px] text-slate-400">平板/手机/电脑操作</span>
                 </div>
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
@@ -164,7 +164,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
               <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-4 space-y-3">
                 <div className="font-bold text-amber-300 flex items-center gap-2 text-sm border-b border-slate-800 pb-1.5">
                   <Wand2 className="w-4.5 h-4.5 text-amber-400" />
-                  AI 图像转像素像素工作坊 (AI Image Studio Workshop)
+                  图像转像素工作坊 (Image Studio Workshop)
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300">
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -172,7 +172,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                       <span className="text-amber-400">✦</span> 鲜艳高饱和保护 & 肤色修正 (Vivid Boost)
                     </strong>
                     <p className="text-slate-400 leading-relaxed">
-                      采用最新的 <strong>CIEDE2000 色彩匹配感官算法</strong>，特别针对二次元动漫人像的肤色、发色及高饱和度色彩进行修正，完美解决传统图像像素化之后出现的死灰、发白、偏色等顽疾。
+                      照片分支使用 <strong>CIEDE2000 色彩匹配</strong>，图标分支使用 CIE76；可在预览中检查色彩和轮廓是否符合原图。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -188,15 +188,15 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                       <span className="text-amber-400">✦</span> 智能绿幕与背景一键抠除 (Chroma Key Background)
                     </strong>
                     <p className="text-slate-400 leading-relaxed">
-                      支持在预览区一键吸取背景色，开启智能色度抠图，拖拽容差条（0-100%）自适应模糊边缘。自动将嘈杂的单色背景剥离，只保留干净的主体，省去拼背景豆的巨额成本。
+                      支持在预览区吸取背景色并调节容差。只会移除与画布边缘连通的候选背景，主体内部孔洞会保留；应用前请检查预览。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white flex items-center gap-1">
-                      <span className="text-amber-400">✦</span> Floyd-Steinberg 与 Atkinson 空间误差扩散抖动 (Dithering)
+                      <span className="text-amber-400">✦</span> Floyd-Steinberg 空间误差扩散抖动 (Dithering)
                     </strong>
                     <p className="text-slate-400 leading-relaxed">
-                      针对渐变光影、手办实拍图片提供专业的误差扩散算法，模拟复古点阵。既有大面积平涂的纯净像素感，也可以在阴影渐变处展现极具立体纹理的材质过渡。
+                      用于照片和渐变光影的误差扩散，可在设置面板中切换并调节强度。抖动会改变局部颜色分布，请以转换预览为准。
                     </p>
                   </div>
                 </div>
@@ -209,7 +209,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                   👑 VIP 专属：显著性智能省豆与精纯优化引擎 (Smart Bead Reducer)
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  为什么远超简单的降低图纸分辨率？普通的降低尺寸是野蛮地缩放画布，会导致五官变瞎、线条崩坏。<strong>显著性智能省豆引擎</strong>能够在保持 100% 原始网格细节与轮廓精度的前提下，对图案数据进行局部拓扑分析和优化：
+                  减粒按目标豆子面积缩放，并以区域占比、边缘和中心权重选择代表色。<strong>免费用户可体验 15%；VIP 可选 15% 或 25%；商家 VIP 另可选 40%</strong>。结果会因图纸内容不同而变化，请对照预览后应用：
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300 pt-1">
                   <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -241,7 +241,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                       <span className="text-sky-400 font-mono">4.</span> 极速减豆计价报告系统 (Savings RMB Calculator)
                     </strong>
                     <p className="text-slate-400 leading-relaxed">
-                      动态计算并输出减粒前后的拼豆颗数对比、色卡种类精简数量。根据拼豆市场物料包（按3元/1000粒）基准，实时估算出本次精纯减豆<strong>能为您在网购采购补充包时，直接省下多少真金白银！</strong>
+                      动态显示减粒前后的拼豆数量和色卡种类变化。材料金额仅按 3 元/1000 粒的示例单价估算，实际采购成本以店铺与包装规格为准。
                     </p>
                   </div>
                 </div>
@@ -257,7 +257,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white block">✦ 直线/矩形/正圆高级像素几何画法</strong>
                     <p className="text-slate-400 leading-relaxed">
-                      基于 Bresenham 与 Midpoint 算法，拖动鼠标即可生成边缘极其干净、像素锯齿经过专门拟合的完美圆弧和直线轮廓，便于拼豆打边框和绘制规整饰物。
+                      直线、矩形和圆形工具按网格生成轮廓，便于补边框和绘制规整饰物。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -299,13 +299,13 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white block">✦ 玩家专属：手头“已有色板”配置 (Inventory Guard)</strong>
                     <p className="text-slate-400 leading-relaxed">
-                      在色卡自定义管理器中，勾选自己手头拥有的色号、屏蔽缺货的。AI 转图匹配时将 100% 自动绕开被您屏蔽的颜色，只在您拥有的豆子里做匹配，绝不浪费买不必要冷门色整包补充装的冤枉钱。
+                      在色卡管理器中勾选手头色号、屏蔽缺货色号。图像转换只会从当前启用的色号中匹配，便于按现有材料调整图纸。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white block">✦ 多国主流拼豆厂商色号一键映射</strong>
                     <p className="text-slate-400 leading-relaxed">
-                      完美内置 <strong>MARD 2.6mm 融合豆系列、ARTKAL_S 软硬豆标准版、Perler 经典色卡、HAMA色卡、MIDO 及 COCO 品牌</strong>。不仅有颜色对应，还印有每家品牌专属的物理色号代码（如 M01, S01, P01），买豆对标绝对零失误。
+                      内置 <strong>MARD、ARTKAL、Perler、HAMA、MIDO 及 COCO</strong> 等品牌色卡与色号代码（如 M01、S01、P01）。不同批次可能存在色差，购买前请对照实物色卡。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -339,13 +339,13 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white block">✦ 巨幅拼豆：高精度多板拼接导出 (Multi-board Export Layout)</strong>
                     <p className="text-slate-400 leading-relaxed">
-                      在打印图纸导出工作室中，可将超大拼豆图（如 100x100）按标准的 29x29 或 50x50 模板拼接插板进行一键裁切。分别导出高清图块，每个图块自带横纵标尺定位和边缘溢出边界说明，完美解决巨幅壁画印制拼接难题。
+                      在导出工作室中，可将大图按 29x29 或 50x50 拼板分块导出。每个图块附带坐标与边界信息，便于打印和拼接。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
                     <strong className="text-white block">✦ 3D 实物融豆熨烫效果实时预览 (Studio Rendering)</strong>
                     <p className="text-slate-400 leading-relaxed">
-                      工作台支持切换“复古原木纹理桌面背景”、“专业Slate暗色网格”、“Studio单色影棚渲染”，甚至可开启“3D物理融豆模式”，逼真地渲染熨烫完成之后的微融状态，以便完美把控线稿物理观感。
+                      工作台支持原木、暗色网格和影棚背景，以及 3D 融豆外观预览；这些为视觉辅助，不代表实际熨烫效果。
                     </p>
                   </div>
                 </div>
@@ -371,4 +371,3 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
     </div>
   );
 };
-

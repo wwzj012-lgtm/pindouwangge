@@ -1,177 +1,77 @@
-import { apiGet, apiPost } from './api';
+import type { BrandKey, BeadColor } from '../types';
+import {
+  deleteCloudPatternAndLocal,
+  deleteLocalPatternCopy,
+  getPatternHistory,
+  getPatternPreview,
+  getPatternProject as getPatternProjectFromStore,
+  normalizePatternTitle,
+  patternDeletionActions,
+  renamePatternRecord,
+  requiresExplicitCloudBinding,
+  retryPatternCloudSync as retryPatternCloudSyncFromStore,
+  savePatternRecord,
+  type PatternRecordSummary,
+  type PatternSyncState,
+} from './patternStore';
+import type { GridMatrix, PatternSettingsSnapshot, StoredPatternProject } from './patternGridCodec';
 
-export interface ExportedPatternRecord {
-  id: string;
-  userId: string;
-  title: string;
-  width: number;
-  height: number;
-  totalBeads: number;
-  thumbnailUrl: string; // Base64 thumbnail string
-  createdAt: number; // ms timestamp
-  expireAt: number; // ms timestamp (30 days from creation)
+export type ExportedPatternRecord = PatternRecordSummary;
+export type { PatternSyncState, StoredPatternProject };
+
+export interface EditablePatternProject extends StoredPatternProject {
+  workId: string;
 }
-
-const RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 Days in milliseconds
+export { getPatternHistory, patternDeletionActions, requiresExplicitCloudBinding };
+export { normalizePatternTitle };
 
 /**
- * Generate a compressed compact thumbnail Data URL from a pattern canvas (max 320px)
- */
-export function generateThumbnailDataUrl(canvas: HTMLCanvasElement, maxDim: number = 320): string {
-  try {
-    const thumbnailCanvas = document.createElement('canvas');
-    const scale = Math.min(maxDim / canvas.width, maxDim / canvas.height, 1);
-    thumbnailCanvas.width = Math.max(100, Math.round(canvas.width * scale));
-    thumbnailCanvas.height = Math.max(100, Math.round(canvas.height * scale));
-
-    const ctx = thumbnailCanvas.getContext('2d');
-    if (ctx) {
-      ctx.fillStyle = '#0f172a'; // slate-900 canvas backdrop
-      ctx.fillRect(0, 0, thumbnailCanvas.width, thumbnailCanvas.height);
-      ctx.drawImage(canvas, 0, 0, thumbnailCanvas.width, thumbnailCanvas.height);
-    }
-    return thumbnailCanvas.toDataURL('image/jpeg', 0.82);
-  } catch (err) {
-    console.warn('Failed to generate canvas thumbnail, returning empty fallback:', err);
-    return canvas.toDataURL('image/png');
-  }
-}
-
-/**
- * Save an exported pattern record for the user (Ordinary user: 7 days, VIP user: 30 days)
+ * Saves an editable grid locally first, then attempts cloud revision sync.
+ * A cloud failure is returned as a visible state and never treated as success.
  */
 export async function saveExportedPatternRecord(params: {
-  userId: string;
+  id?: string;
+  userId: string | null;
   title: string;
   width: number;
   height: number;
   totalBeads: number;
-  canvas: HTMLCanvasElement;
-  isVip?: boolean;
-}): Promise<ExportedPatternRecord | null> {
-  if (!params.userId) return null;
-
-  const recordId = `pat_${crypto.randomUUID()}`;
-  const now = Date.now();
-  const retentionDays = params.isVip ? 30 : 7;
-  const expireAt = now + retentionDays * 24 * 60 * 60 * 1000;
-  const thumbnailUrl = generateThumbnailDataUrl(params.canvas);
-
-  const record: ExportedPatternRecord = {
-    id: recordId,
-    userId: params.userId,
-    title: params.title || '未命名图纸',
-    width: params.width || 29,
-    height: params.height || 29,
-    totalBeads: params.totalBeads || 0,
-    thumbnailUrl,
-    createdAt: now,
-    expireAt,
-  };
-
-  // 1. Cache to LocalStorage immediately
-  try {
-    const localKey = `dzxg_patterns_${params.userId}`;
-    const rawLocal = localStorage.getItem(localKey);
-    let localList: ExportedPatternRecord[] = rawLocal ? JSON.parse(rawLocal) : [];
-    // Filter out expired items (> 30 days old)
-    localList = localList.filter(p => p.expireAt > now);
-    localList.unshift(record);
-    // Limit local storage cache to 50 latest records
-    if (localList.length > 50) localList = localList.slice(0, 50);
-    localStorage.setItem(localKey, JSON.stringify(localList));
-  } catch (e) {
-    console.warn('LocalStorage save failed:', e);
-  }
-
-  // 2. Try Server API Proxy
-  try {
-    const res = await apiPost('/api/user-patterns/save', {
-      id: record.id,
-      title: record.title,
-      width: record.width,
-      height: record.height,
-      totalBeads: record.totalBeads,
-    });
-    if (res.ok) {
-      return record;
-    }
-  } catch (apiErr) {
-    console.warn('Server pattern save endpoint failed:', apiErr);
-  }
-
-  return record;
+  boardSize: number;
+  brand: BrandKey;
+  settings: PatternSettingsSnapshot;
+  grid: GridMatrix;
+  palette: BeadColor[];
+}): Promise<ExportedPatternRecord> {
+  const result = await savePatternRecord(params);
+  return result.record;
 }
 
-/**
- * Get all exported pattern records for a user (filters out items > 30 days old)
- */
-export async function getUserExportedPatterns(userId: string): Promise<ExportedPatternRecord[]> {
-  if (!userId) return [];
-
-  const now = Date.now();
-  let records: ExportedPatternRecord[] = [];
-
-  // 1. Read from LocalStorage cache
-  try {
-    const localKey = `dzxg_patterns_${userId}`;
-    const rawLocal = localStorage.getItem(localKey);
-    if (rawLocal) {
-      const parsed: ExportedPatternRecord[] = JSON.parse(rawLocal);
-      records = parsed.filter(p => p.expireAt > now);
-    }
-  } catch (e) {
-    console.warn('Failed to read local patterns cache:', e);
-  }
-
-  // 2. Try Server API Proxy
-  try {
-    const res = await apiGet<ExportedPatternRecord[]>('/api/user-patterns');
-    if (res.ok && res.data && Array.isArray(res.data) && res.data.length > 0) {
-      const serverRecords = res.data;
-      // Merge server records with local
-      const recordMap = new Map<string, ExportedPatternRecord>();
-      [...records, ...serverRecords].forEach(r => {
-        if (r.expireAt > now) {
-          recordMap.set(r.id, r);
-        }
-      });
-      const merged = Array.from(recordMap.values()).sort((a, b) => b.createdAt - a.createdAt);
-      try {
-        localStorage.setItem(`dzxg_patterns_${userId}`, JSON.stringify(merged));
-      } catch (e) {}
-      return merged;
-    }
-  } catch (apiErr) {
-    console.warn('Server pattern get endpoint failed:', apiErr);
-  }
-
-  return records.sort((a, b) => b.createdAt - a.createdAt);
+export async function getUserExportedPatterns(userId: string | null): Promise<ExportedPatternRecord[]> {
+  return getPatternHistory(userId);
 }
 
-/**
- * Delete a user exported pattern record
- */
-export async function deleteExportedPatternRecord(id: string, userId: string): Promise<boolean> {
-  if (!id || !userId) return false;
+export async function getPatternProject(id: string, userId: string | null): Promise<EditablePatternProject> {
+  return { ...(await getPatternProjectFromStore(id, userId)), workId: id };
+}
 
-  // 1. Remove from LocalStorage
-  try {
-    const localKey = `dzxg_patterns_${userId}`;
-    const rawLocal = localStorage.getItem(localKey);
-    if (rawLocal) {
-      const list: ExportedPatternRecord[] = JSON.parse(rawLocal);
-      const updated = list.filter(p => p.id !== id);
-      localStorage.setItem(localKey, JSON.stringify(updated));
-    }
-  } catch (e) {}
+export async function retryPatternCloudSync(id: string, userId: string | null): Promise<ExportedPatternRecord> {
+  return retryPatternCloudSyncFromStore(id, userId);
+}
 
-  // 2. Call Server API Proxy
-  try {
-    await apiPost('/api/user-patterns/delete', { id });
-  } catch (apiErr) {
-    console.warn('Server pattern delete endpoint failed:', apiErr);
-  }
+export function getExportedPatternPreview(id: string, revision: number, userId: string | null): Promise<Blob | null> {
+  return getPatternPreview(id, revision, userId);
+}
 
+export function renameExportedPattern(record: ExportedPatternRecord, userId: string | null, title: string): Promise<ExportedPatternRecord> {
+  return renamePatternRecord(record, userId, title);
+}
+
+export async function deleteLocalExportedPatternCopy(id: string, userId: string | null): Promise<boolean> {
+  await deleteLocalPatternCopy(id, userId);
+  return true;
+}
+
+export async function deleteCloudExportedPatternAndLocal(id: string, userId: string | null): Promise<boolean> {
+  await deleteCloudPatternAndLocal(id, userId);
   return true;
 }

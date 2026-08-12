@@ -107,8 +107,8 @@ export function getApiToken(): string | null {
 
 function apiBaseUrl(): string {
   const value = import.meta.env.VITE_WORKER_API_URL?.trim();
-  if (!value) throw new Error('缺少 VITE_WORKER_API_URL 配置');
-  return value.endsWith('/') ? value : `${value}/`;
+  const base = value || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+  return base.endsWith('/') ? base : `${base}/`;
 }
 
 function apiUrl(path: string, params?: Record<string, string>): URL {
@@ -258,6 +258,33 @@ export function apiGet<T>(
 
 export function apiPost<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
   return apiRequest<T>('POST', path, body, undefined, options);
+}
+
+/** Fetches an authenticated binary response without serializing the body into JSON. */
+export async function apiGetBlob(path: string, params?: Record<string, string>, timeoutMs = DEFAULT_API_TIMEOUT_MS): Promise<ApiResult<Blob>> {
+  let url: URL;
+  try {
+    url = apiUrl(path, params);
+  } catch (error: unknown) {
+    return { ok: false, status: 0, error: error instanceof Error ? error.message : '请求配置错误' };
+  }
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), normalizedTimeout(timeoutMs));
+  try {
+    const headers = new Headers({ Accept: 'image/webp, image/png' });
+    const token = getApiToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    const type = response.headers.get('Content-Type')?.split(';', 1)[0]?.toLowerCase();
+    if (!response.ok || (type !== 'image/webp' && type !== 'image/png')) {
+      return { ok: false, status: response.status, error: `预览图不可用 (${response.status})` };
+    }
+    return { ok: true, status: response.status, data: await response.blob() };
+  } catch (error: unknown) {
+    return { ok: false, status: 0, error: networkErrorMessage(error), isNetworkError: true };
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 export async function checkApiHealth(): Promise<boolean> {

@@ -28,6 +28,15 @@ interface VipPrivilegesModalProps {
   onOpenAuthModal: () => void;
 }
 
+interface PrivilegeItem {
+  name: string;
+  desc: string;
+  free: boolean | string;
+  vip: boolean | string;
+  pro: boolean | string;
+  badge?: string;
+}
+
 export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
   isOpen,
   onClose,
@@ -40,7 +49,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
 
   if (!isOpen) return null;
 
-  const features = [
+  const features: Array<{ category: string; items: PrivilegeItem[] }> = [
     {
       category: isEn ? 'Image Conversion & Canvas Limits' : '拼豆转换与画布尺寸',
       items: [
@@ -117,9 +126,9 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
         },
         {
           name: isEn ? '⚡ Smart Bead Reducer Studio' : '⚡ 智能省豆与抠图工坊',
-          desc: isEn ? 'Auto remove useless backgrounds and reduce bead count by 20%-50%' : '智能识别抠除无用背景，抠图+降格微调真实节省 20%~50% 拼豆消耗',
-          free: false,
-          vip: true,
+          desc: isEn ? 'Preview feature-aware saving targets: free trial 15%, VIP 15%/25%, Merchant VIP 40%' : '预览特征保留省豆：免费体验 15%，VIP 15%/25%，商家 VIP 40%',
+          free: '体验 15%',
+          vip: '15% / 25%',
           pro: true,
           badge: 'VIP',
         },
@@ -152,12 +161,11 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
           pro: true,
         },
         {
-          name: isEn ? 'Export Pattern History (7 Days vs 30 Days)' : '图纸记录云端存档 (免费7天 / VIP 30天)',
-          desc: isEn ? 'Cloud auto-backup for exported patterns' : '已导出成品图纸自动同步至云端，方便随时回查下载',
-          free: '7天',
-          vip: '30天',
-          pro: '永久',
-          badge: 'VIP',
+          name: isEn ? 'Editable pattern cloud history' : '可编辑图纸云端存档',
+          desc: isEn ? 'Restores editable grids across signed-in devices' : '同步完整可编辑网格，可在其他已登录设备继续编辑和高清导出',
+          free: '10条',
+          vip: '20条',
+          pro: '25条',
         },
         {
           name: isEn ? 'Mixed Palette Matching' : '跨品牌混采色卡与自定义 CSV 导入',
@@ -318,7 +326,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    自动识别人物主体，智能一键扣除无用背景，并提供平滑降格微调，真实帮您节省 20%~50% 拼豆材料成本！
+                    在应用前对照预览：免费用户可体验 15%，VIP 可选 15% 或 25%，商家 VIP 另可选 40%。背景移除与色块平滑可单独调整。
                   </p>
                 </div>
 
@@ -358,12 +366,12 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                       <Cloud className="w-4 h-4" />
                     </span>
                     <div>
-                      <h5 className="font-bold text-slate-200 text-xs">🗄️ 30天云端成品图纸归档</h5>
+                      <h5 className="font-bold text-slate-200 text-xs">可编辑图纸云端存档</h5>
                       <span className="text-[10px] text-amber-300 font-bold">VIP 专享解锁</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    导出的图纸自动云端保存 30 天，手机电脑随时登录账号查看历史作品，防止本地文件丢失。
+                    云端保存完整可编辑网格：免费 10 条、VIP 20 条、商家 VIP 25 条；可在其他设备继续编辑和高清导出。
                   </p>
                 </div>
               </div>

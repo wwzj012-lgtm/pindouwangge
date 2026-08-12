@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2 } from 'lucide-react';
+import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Zap } from 'lucide-react';
 import { useLanguage } from './context/LanguageContext';
 import {
   BeadColor,
@@ -32,6 +32,7 @@ import { AuthModal } from './components/AuthModal';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { UserPatternsModal } from './components/UserPatternsModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
+import type { EditablePatternProject } from './utils/patternHistory';
 
 export default function App() {
   const { language } = useLanguage();
@@ -39,6 +40,7 @@ export default function App() {
 
   // 1. Core State
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
+  const [activePatternId, setActivePatternId] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
   const [isConverting, setIsConverting] = useState<boolean>(false);
@@ -60,6 +62,7 @@ export default function App() {
     sharpening: 30,
     outlineBoost: true,
     chromaKeyColor: null,
+    chromaKeyTolerance: 20,
     colorMatchAlgo: 'ciede2000',
   });
 
@@ -178,6 +181,7 @@ export default function App() {
 
   // Load Image File
   const handleImageUpload = (file: File) => {
+    setActivePatternId(null);
     const reader = new FileReader();
     reader.onload = evt => {
       if (evt.target?.result) {
@@ -196,6 +200,7 @@ export default function App() {
 
   // Load Sample Preset Image
   const handleLoadSample = (sampleUrl: string, name = '安妮亚粉发眼镜示例拼豆') => {
+    setActivePatternId(null);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
@@ -215,6 +220,7 @@ export default function App() {
 
   // Clear Canvas
   const handleClearCanvas = () => {
+    setActivePatternId(null);
     const emptyGrid = Array.from({ length: settings.height }, () =>
       Array(settings.width).fill(null)
     );
@@ -553,6 +559,7 @@ export default function App() {
     try {
       const project: ProjectData = JSON.parse(jsonStr);
       if (project.grid && Array.isArray(project.grid)) {
+        setActivePatternId(null);
         setProjectName(project.name || '导入的拼豆项目');
         setBrand(project.brand || 'MARD');
         setSettings(s => ({
@@ -567,6 +574,24 @@ export default function App() {
     } catch {
       alert('解析拼豆工程文件失败，请确保格式正确');
     }
+  };
+
+  const handleRestorePattern = (project: EditablePatternProject): void => {
+    setActivePatternId(project.workId);
+    setProjectName(project.name);
+    setBrand(project.brand);
+    setActivePalette(project.palette);
+    setSettings((current) => ({
+      ...current,
+      width: project.width,
+      height: project.height,
+      boardSize: project.boardSize,
+      brand: project.brand,
+    }));
+    setSettings({ ...project.settings });
+    const restoredGrid = project.grid.map((row) => [...row]);
+    setGrid(restoredGrid);
+    pushHistory(restoredGrid);
   };
 
   // Keyboard Shortcuts (P, B, I, E, R, Ctrl+Z, Ctrl+Y)
@@ -607,22 +632,17 @@ export default function App() {
       <Header
         projectName={projectName}
         setProjectName={setProjectName}
-        brand={brand}
-        setBrand={setBrand}
         onImageUpload={handleImageUpload}
         onLoadSample={handleLoadSample}
         onExportJson={handleExportJson}
         onImportJson={handleImportJson}
         onOpenExportModal={() => setIsExportModalOpen(true)}
-        onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
         onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onClearCanvas={handleClearCanvas}
-        settings={settings}
-        setSettings={setSettings}
       />
 
       {/* Editing Toolbar */}
@@ -652,11 +672,10 @@ export default function App() {
         canvasBackdrop={canvasBackdrop}
         setCanvasBackdrop={setCanvasBackdrop}
         onShiftGrid={handleShiftGrid}
-        onOpenImageStudio={() => setIsStudioModalOpen(true)}
+        onClearOuterBackground={handleClearOuterBackground}
         hasImage={sourceImage !== null}
         showOverlay={showOverlay}
         setShowOverlay={setShowOverlay}
-        onOpenVipModal={() => setIsVipModalOpen(true)}
       />
 
       {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
@@ -686,14 +705,6 @@ export default function App() {
             onOpenImageStudio={() => {
               setMobileDrawer('none');
               setIsStudioModalOpen(true);
-            }}
-            onOpenSmartReduceModal={() => {
-              setMobileDrawer('none');
-              setIsSmartReduceModalOpen(true);
-            }}
-            onOpenVipModal={() => {
-              setMobileDrawer('none');
-              setIsVipModalOpen(true);
             }}
             onCloseMobile={() => setMobileDrawer('none')}
           />
@@ -760,7 +771,6 @@ export default function App() {
             onSetHighlightColorId={setHighlightColorId}
             onOpenReplaceModal={color => setReplaceSourceColor(color)}
             onSelectColor={color => setSelectedColor(color)}
-            onClearOuterBackground={handleClearOuterBackground}
             onEraseColor={handleEraseColor}
             onRestoreColor={handleRestoreColor}
             erasedColorCoords={erasedColorCoords}
@@ -770,10 +780,10 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Navigation Bar (< lg screens) */}
-      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur-md px-1.5 py-1 flex items-center justify-around z-30 shrink-0 text-[9px]">
+      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur-md px-1.5 py-1.5 flex items-center justify-around z-30 shrink-0 text-[10px]">
         <button
           onClick={() => setMobileDrawer('none')}
-          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
             mobileDrawer === 'none'
               ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
               : 'text-slate-400 hover:text-slate-200'
@@ -785,7 +795,7 @@ export default function App() {
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'settings' ? 'none' : 'settings')}
-          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
             mobileDrawer === 'settings'
               ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
               : 'text-slate-400 hover:text-slate-200'
@@ -797,7 +807,7 @@ export default function App() {
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'stats' ? 'none' : 'stats')}
-          className={`flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
             mobileDrawer === 'stats'
               ? 'text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 shadow-xs'
               : 'text-slate-400 hover:text-slate-200'
@@ -807,20 +817,18 @@ export default function App() {
           <span>{isEn ? 'Stats' : '用量'}</span>
         </button>
 
-        {sourceImage && (
-          <button
-            onClick={() => setIsStudioModalOpen(true)}
-            className="flex flex-col items-center justify-center gap-0.5 py-1 px-2 rounded-lg text-amber-400 hover:text-amber-300 font-medium transition-all cursor-pointer"
-            title={isEn ? 'Image Studio' : '高级图像增强与转拼豆工作坊'}
-          >
-            <Wand2 className="w-3.5 h-3.5" />
-            <span>{isEn ? 'Studio' : '图像增强'}</span>
-          </button>
-        )}
+        <button
+          onClick={() => setIsSmartReduceModalOpen(true)}
+          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg text-sky-300 hover:text-sky-200 font-bold transition-all cursor-pointer"
+          title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
+        >
+          <Zap className="w-3.5 h-3.5" />
+          <span>{isEn ? 'Save' : '省豆'}</span>
+        </button>
 
         <button
           onClick={() => setIsExportModalOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
         >
           <Download className="w-3.5 h-3.5" />
           <span>{isEn ? 'Export' : '导出'}</span>
@@ -848,6 +856,10 @@ export default function App() {
         brandName={brand}
         projectName={projectName}
         beadShape={beadShape}
+        activePalette={activePalette}
+        activePatternId={activePatternId}
+        settings={settings}
+        onPatternArchived={setActivePatternId}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
 
@@ -896,6 +908,7 @@ export default function App() {
       <UserPatternsModal
         isOpen={isUserPatternsModalOpen}
         onClose={() => setIsUserPatternsModalOpen(false)}
+        onContinueEditing={handleRestorePattern}
       />
 
       <VipPrivilegesModal

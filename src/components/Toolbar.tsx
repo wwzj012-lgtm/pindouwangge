@@ -23,10 +23,8 @@ import {
   ArrowLeft,
   ArrowRight,
   Layers,
-  Wand2,
   Hand,
-  Crown,
-  Sparkles,
+  Scissors,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { useLanguage } from '../context/LanguageContext';
@@ -58,11 +56,10 @@ interface ToolbarProps {
   canvasBackdrop: CanvasBackdrop;
   setCanvasBackdrop: (backdrop: CanvasBackdrop) => void;
   onShiftGrid: (dir: 'up' | 'down' | 'left' | 'right') => void;
-  onOpenImageStudio: () => void;
+  onClearOuterBackground: () => void;
   hasImage: boolean;
   showOverlay: boolean;
   setShowOverlay: (show: boolean) => void;
-  onOpenVipModal?: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -91,11 +88,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   canvasBackdrop,
   setCanvasBackdrop,
   onShiftGrid,
-  onOpenImageStudio,
+  onClearOuterBackground,
   hasImage,
   showOverlay,
   setShowOverlay,
-  onOpenVipModal,
 }) => {
   const { language, t } = useLanguage();
   const isEn = language === 'en';
@@ -139,19 +135,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
 
         <div className="h-4 w-px bg-slate-800 shrink-0" />
-
-        {/* Image Studio Launcher Button */}
-        {hasImage && (
-          <button
-            onClick={onOpenImageStudio}
-            className="flex items-center gap-1 px-2 py-1 sm:px-3 sm:py-1.5 bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold rounded-lg shadow-sm cursor-pointer transition-all active:scale-95 text-[11px] shrink-0 whitespace-nowrap"
-            title={isEn ? 'Open Image Studio' : '打开图像转换增强工作坊'}
-          >
-            <Wand2 className="w-3.5 h-3.5 shrink-0" />
-            <span className="hidden sm:inline">{isEn ? 'Image Studio' : '转换增强工作坊'}</span>
-            <span className="sm:hidden">{isEn ? 'Studio' : '转换增强'}</span>
-          </button>
-        )}
 
         {/* Paint & Shape Tools Buttons */}
         <div className="flex items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700/80 shrink-0">
@@ -242,6 +225,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'}
           >
             <Redo2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onClearOuterBackground}
+            className="p-1.5 rounded-md text-slate-300 hover:text-rose-300 hover:bg-rose-950/60 transition-colors cursor-pointer"
+            title={isEn ? 'Clear edge-connected background beads' : '清除与边缘连通的背景豆'}
+          >
+            <Scissors className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -343,18 +333,6 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <span className="hidden sm:inline text-[11px]">{isEn ? 'Grid' : '网格线'}</span>
           </button>
 
-          {/* View VIP Privileges Widget Button */}
-          {onOpenVipModal && (
-            <button
-              onClick={onOpenVipModal}
-              className="bg-gradient-to-r from-amber-500/20 via-purple-500/20 to-amber-500/10 hover:brightness-125 border border-amber-500/40 text-amber-300 font-black px-2 py-1.5 rounded-lg flex items-center gap-1 transition-all cursor-pointer shrink-0 text-xs shadow-sm active:scale-95"
-              title="查看全量功能清单与 VIP / 商家Pro 专享特权"
-            >
-              <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/30 shrink-0 animate-pulse" />
-              <span className="hidden sm:inline text-[11px]">{isEn ? 'VIP Privileges' : '查看会员特权'}</span>
-              <span className="sm:hidden text-[10px]">{isEn ? 'VIP' : '特权'}</span>
-            </button>
-          )}
         </div>
 
         <div className="h-5 w-px bg-slate-800 hidden sm:block" />
@@ -390,4 +368,3 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     </div>
   );
 };
-

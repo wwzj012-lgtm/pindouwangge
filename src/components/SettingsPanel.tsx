@@ -1,18 +1,18 @@
 import React from 'react';
 import {
   Sliders,
-  Sparkles,
   Link2,
   Unlink2,
   RotateCcw,
   Palette,
   LayoutGrid,
-  Zap,
   Pipette,
   Wand2,
   X,
-  Crown,
   AlertCircle,
+  Crown,
+  Sparkles,
+  Zap,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -27,8 +27,6 @@ interface SettingsPanelProps {
   onReconvert: () => void;
   hasImage: boolean;
   onOpenImageStudio: () => void;
-  onOpenSmartReduceModal?: () => void;
-  onOpenVipModal?: () => void;
   onCloseMobile?: () => void;
 }
 
@@ -39,11 +37,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onReconvert,
   hasImage,
   onOpenImageStudio,
-  onOpenSmartReduceModal,
-  onOpenVipModal,
   onCloseMobile,
 }) => {
-  const { isVip, isPro, memberType } = useAuth();
+  const { isVip, isPro } = useAuth();
   const { language } = useLanguage();
   const isEn = language === 'en';
   const brandNames = getBrandNames(isEn);
@@ -119,53 +115,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span>V2 {conversionDiagnostics.pipeline.toUpperCase()}</span>
           <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
           <span>ΔE {conversionDiagnostics.meanDeltaE.toFixed(1)}</span>
-        </div>
-      )}
-
-      {/* Smart Bead Reducer Studio Trigger */}
-      {onOpenSmartReduceModal && (
-        <button
-          onClick={() => {
-            if (onCloseMobile) onCloseMobile();
-            onOpenSmartReduceModal();
-          }}
-          className="w-full py-2 px-3 bg-gradient-to-r from-sky-950 via-indigo-950 to-slate-900 border border-sky-500/80 hover:brightness-110 text-sky-200 font-bold rounded-xl shadow-md flex items-center justify-between cursor-pointer transition-all active:scale-95 group"
-        >
-          <div className="flex items-center gap-2 text-xs">
-            <Zap className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform fill-current" />
-            <span className="text-white">{isEn ? '⚡ Smart Bead Saver (Save 20%~50%)' : '⚡ 智能减少拼豆数量 (省豆20%~50%)'}</span>
-          </div>
-          <span className="text-[10px] bg-sky-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-sky-500/30">PRO</span>
-        </button>
-      )}
-
-      {/* VIP Privileges Widget */}
-      {onOpenVipModal && (
-        <div className="bg-gradient-to-r from-amber-500/15 via-purple-500/15 to-slate-900 border border-amber-500/30 rounded-xl p-3 space-y-2 relative overflow-hidden shadow-md">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 font-black text-amber-300 text-xs">
-              <Crown className="w-4 h-4 text-amber-400 fill-amber-400/20" />
-              <span>{isEn ? 'VIP Privileges & Features' : '会员权益与功能清单'}</span>
-            </div>
-            <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-bold border border-amber-500/30">
-              {isPro ? 'Pro' : isVip ? 'VIP' : (isEn ? 'Free' : '免费版')}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-300 leading-snug">
-            {isEn
-              ? 'Unlock watermark-free HD patterns, 400x400 canvas, smart bead saver & custom store watermarks.'
-              : '解锁高清无水印图纸、400大画布、智能抠图省豆、自定义店铺防盗水印等特权。'}
-          </p>
-          <button
-            onClick={() => {
-              if (onCloseMobile) onCloseMobile();
-              onOpenVipModal();
-            }}
-            className="w-full py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-110 text-slate-950 font-black rounded-lg text-xs flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer active:scale-95"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{isEn ? 'View VIP Privileges' : '查看完整会员特权'}</span>
-          </button>
         </div>
       )}
 

@@ -9,7 +9,6 @@ import {
   Hash,
   X,
   Trash2,
-  Scissors,
   RotateCcw,
 } from 'lucide-react';
 import { BeadColor, ColorStat } from '../types';
@@ -25,7 +24,6 @@ interface StatsPanelProps {
   onSetHighlightColorId: (id: string | null) => void;
   onOpenReplaceModal: (sourceColor: BeadColor) => void;
   onSelectColor: (color: BeadColor) => void;
-  onClearOuterBackground?: () => void;
   onEraseColor?: (colorId: string) => void;
   onRestoreColor?: (colorId: string) => void;
   erasedColorCoords?: Map<string, [number, number][]>;
@@ -42,7 +40,6 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   onSetHighlightColorId,
   onOpenReplaceModal,
   onSelectColor,
-  onClearOuterBackground,
   onEraseColor,
   onRestoreColor,
   erasedColorCoords,
@@ -185,18 +182,6 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           <div className="text-sm font-bold text-sky-400 font-mono mt-0.5">{totalBoards} {isEn ? 'boards' : '板'}</div>
         </div>
       </div>
-
-      {/* Quick Action: Clear Outer Connected Background */}
-      {onClearOuterBackground && (
-        <button
-          onClick={onClearOuterBackground}
-          className="w-full mb-3 py-1.5 px-2 bg-pink-950/80 hover:bg-pink-900 border border-pink-600/60 rounded-xl text-pink-200 text-[11px] font-bold flex items-center justify-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-          title={isEn ? 'Auto clear connected outer background beads' : '自动识别边缘相连的背景拼豆并一次性全部抹除 (只留人物/物体主体)'}
-        >
-          <Scissors className="w-3.5 h-3.5 text-pink-400" />
-          <span>{isEn ? '🪄 Remove Outer Background Beads' : '🪄 一键清除最外层连通背景豆'}</span>
-        </button>
-      )}
 
       {/* Search Input */}
       <div className="relative mb-3">

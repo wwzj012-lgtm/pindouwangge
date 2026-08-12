@@ -5,15 +5,20 @@
  * 核心目标：
  * 1. 真实且大幅度减少【拼豆总数量 (Bead Count)】，而不只是精简色卡。
  * 2. 适应任何主题图片（人物、二次元、萌宠、风景、像素画等），不硬编码任何具体颜色。
- * 3. 分层 protection：基于 Sobel 梯度与显著性分析，锁定五官、瞳孔、高对比轮廓与核心亮色，绝不糊掉。
+ * 3. 分层 protection：基于 Sobel 梯度与显著性分析，锁定五官、瞳孔、高对比轮廓与核心亮色。
  * 4. 智能背景抠除：自动识别并清除四周无用背景拼豆，把背景变为 0 拼豆。
- * 5. 保真缩放/降格 (Saliency Resampling)：支持按比例微调降格，减少 20%~50% 拼豆颗粒数。
+ * 5. 保真缩放/降格 (Saliency Resampling)：支持按目标豆子面积缩放，会员档位为 15%/25%/40%。
  */
 
 import { BeadColor } from '../types';
 import { rgbToLab, deltaE2000 } from './colorUtils';
 
 export type ReductionIntensity = 'light' | 'medium' | 'strong';
+export type BeadSavingPercent = 0 | 15 | 25 | 40;
+
+export function savingPercentToScale(percent: BeadSavingPercent): number {
+  return Math.sqrt(1 - percent / 100);
+}
 
 export interface ReductionOptions {
   intensity: ReductionIntensity;         // 'light' (15~25%), 'medium' (25~35%), 'strong' (35~50%)
@@ -22,7 +27,7 @@ export interface ReductionOptions {
   removeBackgroundBeads: boolean;       // 智能抠除无用背景拼豆 (背景设为透明，物理减豆)
   removeIsolatedNoise: boolean;         // 1~3px 悬空孤立噪点清理
   mergeMinorColors: boolean;            // 合并微量低频杂色
-  downscaleRatio: number;               // 1.0 (原尺寸), 0.85 (精简 -15% 尺寸), 0.70 (极致 -30% 尺寸)
+  downscaleRatio: number;               // Linear scale. Use savingPercentToScale() for an exact bead-area target.
   autoCropEmptyBorder: boolean;         // 自动切除四周无豆空白盘
 }
 
@@ -450,46 +455,54 @@ export function smartReduceGrid(
 
     for (let ty = 0; ty < targetH; ty++) {
       for (let tx = 0; tx < targetW; tx++) {
-        const startX = Math.floor(tx * scaleX);
-        const endX = Math.min(origW - 1, Math.floor((tx + 1) * scaleX));
-        const startY = Math.floor(ty * scaleY);
-        const endY = Math.min(origH - 1, Math.floor((ty + 1) * scaleY));
+        const startX = tx * scaleX;
+        const endX = Math.min(origW, (tx + 1) * scaleX);
+        const startY = ty * scaleY;
+        const endY = Math.min(origH, (ty + 1) * scaleY);
 
-        // Sample window and prioritize Tier 1 (eyes/contours)
-        let bestCid: string | null = null;
-        let highestTierWeight = -1;
-        const colorCounts = new Map<string, number>();
+        // Pick the region representative instead of allowing a single edge pixel
+        // to replace the whole sample block. Repeated colors remain dominant while
+        // contours, highlights and the block centre receive bounded extra weight.
+        const colorScores = new Map<string, { score: number; count: number }>();
+        const centreX = (startX + endX - 1) / 2;
+        const centreY = (startY + endY - 1) / 2;
 
-        for (let sy = startY; sy <= endY; sy++) {
-          for (let sx = startX; sx <= endX; sx++) {
+        for (let sy = Math.floor(startY); sy < Math.ceil(endY); sy++) {
+          const verticalCoverage = Math.max(0, Math.min(sy + 1, endY) - Math.max(sy, startY));
+          for (let sx = Math.floor(startX); sx < Math.ceil(endX); sx++) {
+            const horizontalCoverage = Math.max(0, Math.min(sx + 1, endX) - Math.max(sx, startX));
+            const coverage = horizontalCoverage * verticalCoverage;
+            if (coverage === 0) continue;
             const cid = workGrid[sy][sx];
             if (cid) {
-              colorCounts.set(cid, (colorCounts.get(cid) || 0) + 1);
               const meta = metaGrid[sy][sx];
-              // Tier 1 has highest weight (100), Tier 2 (50), Tier 3 (10)
-              const weight = meta ? (meta.tier === 1 ? 100 : meta.tier === 2 ? 50 : 10) : 5;
-              if (weight > highestTierWeight) {
-                highestTierWeight = weight;
-                bestCid = cid;
-              }
+              const distance = Math.hypot(sx - centreX, sy - centreY);
+              const centreWeight = Math.max(0, 0.25 - distance * 0.08);
+              const edgeWeight = options.protectSaliencyAndContours ? Math.min(0.35, (meta?.edgeWeight ?? 0) * 0.35) : 0;
+              const featureWeight = meta?.tier === 1 ? 0.25 : meta?.tier === 2 ? 0.12 : 0;
+              const vibrantWeight = options.protectVibrantColors && meta ? Math.min(0.15, meta.chroma / 400) : 0;
+              // A feature bonus can refine a close regional vote, but cannot make one
+              // edge pixel outweigh two ordinary pixels from the sampled region.
+              const weight = coverage * (1 + Math.min(0.85, centreWeight + edgeWeight + featureWeight + vibrantWeight));
+              const current = colorScores.get(cid) ?? { score: 0, count: 0 };
+              current.score += weight;
+              current.count += 1;
+              colorScores.set(cid, current);
             }
           }
         }
 
-        if (highestTierWeight >= 50 && bestCid) {
-          scaledGrid[ty][tx] = bestCid;
-        } else {
-          // Dominant color in window
-          let topCid: string | null = null;
-          let maxCnt = 0;
-          colorCounts.forEach((cnt, cid) => {
-            if (cnt > maxCnt) {
-              maxCnt = cnt;
-              topCid = cid;
-            }
-          });
-          scaledGrid[ty][tx] = topCid;
-        }
+        let representative: string | null = null;
+        let bestScore = -1;
+        let bestCount = -1;
+        colorScores.forEach(({ score, count }, cid) => {
+          if (score > bestScore || (score === bestScore && count > bestCount)) {
+            bestScore = score;
+            bestCount = count;
+            representative = cid;
+          }
+        });
+        scaledGrid[ty][tx] = representative;
       }
     }
 

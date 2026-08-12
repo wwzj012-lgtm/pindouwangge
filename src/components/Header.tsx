@@ -1,12 +1,9 @@
 import React, { useRef, useState } from 'react';
 import {
-  Grid,
   Upload,
   Download,
   FolderOpen,
   FileJson,
-  Sparkles,
-  Palette,
   Image as ImageIcon,
   RotateCcw,
   BookOpen,
@@ -16,12 +13,10 @@ import {
   User,
   Menu,
   X,
-  ShieldCheck,
   Globe,
   Loader2,
 } from 'lucide-react';
-import { BrandKey, ConvertSettings } from '../types';
-import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
+import { BRAND_NAMES } from '../data/palettes';
 import { SAMPLE_IMAGES } from '../data/samples';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -29,48 +24,37 @@ import { useLanguage } from '../context/LanguageContext';
 interface HeaderProps {
   projectName: string;
   setProjectName: (name: string) => void;
-  brand: BrandKey;
-  setBrand: (brand: BrandKey) => void;
   onImageUpload: (file: File) => void;
   onLoadSample: (sampleUrl: string) => void;
   onExportJson: () => void;
   onImportJson: (jsonStr: string) => void;
   onOpenExportModal: () => void;
-  onOpenPaletteModal: () => void;
   onOpenGuideModal: () => void;
   onOpenSmartReduceModal?: () => void;
   onOpenPatternsModal?: () => void;
   onOpenAuthModal?: () => void;
   onOpenVipModal?: () => void;
   onClearCanvas: () => void;
-  settings: ConvertSettings;
-  setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   projectName,
   setProjectName,
-  brand,
-  setBrand,
   onImageUpload,
   onLoadSample,
   onExportJson,
   onImportJson,
   onOpenExportModal,
-  onOpenPaletteModal,
   onOpenGuideModal,
   onOpenSmartReduceModal,
   onOpenPatternsModal,
   onOpenAuthModal,
   onOpenVipModal,
   onClearCanvas,
-  settings,
-  setSettings,
 }) => {
-  const { currentUser, userProfile, loading: authLoading, isVip, isPro, memberType, isAdmin } = useAuth();
+  const { currentUser, userProfile, loading: authLoading, isVip, isPro } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const isEn = language === 'en';
-  const brandNames = getBrandNames(isEn);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
@@ -111,72 +95,33 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-base md:text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none whitespace-nowrap">
               {t('appName')}
             </span>
-            <span className="bg-purple-950/80 text-purple-300 border border-purple-700/60 text-[9px] font-bold px-1.5 py-0.5 rounded">
-              {t('proTag')}
-            </span>
+            {onOpenVipModal && (
+              <button
+                onClick={onOpenVipModal}
+                className={`border text-[9px] font-black px-1.5 py-0.5 rounded transition-colors ${
+                  isPro
+                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/50'
+                    : isVip
+                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/50'
+                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
+                }`}
+                title={isEn ? 'View membership benefits' : '查看当前会员权益'}
+              >
+                {isPro ? (isEn ? 'MERCHANT · 40%' : '商家VIP · 40%省豆') : isVip ? (isEn ? 'VIP · 15/25%' : 'VIP · 15/25%省豆') : (isEn ? 'FREE' : '免费版')}
+              </button>
+            )}
           </div>
-        </div>
-
-        {/* Desktop & Tablet Brand Palette Selector */}
-        <div className="hidden md:flex items-center gap-1.5 text-xs">
-          <div className="flex items-center gap-1 bg-slate-800/90 border border-slate-700/80 rounded-lg px-2 py-1 shrink-0">
-            <Palette className="w-3.5 h-3.5 text-pink-400 shrink-0" />
-            <select
-              value={brand}
-              onChange={e => {
-                const newBrand = e.target.value as BrandKey;
-                setBrand(newBrand);
-                setSettings(s => ({ ...s, brand: newBrand }));
-              }}
-              className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs max-w-[120px] xl:max-w-none truncate"
-            >
-              {Object.entries(brandNames).map(([key, name]) => (
-                <option key={key} value={key} className="bg-slate-800 text-white">
-                  {name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Quick Board Size Selector (Desktop XL) */}
-          <div className="hidden xl:flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/80 rounded-lg px-2.5 py-1 shrink-0">
-            <span className="text-slate-400 text-xs whitespace-nowrap">{t('pegboard')}:</span>
-            <select
-              value={`${settings.width}x${settings.height}`}
-              onChange={e => {
-                const preset = BOARD_PRESETS.find(p => `${p.width}x${p.height}` === e.target.value);
-                if (preset) {
-                  setSettings(s => ({
-                    ...s,
-                    width: preset.width,
-                    height: preset.height,
-                    boardSize: preset.boardSize,
-                  }));
-                }
-              }}
-              className="bg-transparent text-slate-200 outline-none cursor-pointer font-medium text-xs"
-            >
-              {BOARD_PRESETS.map(p => (
-                <option key={p.name} value={`${p.width}x${p.height}`} className="bg-slate-800 text-white">
-                  {getBoardPresetName(p, isEn)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <button
-            onClick={onOpenPaletteModal}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700 flex items-center gap-1 transition-colors cursor-pointer shrink-0 whitespace-nowrap text-xs"
-            title="管理与禁用色卡"
-          >
-            <Palette className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            <span className="hidden xl:inline">{t('personalCenter')}</span>
-            <span className="xl:hidden text-[11px]">{t('personalCenter')}</span>
-          </button>
         </div>
 
         {/* Right Corner Controls for Mobile & All Devices */}
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={onOpenGuideModal}
+            className="hidden md:flex p-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white"
+            title={isEn ? 'Guide' : '使用指南'}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+          </button>
           {/* Language Toggle Button */}
           <button
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
@@ -249,34 +194,12 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Action Buttons Row for Tablet & Desktop (>= md) */}
       <div className="hidden md:flex items-center justify-end gap-1.5 overflow-x-auto scrollbar-none">
-        {/* VIP Privileges Button */}
-        {onOpenVipModal && (
-          <button
-            onClick={onOpenVipModal}
-            className="bg-gradient-to-r from-amber-500/20 via-purple-500/20 to-amber-500/10 hover:brightness-125 text-amber-300 text-xs font-black px-2.5 py-1.5 rounded-lg border border-amber-500/40 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
-            title={language === 'zh' ? '查看全量功能清单与 VIP / 商家Pro 专享特权' : 'View VIP privileges & feature list'}
-          >
-            <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400/20 shrink-0 animate-pulse" />
-            <span>{language === 'zh' ? '会员特权' : 'VIP Privileges'}</span>
-          </button>
-        )}
-
-        {/* Operation Guide Button */}
-        <button
-          onClick={onOpenGuideModal}
-          className="bg-purple-950/90 hover:bg-purple-900 text-purple-200 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-purple-700/80 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
-          title={language === 'zh' ? '查看拼豆设计操作指南' : 'View design guide'}
-        >
-          <BookOpen className="w-3.5 h-3.5 text-purple-300 shrink-0" />
-          <span className="hidden xl:inline">{t('guide')}</span>
-        </button>
-
         {/* Exported Pattern History Records Button */}
         {onOpenPatternsModal && (
           <button
             onClick={onOpenPatternsModal}
             className="bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-purple-500/30 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
-            title={language === 'zh' ? '查看导出的拼豆成品图纸记录（保留30天）' : 'View exported pattern history'}
+            title={language === 'zh' ? '查看可继续编辑的拼豆图纸记录' : 'View editable pattern history'}
           >
             <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
             <span>{language === 'zh' ? '图纸记录' : 'History'}</span>
@@ -304,7 +227,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenSmartReduceModal}
             className="bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-md shadow-sky-500/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ring-1 ring-sky-400/40"
-            title="智能扣除无用背景与降格微调，真实减少使用拼豆总数(省豆20%~50%)"
+            title={isEn ? 'Feature-preserving bead saving: VIP 15/25%, Merchant VIP 40%' : '特征保真省豆：VIP 15%/25%，商家VIP 40%'}
           >
             <Zap className="w-3.5 h-3.5 shrink-0 fill-current text-amber-300 animate-pulse" />
             <span>{t('smartReduce')}</span>
@@ -351,48 +274,6 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <div className="flex-1 overflow-y-auto py-4 space-y-3">
-            {/* Brand Palette selector on Mobile */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2">
-              <label className="text-xs font-bold text-slate-300 flex items-center gap-2">
-                <Palette className="w-4 h-4 text-pink-400" />
-                <span>{t('selectBrand')}</span>
-              </label>
-              <select
-                value={brand}
-                onChange={e => {
-                  const newBrand = e.target.value as BrandKey;
-                  setBrand(newBrand);
-                  setSettings(s => ({ ...s, brand: newBrand }));
-                }}
-                className="w-full p-3 bg-slate-950 border border-slate-800 rounded-xl text-xs text-white outline-none cursor-pointer font-bold min-h-[48px]"
-              >
-                {Object.entries(brandNames).map(([key, name]) => (
-                  <option key={key} value={key}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Smart Bead Reducer */}
-            {onOpenSmartReduceModal && (
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  onOpenSmartReduceModal();
-                }}
-                className="w-full p-3.5 rounded-xl bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 text-white font-bold text-sm shadow-lg flex items-center justify-between cursor-pointer min-h-[48px] active:scale-98"
-              >
-                <div className="flex items-center gap-2">
-                  <Zap className="w-5 h-5 fill-current text-amber-300 animate-pulse" />
-                  <span>{t('smartReduce')}</span>
-                </div>
-                <span className="text-xs bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-black">
-                  {language === 'zh' ? '省豆20%~50%' : 'Save 20%~50%'}
-                </span>
-              </button>
-            )}
-
             {/* Upload Image */}
             <button
               onClick={() => {
@@ -403,30 +284,6 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Upload className="w-5 h-5" />
               <span>{t('uploadImage')}</span>
-            </button>
-
-            {/* Export Tutorial */}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                onOpenExportModal();
-              }}
-              className="w-full p-3.5 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
-            >
-              <Download className="w-5 h-5" />
-              <span>{t('exportPattern')}</span>
-            </button>
-
-            {/* Manage Palette */}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                onOpenPaletteModal();
-              }}
-              className="w-full p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
-            >
-              <Palette className="w-5 h-5 text-amber-400" />
-              <span>{t('personalCenter')}</span>
             </button>
 
             {/* Open & Save Project */}

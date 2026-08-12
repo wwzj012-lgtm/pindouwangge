@@ -20,11 +20,21 @@ import {
 } from 'lucide-react';
 import { BeadColor } from '../types';
 import {
-  smartReduceGrid,
   ReductionIntensity,
   ReductionOptions,
   ReductionReport,
+  savingPercentToScale,
+  smartReduceGrid,
+  type BeadSavingPercent,
 } from '../utils/smartReduceUtils';
+import {
+  canApplySavingTarget,
+  canUseSavingTarget,
+  getSmartReduceFooterAction,
+  getSmartReduceMembership,
+  nearestAllowedSavingTarget,
+} from '../utils/smartReduceAccess';
+import { scheduleSmartReduceFallback, shouldAcceptSmartReducePreviewResult } from '../utils/smartReduceScheduler';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -37,6 +47,20 @@ interface SmartBeadReducerModalProps {
   onOpenAuthModal?: () => void;
 }
 
+interface SmartReduceRequest {
+  id: number;
+  grid: (string | null)[][];
+  palette: BeadColor[];
+  options: ReductionOptions;
+}
+
+interface SmartReduceRequest {
+  id: number;
+  grid: (string | null)[][];
+  palette: BeadColor[];
+  options: ReductionOptions;
+}
+
 export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   isOpen,
   onClose,
@@ -45,10 +69,10 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   onApplyReducedGrid,
   onOpenAuthModal,
 }) => {
-  const { isVip, hasFreeTrial, consumeFreeTrial } = useAuth();
+  const { isVip, isPro, hasFreeTrial, consumeFreeTrial } = useAuth();
   const { t, formatPrice, language } = useLanguage();
   const [intensity, setIntensity] = useState<ReductionIntensity>('medium');
-  const [downscaleRatio, setDownscaleRatio] = useState<number>(1.0); // 1.0, 0.85, 0.70
+  const [savingTarget, setSavingTarget] = useState<BeadSavingPercent>(15);
   const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(true);
   const [protectSaliencyAndContours, setProtectSaliencyAndContours] = useState<boolean>(true);
   const [protectVibrantColors, setProtectVibrantColors] = useState<boolean>(true);
@@ -58,39 +82,132 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
 
   const [report, setReport] = useState<ReductionReport | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
+  const [calculationError, setCalculationError] = useState<'calculation-failed' | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+  const workerFailedRef = useRef(false);
+  const requestIdRef = useRef(0);
+  const lastRequestRef = useRef<SmartReduceRequest | null>(null);
+  const fallbackCancelRef = useRef<(() => void) | null>(null);
+  const fallbackRunnerRef = useRef<((request: SmartReduceRequest) => void) | null>(null);
+  const membership = getSmartReduceMembership(isVip, isPro);
+  const canApplyCurrentTarget = canApplySavingTarget(savingTarget, membership, hasFreeTrial);
+  const footerAction = getSmartReduceFooterAction(membership, savingTarget, hasFreeTrial);
+  const selectSavingTarget = (target: BeadSavingPercent) => {
+    if (!canUseSavingTarget(target, membership)) {
+      onOpenAuthModal?.();
+      return;
+    }
+    setSavingTarget(target);
+  };
+
+  useEffect(() => {
+    const allowedTarget = nearestAllowedSavingTarget(savingTarget, membership);
+    if (allowedTarget !== savingTarget) setSavingTarget(allowedTarget);
+  }, [membership, savingTarget]);
+
+  useEffect(() => {
+    const scheduleFallback = (request: SmartReduceRequest) => {
+      if (lastRequestRef.current?.id !== request.id || fallbackCancelRef.current) return;
+      fallbackCancelRef.current = scheduleSmartReduceFallback(() => {
+        fallbackCancelRef.current = null;
+        if (!shouldAcceptSmartReducePreviewResult(request.id, requestIdRef.current)) return;
+        try {
+          setCalculationError(null);
+          setReport(smartReduceGrid(request.grid, request.palette, request.options));
+        } catch {
+          setCalculationError('calculation-failed');
+        } finally {
+          setIsCalculating(false);
+        }
+      });
+    };
+    fallbackRunnerRef.current = scheduleFallback;
+
+    let worker: Worker | null = null;
+    try {
+      worker = new Worker(new URL('../utils/smartReduce.worker.ts', import.meta.url), { type: 'module' });
+      workerRef.current = worker;
+      worker.onmessage = (event: MessageEvent<{ id: number; report?: ReductionReport; error?: string }>) => {
+        if (!shouldAcceptSmartReducePreviewResult(event.data.id, requestIdRef.current)) return;
+        if (event.data.error) {
+          workerFailedRef.current = true;
+          if (workerRef.current === worker) workerRef.current = null;
+          worker.terminate();
+          setCalculationError('calculation-failed');
+          const request = lastRequestRef.current;
+          if (request) scheduleFallback(request);
+        } else if (event.data.report) {
+          setCalculationError(null);
+          setReport(event.data.report);
+        }
+        setIsCalculating(false);
+      };
+      worker.onerror = () => {
+        workerFailedRef.current = true;
+        if (workerRef.current === worker) workerRef.current = null;
+        worker?.terminate();
+        const request = lastRequestRef.current;
+        if (request) scheduleFallback(request);
+      };
+    } catch {
+      workerFailedRef.current = true;
+      workerRef.current = null;
+    }
+
+    return () => {
+      fallbackCancelRef.current?.();
+      fallbackCancelRef.current = null;
+      fallbackRunnerRef.current = null;
+      worker?.terminate();
+      if (workerRef.current === worker) workerRef.current = null;
+    };
+  }, []);
 
   const origCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const optCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Re-calculate optimization whenever options change
+  // Calculation runs off the UI thread so changing a target never blocks the modal.
   useEffect(() => {
     if (!isOpen || grid.length === 0) return;
 
+    const id = requestIdRef.current + 1;
+    requestIdRef.current = id;
     setIsCalculating(true);
-    const timer = setTimeout(() => {
-      const opts: ReductionOptions = {
-        intensity,
-        downscaleRatio,
-        removeBackgroundBeads,
-        protectSaliencyAndContours,
-        protectVibrantColors,
-        removeIsolatedNoise,
-        mergeMinorColors,
-        autoCropEmptyBorder,
-      };
+    setCalculationError(null);
+    setReport(null);
+    const opts: ReductionOptions = {
+      intensity,
+      downscaleRatio: savingPercentToScale(savingTarget),
+      removeBackgroundBeads,
+      protectSaliencyAndContours,
+      protectVibrantColors,
+      removeIsolatedNoise,
+      mergeMinorColors,
+      autoCropEmptyBorder,
+    };
+    const request: SmartReduceRequest = { id, grid, palette, options: opts };
+    lastRequestRef.current = request;
+    fallbackCancelRef.current?.();
+    fallbackCancelRef.current = null;
 
-      const result = smartReduceGrid(grid, palette, opts);
-      setReport(result);
-      setIsCalculating(false);
-    }, 50);
-
-    return () => clearTimeout(timer);
+    const worker = workerRef.current;
+    if (worker && !workerFailedRef.current) {
+      try {
+        worker.postMessage(request);
+        return;
+      } catch {
+        workerFailedRef.current = true;
+        workerRef.current = null;
+        worker.terminate();
+      }
+    }
+    fallbackRunnerRef.current?.(request);
   }, [
     isOpen,
     grid,
     palette,
     intensity,
-    downscaleRatio,
+    savingTarget,
     removeBackgroundBeads,
     protectSaliencyAndContours,
     protectVibrantColors,
@@ -169,6 +286,11 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const optW = report?.optimizedGrid[0]?.length || origW;
 
   const handleApply = async () => {
+    if (!canApplyCurrentTarget) {
+      onOpenAuthModal?.();
+      return;
+    }
+
     if (!isVip) {
       if (hasFreeTrial) {
         const success = await consumeFreeTrial();
@@ -203,7 +325,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               <h2 className="text-lg font-bold text-white flex items-center gap-2">
                 <span>{t('reducerTitle')}</span>
                 <span className="text-[10px] px-2 py-0.5 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black shadow">
-                  {t('proTag')} VIP
+                  {isPro ? t('proMember') : t('vipMember')}
                 </span>
               </h2>
               <p className="text-xs text-amber-200/80">
@@ -250,16 +372,18 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   <span>{t('reducerScaleTitle')}</span>
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">
-                  {downscaleRatio === 1.0 ? t('reducerScaleKeep') : downscaleRatio === 0.85 ? t('reducerScale15') : t('reducerScale30')}
+                  {savingTarget === 0
+                    ? t('reducerScaleKeep')
+                    : language === 'zh' ? `目标省豆 ${savingTarget}%` : `Target saving ${savingTarget}%`}
                 </span>
               </label>
 
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <button
                   type="button"
-                  onClick={() => setDownscaleRatio(1.0)}
+                  onClick={() => selectSavingTarget(0)}
                   className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
-                    downscaleRatio === 1.0
+                    savingTarget === 0
                       ? 'bg-sky-950 border-sky-500 text-sky-200 shadow-sm'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
@@ -270,28 +394,45 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setDownscaleRatio(0.85)}
+                  onClick={() => selectSavingTarget(15)}
                   className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
-                    downscaleRatio === 0.85
+                    savingTarget === 15
                       ? 'bg-indigo-950 border-indigo-500 text-indigo-200 shadow-sm'
                       : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
                   }`}
                 >
                   <div>{t('reducerScale15')}</div>
-                  <div className="text-[10px] text-emerald-400 font-normal">{t('reducerScale15Desc')}</div>
+                  <div className="text-[10px] text-emerald-400 font-normal">{isVip ? t('reducerScale15Desc') : (language === 'zh' ? '免费体验' : 'Free trial')}</div>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setDownscaleRatio(0.70)}
+                  onClick={() => selectSavingTarget(25)}
+                  aria-disabled={!canUseSavingTarget(25, membership)}
+                  title={!canUseSavingTarget(25, membership) ? (language === 'zh' ? 'VIP 可解锁 25% 省豆' : 'Upgrade to VIP to unlock 25% saving') : undefined}
                   className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
-                    downscaleRatio === 0.70
+                    savingTarget === 25
                       ? 'bg-purple-950 border-purple-500 text-purple-200 shadow-sm'
-                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800'
+                      : `bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 ${!canUseSavingTarget(25, membership) ? 'opacity-60' : ''}`
                   }`}
                 >
-                  <div className="text-purple-300">{t('reducerScale30')}</div>
-                  <div className="text-[10px] text-emerald-400 font-normal">{t('reducerScale30Desc')}</div>
+                  <div className="text-purple-300">{t('reducerScale25')}</div>
+                  <div className="text-[10px] text-emerald-400 font-normal">{t('reducerScale25Desc')}</div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => selectSavingTarget(40)}
+                  aria-disabled={!canUseSavingTarget(40, membership)}
+                  title={!canUseSavingTarget(40, membership) ? (language === 'zh' ? '商家 VIP 可解锁 40% 省豆' : 'Upgrade to Merchant VIP to unlock 40% saving') : undefined}
+                  className={`py-2 px-2 rounded-lg text-xs font-bold border transition-all cursor-pointer text-center ${
+                    savingTarget === 40
+                      ? 'bg-amber-950 border-amber-500 text-amber-200'
+                      : `bg-slate-900 border-slate-800 text-slate-400 hover:bg-slate-800 ${!canUseSavingTarget(40, membership) ? 'opacity-60' : ''}`
+                  }`}
+                >
+                  <div className="text-amber-300">{t('reducerScale40')}</div>
+                  <div className="text-[10px] text-amber-400 font-normal">{t('reducerScale40Desc')}</div>
                 </button>
               </div>
             </div>
@@ -373,7 +514,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300 mt-1">
-                  {language === 'zh' ? '智能融合相似大面积背景色块，完美保持主体表情清晰。' : 'Smart merge similar flat colors, keeping the subject\'s face perfectly clear.'}
+                  {language === 'zh' ? '智能合并相近的大面积色块，减少零碎颜色；请对照预览检查主体特征。' : 'Merge similar large color patches and review the preview for subject details.'}
                 </p>
               </button>
 
@@ -526,8 +667,10 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 {isCalculating ? (
                   <div className="flex flex-col items-center gap-2 text-sky-300 text-xs font-medium">
                     <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
-                    <span>正在进行通用图像边缘分析与极速省豆计算...</span>
+                    <span>{language === 'zh' ? '正在计算预览…' : 'Calculating preview...'}</span>
                   </div>
+                ) : calculationError ? (
+                  <div className="px-4 text-center text-xs text-rose-300">{language === 'zh' ? '预览计算未完成，请调整设置后重试。' : 'Preview calculation did not finish. Adjust settings and try again.'}</div>
                 ) : (
                   <canvas
                     ref={optCanvasRef}
@@ -605,13 +748,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                         <>
                           原图 {origW}×{origH} = {report.originalTotalBeads} 粒拼豆 ({report.originalColorTypesCount}色)
                           <ArrowRight className="w-3.5 h-3.5 inline mx-1.5 text-sky-400" />
-                          PRO 减粒图纸 {optW}×{optH} = {report.optimizedTotalBeads} 粒拼豆 ({report.optimizedColorTypesCount}色)
+                          {t('reducerOptScheme')} {optW}×{optH} = {report.optimizedTotalBeads} 粒拼豆 ({report.optimizedColorTypesCount}色)
                         </>
                       ) : (
                         <>
                           Original {origW}×{origH} = {report.originalTotalBeads} beads ({report.originalColorTypesCount} colors)
                           <ArrowRight className="w-3.5 h-3.5 inline mx-1.5 text-sky-400" />
-                          PRO Optimized {optW}×{optH} = {report.optimizedTotalBeads} beads ({report.optimizedColorTypesCount} colors)
+                          {t('reducerOptScheme')} {optW}×{optH} = {report.optimizedTotalBeads} beads ({report.optimizedColorTypesCount} colors)
                         </>
                       )}
                     </span>
@@ -624,7 +767,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 <div className="flex items-center gap-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 px-5 py-2.5 rounded-xl shrink-0 shadow-lg shadow-amber-500/25 border border-amber-300">
                   <DollarSign className="w-5 h-5 fill-current shrink-0" />
                   <div className="flex items-baseline gap-1">
-                    <span className="font-black text-xs">{language === 'zh' ? 'PRO VIP 预计总节省：' : 'PRO VIP Est. Savings: '}</span>
+                    <span className="font-black text-xs">{t('reducerSavingEst')}</span>
                     <span className="text-xl sm:text-2xl font-black font-mono tracking-tight text-slate-950">{formatPrice(report.estimatedMoneySavedRMB)}</span>
                   </div>
                 </div>
@@ -644,7 +787,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           </button>
 
           <div className="flex items-center gap-3">
-            {isVip ? (
+            {footerAction === 'apply' ? (
               <button
                 type="button"
                 onClick={handleApply}
@@ -654,11 +797,11 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 <Zap className="w-4 h-4 fill-current text-amber-300" />
                 <span>{language === 'zh' ? '应用减粒图纸到当前拼豆画布' : 'Apply reduced pattern to pegboard'}</span>
               </button>
-            ) : hasFreeTrial ? (
+            ) : footerAction === 'trial' ? (
               <button
                 type="button"
                 onClick={handleApply}
-                disabled={isCalculating || !report}
+                disabled={isCalculating}
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 via-teal-600 to-emerald-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-emerald-500/25 transition-all cursor-pointer flex items-center gap-2 border border-emerald-300"
               >
                 <Gift className="w-4 h-4 fill-current text-slate-950" />
@@ -672,7 +815,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 text-slate-950 font-black text-xs hover:brightness-110 active:scale-95 shadow-lg shadow-amber-500/25 transition-all cursor-pointer flex items-center gap-2 border border-amber-300"
               >
                 <Crown className="w-4 h-4 fill-current text-slate-950" />
-                <span>{language === 'zh' ? '解锁 PRO VIP 权限 / 激活卡密应用' : 'Unlock PRO VIP or redeem code to apply'}</span>
+                <span>{t('reducerApplyUnlock')}</span>
               </button>
             )}
           </div>

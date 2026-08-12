@@ -71,6 +71,16 @@ describe('Worker API client', () => {
     expect(headers.get('Authorization')).toBeNull();
   });
 
+  it('uses the current origin when no API URL is configured', async () => {
+    vi.stubEnv('VITE_WORKER_API_URL', '');
+    vi.stubGlobal('window', { location: { origin: 'https://stellabean.pages.dev' } });
+    fetchMock.mockResolvedValue(successResponse({ status: 'ok' }));
+
+    await apiGet('/api/health');
+
+    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://stellabean.pages.dev/api/health'));
+  });
+
   it('stores remembered tokens in localStorage only', () => {
     setApiToken('persistent-token', true);
 

@@ -416,7 +416,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full py-2.5 px-3 bg-slate-900 hover:bg-slate-800 border border-purple-500/40 text-purple-200 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md active:scale-95 min-h-[44px]"
                   >
                     <ImageIcon className="w-4 h-4 text-purple-400" />
-                    <span>查看我的导出图纸记录 (已归档成品，保留30天)</span>
+                    <span>查看我的可编辑图纸记录</span>
                   </button>
                 </div>
               )}

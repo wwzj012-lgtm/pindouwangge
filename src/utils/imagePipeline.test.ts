@@ -103,17 +103,41 @@ describe('pipeline classification and palette matching', () => {
 });
 
 describe('topology-preserving background removal', () => {
-  it('reports auto and manual edge-background decisions without treating either as a global chroma key', () => {
+  it('keeps backgrounds by default, including legacy settings that lack the explicit opt-in', () => {
     const data = makePixels(5, 5, [255, 255, 255]);
-    setPixel(data, 5, 2, 2, [0, 0, 0, 255]);
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 3; x += 1) setPixel(data, 5, x, y, [0, 0, 0, 255]);
+    }
 
-    const auto = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: null }, palette);
-    const manual = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: '#FFFFFF' }, palette);
+    const result = convertImageDataToGrid(data, 5, 5, { ...baseSettings, chromaKeyColor: null }, palette);
+
+    expect(result.diagnostics.background).toBeNull();
+    expect(result.diagnostics.backgroundPixelsRemoved).toBe(0);
+    expect(result.grid[0][0]).toBe('white');
+    expect(result.grid[2][2]).toBe('black');
+  });
+
+  it('removes edge background only after an explicit auto or manual opt-in', () => {
+    const data = makePixels(5, 5, [255, 255, 255]);
+    for (let y = 1; y <= 3; y += 1) {
+      for (let x = 1; x <= 3; x += 1) setPixel(data, 5, x, y, [0, 0, 0, 255]);
+    }
+
+    const auto = convertImageDataToGrid(data, 5, 5, {
+      ...baseSettings,
+      backgroundRemovalEnabled: true,
+      chromaKeyColor: null,
+    }, palette);
+    const manual = convertImageDataToGrid(data, 5, 5, {
+      ...baseSettings,
+      backgroundRemovalEnabled: true,
+      chromaKeyColor: '#FFFFFF',
+    }, palette);
 
     expect(auto.diagnostics.background?.source).toBe('auto');
     expect(manual.diagnostics.background).toMatchObject({ source: 'manual', color: '#FFFFFF' });
-    expect(auto.diagnostics.backgroundPixelsRemoved).toBe(24);
-    expect(manual.diagnostics.backgroundPixelsRemoved).toBe(24);
+    expect(auto.diagnostics.backgroundPixelsRemoved).toBe(16);
+    expect(manual.diagnostics.backgroundPixelsRemoved).toBe(16);
     expect(auto.grid[2][2]).toBe('black');
     expect(manual.grid[2][2]).toBe('black');
   });
@@ -254,6 +278,64 @@ describe('detail preservation and deterministic output', () => {
     expect(first.diagnostics.pipeline).toBe('photo');
     expect(first.grid).toEqual(second.grid);
     expect(first.grid[2][2]).toBeNull();
+  });
+
+  it('does not clean a low-contrast photo cell when Floyd-Steinberg is disabled', () => {
+    const softPalette: BeadColor[] = [
+      { id: 'gray', code: 'G', name: 'Gray', hex: '#808080', rgb: [128, 128, 128], brand: 'MARD' },
+      { id: 'dark-gray', code: 'D', name: 'Dark gray', hex: '#606060', rgb: [96, 96, 96], brand: 'MARD' },
+    ];
+    const data = makePixels(3, 3, [128, 128, 128]);
+    setPixel(data, 3, 1, 1, [108, 108, 108, 255]);
+    const result = convertImageDataToGrid(data, 3, 3, {
+      ...baseSettings,
+      width: 3,
+      height: 3,
+      pipelineOverride: 'photo',
+      dither: 'none',
+    }, softPalette);
+
+    expect(result.grid.flat().every(Boolean)).toBe(true);
+    expect(result.grid[1][1]).toBe('dark-gray');
+  });
+
+  it('cleans a low-contrast Floyd-Steinberg colour speck and reports the final match', () => {
+    const softPalette: BeadColor[] = [
+      { id: 'gray', code: 'G', name: 'Gray', hex: '#808080', rgb: [128, 128, 128], brand: 'MARD' },
+      { id: 'dark-gray', code: 'D', name: 'Dark gray', hex: '#606060', rgb: [96, 96, 96], brand: 'MARD' },
+    ];
+    const data = makePixels(3, 3, [128, 128, 128]);
+    setPixel(data, 3, 1, 1, [108, 108, 108, 255]);
+    const result = convertImageDataToGrid(data, 3, 3, {
+      ...baseSettings,
+      width: 3,
+      height: 3,
+      pipelineOverride: 'photo',
+      dither: 'floyd',
+      ditherStrength: 1,
+    }, softPalette);
+
+    expect(result.grid.flat().every(Boolean)).toBe(true);
+    expect(result.grid[1][1]).toBe('gray');
+    expect(result.diagnostics.matches[1][1]?.matchedColorId).toBe(result.grid[1][1]);
+  });
+
+  it('keeps high-contrast photo lines and transparent boundaries intact', () => {
+    const data = makePixels(5, 5, [255, 255, 255]);
+    for (let x = 1; x <= 3; x += 1) setPixel(data, 5, x, 2, [0, 0, 0, 255]);
+    setPixel(data, 5, 0, 0, [255, 255, 255, 0]);
+    const result = convertImageDataToGrid(data, 5, 5, {
+      ...baseSettings,
+      width: 5,
+      height: 5,
+      pipelineOverride: 'photo',
+      dither: 'none',
+    }, palette);
+
+    expect(result.grid[0][0]).toBeNull();
+    expect(result.grid[2][1]).toBe('black');
+    expect(result.grid[2][2]).toBe('black');
+    expect(result.grid[2][3]).toBe('black');
   });
 
   it('exposes first and second palette candidates for each non-transparent output cell', () => {

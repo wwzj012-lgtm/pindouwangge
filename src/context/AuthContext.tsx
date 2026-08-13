@@ -3,7 +3,7 @@ import {
   type AuthSession,
   type UserProfile,
 } from '../lib/accountApi';
-import { apiGet, apiPost, clearApiToken, setApiToken } from '../utils/api';
+import { apiGet, apiPost, clearAdminSession, clearApiToken, setApiToken } from '../utils/api';
 
 interface SessionUser {
   uid: string;
@@ -141,6 +141,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (error) {
         console.error('Authentication initialization failed:', error);
         clearApiToken();
+        clearAdminSession();
         clearStoredSessions();
         sessionPersistenceRef.current = null;
         setCurrentUser(null);
@@ -180,6 +181,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logoutUser = async (): Promise<void> => {
     clearApiToken();
+    clearAdminSession();
     clearStoredSessions();
     sessionPersistenceRef.current = null;
     setCurrentUser(null);

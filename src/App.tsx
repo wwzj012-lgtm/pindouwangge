@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Zap } from 'lucide-react';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -16,6 +16,8 @@ import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
 import { smartCropSubject } from './utils/cropUtils';
+import { resetBackgroundRemovalForNewImage } from './utils/imageStudioControls';
+import { createImageRequestGate } from './utils/imageRequestGate';
 
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
@@ -29,7 +31,6 @@ import { ImageStudioModal } from './components/ImageStudioModal';
 import { UserGuideModal } from './components/UserGuideModal';
 import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
 import { AuthModal } from './components/AuthModal';
-import { AdminPanelModal } from './components/AdminPanelModal';
 import { UserPatternsModal } from './components/UserPatternsModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
 import type { EditablePatternProject } from './utils/patternHistory';
@@ -68,6 +69,29 @@ export default function App() {
 
   // Source Image element reference
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
+  const imageRequestGateRef = useRef(createImageRequestGate());
+
+  const beginImageRequest = useCallback(() => {
+    return imageRequestGateRef.current.begin();
+  }, []);
+
+  const invalidateImageRequest = useCallback(() => {
+    const token = imageRequestGateRef.current.invalidate();
+    setIsConverting(false);
+    return token;
+  }, []);
+
+  const isCurrentImageRequest = useCallback(
+    (token: number) => imageRequestGateRef.current.isCurrent(token),
+    []
+  );
+
+  const finishImageRequest = useCallback(
+    (token: number) => {
+      if (isCurrentImageRequest(token)) setIsConverting(false);
+    },
+    [isCurrentImageRequest]
+  );
 
   // Grid Matrix: 2D Array of BeadColor ID (or null for empty peg)
   const [grid, setGrid] = useState<(string | null)[][]>(() =>
@@ -101,7 +125,6 @@ export default function App() {
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isAdminPanelOpen, setIsAdminPanelOpen] = useState(false);
   const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
@@ -147,68 +170,96 @@ export default function App() {
 
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
-    (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[]) => {
+    (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[], requestToken = beginImageRequest()) => {
+      if (!isCurrentImageRequest(requestToken)) return;
       setIsConverting(true);
       setTimeout(() => {
+        if (!isCurrentImageRequest(requestToken)) return;
         let targetW = currentSettings.width;
         let targetH = currentSettings.height;
 
         if (currentSettings.keepAspectRatio && img.width > 0 && img.height > 0) {
           const ratio = img.height / img.width;
           targetH = Math.max(10, Math.round(targetW * ratio));
-          setSettings(s => ({ ...s, height: targetH }));
+          if (isCurrentImageRequest(requestToken)) {
+            setSettings(s => ({ ...s, height: targetH }));
+          }
         }
 
-        const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
-        const conversion = imageToGridWithDiagnostics(img, effectiveSettings, currentPalette);
-        const newGrid = conversion.grid;
+        try {
+          const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
+          const conversion = imageToGridWithDiagnostics(img, effectiveSettings, currentPalette);
+          const newGrid = conversion.grid;
 
-        setGrid(newGrid);
-        setConversionDiagnostics(conversion.diagnostics);
-        pushHistory(newGrid);
-        setIsConverting(false);
+          if (isCurrentImageRequest(requestToken)) {
+            setGrid(newGrid);
+            setConversionDiagnostics(conversion.diagnostics);
+            pushHistory(newGrid);
+          }
+        } finally {
+          finishImageRequest(requestToken);
+        }
       }, 50);
     },
-    [pushHistory]
+    [beginImageRequest, finishImageRequest, isCurrentImageRequest, pushHistory]
   );
 
   // Re-convert on settings update if source image exists
   const handleReconvert = () => {
     if (sourceImage) {
-      convertImageToGrid(sourceImage, settings, activePalette);
+      const requestToken = beginImageRequest();
+      convertImageToGrid(sourceImage, settings, activePalette, requestToken);
     }
   };
 
   // Load Image File
   const handleImageUpload = (file: File) => {
+    const requestToken = beginImageRequest();
     setActivePatternId(null);
+    setIsConverting(true);
     const reader = new FileReader();
     reader.onload = evt => {
+      if (!isCurrentImageRequest(requestToken)) return;
       if (evt.target?.result) {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         img.onload = () => {
+          if (!isCurrentImageRequest(requestToken)) return;
+          const safeSettings = resetBackgroundRemovalForNewImage(settings);
           setSourceImage(img);
           setProjectName(file.name.replace(/\.[^/.]+$/, ''));
-          convertImageToGrid(img, settings, activePalette);
+          setSettings(safeSettings);
+          convertImageToGrid(img, safeSettings, activePalette, requestToken);
+        };
+        img.onerror = () => {
+          finishImageRequest(requestToken);
         };
         img.src = evt.target.result as string;
       }
+    };
+    reader.onerror = () => {
+      finishImageRequest(requestToken);
     };
     reader.readAsDataURL(file);
   };
 
   // Load Sample Preset Image
   const handleLoadSample = (sampleUrl: string, name = '安妮亚粉发眼镜示例拼豆') => {
+    const requestToken = beginImageRequest();
     setActivePatternId(null);
+    setIsConverting(true);
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
+      if (!isCurrentImageRequest(requestToken)) return;
       setSourceImage(img);
       setProjectName(name);
-      const presetSettings = { ...settings, width: 79, height: 44 };
+      const presetSettings = { ...resetBackgroundRemovalForNewImage(settings), width: 79, height: 44 };
       setSettings(presetSettings);
-      convertImageToGrid(img, presetSettings, activePalette);
+      convertImageToGrid(img, presetSettings, activePalette, requestToken);
+    };
+    img.onerror = () => {
+      finishImageRequest(requestToken);
     };
     img.src = sampleUrl;
   };
@@ -220,6 +271,7 @@ export default function App() {
 
   // Clear Canvas
   const handleClearCanvas = () => {
+    invalidateImageRequest();
     setActivePatternId(null);
     const emptyGrid = Array.from({ length: settings.height }, () =>
       Array(settings.width).fill(null)
@@ -248,6 +300,7 @@ export default function App() {
         }
       }
     }
+    invalidateImageRequest();
     setGrid(newGrid);
     pushHistory(newGrid);
   };
@@ -281,6 +334,7 @@ export default function App() {
         applyPoint(settings.width - 1 - x, settings.height - 1 - y);
       }
 
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     } else if (activeTool === 'eraser') {
@@ -304,6 +358,7 @@ export default function App() {
         erasePoint(settings.width - 1 - x, settings.height - 1 - y);
       }
 
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     } else if (activeTool === 'bucket') {
@@ -334,6 +389,7 @@ export default function App() {
         }
       }
 
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     } else if (activeTool === 'replace') {
@@ -370,6 +426,7 @@ export default function App() {
       }
     });
 
+    invalidateImageRequest();
     setGrid(newGrid);
     pushHistory(newGrid);
   };
@@ -384,6 +441,7 @@ export default function App() {
         return cell;
       })
     );
+    invalidateImageRequest();
     setGrid(newGrid);
     pushHistory(newGrid);
   };
@@ -410,6 +468,7 @@ export default function App() {
       const newGrid = grid.map(row =>
         row.map(cell => (cell === colorId ? null : cell))
       );
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     }
@@ -426,6 +485,7 @@ export default function App() {
           newGrid[y][x] = colorId;
         }
       }
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     }
@@ -527,6 +587,7 @@ export default function App() {
         });
         return next;
       });
+      invalidateImageRequest();
       setGrid(newGrid);
       pushHistory(newGrid);
     }
@@ -559,6 +620,7 @@ export default function App() {
     try {
       const project: ProjectData = JSON.parse(jsonStr);
       if (project.grid && Array.isArray(project.grid)) {
+        invalidateImageRequest();
         setActivePatternId(null);
         setProjectName(project.name || '导入的拼豆项目');
         setBrand(project.brand || 'MARD');
@@ -577,6 +639,7 @@ export default function App() {
   };
 
   const handleRestorePattern = (project: EditablePatternProject): void => {
+    invalidateImageRequest();
     setActivePatternId(project.workId);
     setProjectName(project.name);
     setBrand(project.brand);
@@ -882,6 +945,7 @@ export default function App() {
         grid={grid}
         palette={activePalette}
         onApplyReducedGrid={(newGrid) => {
+          invalidateImageRequest();
           setGrid(newGrid);
           pushHistory(newGrid);
           setSettings(s => ({
@@ -896,13 +960,8 @@ export default function App() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
-        onOpenAdminPanel={() => setIsAdminPanelOpen(true)}
+        onOpenAdminPanel={() => window.location.assign('/admin')}
         onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
-      />
-
-      <AdminPanelModal
-        isOpen={isAdminPanelOpen}
-        onClose={() => setIsAdminPanelOpen(false)}
       />
 
       <UserPatternsModal
@@ -926,6 +985,7 @@ export default function App() {
           setSettings={setSettings}
           activePalette={activePalette}
           onApplyConversion={(newGrid, updatedImg) => {
+            invalidateImageRequest();
             if (updatedImg) {
               setSourceImage(updatedImg);
             }

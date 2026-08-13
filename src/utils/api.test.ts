@@ -3,11 +3,13 @@ import {
   apiGet,
   apiPost,
   checkApiHealth,
-  clearAdminApiSecret,
+  clearAdminSession,
   clearApiToken,
+  createAdminSession,
+  getAdminSessionToken,
   getApiToken,
+  setAdminSessionToken,
   setApiToken,
-  setAdminApiSecret,
 } from './api';
 
 function successResponse<T>(data: T): Response {
@@ -51,7 +53,7 @@ describe('Worker API client', () => {
     vi.stubGlobal('sessionStorage', createStorage());
     fetchMock.mockReset();
     clearApiToken();
-    clearAdminApiSecret();
+    clearAdminSession();
   });
 
   afterEach(() => {
@@ -59,8 +61,7 @@ describe('Worker API client', () => {
     vi.unstubAllGlobals();
   });
 
-  it('does not send the admin secret to public requests', async () => {
-    setAdminApiSecret('admin-only-secret');
+  it('sends the unlock secret only to the admin session exchange', async () => {
     fetchMock.mockResolvedValue(successResponse({ token: 'token' }));
 
     await apiPost('/api/auth/signin', { email: 'user@example.com', password: 'password' });
@@ -69,6 +70,44 @@ describe('Worker API client', () => {
     const headers = new Headers(request.headers);
     expect(headers.get('X-Worker-Secret')).toBeNull();
     expect(headers.get('Authorization')).toBeNull();
+  });
+
+  it('stores the short-lived admin session in sessionStorage only', () => {
+    setAdminSessionToken('short-lived-admin-session');
+
+    expect(getAdminSessionToken()).toBe('short-lived-admin-session');
+    expect(sessionStorage.getItem('beadgrid_admin_session')).toBe('short-lived-admin-session');
+    expect(localStorage.getItem('beadgrid_admin_session')).toBeNull();
+  });
+
+  it('exchanges the static secret once and uses the returned session for admin APIs', async () => {
+    fetchMock
+      .mockResolvedValueOnce(successResponse({ token: 'short-lived-admin-session', expiresAt: Date.now() + 1_800_000 }))
+      .mockResolvedValueOnce(successResponse([]));
+
+    await expect(createAdminSession('admin-only-secret')).resolves.toMatchObject({ ok: true });
+    await apiGet('/api/admin/users');
+
+    const unlockHeaders = new Headers((fetchMock.mock.calls[0][1] as RequestInit).headers);
+    expect(unlockHeaders.get('X-Worker-Secret')).toBe('admin-only-secret');
+    expect(unlockHeaders.get('X-Admin-Session')).toBeNull();
+
+    const adminHeaders = new Headers((fetchMock.mock.calls[1][1] as RequestInit).headers);
+    expect(adminHeaders.get('X-Worker-Secret')).toBeNull();
+    expect(adminHeaders.get('X-Admin-Session')).toBe('short-lived-admin-session');
+    expect(localStorage.getItem('beadgrid_admin_session')).toBeNull();
+  });
+
+  it('clears the admin session after an admin authorization failure', async () => {
+    setAdminSessionToken('expired-admin-session');
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: false, message: 'expired' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await apiGet('/api/admin/users');
+
+    expect(getAdminSessionToken()).toBeNull();
   });
 
   it('uses the current origin when no API URL is configured', async () => {

@@ -20,6 +20,47 @@ export function savingPercentToScale(percent: BeadSavingPercent): number {
   return Math.sqrt(1 - percent / 100);
 }
 
+export interface ReducedGridDimensions {
+  width: number;
+  height: number;
+}
+
+/** Converts an area-saving target's linear scale into stable grid dimensions. */
+export function getReducedGridDimensions(
+  originalWidth: number,
+  originalHeight: number,
+  downscaleRatio: number,
+): ReducedGridDimensions {
+  const ratio = Number.isFinite(downscaleRatio)
+    ? Math.min(1, Math.max(0, downscaleRatio))
+    : 1;
+
+  const width = Math.max(1, Math.floor(originalWidth));
+  const height = Math.max(1, Math.floor(originalHeight));
+  const targetArea = width * height * ratio * ratio;
+  const originalAspect = width / height;
+  let best = { width, height, areaError: Infinity, aspectError: Infinity };
+
+  // Small grids cannot always realize a percentage exactly. Search all legal
+  // integer dimensions, prioritize target area, then preserve aspect ratio.
+  for (let candidateWidth = 1; candidateWidth <= width; candidateWidth++) {
+    for (let candidateHeight = 1; candidateHeight <= height; candidateHeight++) {
+      const areaError = Math.abs(candidateWidth * candidateHeight - targetArea);
+      const aspectError = Math.abs(Math.log((candidateWidth / candidateHeight) / originalAspect));
+      if (
+        areaError < best.areaError
+        || (areaError === best.areaError && aspectError < best.aspectError)
+        || (areaError === best.areaError && aspectError === best.aspectError
+          && (candidateWidth < best.width || (candidateWidth === best.width && candidateHeight < best.height)))
+      ) {
+        best = { width: candidateWidth, height: candidateHeight, areaError, aspectError };
+      }
+    }
+  }
+
+  return { width: best.width, height: best.height };
+}
+
 export interface ReductionOptions {
   intensity: ReductionIntensity;         // 'light' (15~25%), 'medium' (25~35%), 'strong' (35~50%)
   protectSaliencyAndContours: boolean;   // 高对比边缘/五官/瞳孔/核心描边强锁保护 (防止走形糊掉)
@@ -36,10 +77,19 @@ export interface ReductionReport {
   originalTotalBeads: number;
   optimizedTotalBeads: number;
   savedBeadCount: number;
+  /** Saving due to resizing; explicit background deletion is excluded. */
   savedPercent: number;
+  /** Canvas-area saving, which is the membership target advertised by the UI. */
+  gridAreaSavedPercent: number;
+  /** Raw material reduction, including explicitly requested background deletion. */
+  effectiveBeadSavedPercent: number;
   bgBeadsSaved: number;            // 智能抠除背景省下的拼豆数
-  noiseBeadsSaved: number;         // 净化悬空杂豆省下的拼豆数
-  patchMergedBeadsSaved: number;    // 色块连片合并省下的拼豆数
+  noiseBeadsSaved: number;         // Retained for compatibility; recoloring does not save beads.
+  recoloredNoiseCount: number;     // Number of noise cells recolored, not removed.
+  patchMergedBeadsSaved: number;   // Retained for compatibility; color merging does not save beads.
+  resamplingBeadsSaved: number;    // Actual beads saved by grid resizing, excluding background removal.
+  resamplingBeadChangeCount: number; // Signed resizing change: positive means fewer beads.
+  totalBeadChangeCount: number;    // Signed total material change: positive means fewer beads.
   originalColorTypesCount: number;
   optimizedColorTypesCount: number;
   savedColorTypesCount: number;
@@ -92,6 +142,9 @@ export function smartReduceGrid(
 
   const originalColorTypesCount = initialColorCounts.size;
   if (originalTotalBeads === 0) return createEmptyReport(grid);
+  // "Keep original grid" is a no-op in this modal. Controls that simplify,
+  // crop, or remove pixels apply only to an actual reduction target.
+  const shouldPreserveOriginal = options.downscaleRatio >= 0.999999;
 
   // -------------------------------------------------------------
   // Step 1: Detect Corner/Border Background Color & Background Flood Mask
@@ -125,7 +178,7 @@ export function smartReduceGrid(
     Array(origW).fill(false)
   );
 
-  if (options.removeBackgroundBeads && dominantBgColor) {
+  if (!shouldPreserveOriginal && options.removeBackgroundBeads && dominantBgColor) {
     const bgObj = paletteMap.get(dominantBgColor);
     const bgLab = bgObj ? rgbToLab(...bgObj.rgb) : null;
 
@@ -267,8 +320,8 @@ export function smartReduceGrid(
   // -------------------------------------------------------------
   // Step 3: Remove Isolated Floating Noise Specks (1-3px)
   // -------------------------------------------------------------
-  let noiseBeadsSaved = 0;
-  if (options.removeIsolatedNoise) {
+  let recoloredNoiseCount = 0;
+  if (!shouldPreserveOriginal && options.removeIsolatedNoise) {
     const passes = options.intensity === 'strong' ? 3 : options.intensity === 'medium' ? 2 : 1;
     for (let pass = 0; pass < passes; pass++) {
       for (let y = 0; y < origH; y++) {
@@ -298,23 +351,21 @@ export function smartReduceGrid(
             }
           }
 
-          // If completely isolated or surrounded by blank background => Clear it
-          if (totalValid <= 1) {
-            workGrid[y][x] = null; // Clear floating bead
-            noiseBeadsSaved++;
-          } else {
-            const sameCount = neighborCounts.get(cid) || 0;
-            if (sameCount === 0 && totalValid >= 3) {
-              // Adopt dominant neighbor
-              let bestN = cid;
-              let maxN = 0;
-              neighborCounts.forEach((cnt, ncid) => {
-                if (cnt > maxN) {
-                  maxN = cnt;
-                  bestN = ncid;
-                }
-              });
+          const sameCount = neighborCounts.get(cid) || 0;
+          if (sameCount === 0 && totalValid > 0) {
+            // Cleanup can simplify a colour but must never turn an opaque source
+            // cell transparent. That behavior produced random holes in previews.
+            let bestN = cid;
+            let maxN = 0;
+            neighborCounts.forEach((cnt, ncid) => {
+              if (cnt > maxN) {
+                maxN = cnt;
+                bestN = ncid;
+              }
+            });
+            if (bestN !== cid) {
               workGrid[y][x] = bestN;
+              recoloredNoiseCount++;
             }
           }
         }
@@ -325,58 +376,60 @@ export function smartReduceGrid(
   // -------------------------------------------------------------
   // Step 4: Regional Color Smoothing & Patch Consolidation
   // -------------------------------------------------------------
-  const colorMergeThreshold = options.intensity === 'strong' ? 20 : options.intensity === 'medium' ? 14 : 8;
-  const boxRadius = options.intensity === 'strong' ? 2 : 1;
+  if (!shouldPreserveOriginal) {
+    const colorMergeThreshold = options.intensity === 'strong' ? 20 : options.intensity === 'medium' ? 14 : 8;
+    const boxRadius = options.intensity === 'strong' ? 2 : 1;
 
-  for (let y = 0; y < origH; y++) {
-    for (let x = 0; x < origW; x++) {
-      const cid = workGrid[y][x];
-      if (!cid) continue;
+    for (let y = 0; y < origH; y++) {
+      for (let x = 0; x < origW; x++) {
+        const cid = workGrid[y][x];
+        if (!cid) continue;
 
-      const meta = metaGrid[y][x];
-      if (!meta) continue;
+        const meta = metaGrid[y][x];
+        if (!meta) continue;
 
-      if (meta.tier === 1 && options.protectSaliencyAndContours) continue; // Lock facial & contour
+        if (meta.tier === 1 && options.protectSaliencyAndContours) continue; // Lock facial & contour
 
-      let tierThreshold = colorMergeThreshold;
-      if (meta.tier === 2 && options.protectVibrantColors) tierThreshold *= 0.6; // High protection gentle
-      if (meta.tier === 4) tierThreshold *= 1.5; // Aggressive for low-weight shadows
+        let tierThreshold = colorMergeThreshold;
+        if (meta.tier === 2 && options.protectVibrantColors) tierThreshold *= 0.6; // High protection gentle
+        if (meta.tier === 4) tierThreshold *= 1.5; // Aggressive for low-weight shadows
 
-      // Check surrounding window
-      const neighborColors = new Map<string, number>();
-      for (let dy = -boxRadius; dy <= boxRadius; dy++) {
-        for (let dx = -boxRadius; dx <= boxRadius; dx++) {
-          const nx = x + dx;
-          const ny = y + dy;
-          if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
-            const ncid = workGrid[ny][nx];
-            if (ncid) {
-              neighborColors.set(ncid, (neighborColors.get(ncid) || 0) + 1);
+        // Check surrounding window
+        const neighborColors = new Map<string, number>();
+        for (let dy = -boxRadius; dy <= boxRadius; dy++) {
+          for (let dx = -boxRadius; dx <= boxRadius; dx++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
+              const ncid = workGrid[ny][nx];
+              if (ncid) {
+                neighborColors.set(ncid, (neighborColors.get(ncid) || 0) + 1);
+              }
             }
           }
         }
-      }
 
-      let dominantColor = cid;
-      let maxCount = neighborColors.get(cid) || 0;
+        let dominantColor = cid;
+        let maxCount = neighborColors.get(cid) || 0;
 
-      neighborColors.forEach((cnt, ncid) => {
-        if (ncid !== cid && cnt > maxCount + 1) {
-          const c1 = paletteMap.get(cid);
-          const c2 = paletteMap.get(ncid);
-          if (c1 && c2) {
-            const lab1 = rgbToLab(...c1.rgb);
-            const lab2 = rgbToLab(...c2.rgb);
-            if (deltaE2000(lab1, lab2) < tierThreshold) {
-              maxCount = cnt;
-              dominantColor = ncid;
+        neighborColors.forEach((cnt, ncid) => {
+          if (ncid !== cid && cnt > maxCount + 1) {
+            const c1 = paletteMap.get(cid);
+            const c2 = paletteMap.get(ncid);
+            if (c1 && c2) {
+              const lab1 = rgbToLab(...c1.rgb);
+              const lab2 = rgbToLab(...c2.rgb);
+              if (deltaE2000(lab1, lab2) < tierThreshold) {
+                maxCount = cnt;
+                dominantColor = ncid;
+              }
             }
           }
-        }
-      });
+        });
 
-      if (dominantColor !== cid) {
-        workGrid[y][x] = dominantColor;
+        if (dominantColor !== cid) {
+          workGrid[y][x] = dominantColor;
+        }
       }
     }
   }
@@ -384,7 +437,7 @@ export function smartReduceGrid(
   // -------------------------------------------------------------
   // Step 5: Merge Minor Low-Frequency Colors
   // -------------------------------------------------------------
-  if (options.mergeMinorColors) {
+  if (!shouldPreserveOriginal && options.mergeMinorColors) {
     const postCounts = new Map<string, number>();
     for (let y = 0; y < origH; y++) {
       for (let x = 0; x < origW; x++) {
@@ -443,15 +496,25 @@ export function smartReduceGrid(
   // Step 6: Saliency-Preserving Grid Downsampling (智能按比例缩小降格度数)
   // -------------------------------------------------------------
   if (options.downscaleRatio < 0.98) {
-    const targetW = Math.max(10, Math.round(origW * options.downscaleRatio));
-    const targetH = Math.max(10, Math.round(origH * options.downscaleRatio));
-
-    const scaledGrid: (string | null)[][] = Array.from({ length: targetH }, () =>
-      Array(targetW).fill(null)
+    const { width: targetW, height: targetH } = getReducedGridDimensions(
+      origW,
+      origH,
+      options.downscaleRatio,
     );
+
+    const scaledGrid: (string | null)[][] = Array.from({ length: targetH }, () => Array(targetW).fill(null));
 
     const scaleX = origW / targetW;
     const scaleY = origH / targetH;
+
+    const candidates: Array<{
+      x: number;
+      y: number;
+      representative: string;
+      opaqueCoverage: number;
+      opaqueRatio: number;
+      score: number;
+    }> = [];
 
     for (let ty = 0; ty < targetH; ty++) {
       for (let tx = 0; tx < targetW; tx++) {
@@ -464,6 +527,8 @@ export function smartReduceGrid(
         // to replace the whole sample block. Repeated colors remain dominant while
         // contours, highlights and the block centre receive bounded extra weight.
         const colorScores = new Map<string, { score: number; count: number }>();
+        const targetArea = (endX - startX) * (endY - startY);
+        let opaqueCoverage = 0;
         const centreX = (startX + endX - 1) / 2;
         const centreY = (startY + endY - 1) / 2;
 
@@ -475,6 +540,7 @@ export function smartReduceGrid(
             if (coverage === 0) continue;
             const cid = workGrid[sy][sx];
             if (cid) {
+              opaqueCoverage += coverage;
               const meta = metaGrid[sy][sx];
               const distance = Math.hypot(sx - centreX, sy - centreY);
               const centreWeight = Math.max(0, 0.25 - distance * 0.08);
@@ -502,9 +568,41 @@ export function smartReduceGrid(
             representative = cid;
           }
         });
-        scaledGrid[ty][tx] = representative;
+        if (representative && opaqueCoverage > 0 && targetArea > 0) {
+          candidates.push({
+            x: tx,
+            y: ty,
+            representative,
+            opaqueCoverage,
+            opaqueRatio: opaqueCoverage / targetArea,
+            score: bestScore,
+          });
+        }
       }
     }
+
+    // Alpha-aware area budget: transparent coverage participates in every
+    // sampling region. A sparse source cannot create more opaque output cells
+    // than its area warrants after downscaling, even when it crosses boundaries.
+    const targetAreaRatio = (targetW * targetH) / (origW * origH);
+    const maxOpaqueCells = Math.min(targetW * targetH, Math.ceil(originalTotalBeads * targetAreaRatio));
+    const sortedCandidates = candidates
+      .sort((left, right) => (
+        right.opaqueRatio - left.opaqueRatio
+        || right.opaqueCoverage - left.opaqueCoverage
+        || right.score - left.score
+        || left.y - right.y
+        || left.x - right.x
+      ));
+    // Fully/mostly covered target cells form a compact subject. Do not use
+    // fractional boundary fragments to fill a global quota, because that
+    // produces isolated islands around otherwise solid components.
+    const denseCandidates = sortedCandidates.filter(({ opaqueRatio }) => opaqueRatio >= 0.5);
+    const selectedCandidates = (denseCandidates.length > 0 ? denseCandidates : sortedCandidates)
+      .slice(0, maxOpaqueCells);
+    selectedCandidates.forEach(({ x, y, representative }) => {
+      scaledGrid[y][x] = representative;
+    });
 
     workGrid = scaledGrid;
   }
@@ -513,7 +611,9 @@ export function smartReduceGrid(
   // Step 7: Auto-Crop Outer Empty Border
   // -------------------------------------------------------------
   let finalGrid = workGrid;
-  if (options.autoCropEmptyBorder) {
+  // A saving target promises a specific resized canvas. Cropping is only an
+  // explicit, unscaled cleanup action and cannot change that target.
+  if (options.autoCropEmptyBorder && options.downscaleRatio >= 0.98) {
     const curH = workGrid.length;
     const curW = workGrid[0].length;
     let minX = curW, maxX = 0, minY = curH, maxY = 0;
@@ -563,12 +663,25 @@ export function smartReduceGrid(
     }
   }
 
-  const savedBeadCount = Math.max(0, originalTotalBeads - optimizedTotalBeads);
-  const savedPercent = originalTotalBeads > 0
-    ? Math.round((savedBeadCount / originalTotalBeads) * 100)
+  const totalBeadChangeCount = originalTotalBeads - optimizedTotalBeads;
+  const savedBeadCount = Math.max(0, totalBeadChangeCount);
+  const reductionBaselineBeads = Math.max(0, originalTotalBeads - bgBeadsSaved);
+  const resamplingBeadChangeCount = reductionBaselineBeads - optimizedTotalBeads;
+  const resamplingBeadsSaved = Math.max(0, resamplingBeadChangeCount);
+  const savedPercent = reductionBaselineBeads > 0
+    ? Math.round(((reductionBaselineBeads - optimizedTotalBeads) / reductionBaselineBeads) * 1000) / 10
+    : 0;
+  const originalGridArea = origW * origH;
+  const optimizedGridArea = finalGrid.length * (finalGrid[0]?.length ?? 0);
+  const gridAreaSavedPercent = originalGridArea > 0
+    ? Math.round(((originalGridArea - optimizedGridArea) / originalGridArea) * 1000) / 10
+    : 0;
+  const effectiveBeadSavedPercent = originalTotalBeads > 0
+    ? Math.round((totalBeadChangeCount / originalTotalBeads) * 1000) / 10
     : 0;
 
-  const patchMergedBeadsSaved = Math.max(0, savedBeadCount - bgBeadsSaved - noiseBeadsSaved);
+  const noiseBeadsSaved = 0;
+  const patchMergedBeadsSaved = 0;
 
   const optimizedColorTypesCount = finalColorCounts.size;
   const savedColorTypesCount = originalColorTypesCount - optimizedColorTypesCount;
@@ -588,9 +701,15 @@ export function smartReduceGrid(
     optimizedTotalBeads,
     savedBeadCount,
     savedPercent,
+    gridAreaSavedPercent,
+    effectiveBeadSavedPercent,
     bgBeadsSaved,
     noiseBeadsSaved,
+    recoloredNoiseCount,
     patchMergedBeadsSaved,
+    resamplingBeadsSaved,
+    resamplingBeadChangeCount,
+    totalBeadChangeCount,
     originalColorTypesCount,
     optimizedColorTypesCount,
     savedColorTypesCount,
@@ -607,9 +726,15 @@ function createEmptyReport(grid: (string | null)[][]): ReductionReport {
     optimizedTotalBeads: 0,
     savedBeadCount: 0,
     savedPercent: 0,
+    gridAreaSavedPercent: 0,
+    effectiveBeadSavedPercent: 0,
     bgBeadsSaved: 0,
     noiseBeadsSaved: 0,
+    recoloredNoiseCount: 0,
     patchMergedBeadsSaved: 0,
+    resamplingBeadsSaved: 0,
+    resamplingBeadChangeCount: 0,
+    totalBeadChangeCount: 0,
     originalColorTypesCount: 0,
     optimizedColorTypesCount: 0,
     savedColorTypesCount: 0,

@@ -35,19 +35,12 @@ export const SIGNUP_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
 };
 
 const SESSION_TOKEN_KEY = 'beadgrid_worker_jwt';
-let adminApiSecret: string | null = null;
+const ADMIN_SESSION_TOKEN_KEY = 'beadgrid_admin_session';
+const ADMIN_SESSION_ENDPOINT = '/api/admin/session';
 
-export function setAdminApiSecret(secret: string): void {
-  const normalizedSecret = secret.trim();
-  adminApiSecret = normalizedSecret || null;
-}
-
-export function clearAdminApiSecret(): void {
-  adminApiSecret = null;
-}
-
-export function hasAdminApiSecret(): boolean {
-  return adminApiSecret !== null;
+interface AdminSessionResponse {
+  token: string;
+  expiresAt: number;
 }
 
 function getLocalStorage(): Storage | null {
@@ -74,6 +67,44 @@ function removeApiToken(storage: Storage | null): void {
   } catch {
     // Storage can be unavailable in private browsing contexts.
   }
+}
+
+function removeAdminSession(storage: Storage | null): void {
+  try {
+    storage?.removeItem(ADMIN_SESSION_TOKEN_KEY);
+  } catch {
+    // Storage can be unavailable in private browsing contexts.
+  }
+}
+
+export function setAdminSessionToken(token: string): void {
+  const normalizedToken = token.trim();
+  if (!normalizedToken) {
+    clearAdminSession();
+    return;
+  }
+  try {
+    getSessionStorage()?.setItem(ADMIN_SESSION_TOKEN_KEY, normalizedToken);
+  } catch {
+    // An in-memory fallback would keep a privileged session after the tab closes.
+    // Fail closed when sessionStorage is unavailable.
+  }
+}
+
+export function clearAdminSession(): void {
+  removeAdminSession(getSessionStorage());
+}
+
+export function getAdminSessionToken(): string | null {
+  try {
+    return getSessionStorage()?.getItem(ADMIN_SESSION_TOKEN_KEY) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function hasAdminSession(): boolean {
+  return getAdminSessionToken() !== null;
 }
 
 export function setApiToken(token: string, persist = true): void {
@@ -170,6 +201,7 @@ async function apiRequestOnce<T>(
   body: unknown,
   params: Record<string, string> | undefined,
   timeoutMs: number,
+  adminUnlockSecret?: string,
 ): Promise<ApiResult<T>> {
   let url: URL;
   try {
@@ -190,9 +222,12 @@ async function apiRequestOnce<T>(
     const headers = new Headers({ Accept: 'application/json' });
     const token = getApiToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
-    // The manually entered secret is never attached to public or user routes.
-    if (path.startsWith('/api/admin/') && adminApiSecret) {
-      headers.set('X-Worker-Secret', adminApiSecret);
+    if (path === ADMIN_SESSION_ENDPOINT && adminUnlockSecret) {
+      // The manually entered secret is sent once to exchange it for a short-lived session.
+      headers.set('X-Worker-Secret', adminUnlockSecret);
+    } else if (path.startsWith('/api/admin/')) {
+      const adminSession = getAdminSessionToken();
+      if (adminSession) headers.set('X-Admin-Session', adminSession);
     }
     if (method === 'POST') headers.set('Content-Type', 'application/json');
 
@@ -202,6 +237,10 @@ async function apiRequestOnce<T>(
       body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
       signal: controller.signal,
     });
+    if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT
+      && (response.status === 401 || response.status === 403)) {
+      clearAdminSession();
+    }
     const contentType = response.headers.get('Content-Type') ?? '';
     if (!contentType.toLowerCase().includes('application/json')) {
       return { ok: false, status: response.status, error: `后端返回了非 JSON 响应 (${response.status})` };
@@ -234,13 +273,14 @@ async function apiRequest<T>(
   body?: unknown,
   params?: Record<string, string>,
   options: ApiRequestOptions = {},
+  adminUnlockSecret?: string,
 ): Promise<ApiResult<T>> {
   const timeoutMs = normalizedTimeout(options.timeoutMs);
   const networkRetries = allowedNetworkRetries(method, path, options.networkRetries);
   const retryDelayMs = Math.max(0, Math.floor(options.retryDelayMs ?? 300));
 
   for (let attempt = 0; attempt <= networkRetries; attempt += 1) {
-    const result = await apiRequestOnce<T>(method, path, body, params, timeoutMs);
+    const result = await apiRequestOnce<T>(method, path, body, params, timeoutMs, adminUnlockSecret);
     if (!result.isNetworkError || result.status !== 0 || attempt === networkRetries) return result;
     await waitForRetry(retryDelayMs);
   }
@@ -258,6 +298,30 @@ export function apiGet<T>(
 
 export function apiPost<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
   return apiRequest<T>('POST', path, body, undefined, options);
+}
+
+export async function createAdminSession(secret: string): Promise<ApiResult<AdminSessionResponse>> {
+  const normalizedSecret = secret.trim();
+  if (!normalizedSecret) {
+    return { ok: false, status: 0, error: '请输入管理员密钥' };
+  }
+
+  const result = await apiRequest<AdminSessionResponse>(
+    'POST',
+    ADMIN_SESSION_ENDPOINT,
+    {},
+    undefined,
+    { timeoutMs: AUTH_API_TIMEOUT_MS, networkRetries: 0 },
+    normalizedSecret,
+  );
+  const token = result.data?.token?.trim();
+  if (!result.ok || !token || !Number.isFinite(result.data?.expiresAt)) {
+    if (result.ok) return { ok: false, status: result.status, error: '后台会话响应无效' };
+    return result;
+  }
+
+  setAdminSessionToken(token);
+  return result;
 }
 
 /** Fetches an authenticated binary response without serializing the body into JSON. */

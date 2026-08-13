@@ -528,9 +528,36 @@ function selectPalette(pixels: GridPixel[], palette: PaletteEntry[], colorLimit:
   return palette.filter((entry) => ids.has(entry.color.id));
 }
 
-function cleanLogoNoise(grid: (string | null)[][]): void {
+function diagnosticForReplacement(
+  sourceLab: Lab,
+  replacement: PaletteEntry,
+  palette: PaletteEntry[],
+  algorithm: 'cie76' | 'ciede2000',
+): ColorMatchDiagnostic {
+  const ranked = rankPaletteMatches(sourceLab, palette, algorithm);
+  const second = ranked.find((candidate) => candidate.entry.color.id !== replacement.color.id) ?? null;
+  const deltaE = paletteDistance(sourceLab, replacement, algorithm);
+  return {
+    sourceLab,
+    matchingLab: sourceLab,
+    matchedColorId: replacement.color.id,
+    matchedColorCode: replacement.color.code,
+    deltaE,
+    secondColorId: second?.entry.color.id ?? null,
+    secondColorCode: second?.entry.color.code ?? null,
+    secondDeltaE: second?.distance ?? null,
+    deltaEDifference: second ? second.distance - deltaE : null,
+  };
+}
+
+function cleanLogoNoise(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  width: number,
+  palette: PaletteEntry[],
+  matches: (ColorMatchDiagnostic | null)[][],
+): void {
   const height = grid.length;
-  const width = grid[0]?.length ?? 0;
   const updates: Array<{ x: number; y: number; color: string }> = [];
   for (let y = 1; y + 1 < height; y += 1) {
     for (let x = 1; x + 1 < width; x += 1) {
@@ -541,7 +568,91 @@ function cleanLogoNoise(grid: (string | null)[][]): void {
       if (neighbors.every((value) => value === neighbors[0])) updates.push({ x, y, color: neighbors[0]! });
     }
   }
-  for (const update of updates) grid[update.y][update.x] = update.color;
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  for (const update of updates) {
+    grid[update.y][update.x] = update.color;
+    const sourceLab = sourceLabs[update.y * width + update.x];
+    const replacement = paletteById.get(update.color);
+    if (sourceLab && replacement) {
+      matches[update.y][update.x] = diagnosticForReplacement(sourceLab, replacement, palette, 'cie76');
+    }
+  }
+}
+
+function cleanPhotoNoise(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  width: number,
+  palette: PaletteEntry[],
+  matches: (ColorMatchDiagnostic | null)[][],
+): void {
+  const height = grid.length;
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  const updates: Array<{ x: number; y: number; color: string }> = [];
+
+  for (let y = 1; y + 1 < height; y += 1) {
+    for (let x = 1; x + 1 < width; x += 1) {
+      const current = grid[y][x];
+      if (!current) continue;
+      const neighbors = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
+      const replacement = neighbors[0];
+      if (!replacement || replacement === current || !neighbors.every((color) => color === replacement)) continue;
+
+      const source = sourceLabs[y * width + x];
+      const neighbourLabs = [
+        sourceLabs[(y - 1) * width + x],
+        sourceLabs[(y + 1) * width + x],
+        sourceLabs[y * width + x - 1],
+        sourceLabs[y * width + x + 1],
+      ];
+      if (!source || neighbourLabs.some((lab) => !lab)) continue;
+      const averageNeighbourDelta = neighbourLabs.reduce((sum, lab) => sum + deltaE2000(source, lab!), 0) / neighbors.length;
+      // The source must be locally smooth. This leaves real high-contrast
+      // details, one-cell lines, and faces untouched while removing a single
+      // Floyd-Steinberg colour excursion inside a flat region.
+      if (averageNeighbourDelta > 12) continue;
+
+      updates.push({ x, y, color: replacement });
+    }
+  }
+
+  for (const update of updates) {
+    grid[update.y][update.x] = update.color;
+    const sourceLab = sourceLabs[update.y * width + update.x];
+    const replacement = paletteById.get(update.color);
+    if (!sourceLab || !replacement) continue;
+    matches[update.y][update.x] = diagnosticForReplacement(sourceLab, replacement, palette, 'ciede2000');
+  }
+}
+
+function summarizeMatches(
+  matches: (ColorMatchDiagnostic | null)[][],
+  palette: PaletteEntry[],
+): { meanSourceLightness: number; meanMatchedLightness: number; lightnessBias: number; meanDeltaE: number } {
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  let sourceLightnessTotal = 0;
+  let matchedLightnessTotal = 0;
+  let deltaETotal = 0;
+  let matchedPixels = 0;
+
+  for (const row of matches) {
+    for (const match of row) {
+      if (!match) continue;
+      const matched = paletteById.get(match.matchedColorId);
+      if (!matched) continue;
+      sourceLightnessTotal += match.sourceLab[0];
+      matchedLightnessTotal += matched.lab[0];
+      deltaETotal += match.deltaE;
+      matchedPixels += 1;
+    }
+  }
+
+  return {
+    meanSourceLightness: matchedPixels > 0 ? sourceLightnessTotal / matchedPixels : 0,
+    meanMatchedLightness: matchedPixels > 0 ? matchedLightnessTotal / matchedPixels : 0,
+    lightnessBias: matchedPixels > 0 ? (matchedLightnessTotal - sourceLightnessTotal) / matchedPixels : 0,
+    meanDeltaE: matchedPixels > 0 ? deltaETotal / matchedPixels : 0,
+  };
 }
 
 function emptyResult(): ConversionResult {
@@ -577,14 +688,16 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const detected = classifyImageColors(data, sourceWidth, sourceHeight, alphaCutoff);
   const override = settings.pipelineOverride ?? 'auto';
   const pipeline = override === 'auto' ? detected.pipeline : override;
-  const backgroundResult = createEdgeConnectedBackgroundMask(
-    data,
-    sourceWidth,
-    sourceHeight,
-    settings.chromaKeyColor,
-    normalizedSetting(settings.chromaKeyTolerance),
-    alphaCutoff,
-  );
+  const backgroundResult = settings.backgroundRemovalEnabled === true
+    ? createEdgeConnectedBackgroundMask(
+      data,
+      sourceWidth,
+      sourceHeight,
+      settings.chromaKeyColor,
+      normalizedSetting(settings.chromaKeyTolerance),
+      alphaCutoff,
+    )
+    : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
   const targetPixels: GridPixel[] = [];
   const scaleX = sourceWidth / settings.width;
   const scaleY = sourceHeight / settings.height;
@@ -645,10 +758,6 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const working = targetPixels.map((pixel) => ({ ...pixel }));
   const grid = Array.from({ length: settings.height }, () => Array<string | null>(settings.width).fill(null));
   const matches = Array.from({ length: settings.height }, () => Array<ColorMatchDiagnostic | null>(settings.width).fill(null));
-  let sourceLightnessTotal = 0;
-  let matchedLightnessTotal = 0;
-  let deltaETotal = 0;
-  let matchedPixels = 0;
   const ditherStrength = clampUnit(settings.ditherStrength ?? 0.65);
   const useFloydSteinberg = pipeline === 'photo' && settings.dither === 'floyd' && ditherStrength > 0;
   for (let y = 0; y < settings.height; y += 1) {
@@ -666,10 +775,6 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       const matched = ranked[0].entry.color;
       grid[y][x] = matched.id;
       matches[y][x] = diagnostic;
-      sourceLightnessTotal += sourceLab[0];
-      matchedLightnessTotal += ranked[0].entry.lab[0];
-      deltaETotal += ranked[0].distance;
-      matchedPixels += 1;
       if (!useFloydSteinberg) continue;
       const error: Rgb = [pixel.r - matched.rgb[0], pixel.g - matched.rgb[1], pixel.b - matched.rgb[2]];
       const diffuse = (nextX: number, nextY: number, weight: number) => {
@@ -689,7 +794,9 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       diffuse(x + direction, y + 1, 1 / 16);
     }
   }
-  if (pipeline === 'logo') cleanLogoNoise(grid);
+  if (pipeline === 'logo') cleanLogoNoise(grid, sourceLabs, settings.width, mappingPalette, matches);
+  else if (useFloydSteinberg) cleanPhotoNoise(grid, sourceLabs, settings.width, mappingPalette, matches);
+  const summary = summarizeMatches(matches, mappingPalette);
   return {
     grid,
     diagnostics: {
@@ -700,10 +807,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       confidence: detected.confidence,
       backgroundPixelsRemoved: backgroundResult.mask.reduce((sum, value) => sum + value, 0),
       background: backgroundResult.inference,
-      meanSourceLightness: matchedPixels > 0 ? sourceLightnessTotal / matchedPixels : 0,
-      meanMatchedLightness: matchedPixels > 0 ? matchedLightnessTotal / matchedPixels : 0,
-      lightnessBias: matchedPixels > 0 ? (matchedLightnessTotal - sourceLightnessTotal) / matchedPixels : 0,
-      meanDeltaE: matchedPixels > 0 ? deltaETotal / matchedPixels : 0,
+      ...summary,
       matches,
     },
   };

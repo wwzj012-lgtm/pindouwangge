@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   X,
   Zap,
@@ -35,6 +35,10 @@ import {
   nearestAllowedSavingTarget,
 } from '../utils/smartReduceAccess';
 import { scheduleSmartReduceFallback, shouldAcceptSmartReducePreviewResult } from '../utils/smartReduceScheduler';
+import {
+  formatReductionChange,
+  shouldResetSmartReduceSafetyOptions,
+} from '../utils/smartReduceModalState';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -73,12 +77,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const { t, formatPrice, language } = useLanguage();
   const [intensity, setIntensity] = useState<ReductionIntensity>('medium');
   const [savingTarget, setSavingTarget] = useState<BeadSavingPercent>(15);
-  const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(true);
+  // Background removal is destructive and must be explicitly selected.
+  const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(false);
   const [protectSaliencyAndContours, setProtectSaliencyAndContours] = useState<boolean>(true);
   const [protectVibrantColors, setProtectVibrantColors] = useState<boolean>(true);
   const [removeIsolatedNoise, setRemoveIsolatedNoise] = useState<boolean>(true);
   const [mergeMinorColors, setMergeMinorColors] = useState<boolean>(true);
-  const [autoCropEmptyBorder, setAutoCropEmptyBorder] = useState<boolean>(true);
+  const [autoCropEmptyBorder, setAutoCropEmptyBorder] = useState<boolean>(false);
 
   const [report, setReport] = useState<ReductionReport | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
@@ -89,6 +94,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const lastRequestRef = useRef<SmartReduceRequest | null>(null);
   const fallbackCancelRef = useRef<(() => void) | null>(null);
   const fallbackRunnerRef = useRef<((request: SmartReduceRequest) => void) | null>(null);
+  const safetySessionRef = useRef({ isOpen: false, grid: null as (string | null)[][] | null });
   const membership = getSmartReduceMembership(isVip, isPro);
   const canApplyCurrentTarget = canApplySavingTarget(savingTarget, membership, hasFreeTrial);
   const footerAction = getSmartReduceFooterAction(membership, savingTarget, hasFreeTrial);
@@ -104,6 +110,21 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
     const allowedTarget = nearestAllowedSavingTarget(savingTarget, membership);
     if (allowedTarget !== savingTarget) setSavingTarget(allowedTarget);
   }, [membership, savingTarget]);
+
+  // Run before preview effects so a reopened modal never calculates once with
+  // destructive choices left over from its previous session.
+  useLayoutEffect(() => {
+    const currentSession = { isOpen, grid };
+    if (shouldResetSmartReduceSafetyOptions(safetySessionRef.current, currentSession)) {
+      setRemoveBackgroundBeads(false);
+      setAutoCropEmptyBorder(false);
+    }
+    safetySessionRef.current = currentSession;
+  }, [isOpen, grid]);
+
+  useEffect(() => {
+    if (savingTarget !== 0 && autoCropEmptyBorder) setAutoCropEmptyBorder(false);
+  }, [savingTarget, autoCropEmptyBorder]);
 
   useEffect(() => {
     const scheduleFallback = (request: SmartReduceRequest) => {
@@ -284,6 +305,8 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const origW = grid[0]?.length || 0;
   const optH = report?.optimizedGrid.length || origH;
   const optW = report?.optimizedGrid[0]?.length || origW;
+  const formatChange = (value: number) => formatReductionChange(value, language === 'zh');
+  const canCropEmptyBorder = savingTarget === 0;
 
   const handleApply = async () => {
     if (!canApplyCurrentTarget) {
@@ -602,6 +625,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   type="checkbox"
                   checked={autoCropEmptyBorder}
                   onChange={e => setAutoCropEmptyBorder(e.target.checked)}
+                  disabled={!canCropEmptyBorder}
                   className="rounded bg-slate-800 border-slate-700 text-sky-500 focus:ring-sky-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-emerald-300">
@@ -654,10 +678,10 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   <span>智能减粒方案 (实测减豆)</span>
                 </span>
 
-                {report && report.savedPercent > 0 && (
+                {report && report.gridAreaSavedPercent > 0 && (
                   <span className="text-xs font-bold text-emerald-300 bg-emerald-950/90 border border-emerald-500/80 px-2.5 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
                     <TrendingDown className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>省豆 -{report.savedPercent}%</span>
+                    <span>{language === 'zh' ? `画板${formatChange(report.gridAreaSavedPercent)}` : `Canvas ${formatChange(report.gridAreaSavedPercent)}`}</span>
                   </span>
                 )}
               </div>
@@ -709,9 +733,9 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
                       {language === 'zh' ? (
-                        <>抠除背景、合并连片，减少 <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> 颗拼豆耗材 (物理省豆 <strong className="text-emerald-400">{report.savedPercent}%</strong>)</>
+                        <>图纸调整后物料<strong className="text-amber-300 font-mono">{formatChange(report.effectiveBeadSavedPercent)}</strong>；有效豆数<strong className="text-emerald-400">{formatChange(report.savedPercent)}</strong>（不含主动去背景）</>
                       ) : (
-                        <>Removed bg/merged clusters, reducing <strong className="text-amber-300 font-mono">{report.savedBeadCount}</strong> beads (saved <strong className="text-emerald-400">{report.savedPercent}%</strong>)</>
+                        <>Material usage <strong className="text-amber-300 font-mono">{formatChange(report.effectiveBeadSavedPercent)}</strong>; effective beads <strong className="text-emerald-400">{formatChange(report.savedPercent)}</strong> (excluding optional background removal).</>
                       )}
                     </p>
                   </div>
@@ -761,6 +785,11 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </div>
                   <div className="text-[11px] text-amber-200/80 font-mono flex items-center gap-1 justify-center md:justify-start">
                     <span>{language === 'zh' ? '* 备注计价基准：按市面常规 3 元 / 千粒补充包零售价测算。' : '* Pricing standard benchmark: Estimated based on $0.50 / 1000 beads packs retail price.'}</span>
+                  </div>
+                  <div className="text-[11px] text-sky-200/80 flex items-center gap-1 justify-center md:justify-start">
+                    <span>{language === 'zh'
+                      ? `目标画板面积减少 ${savingTarget}%；实际${formatChange(report.gridAreaSavedPercent)}；有效豆数${formatChange(report.savedPercent)}（不含主动去背景）`
+                      : `Target canvas area reduced ${savingTarget}%; actual ${formatChange(report.gridAreaSavedPercent)}; effective beads ${formatChange(report.savedPercent)} (excluding optional background removal).`}</span>
                   </div>
                 </div>
 

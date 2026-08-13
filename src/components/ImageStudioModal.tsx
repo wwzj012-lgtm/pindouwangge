@@ -19,6 +19,15 @@ import { useLanguage } from '../context/LanguageContext';
 import { imageToGridWithDiagnostics } from '../utils/colorUtils';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
 import { smartCropSubject } from '../utils/cropUtils';
+import {
+  IMAGE_STUDIO_PREVIEW_DEBOUNCE_MS,
+  buildTransformedImageCanvas,
+  clampImageStudioControl,
+  isImageStudioOperationCurrent,
+  nextImageStudioOperationToken,
+  resetImageStudioBackgroundSettings,
+  stepImageStudioControl,
+} from '../utils/imageStudioControls';
 
 interface ImageStudioModalProps {
   isOpen: boolean;
@@ -29,6 +38,37 @@ interface ImageStudioModalProps {
   activePalette: BeadColor[];
   onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement) => void;
 }
+
+interface PreciseRangeControlProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  suffix?: string;
+  onValueChange: (value: number) => void;
+}
+
+const PreciseRangeControl: React.FC<PreciseRangeControlProps> = ({
+  label,
+  value,
+  min,
+  max,
+  suffix = '',
+  onValueChange,
+}) => (
+  <div className="space-y-1">
+    <div className="flex justify-between text-[11px]">
+      <span className="text-slate-400">{label}</span>
+      <span className="font-mono text-slate-200 tabular-nums">{value}{suffix}</span>
+    </div>
+    <div className="grid grid-cols-[28px_minmax(0,1fr)_28px_56px] gap-1.5 items-center">
+      <button type="button" onClick={() => onValueChange(stepImageStudioControl(value, -1, min, max))} className="h-7 rounded border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700">-</button>
+      <input type="range" min={min} max={max} step={1} value={value} onChange={e => onValueChange(clampImageStudioControl(Number(e.target.value), min, max))} className="w-full accent-rose-500 cursor-pointer" />
+      <button type="button" onClick={() => onValueChange(stepImageStudioControl(value, 1, min, max))} className="h-7 rounded border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700">+</button>
+      <input type="number" min={min} max={max} step={1} value={value} onChange={e => onValueChange(clampImageStudioControl(Number(e.target.value), min, max))} className="h-7 w-full rounded border border-slate-700 bg-slate-800 px-1 text-right font-mono text-slate-100 outline-none" />
+    </div>
+  </div>
+);
 
 export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   isOpen,
@@ -42,6 +82,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   const { language } = useLanguage();
   const isEn = language === 'en';
   const [localSettings, setLocalSettings] = useState<ConvertSettings>(settings);
+  const [previewSettings, setPreviewSettings] = useState<ConvertSettings>(settings);
   const [rotation, setRotation] = useState<number>(0); // 0, 90, 180, 270
   const [flipH, setFlipH] = useState<boolean>(false);
   const [isPickingColor, setIsPickingColor] = useState<boolean>(false);
@@ -59,6 +100,37 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   const [activeMobileTab, setActiveMobileTab] = useState<'preview' | 'settings'>('preview');
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const sessionTokenRef = useRef(0);
+  const previewTokenRef = useRef(0);
+  const cropOperationTokenRef = useRef(0);
+  const cropPendingRef = useRef(false);
+
+  const invalidateSession = () => {
+    sessionTokenRef.current += 1;
+    previewTokenRef.current += 1;
+    cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
+    cropPendingRef.current = false;
+    return sessionTokenRef.current;
+  };
+
+  const handleClose = () => {
+    invalidateSession();
+    onClose();
+  };
+
+  const createAppliedImage = (canvas: HTMLCanvasElement): Promise<HTMLImageElement | null> => {
+    try {
+      const source = canvas.toDataURL('image/png');
+      const image = new Image();
+      return new Promise((resolve) => {
+        image.onload = () => resolve(image);
+        image.onerror = () => resolve(null);
+        image.src = source;
+      });
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
 
   // Palette map lookup
   const paletteMap = React.useMemo(() => {
@@ -68,14 +140,28 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   // Sync state when modal opens
   useEffect(() => {
     if (isOpen) {
-      setLocalSettings(settings);
-      setPickedChromaColor(settings.chromaKeyColor);
+      invalidateSession();
+      const safeSettings = resetImageStudioBackgroundSettings(settings);
+      setLocalSettings(safeSettings);
+      setPreviewSettings(safeSettings);
+      setPickedChromaColor(null);
       setCurrentImg(sourceImage);
       setOriginalImg(null);
       setCropSavedPercent(null);
       setConversionDiagnostics(null);
+    } else {
+      invalidateSession();
     }
+    return () => {
+      invalidateSession();
+    };
   }, [isOpen, settings, sourceImage]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = window.setTimeout(() => setPreviewSettings(localSettings), IMAGE_STUDIO_PREVIEW_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, localSettings]);
 
   // Render preview grid to canvas with exact 1:1 aspect ratio
   useEffect(() => {
@@ -129,37 +215,24 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     const activeImage = currentImg || sourceImage;
     if (!isOpen || !activeImage) return;
 
+    const sessionToken = sessionTokenRef.current;
+    const previewToken = ++previewTokenRef.current;
     setIsCalculating(true);
     const timer = setTimeout(() => {
-      const canvas = imageCanvasRef.current;
+      if (sessionToken !== sessionTokenRef.current || previewToken !== previewTokenRef.current) return;
+      const canvas = buildTransformedImageCanvas(activeImage, rotation, flipH, imageCanvasRef.current ?? undefined);
       if (!canvas) return;
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const sw = activeImage.naturalWidth || activeImage.width;
-      const sh = activeImage.naturalHeight || activeImage.height;
-
-      const isRotated = rotation === 90 || rotation === 270;
-      canvas.width = isRotated ? sh : sw;
-      canvas.height = isRotated ? sw : sh;
-
-      ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      if (flipH) ctx.scale(-1, 1);
-      ctx.drawImage(activeImage, -sw / 2, -sh / 2);
-      ctx.restore();
-
       // Generate preview pixel grid using current local settings
-      const result = imageToGridWithDiagnostics(canvas, localSettings, activePalette || []);
+      const result = imageToGridWithDiagnostics(canvas, previewSettings, activePalette || []);
+      if (sessionToken !== sessionTokenRef.current || previewToken !== previewTokenRef.current) return;
       setPreviewGrid(result.grid);
       setConversionDiagnostics(result.diagnostics);
       setIsCalculating(false);
-    }, 40);
+    }, 0);
 
     return () => clearTimeout(timer);
-  }, [isOpen, currentImg, sourceImage, localSettings, rotation, flipH, activePalette]);
+  }, [isOpen, currentImg, sourceImage, previewSettings, rotation, flipH, activePalette]);
 
   if (!isOpen || !sourceImage) return null;
 
@@ -168,39 +241,64 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     const activeImage = currentImg || sourceImage;
     if (!activeImage) return;
 
-    const result = await smartCropSubject(activeImage, 0.03);
-    if (!result) {
-      alert('未检测到可裁切的明显空白/黑白背景，或主体已紧凑填充整个画布。');
-      return;
-    }
+    const sessionToken = sessionTokenRef.current;
+    const cropToken = nextImageStudioOperationToken(cropOperationTokenRef.current);
+    cropOperationTokenRef.current = cropToken;
+    cropPendingRef.current = true;
+    setIsCalculating(true);
+    let cropSucceeded = false;
+    try {
+      const result = await smartCropSubject(activeImage, 0.03);
+      if (!isOpen || sessionToken !== sessionTokenRef.current || !isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) return;
+      if (!result) {
+        alert('未检测到可裁切的明显空白/黑白背景，或主体已紧凑填充整个画布。');
+        return;
+      }
 
-    if (!originalImg) {
-      setOriginalImg(activeImage);
-    }
-    setCurrentImg(result.croppedImage);
-    setCropSavedPercent(result.savedPixelRatioPercent);
+      if (!originalImg) {
+        setOriginalImg(activeImage);
+      }
+      setCurrentImg(result.croppedImage);
+      setCropSavedPercent(result.savedPixelRatioPercent);
 
-    // Adjust localSettings height ratio automatically
-    const newRatio = result.croppedCanvas.height / result.croppedCanvas.width;
-    const newHeight = Math.max(10, Math.round(localSettings.width * newRatio));
-    setLocalSettings(s => ({
-      ...s,
-      height: newHeight,
-    }));
+      // Adjust localSettings height ratio automatically
+      const newRatio = result.croppedCanvas.height / result.croppedCanvas.width;
+      setLocalSettings(s => ({
+        ...s,
+        height: Math.max(10, Math.round(s.width * newRatio)),
+      }));
+      cropSucceeded = true;
+    } catch {
+      // The finally block clears loading only for the current crop operation.
+    } finally {
+      if (isOpen && sessionToken === sessionTokenRef.current && isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) {
+        cropPendingRef.current = false;
+        if (!cropSucceeded) setIsCalculating(false);
+      }
+    }
   };
 
   const handleRestoreOriginal = () => {
     if (originalImg) {
+      cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
+      cropPendingRef.current = false;
+      previewTokenRef.current += 1;
       setCurrentImg(originalImg);
       setOriginalImg(null);
       setCropSavedPercent(null);
+      setIsCalculating(false);
     }
+  };
+
+  const disableBackgroundRemoval = () => {
+    setPickedChromaColor(null);
+    setLocalSettings(s => ({ ...s, chromaKeyColor: null, backgroundRemovalEnabled: false }));
   };
 
   // Clear the manual key so V2 edge-cluster inference owns automatic detection.
   const autoDetectAndRemoveBackground = () => {
     setPickedChromaColor(null);
-    setLocalSettings(s => ({ ...s, chromaKeyColor: null }));
+    setLocalSettings(s => ({ ...s, chromaKeyColor: null, backgroundRemovalEnabled: true }));
   };
 
   // Quick remove white/light background
@@ -210,6 +308,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       ...s,
       chromaKeyColor: '#FFFFFF',
       chromaKeyTolerance: 20,
+      backgroundRemovalEnabled: true,
     }));
   };
 
@@ -237,7 +336,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       .toUpperCase()}`;
 
     setPickedChromaColor(hex);
-    setLocalSettings(s => ({ ...s, chromaKeyColor: hex }));
+    setLocalSettings(s => ({ ...s, chromaKeyColor: hex, backgroundRemovalEnabled: true }));
     setIsPickingColor(false);
   };
 
@@ -271,8 +370,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         outlineBoost: false,
         contrast: 5,
         saturation: 10,
-        dither: 'floyd',
-        ditherStrength: 0.65,
+        dither: 'none',
+        ditherStrength: 0.25,
       }));
     } else if (preset === 'pixel') {
       setLocalSettings(s => ({
@@ -292,6 +391,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         sharpening: 0,
         outlineBoost: false,
         chromaKeyColor: null,
+        backgroundRemovalEnabled: false,
         pipelineOverride: 'auto',
         dither: 'none',
       }));
@@ -299,10 +399,33 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     }
   };
 
-  const handleApply = () => {
-    setSettings(localSettings);
-    onApplyConversion(previewGrid, currentImg || undefined);
-    onClose();
+  const handleApply = async () => {
+    if (cropPendingRef.current) {
+      cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
+      cropPendingRef.current = false;
+      setIsCalculating(false);
+      return;
+    }
+    const sessionToken = sessionTokenRef.current;
+    const cropToken = cropOperationTokenRef.current;
+    const activeImage = currentImg || sourceImage;
+    if (!activeImage || isCalculating) return;
+    const canvas = buildTransformedImageCanvas(activeImage, rotation, flipH);
+    if (!canvas || sessionToken !== sessionTokenRef.current) return;
+    const applied = imageToGridWithDiagnostics(canvas, localSettings, activePalette || []);
+    if (sessionToken !== sessionTokenRef.current) return;
+    setIsCalculating(true);
+    const appliedImage = await createAppliedImage(canvas);
+    if (!isOpen || sessionToken !== sessionTokenRef.current || !isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) return;
+    if (!appliedImage) {
+      setIsCalculating(false);
+      return;
+    }
+    // The next image must opt in again; a prior crop/key cannot silently remove its background.
+    setSettings(resetImageStudioBackgroundSettings(localSettings));
+    onApplyConversion(applied.grid, appliedImage);
+    invalidateSession();
+    handleClose();
   };
 
   return (
@@ -327,7 +450,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer transition-colors shrink-0 ml-2"
           >
             <X className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -671,27 +794,15 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <span>{isEn ? 'Edge Sharpening & Enhancement' : '图像边缘与锐化处理'}</span>
               </label>
 
-              {/* Sharpening Slider */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-300">{isEn ? 'Sharpening & Edge Enhancement' : '锐化与边缘增强'}</span>
-                  <span className="font-mono text-rose-400 font-bold">
-                    {localSettings.sharpening}%
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={localSettings.sharpening}
-                  onChange={e =>
-                    setLocalSettings(s => ({
-                      ...s,
-                      sharpening: parseInt(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-rose-500 cursor-pointer"
-                />
+              <PreciseRangeControl
+                label={isEn ? 'Sharpening & Edge Enhancement' : '锐化与边缘增强'}
+                value={localSettings.sharpening}
+                min={0}
+                max={100}
+                suffix="%"
+                onValueChange={sharpening => setLocalSettings(s => ({ ...s, sharpening }))}
+              />
+              <div>
                 <p className="text-[10px] text-slate-400">
                   {isEn ? 'Boosts fine line sharpness caused by downscaling.' : '提升因缩小造成的线条模糊，使像素小点边缘清晰无比。'}
                 </p>
@@ -723,12 +834,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   <Crop className="w-4 h-4 text-sky-400" />
                   <span>{isEn ? 'Smart Subject Crop & BG Removal' : '智能主体裁剪与背景扣除'}</span>
                 </span>
-                {pickedChromaColor && (
+                {localSettings.backgroundRemovalEnabled && (
                   <button
-                    onClick={() => {
-                      setPickedChromaColor(null);
-                      setLocalSettings(s => ({ ...s, chromaKeyColor: null }));
-                    }}
+                    onClick={disableBackgroundRemoval}
                     className="text-[10px] text-rose-400 hover:underline cursor-pointer"
                   >
                     {isEn ? 'Clear Color' : '清除扣色'}
@@ -775,36 +883,27 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 />
                 <div className="flex-1">
                   <div className="text-[11px] font-bold text-slate-200">
-                    {pickedChromaColor ? (isEn ? `Removed Color: ${pickedChromaColor}` : `扣除颜色: ${pickedChromaColor}`) : (isEn ? 'No BG color selected' : '未选择背景色')}
+                    {localSettings.backgroundRemovalEnabled
+                      ? (pickedChromaColor ? (isEn ? `Removing: ${pickedChromaColor}` : `扣除颜色: ${pickedChromaColor}`) : (isEn ? 'Smart background removal is on' : '智能去背景已开启'))
+                      : (isEn ? 'Background removal is off' : '背景移除已关闭')}
                   </div>
                   <div className="text-[10px] text-slate-400">
-                    {isEn ? 'Use pipette tool or enter Hex color code' : '使用左侧吸管或直接输入Hex色号'}
+                    {localSettings.backgroundRemovalEnabled
+                      ? (isEn ? 'Clear to keep the original background' : '清除即可保留原背景')
+                      : (isEn ? 'Choose Smart Cut, white background, or pipette to enable' : '请主动选择智能、白底或吸管去背景')}
                   </div>
                 </div>
               </div>
 
-              {pickedChromaColor && (
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-300">{isEn ? 'Chroma Tolerance' : '抠色容差 (Tolerance)'}</span>
-                    <span className="font-mono text-rose-400">
-                      {localSettings.chromaKeyTolerance}%
-                    </span>
-                  </div>
-                  <input
-                    type="range"
-                    min={0}
-                    max={100}
-                    value={localSettings.chromaKeyTolerance}
-                    onChange={e =>
-                      setLocalSettings(s => ({
-                        ...s,
-                        chromaKeyTolerance: parseInt(e.target.value),
-                      }))
-                    }
-                    className="w-full accent-rose-500 cursor-pointer"
-                  />
-                </div>
+              {localSettings.backgroundRemovalEnabled && (
+                <PreciseRangeControl
+                  label={isEn ? 'Chroma Tolerance' : '抠色容差'}
+                  value={localSettings.chromaKeyTolerance}
+                  min={0}
+                  max={100}
+                  suffix="%"
+                  onValueChange={chromaKeyTolerance => setLocalSettings(s => ({ ...s, chromaKeyTolerance }))}
+                />
               )}
             </div>
 
@@ -812,67 +911,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             <div className="space-y-3 pt-3 border-t border-slate-800">
               <label className="text-slate-200 font-bold text-xs">{isEn ? 'Basic Color Adjustments' : '基础明暗调色'}</label>
 
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">{isEn ? 'Brightness' : '亮度 (Brightness)'}</span>
-                  <span className="font-mono text-slate-200">
-                    {localSettings.brightness > 0 ? `+${localSettings.brightness}` : localSettings.brightness}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={localSettings.brightness}
-                  onChange={e =>
-                    setLocalSettings(s => ({
-                      ...s,
-                      brightness: parseInt(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-rose-500 cursor-pointer"
-                />
-              </div>
+              <PreciseRangeControl label={isEn ? 'Brightness' : '亮度'} value={localSettings.brightness} min={-100} max={100} onValueChange={brightness => setLocalSettings(s => ({ ...s, brightness }))} />
 
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">{isEn ? 'Contrast' : '对比度 (Contrast)'}</span>
-                  <span className="font-mono text-slate-200">{localSettings.contrast}</span>
-                </div>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={localSettings.contrast}
-                  onChange={e =>
-                    setLocalSettings(s => ({
-                      ...s,
-                      contrast: parseInt(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-rose-500 cursor-pointer"
-                />
-              </div>
+              <PreciseRangeControl label={isEn ? 'Contrast' : '对比度'} value={localSettings.contrast} min={-100} max={100} onValueChange={contrast => setLocalSettings(s => ({ ...s, contrast }))} />
 
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">{isEn ? 'Saturation' : '饱和度 (Saturation)'}</span>
-                  <span className="font-mono text-slate-200">{localSettings.saturation}</span>
-                </div>
-                <input
-                  type="range"
-                  min={-100}
-                  max={100}
-                  value={localSettings.saturation}
-                  onChange={e =>
-                    setLocalSettings(s => ({
-                      ...s,
-                      saturation: parseInt(e.target.value),
-                    }))
-                  }
-                  className="w-full accent-rose-500 cursor-pointer"
-                />
-              </div>
+              <PreciseRangeControl label={isEn ? 'Saturation' : '饱和度'} value={localSettings.saturation} min={-100} max={100} onValueChange={saturation => setLocalSettings(s => ({ ...s, saturation }))} />
             </div>
 
             {/* Section 5: Color Limit & Dithering */}
@@ -893,20 +936,16 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 </select>
               </div>
 
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-slate-400">{isEn ? 'Floyd Strength' : 'Floyd 强度'}</span>
-                  <span className="font-mono text-rose-400">{Math.round((localSettings.ditherStrength ?? 0.65) * 100)}%</span>
-                </div>
-                <input
-                  type="range"
+              {localSettings.dither === 'floyd' && (
+                <PreciseRangeControl
+                  label={isEn ? 'Floyd strength' : 'Floyd 强度'}
+                  value={Math.round((localSettings.ditherStrength ?? 0.25) * 100)}
                   min={0}
                   max={100}
-                  value={Math.round((localSettings.ditherStrength ?? 0.65) * 100)}
-                  onChange={e => setLocalSettings(s => ({ ...s, ditherStrength: parseInt(e.target.value) / 100 }))}
-                  className="w-full accent-rose-500 cursor-pointer"
+                  suffix="%"
+                  onValueChange={strength => setLocalSettings(s => ({ ...s, ditherStrength: strength / 100 }))}
                 />
-              </div>
+              )}
 
               <div className="space-y-1">
                 <div className="flex justify-between text-[11px]">
@@ -934,7 +973,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         {/* Footer Actions */}
         <div className="px-3.5 sm:px-6 py-2.5 sm:py-3.5 border-t border-slate-800 flex items-center justify-between bg-slate-900/90 shrink-0 gap-2">
           <button
-            onClick={onClose}
+            onClick={handleClose}
             className="px-3.5 sm:px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold cursor-pointer transition-colors shrink-0"
           >
             {isEn ? 'Cancel' : '取消'}

@@ -19,6 +19,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { BrandKey, ConvertSettings, DitherMode } from '../types';
 import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
+import { resetBackgroundRemovalForNewImage } from '../utils/imageStudioControls';
 
 interface SettingsPanelProps {
   settings: ConvertSettings;
@@ -54,6 +55,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const handleResetFilters = () => {
     setSettings(prev => ({
       ...prev,
+      ...resetBackgroundRemovalForNewImage(prev),
       brightness: 0,
       contrast: 0,
       saturation: 0,
@@ -63,6 +65,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       sharpening: 0,
       outlineBoost: false,
       chromaKeyColor: null,
+      backgroundRemovalEnabled: false,
       pipelineOverride: 'auto',
       ditherStrength: 0.65,
     }));

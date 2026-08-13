@@ -53,6 +53,8 @@ export interface ConvertSettings {
   vividBoost?: boolean;           // Prevent color whitening & enhance saturation
   chromaKeyColor: string | null;  // Transparent background color hex (if set)
   chromaKeyTolerance: number;     // 0-100 tolerance for chroma keying
+  /** Explicit opt-in. Missing on historical projects means background is kept. */
+  backgroundRemovalEnabled?: boolean;
   kmeansClustering?: boolean;     // Group similar colors before mapping to reduce noise
   pipelineOverride?: 'auto' | 'logo' | 'photo'; // Defaults to automatic V2 classification
   ditherStrength?: number;        // 0-1, defaults to 0.65 for Floyd-Steinberg

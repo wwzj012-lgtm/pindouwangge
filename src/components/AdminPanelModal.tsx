@@ -33,9 +33,9 @@ import { useAuth } from '../context/AuthContext';
 import {
   apiGet,
   apiPost,
-  clearAdminApiSecret,
-  hasAdminApiSecret,
-  setAdminApiSecret,
+  clearAdminSession,
+  createAdminSession,
+  hasAdminSession,
 } from '../utils/api';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
@@ -52,6 +52,7 @@ import {
 interface AdminPanelModalProps {
   isOpen: boolean;
   onClose: () => void;
+  standalone?: boolean;
 }
 
 type UserRoleFilter = 'all' | 'admin' | 'pro' | 'vip' | 'free';
@@ -72,7 +73,7 @@ interface VipCodeData {
   deletePendingAt?: number | null; // 标记卡密申请删除时间戳(3天缓冲等待期，期间可撤销)
 }
 
-export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClose }) => {
+export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClose, standalone = false }) => {
   const { currentUser, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'codes' | 'logs'>('users');
 
@@ -136,30 +137,41 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   // Reset Password Modal state
   const [showResetPasswordModal, setShowResetPasswordModal] = useState<boolean>(false);
   const [userToResetPassword, setUserToResetPassword] = useState<UserProfile | null>(null);
-  const [resetSuccessMessage, setResetSuccessMessage] = useState<string>('');
+  const [resetMode, setResetMode] = useState<'random' | 'custom'>('random');
+  const [resetPasswordInput, setResetPasswordInput] = useState<string>('');
+  const [resetPasswordConfirmation, setResetPasswordConfirmation] = useState<string>('');
+  const [resetPasswordError, setResetPasswordError] = useState<string>('');
+  const [resetTemporaryPassword, setResetTemporaryPassword] = useState<string>('');
+  const [resetPasswordCopied, setResetPasswordCopied] = useState<boolean>(false);
+  const [showResetPasswordInput, setShowResetPasswordInput] = useState<boolean>(false);
+
+  const clearResetPasswordState = () => {
+    setUserToResetPassword(null);
+    setResetMode('random');
+    setResetPasswordInput('');
+    setResetPasswordConfirmation('');
+    setResetPasswordError('');
+    setResetTemporaryPassword('');
+    setResetPasswordCopied(false);
+    setShowResetPasswordInput(false);
+  };
 
   useEffect(() => {
     if (!isOpen || !isAdmin) {
-      clearAdminApiSecret();
+      clearAdminSession();
       setIsAdminUnlocked(false);
       setAdminSecretInput('');
       setAdminSecretError('');
       return;
     }
 
-    const unlocked = hasAdminApiSecret();
+    const unlocked = hasAdminSession();
     setIsAdminUnlocked(unlocked);
     setAdminSecretError('');
     if (unlocked) {
       void loadData();
     }
   }, [isOpen, isAdmin]);
-
-  useEffect(() => {
-    return () => {
-      clearAdminApiSecret();
-    };
-  }, []);
 
   const loadData = async (): Promise<boolean> => {
     setLoading(true);
@@ -169,10 +181,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         apiGet<VipCodeData[]>('/api/admin/codes'),
         apiGet<AuditLog[]>('/api/admin/audit-logs'),
       ]);
-      if ([usersRes, codesRes, logsRes].some(result => result.status === 401)) {
-        clearAdminApiSecret();
+      if ([usersRes, codesRes, logsRes].some(result => result.status === 401 || result.status === 403)) {
+        clearAdminSession();
         setIsAdminUnlocked(false);
-        setAdminSecretError('管理员密钥无效或登录状态已失效，请重试');
+        setAdminSecretError('后台会话已失效，请重新解锁');
         return false;
       }
       if (!usersRes.ok || !codesRes.ok || !logsRes.ok) {
@@ -206,7 +218,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }
 
     setAdminSecretError('');
-    setAdminApiSecret(secret);
+    const sessionResult = await createAdminSession(secret);
+    if (!sessionResult.ok) {
+      setAdminSecretError(sessionResult.error ?? '管理员密钥无效或登录状态已失效，请重试');
+      return;
+    }
     const loaded = await loadData();
     if (loaded) {
       setIsAdminUnlocked(true);
@@ -215,7 +231,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   };
 
   const handleAdminClose = () => {
-    clearAdminApiSecret();
+    clearResetPasswordState();
+    clearAdminSession();
     setIsAdminUnlocked(false);
     setAdminSecretInput('');
     setAdminSecretError('');
@@ -419,27 +436,77 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   };
 
   const handleOpenResetPasswordModal = (user: UserProfile) => {
+    if (user.uid === currentUser?.uid) return;
+    clearResetPasswordState();
     setUserToResetPassword(user);
-    setResetSuccessMessage('');
     setShowResetPasswordModal(true);
+  };
+
+  const handleCloseResetPasswordModal = () => {
+    setShowResetPasswordModal(false);
+    clearResetPasswordState();
+  };
+
+  const handleResetModeChange = (mode: 'random' | 'custom') => {
+    setResetMode(mode);
+    setResetPasswordInput('');
+    setResetPasswordConfirmation('');
+    setResetPasswordError('');
+    setResetTemporaryPassword('');
+    setResetPasswordCopied(false);
+    setShowResetPasswordInput(false);
   };
 
   const handleResetPassword = async () => {
     if (!userToResetPassword) return;
 
+    if (userToResetPassword.uid === currentUser?.uid) {
+      setResetPasswordError('不能重置当前管理员自己的密码');
+      return;
+    }
+
+    const customPassword = resetPasswordInput;
+    if (resetMode === 'custom') {
+      if (customPassword.trim().length < 8 || customPassword.length > 72) {
+        setResetPasswordError('指定密码必须为 8-72 个字符且不能为空');
+        return;
+      }
+      if (customPassword !== resetPasswordConfirmation) {
+        setResetPasswordError('两次输入的密码不一致');
+        return;
+      }
+    }
+
     setLoading(true);
+    setResetPasswordError('');
     try {
-      const result = await apiPost<{ temporaryPassword: string }>('/api/admin/reset-password', {
+      const result = await apiPost<{ mode: 'random' | 'custom'; temporaryPassword?: string }>('/api/admin/reset-password', {
         uid: userToResetPassword.uid,
+        mode: resetMode,
+        ...(resetMode === 'custom' ? { password: customPassword } : {}),
       });
       if (!result.ok || !result.data) throw new Error(result.error ?? '密码重置失败');
-      setResetSuccessMessage(
-        `成功重置！玩家 [${userToResetPassword.displayName}] 的临时密码为：${result.data.temporaryPassword}`,
-      );
+      if (result.data.mode === 'random' && result.data.temporaryPassword) {
+        setResetTemporaryPassword(result.data.temporaryPassword);
+      } else {
+        setResetPasswordInput('');
+        setResetPasswordConfirmation('');
+      }
     } catch (err) {
       console.error('Failed to reset password:', err);
+      setResetPasswordError(err instanceof Error ? err.message : '密码重置失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyTemporaryPassword = async () => {
+    if (!resetTemporaryPassword) return;
+    try {
+      await navigator.clipboard.writeText(resetTemporaryPassword);
+      setResetPasswordCopied(true);
+    } catch {
+      setResetPasswordError('复制失败，请手动记录临时密码');
     }
   };
 
@@ -691,7 +758,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
   if (!isAdminUnlocked) {
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+      <div className={standalone ? 'min-h-screen flex items-center justify-center bg-slate-950 p-4' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4'}>
         <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
           <div className="px-5 py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -777,7 +844,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const isHighFreqAnomaly = todayRedeemedCount >= 5;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div className={standalone ? 'min-h-screen bg-slate-950 p-2 sm:p-4 overflow-y-auto' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto'}>
       <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[92vh]">
         {/* Modal Header */}
         <div className="px-4 py-3 sm:px-6 sm:py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
@@ -1081,8 +1148,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                             <button
                               type="button"
                               onClick={() => handleOpenResetPasswordModal(user)}
+                              disabled={user.uid === currentUser?.uid}
                               className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all min-h-[36px] min-w-[36px] flex items-center justify-center cursor-pointer"
-                              title="生成一次性临时密码"
+                              title={user.uid === currentUser?.uid ? '不能重置当前管理员自己的密码' : '重置密码'}
                             >
                               <Lock className="w-3.5 h-3.5" />
                             </button>
@@ -1265,8 +1333,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                               <button
                                 type="button"
                                 onClick={() => handleOpenResetPasswordModal(user)}
+                                disabled={user.uid === currentUser?.uid}
                                 className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 hover:bg-amber-500/20 transition-all cursor-pointer flex items-center justify-center"
-                                title="生成一次性临时密码"
+                                title={user.uid === currentUser?.uid ? '不能重置当前管理员自己的密码' : '重置密码'}
                               >
                                 <Lock className="w-3.5 h-3.5" />
                               </button>
@@ -2049,33 +2118,101 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               <h3 className="text-sm font-bold text-white">重置密码确认</h3>
             </div>
 
-            {resetSuccessMessage ? (
+            {resetTemporaryPassword ? (
               <div className="space-y-4">
                 <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs leading-relaxed flex items-start gap-2">
                   <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" />
                   <div>
                     <p className="font-bold mb-1">重置密码成功！</p>
-                    <p>{resetSuccessMessage}</p>
+                    <p>请立即记录并安全转交给 {userToResetPassword.displayName}。关闭后将不再显示。</p>
+                    <div className="mt-2 flex items-center gap-2">
+                      <code className="min-w-0 flex-1 break-all rounded-lg bg-slate-950 px-2 py-1.5 text-amber-200">{resetTemporaryPassword}</code>
+                      <button
+                        type="button"
+                        onClick={handleCopyTemporaryPassword}
+                        className="shrink-0 p-2 text-amber-300 hover:text-amber-200 rounded-lg cursor-pointer"
+                        title="复制临时密码"
+                        aria-label="复制临时密码"
+                      >
+                        {resetPasswordCopied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowResetPasswordModal(false);
-                    setUserToResetPassword(null);
-                    setResetSuccessMessage('');
-                  }}
+                  onClick={handleCloseResetPasswordModal}
                   className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl cursor-pointer min-h-[40px]"
                 >
-                  我知道了
+                  关闭并清除临时密码
                 </button>
               </div>
             ) : (
               <>
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  您确定要重置玩家 <strong className="text-white font-bold">{userToResetPassword.displayName}</strong> 的登录密码吗？
-                  重置后，系统将生成一个仅显示一次的随机临时密码。
+                  为玩家 <strong className="text-white font-bold">{userToResetPassword.displayName}</strong> 重置登录密码。
                 </p>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleResetModeChange('random')}
+                    className={`min-h-[52px] rounded-xl border px-3 py-2 text-left text-xs cursor-pointer ${resetMode === 'random' ? 'border-amber-400 bg-amber-500/15 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}
+                  >
+                    <span className="block font-bold">随机临时密码</span>
+                    <span className="text-[10px] opacity-80">系统生成，仅显示一次</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleResetModeChange('custom')}
+                    className={`min-h-[52px] rounded-xl border px-3 py-2 text-left text-xs cursor-pointer ${resetMode === 'custom' ? 'border-amber-400 bg-amber-500/15 text-amber-200' : 'border-slate-700 bg-slate-950 text-slate-300'}`}
+                  >
+                    <span className="block font-bold">指定新密码</span>
+                    <span className="text-[10px] opacity-80">管理员设置，成功后不回显</span>
+                  </button>
+                </div>
+
+                {resetMode === 'custom' && (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">指定新密码（8-72 个字符）</label>
+                      <div className="relative">
+                        <input
+                          type={showResetPasswordInput ? 'text' : 'password'}
+                          value={resetPasswordInput}
+                          onChange={event => setResetPasswordInput(event.target.value)}
+                          autoComplete="new-password"
+                          maxLength={72}
+                          className="w-full min-h-[44px] rounded-xl border border-slate-700 bg-slate-950 px-3 pr-10 text-xs text-white focus:border-amber-400 focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowResetPasswordInput(value => !value)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-white cursor-pointer"
+                          title={showResetPasswordInput ? '隐藏密码' : '显示密码'}
+                          aria-label={showResetPasswordInput ? '隐藏密码' : '显示密码'}
+                        >
+                          {showResetPasswordInput ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[11px] text-slate-400">确认新密码</label>
+                      <input
+                        type={showResetPasswordInput ? 'text' : 'password'}
+                        value={resetPasswordConfirmation}
+                        onChange={event => setResetPasswordConfirmation(event.target.value)}
+                        autoComplete="new-password"
+                        maxLength={72}
+                        className="w-full min-h-[44px] rounded-xl border border-slate-700 bg-slate-950 px-3 text-xs text-white focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {resetPasswordError && (
+                  <p role="alert" className="rounded-lg bg-rose-500/10 px-3 py-2 text-xs text-rose-300">{resetPasswordError}</p>
+                )}
 
                 <div className="flex items-center gap-3 pt-2">
                   <button
@@ -2089,14 +2226,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                     ) : (
                       <KeyRound className="w-4 h-4" />
                     )}
-                    <span>确认生成临时密码</span>
+                    <span>{resetMode === 'random' ? `为 ${userToResetPassword.displayName} 生成临时密码` : `确认将 ${userToResetPassword.displayName} 的密码改为指定密码`}</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowResetPasswordModal(false);
-                      setUserToResetPassword(null);
-                    }}
+                    onClick={handleCloseResetPasswordModal}
                     className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl cursor-pointer min-h-[44px]"
                   >
                     取消

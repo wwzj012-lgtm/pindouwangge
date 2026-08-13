@@ -487,7 +487,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         <div className="flex-1 flex flex-col xl:flex-row overflow-hidden min-h-0">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
           <div
-            className={`flex-1 p-3 sm:p-6 flex-col gap-4 overflow-y-auto bg-slate-950/50 min-h-0 ${
+            className={`flex-1 p-3 sm:p-6 flex-col gap-4 overflow-y-auto xl:overflow-hidden bg-slate-950/50 min-h-0 ${
               activeMobileTab === 'preview' ? 'flex' : 'hidden xl:flex'
             }`}
           >
@@ -575,9 +575,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             )}
 
             {/* Canvas Display Dual Box */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 shrink-0 xl:flex-1 xl:min-h-0 xl:items-stretch">
               {/* Box 1: Pre-processed Source Image Canvas */}
-              <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3 relative group">
+              <div className="flex flex-col min-h-0 bg-slate-900/80 border border-slate-800 rounded-xl p-3 relative group">
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Scissors className="w-3.5 h-3.5 text-sky-400" />
@@ -613,7 +613,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex-1 min-h-[260px] sm:min-h-[300px] flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
+                <div className="flex-1 min-h-[260px] sm:min-h-[300px] xl:min-h-0 flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2 relative">
                   <canvas
                     ref={imageCanvasRef}
                     onClick={handleCanvasClick}
@@ -631,7 +631,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
               </div>
 
               {/* Box 2: Live Converted Pixel Bead Preview */}
-              <div className="flex flex-col bg-slate-900/80 border border-slate-800 rounded-xl p-3">
+              <div className="flex flex-col min-h-0 bg-slate-900/80 border border-slate-800 rounded-xl p-3">
                 <div className="flex items-center justify-between mb-2 text-xs font-semibold text-slate-300 shrink-0">
                   <span className="flex items-center gap-1">
                     <Eye className="w-3.5 h-3.5 text-rose-400" />
@@ -658,7 +658,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </div>
                 )}
 
-                <div className="flex-1 min-h-[260px] sm:min-h-[300px] relative flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
+                <div className="flex-1 min-h-[260px] sm:min-h-[300px] xl:min-h-0 relative flex items-center justify-center overflow-hidden bg-slate-950 rounded-lg border border-slate-800/80 p-2">
                   {previewGrid.length > 0 ? (
                     <canvas
                       ref={previewCanvasRef}

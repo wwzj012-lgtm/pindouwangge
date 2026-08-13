@@ -844,8 +844,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const isHighFreqAnomaly = todayRedeemedCount >= 5;
 
   return (
-    <div className={standalone ? 'min-h-screen bg-slate-950 p-2 sm:p-4 overflow-y-auto' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto'}>
-      <div className="relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[92vh]">
+    <div className={standalone
+      ? 'min-h-screen bg-[radial-gradient(circle_at_top,#111d35_0%,#070b18_48%,#040711_100%)] px-3 py-4 sm:px-5 sm:py-6 lg:px-8 lg:py-8 overflow-y-auto'
+      : 'fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto'}>
+      <div className={standalone
+        ? 'relative mx-auto flex min-h-[calc(100vh-2rem)] w-full max-w-[1600px] flex-col overflow-hidden rounded-2xl border border-slate-700/80 bg-slate-900/95 shadow-[0_24px_80px_rgba(0,0,0,0.42)] lg:min-h-[calc(100vh-4rem)]'
+        : 'relative w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[92vh]'}>
         {/* Modal Header */}
         <div className="px-4 py-3 sm:px-6 sm:py-4 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -993,7 +997,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         </div>
 
         {/* Tab Content Area */}
-        <div className="p-3 sm:p-6 overflow-y-auto flex-1 custom-scrollbar space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar space-y-5">
           {activeTab === 'users' && (
             /* Users Tab */
             <div className="space-y-4">
@@ -1197,8 +1201,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               </div>
 
               {/* Desktop & Tablet Table View (>= sm screens) */}
-              <div className="hidden sm:block border border-slate-800 rounded-xl overflow-x-auto bg-slate-950">
-                <table className="w-full text-left text-xs text-slate-300">
+              <div className="hidden sm:block overflow-x-auto rounded-xl border border-slate-800 bg-slate-950">
+                <table className="w-full min-w-[980px] text-left text-xs text-slate-300">
                   <thead className="bg-slate-900 border-b border-slate-800 text-slate-400 font-bold">
                     <tr>
                       <th className="px-3 py-3 w-8">

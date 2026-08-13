@@ -142,17 +142,45 @@ describe('membership bead-saving targets', () => {
     expect(report.totalBeadChangeCount).toBeGreaterThanOrEqual(0);
   });
 
+  it('uses proportional dimensions for a 79x44 grid at 25% saving', () => {
+    expect(getReducedGridDimensions(79, 44, savingPercentToScale(25))).toEqual({ width: 68, height: 38 });
+  });
+
+  it.each([
+    [79, 44, 15],
+    [79, 44, 25],
+    [79, 44, 40],
+    [120, 47, 15],
+    [120, 47, 25],
+    [120, 47, 40],
+  ] as const)('rounds both axes from the same scale for %sx%s at %s%%', (width, height, saving) => {
+    const scale = savingPercentToScale(saving);
+    const dimensions = getReducedGridDimensions(width, height, scale);
+
+    expect(dimensions).toEqual({
+      width: Math.round(width * scale),
+      height: Math.round(height * scale),
+    });
+    expect(Math.abs(dimensions.width / dimensions.height - width / height)).toBeLessThanOrEqual(
+      1 / dimensions.height + 1 / height,
+    );
+  });
+
   it.each([
     [1, 9, 40],
     [2, 2, 15],
     [2, 2, 25],
     [3, 3, 40],
-  ] as const)('uses the closest legal integer dimensions for %sx%s at %s%%', (width, height, saving) => {
+  ] as const)('keeps tiny %sx%s grids within legal proportional bounds at %s%%', (width, height, saving) => {
     const dimensions = getReducedGridDimensions(width, height, savingPercentToScale(saving));
     expect(dimensions.width).toBeGreaterThanOrEqual(1);
     expect(dimensions.height).toBeGreaterThanOrEqual(1);
     expect(dimensions.width).toBeLessThanOrEqual(width);
     expect(dimensions.height).toBeLessThanOrEqual(height);
+  });
+
+  it('keeps dimensions unchanged at 0% saving', () => {
+    expect(getReducedGridDimensions(79, 44, savingPercentToScale(0))).toEqual({ width: 79, height: 44 });
   });
 
   it('keeps the main solid component connected after alpha-aware downsampling', () => {

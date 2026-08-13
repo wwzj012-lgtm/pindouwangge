@@ -25,7 +25,7 @@ export interface ReducedGridDimensions {
   height: number;
 }
 
-/** Converts an area-saving target's linear scale into stable grid dimensions. */
+/** Converts an area-saving target's linear scale into proportional grid dimensions. */
 export function getReducedGridDimensions(
   originalWidth: number,
   originalHeight: number,
@@ -37,28 +37,14 @@ export function getReducedGridDimensions(
 
   const width = Math.max(1, Math.floor(originalWidth));
   const height = Math.max(1, Math.floor(originalHeight));
-  const targetArea = width * height * ratio * ratio;
-  const originalAspect = width / height;
-  let best = { width, height, areaError: Infinity, aspectError: Infinity };
 
-  // Small grids cannot always realize a percentage exactly. Search all legal
-  // integer dimensions, prioritize target area, then preserve aspect ratio.
-  for (let candidateWidth = 1; candidateWidth <= width; candidateWidth++) {
-    for (let candidateHeight = 1; candidateHeight <= height; candidateHeight++) {
-      const areaError = Math.abs(candidateWidth * candidateHeight - targetArea);
-      const aspectError = Math.abs(Math.log((candidateWidth / candidateHeight) / originalAspect));
-      if (
-        areaError < best.areaError
-        || (areaError === best.areaError && aspectError < best.aspectError)
-        || (areaError === best.areaError && aspectError === best.aspectError
-          && (candidateWidth < best.width || (candidateWidth === best.width && candidateHeight < best.height)))
-      ) {
-        best = { width: candidateWidth, height: candidateHeight, areaError, aspectError };
-      }
-    }
-  }
-
-  return { width: best.width, height: best.height };
+  // Both axes must use the same linear scale. Selecting independent integer
+  // dimensions to match the target area can preserve one axis and visibly
+  // distort the image, especially for non-square source grids.
+  return {
+    width: Math.min(width, Math.max(1, Math.round(width * ratio))),
+    height: Math.min(height, Math.max(1, Math.round(height * ratio))),
+  };
 }
 
 export interface ReductionOptions {

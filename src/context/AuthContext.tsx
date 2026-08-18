@@ -230,41 +230,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUserProfile = async (updates: { displayName?: string; photoURL?: string; password?: string }): Promise<{ success: boolean; message: string }> => {
     if (!userProfile) return { success: false, message: '尚未登录账号' };
-    try {
-      const result = await apiPost<UserProfile>('/api/user-profile/update', updates);
-      let updatedProfile: UserProfile;
-      if (result.ok && result.data) {
-        updatedProfile = result.data;
-      } else {
-        // Fallback for local update
-        updatedProfile = {
-          ...userProfile,
-          displayName: updates.displayName !== undefined ? updates.displayName : userProfile.displayName,
-          photoURL: updates.photoURL !== undefined ? updates.photoURL : userProfile.photoURL,
-          updatedAt: Date.now(),
-        };
-      }
-      setUserProfile(updatedProfile);
-      setCurrentUser(sessionUser(updatedProfile));
-      const persistence = sessionPersistenceRef.current || 'persistent';
-      const saved = readStoredSession(persistence);
-      if (saved) writeStoredSession({ ...saved, profile: updatedProfile }, persistence);
-      return { success: true, message: '个人资料修改成功！' };
-    } catch {
-      // Graceful local update fallback
-      const updatedProfile: UserProfile = {
-        ...userProfile,
-        displayName: updates.displayName !== undefined ? updates.displayName : userProfile.displayName,
-        photoURL: updates.photoURL !== undefined ? updates.photoURL : userProfile.photoURL,
-        updatedAt: Date.now(),
-      };
-      setUserProfile(updatedProfile);
-      setCurrentUser(sessionUser(updatedProfile));
-      const persistence = sessionPersistenceRef.current || 'persistent';
-      const saved = readStoredSession(persistence);
-      if (saved) writeStoredSession({ ...saved, profile: updatedProfile }, persistence);
-      return { success: true, message: '个人资料修改成功！' };
+    const result = await apiPost<UserProfile>('/api/user-profile/update', updates);
+    if (!result.ok || !result.data) {
+      return { success: false, message: result.error ?? '个人资料保存失败，请稍后重试' };
     }
+    const updatedProfile = result.data;
+    setUserProfile(updatedProfile);
+    setCurrentUser(sessionUser(updatedProfile));
+    const persistence = sessionPersistenceRef.current || 'persistent';
+    const saved = readStoredSession(persistence);
+    if (saved) writeStoredSession({ ...saved, profile: updatedProfile }, persistence);
+    return { success: true, message: '个人资料修改成功！' };
   };
 
   const now = Date.now();

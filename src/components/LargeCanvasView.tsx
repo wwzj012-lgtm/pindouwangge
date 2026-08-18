@@ -4,6 +4,8 @@ import {
   Download,
   Grid2X2,
   Loader2,
+  Paintbrush,
+  Eraser,
   Plus,
   Trash2,
   Upload,
@@ -256,6 +258,9 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
   if (!initialState.current) initialState.current = restorePersistedFrames();
   const [frames, setFrames] = useState<LargeCanvasFrame[]>(() => initialState.current?.frames ?? []);
   const [selectedId, setSelectedId] = useState<string | null>(() => initialState.current?.selectedId ?? null);
+  const [drawMode, setDrawMode] = useState(false);
+  const [drawColorId, setDrawColorId] = useState<string | null>(() => Array.from(paletteMap.keys())[0] ?? null);
+  const drawingPointerRef = useRef<number | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [newFrameMaxSide, setNewFrameMaxSide] = useState<LargeCanvasMaxSide>(DEFAULT_MAX_SIDE);
   const [interaction, setInteraction] = useState<GridInteraction | null>(null);
@@ -296,6 +301,35 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
 
   const updateFrame = (id: string, update: Partial<LargeCanvasFrame>) => {
     setFrames(current => current.map(frame => frame.id === id ? { ...frame, ...update } : frame));
+  };
+
+  useEffect(() => {
+    if (drawColorId && paletteMap.has(drawColorId)) return;
+    setDrawColorId(Array.from(paletteMap.keys())[0] ?? null);
+  }, [drawColorId, paletteMap]);
+
+  const ensureEditableGrid = (frame: LargeCanvasFrame): void => {
+    if (frame.beanResult && frame.beanResult.length === frame.rect.height && frame.beanResult[0]?.length === frame.rect.width) return;
+    updateFrame(frame.id, {
+      beanResult: Array.from({ length: frame.rect.height }, () => Array<string | null>(frame.rect.width).fill(null)),
+      sourceImageDataUrl: null,
+      loading: false,
+      error: null,
+    });
+  };
+
+  const paintAtPoint = (point: GridPoint, frameId: string): void => {
+    setFrames(current => current.map(frame => {
+      if (frame.id !== frameId) return frame;
+      const x = point.x - frame.rect.x;
+      const y = point.y - frame.rect.y;
+      if (x < 0 || y < 0 || x >= frame.rect.width || y >= frame.rect.height) return frame;
+      const nextGrid = frame.beanResult
+        ? frame.beanResult.map(row => [...row])
+        : Array.from({ length: frame.rect.height }, () => Array<string | null>(frame.rect.width).fill(null));
+      nextGrid[y][x] = drawMode ? drawColorId : null;
+      return { ...frame, beanResult: nextGrid, sourceImageDataUrl: null, error: null };
+    }));
   };
 
   const nextRequestVersion = (id: string): number => {
@@ -588,6 +622,31 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
+  const startDrawing = (event: React.PointerEvent, frame: LargeCanvasFrame) => {
+    if (event.button !== 0 || pinchStateRef.current.active) return;
+    event.stopPropagation();
+    setSelectedId(frame.id);
+    ensureEditableGrid(frame);
+    drawingPointerRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const point = getGridPoint(event);
+    if (point) paintAtPoint(point, frame.id);
+  };
+
+  const continueDrawing = (event: React.PointerEvent) => {
+    if (drawingPointerRef.current !== event.pointerId || pinchStateRef.current.active) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const point = getGridPoint(event);
+    if (point && selectedId) paintAtPoint(point, selectedId);
+  };
+
+  const finishDrawing = (event: React.PointerEvent) => {
+    if (drawingPointerRef.current !== event.pointerId) return;
+    drawingPointerRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
   const updateInteraction = (event: React.PointerEvent) => {
     if (!interaction || pinchStateRef.current.active) return;
     const point = getGridPoint(event);
@@ -699,6 +758,15 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold text-slate-500">{frames.length} 个图框 · {completedCount} 个结果</span>
+            <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="大画板绘图工具">
+              <button type="button" title="画笔" aria-label="画笔" onClick={() => { setDrawMode(true); if (!drawColorId) setDrawColorId(Array.from(paletteMap.keys())[0] ?? null); }} className={`rounded p-1.5 ${drawMode && drawColorId ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}><Paintbrush className="h-3.5 w-3.5" /></button>
+              <button type="button" title="橡皮擦" aria-label="橡皮擦" onClick={() => { setDrawMode(true); setDrawColorId(null); }} className={`rounded p-1.5 ${drawMode && !drawColorId ? 'bg-rose-600 text-white' : 'text-rose-700 hover:bg-white'}`}><Eraser className="h-3.5 w-3.5" /></button>
+              <select aria-label="绘图颜色" value={drawColorId ?? ''} onChange={event => { setDrawColorId(event.target.value || null); setDrawMode(true); }} className="max-w-28 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-bold text-slate-700">
+                <option value="">橡皮擦</option>
+                {Array.from(paletteMap.entries()).map(([id, color]) => <option key={id} value={id}>{id} {color.hex}</option>)}
+              </select>
+              {drawMode && <button type="button" title="退出绘图" aria-label="退出绘图" onClick={() => setDrawMode(false)} className="rounded px-1.5 py-1 text-[10px] font-bold text-slate-500 hover:bg-white">完成</button>}
+            </div>
             <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="画板缩放">
               <button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-3.5 w-3.5" /></button>
               <input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="w-20 accent-purple-600" />
@@ -736,7 +804,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
               const isHovered = hoveredId === frame.id;
               const showPopup = isSelected || (selectedId === null && isHovered);
               return (
-                <article key={frame.id} aria-label={frame.title} className={`absolute overflow-visible ${isSelected || isHovered ? 'z-30' : 'z-10'}`} style={{ left: renderRect.x * scaledCellSize, top: renderRect.y * scaledCellSize, width: renderRect.width * scaledCellSize, height: renderRect.height * scaledCellSize }} onPointerEnter={() => setHoveredId(frame.id)} onPointerLeave={() => { if (selectedId !== frame.id) setHoveredId(current => current === frame.id ? null : current); }} onPointerDown={event => startFrameMove(event, frame)} onPointerMove={updateInteraction} onPointerUp={finishInteraction} onClick={event => { event.stopPropagation(); setSelectedId(frame.id); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); loadFile(frame, event.dataTransfer.files[0]); }}>
+                <article key={frame.id} aria-label={frame.title} className={`absolute overflow-visible ${isSelected || isHovered ? 'z-30' : 'z-10'}`} style={{ left: renderRect.x * scaledCellSize, top: renderRect.y * scaledCellSize, width: renderRect.width * scaledCellSize, height: renderRect.height * scaledCellSize, touchAction: drawMode ? 'none' : 'auto' }} onPointerEnter={() => setHoveredId(frame.id)} onPointerLeave={() => { if (selectedId !== frame.id) setHoveredId(current => current === frame.id ? null : current); }} onPointerDown={event => drawMode ? startDrawing(event, frame) : startFrameMove(event, frame)} onPointerMove={event => drawMode ? continueDrawing(event) : updateInteraction(event)} onPointerUp={event => drawMode ? finishDrawing(event) : finishInteraction()} onPointerCancel={event => drawMode ? finishDrawing(event) : setInteraction(null)} onClick={event => { event.stopPropagation(); setSelectedId(frame.id); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); loadFile(frame, event.dataTransfer.files[0]); }}>
                   <div className={`pointer-events-none absolute inset-0 ${valid ? (isSelected ? 'ring-2 ring-amber-400' : 'ring-1 ring-purple-500/70') : 'ring-2 ring-rose-500'}`} />
                   <FrameBeanGrid frame={frame} paletteMap={paletteMap} rect={renderRect} />
                   {frame.loading && <div className="absolute inset-0 flex items-center justify-center bg-white/70"><Loader2 className="h-5 w-5 animate-spin text-purple-600" /></div>}
@@ -746,7 +814,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({ paletteMap, on
                     <div data-view-scale-ignore className="absolute left-0 z-50 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" style={{ top: renderRect.y === 0 ? renderRect.height * scaledCellSize + 6 : -50, width: 'min(220px, calc(100vw - 1.5rem))' }} onPointerDown={event => { event.stopPropagation(); setSelectedId(frame.id); }} onPointerMove={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
                       <div className="flex items-center justify-between gap-1"><span className="truncate text-[10px] font-extrabold text-slate-800">{frame.title}</span><button type="button" aria-label="关闭图框浮窗" className="rounded p-0.5 text-slate-400 hover:bg-slate-100" onClick={event => { event.stopPropagation(); setSelectedId(null); setHoveredId(null); }}><X className="h-3 w-3" /></button></div>
                       <div className="mt-0.5 flex items-center justify-between text-[9px] font-bold text-slate-500"><span>{renderRect.width} × {renderRect.height}格 · {frame.maxSide}格</span><span>{frame.loading ? '生成中' : frame.error ? '失败' : frame.beanResult ? '已生成' : '待上传'}</span></div>
-                      <div className="mt-1.5 grid grid-cols-4 gap-0.5"><button type="button" title="上传图片" onClick={() => inputRefs.current.get(frame.id)?.click()} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 bg-purple-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-purple-700"><Upload className="h-2.5 w-2.5" />上传</button><button type="button" title="导出图框" disabled={!frame.beanResult} onClick={() => exportFrame(frame)} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 px-1 py-0.5 text-[9px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-2.5 w-2.5" />导出</button><button type="button" title="打开图框" disabled={!frame.beanResult} onClick={() => onOpenFrame(frame)} className="inline-flex items-center justify-center rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">打开</button><button type="button" title="删除图框" onClick={() => deleteFrame(frame.id)} className="inline-flex items-center justify-center gap-0.5 rounded border border-rose-200 px-1 py-0.5 text-[9px] font-bold text-rose-700 hover:bg-rose-50"><Trash2 className="h-2.5 w-2.5" />删</button></div>
+                      <div className="mt-1.5 grid grid-cols-5 gap-0.5"><button type="button" title="上传图片" onClick={() => inputRefs.current.get(frame.id)?.click()} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 bg-purple-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-purple-700"><Upload className="h-2.5 w-2.5" />上传</button><button type="button" title="绘制图框" onClick={() => { setSelectedId(frame.id); ensureEditableGrid(frame); setDrawMode(true); if (!drawColorId) setDrawColorId(Array.from(paletteMap.keys())[0] ?? null); }} className="inline-flex items-center justify-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100"><Paintbrush className="h-2.5 w-2.5" />绘制</button><button type="button" title="导出图框" disabled={!frame.beanResult} onClick={() => exportFrame(frame)} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 px-1 py-0.5 text-[9px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-2.5 w-2.5" />导出</button><button type="button" title="打开图框" disabled={!frame.beanResult} onClick={() => onOpenFrame(frame)} className="inline-flex items-center justify-center rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">打开</button><button type="button" title="删除图框" onClick={() => deleteFrame(frame.id)} className="inline-flex items-center justify-center gap-0.5 rounded border border-rose-200 px-1 py-0.5 text-[9px] font-bold text-rose-700 hover:bg-rose-50"><Trash2 className="h-2.5 w-2.5" />删</button></div>
                       <div className="mt-1 grid grid-cols-3 gap-0.5" role="group" aria-label="图框尺寸档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" disabled={frame.loading} onClick={() => changeMaxSide(frame, side)} className={`rounded px-1 py-0.5 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${frame.maxSide === side ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{side}格</button>)}</div>
                       <div className="mt-1 grid grid-cols-3 gap-0.5" role="group" aria-label="当前图框转换模式">{LARGE_CANVAS_MODES.map(({ id: mode, label }) => <button key={mode} type="button" disabled={frame.loading} onClick={() => changeMode(frame, mode)} className={`rounded px-1 py-0.5 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${frame.mode === mode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}>{label}</button>)}</div>
                     </div>

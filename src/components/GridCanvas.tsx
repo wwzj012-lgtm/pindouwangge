@@ -141,6 +141,13 @@ function isCanvasInteractionIgnoredTarget(target: EventTarget | null): boolean {
   return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], [data-canvas-interaction-ignore], [role="dialog"], [aria-modal="true"]'));
 }
 
+function getCanvasDpr(): number {
+  // High-DPR mobile canvases multiply every fill/stroke cost without adding
+  // useful detail at the board's small cell sizes. Keep desktop retina sharp
+  // while bounding the cost on phones and tablets.
+  return Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+}
+
 export const GridCanvas: React.FC<GridCanvasProps> = ({
   grid,
   paletteMap,
@@ -181,7 +188,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   // Pan offsets
   const [pan, setPan] = useState({ x: 40, y: 40 });
   const [isPanning, setIsPanning] = useState(false);
-  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
   // Remember last drawing tool before switching to hand
   const [lastDrawTool, setLastDrawTool] = useState<ToolType>('pencil');
@@ -393,10 +399,39 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const zoomRef = useRef(zoom);
   const panRef = useRef(pan);
   const activeToolRef = useRef(activeTool);
+  const panStartRef = useRef({ x: 0, y: 0 });
+  const transformFrameRef = useRef<number | null>(null);
+  const pendingTransformRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
 
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+
+  const scheduleTransformCommit = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
+    // Pointer/touch events can arrive much faster than a phone can paint. Keep
+    // refs current for coordinate math, but commit React state at most once per
+    // animation frame so the expensive canvas render is coalesced.
+    zoomRef.current = nextZoom;
+    panRef.current = nextPan;
+    pendingTransformRef.current = { zoom: nextZoom, pan: nextPan };
+    if (transformFrameRef.current !== null) return;
+
+    transformFrameRef.current = window.requestAnimationFrame(() => {
+      transformFrameRef.current = null;
+      const pending = pendingTransformRef.current;
+      pendingTransformRef.current = null;
+      if (!pending) return;
+      setZoom(pending.zoom);
+      setPan(pending.pan);
+    });
+  }, [setZoom]);
+
+  useEffect(() => () => {
+    if (transformFrameRef.current !== null) {
+      window.cancelAnimationFrame(transformFrameRef.current);
+      transformFrameRef.current = null;
+    }
+  }, []);
 
   const changeZoomAtClient = useCallback((targetZoom: number, clientX: number, clientY: number): boolean => {
     const previousZoom = zoomRef.current;
@@ -404,24 +439,20 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     if (nextZoom === previousZoom) return false;
 
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const localX = clientX - rect.left;
-      const localY = clientY - rect.top;
-      const ratio = nextZoom / previousZoom;
-      setPan(current => {
-        const nextPan = {
-          x: localX - (localX - current.x) * ratio,
-          y: localY - (localY - current.y) * ratio,
-        };
-        panRef.current = nextPan;
-        return nextPan;
-      });
-    }
-
-    zoomRef.current = nextZoom;
-    setZoom(nextZoom);
+    const nextPan = rect
+      ? (() => {
+          const localX = clientX - rect.left;
+          const localY = clientY - rect.top;
+          const ratio = nextZoom / previousZoom;
+          return {
+            x: localX - (localX - panRef.current.x) * ratio,
+            y: localY - (localY - panRef.current.y) * ratio,
+          };
+        })()
+      : panRef.current;
+    scheduleTransformCommit(nextZoom, nextPan);
     return true;
-  }, [setZoom]);
+  }, [scheduleTransformCommit]);
 
   const changeZoomAtCanvasCenter = useCallback((factor: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -622,8 +653,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           const newPanX = state.initialMidX - rect.left - (focusX * zoomRatio) + deltaMidX;
           const newPanY = state.initialMidY - rect.top - (focusY * zoomRatio) + deltaMidY;
 
-          setZoom(newZoom);
-          setPan({ x: newPanX, y: newPanY });
+          scheduleTransformCommit(newZoom, { x: newPanX, y: newPanY });
         }
       } else if (e.touches.length === 1 && state.isPanningSingle) {
         e.preventDefault();
@@ -633,7 +663,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         state.lastSingleTouchX = t.clientX;
         state.lastSingleTouchY = t.clientY;
 
-        setPan(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+         scheduleTransformCommit(zoomRef.current, {
+           x: panRef.current.x + dx,
+           y: panRef.current.y + dy,
+         });
       }
     };
 
@@ -658,7 +691,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [finishHistoryTransaction, setZoom]);
+  }, [finishHistoryTransaction, scheduleTransformCommit]);
 
   // Handle mouse-wheel zoom around the current pointer position.
   const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
@@ -709,7 +742,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const dpr = getCanvasDpr();
     const canvasWidth = canvas.width / dpr;
     const canvasHeight = canvas.height / dpr;
 
@@ -987,7 +1020,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const handleResize = () => {
       if (containerRef.current && canvasRef.current) {
         const { clientWidth, clientHeight } = containerRef.current;
-        const dpr = Math.max(1, window.devicePixelRatio || 1);
+        const dpr = getCanvasDpr();
         canvasRef.current.width = Math.floor(clientWidth * dpr);
         canvasRef.current.height = Math.floor(clientHeight * dpr);
         canvasRef.current.style.width = `${clientWidth}px`;
@@ -1017,7 +1050,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       activePointerIdRef.current = e.pointerId;
       if (isSpacePan) spacePanPointerIdRef.current = e.pointerId;
       setIsPanning(true);
-      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      const nextPanStart = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
+      panStartRef.current = nextPanStart;
       return;
     }
 
@@ -1056,7 +1090,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isPanning || spacePanPointerIdRef.current === e.pointerId) {
       if (spacePanPointerIdRef.current === e.pointerId) e.preventDefault();
-      setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      scheduleTransformCommit(zoomRef.current, {
+        x: e.clientX - panStartRef.current.x,
+        y: e.clientY - panStartRef.current.y,
+      });
       return;
     }
 

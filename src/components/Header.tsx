@@ -68,11 +68,11 @@ export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
     return (
       <button
         onClick={onOpenAuthModal}
-        className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100/90 hover:bg-purple-200 text-purple-950 text-xs font-bold border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:scale-102 active:scale-95"
+        className="flex items-center gap-1.5 rounded-full bg-purple-100/90 px-2 py-1 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
         title={loginLabel}
       >
         <User className="w-4 h-4 shrink-0" />
-        <span>{loginLabel}</span>
+        <span className="hidden sm:inline">{loginLabel}</span>
       </button>
     );
   }
@@ -84,7 +84,7 @@ export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
         if (onOpenUserProfileModal) onOpenUserProfileModal();
         else onOpenAuthModal?.();
       }}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100/90 hover:bg-purple-200 text-purple-950 text-xs font-bold border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:scale-102 active:scale-95"
+      className="flex items-center gap-1.5 rounded-full bg-purple-100/90 px-2 py-1 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
       title="点击进入个人中心"
     >
       {photoURL ? (
@@ -94,7 +94,7 @@ export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
           {accountName[0]}
         </div>
       )}
-      <span className="truncate max-w-[95px] font-extrabold">{accountName}</span>
+      <span className="hidden max-w-[95px] truncate font-extrabold sm:inline">{accountName}</span>
     </button>
   );
 };
@@ -146,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-white/95 backdrop-blur-md border-b border-purple-200/80 text-purple-950 px-4 py-2.5 md:px-8 md:py-3 shadow-2xs sticky top-0 z-30 transition-all select-none">
+    <header className="sticky top-0 z-30 overflow-x-clip border-b border-purple-200/80 bg-white/95 px-2.5 py-2.5 text-purple-950 shadow-2xs backdrop-blur-md transition-all select-none sm:px-4 md:px-8 md:py-3">
       <input
         ref={fileInputRef}
         type="file"
@@ -154,24 +154,31 @@ export const Header: React.FC<HeaderProps> = ({
         className="hidden"
         onChange={handleFileChange}
       />
-      <div className="w-full flex items-center justify-between gap-3 md:gap-6">
+      <input
+        ref={jsonInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={handleJsonChange}
+      />
+      <div className="flex w-full min-w-0 items-center justify-between gap-1.5 sm:gap-3 md:gap-6">
         
         {/* Left: Logo & Brand Name */}
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex min-w-0 shrink items-center gap-2 sm:gap-4">
           <div
             onClick={() => setCurrentTab?.('home')}
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex min-w-0 items-center gap-2.5 cursor-pointer group"
           >
             <img
               src="/douzhixingge_logo.svg"
               alt="豆织星格"
-              className="w-9 h-9 object-contain shrink-0 group-hover:scale-105 transition-transform"
+              className="h-8 w-8 shrink-0 object-contain transition-transform group-hover:scale-105 sm:h-9 sm:w-9"
             />
-            <div className="flex flex-col">
-              <span className="text-lg md:text-xl font-black text-purple-950 tracking-tight flex items-center gap-1 leading-none">
+            <div className="flex min-w-0 flex-col max-[359px]:hidden">
+              <span className="flex items-center gap-1 whitespace-nowrap text-base font-black leading-none tracking-tight text-purple-950 sm:text-lg md:text-xl">
                 豆织<span className="text-purple-600">星格</span>
               </span>
-              <span className="text-[10px] font-bold text-purple-400 tracking-wider">BEADGRID STUDIO</span>
+              <span className="hidden text-[10px] font-bold tracking-wider text-purple-400 sm:block">BEADGRID STUDIO</span>
             </div>
           </div>
 
@@ -234,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right Corner: Search bar, Guide, VIP, User badge & Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
           {/* Header Search Input Bar */}
           <div className="hidden lg:flex items-center relative w-48 xl:w-56">
             <input
@@ -291,11 +298,11 @@ export const Header: React.FC<HeaderProps> = ({
             title={language === 'zh' ? 'Switch to English' : '切换为中文'}
           >
             <Globe className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-            <span>{language === 'zh' ? 'EN' : '中文'}</span>
+            <span className="max-[359px]:hidden">{language === 'zh' ? 'EN' : '中文'}</span>
           </button>
 
           {/* Account entry */}
-          <div className="flex items-center gap-2">
+          <div className="min-w-0 shrink-0">
             <HeaderAccountTrigger
               isAuthenticated={Boolean(currentUser)}
               displayName={userProfile?.displayName ?? currentUser?.displayName ?? null}
@@ -309,7 +316,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Mobile Hamburger Toggle Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 bg-purple-100 hover:bg-purple-200 text-purple-900 rounded-xl border border-purple-200 cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center active:scale-95"
+            className="flex min-h-10 min-w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-purple-200 bg-purple-100 p-2 text-purple-900 hover:bg-purple-200 active:scale-95 md:hidden"
             aria-label="打开导航菜单"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}

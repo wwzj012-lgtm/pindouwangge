@@ -129,15 +129,19 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 <div className="space-y-1.5 pt-1">
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                     <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-rose-400" /> 双指捏合平移缩放 (Pinch Zoom)</span>
-                    <span className="text-rose-300 font-mono font-bold">两指手势缩放 / 两指拖拽平移</span>
+                    <span className="text-rose-300 font-mono font-bold">普通画板支持双指缩放/平移；大画板支持双指捏合缩放</span>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                     <span className="flex items-center gap-2"><Move className="w-3.5 h-3.5 text-amber-400" /> 电脑端快捷平移</span>
-                    <span className="text-amber-300 font-mono font-bold">按住 Shift + 鼠标左键拖拽 / 按住鼠标中键</span>
+                    <span className="text-amber-300 font-mono font-bold">鼠标悬停普通画板或大画板时，按住 Space + 鼠标左键拖拽</span>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
-                    <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-sky-400" /> 居中自适应缩放</span>
-                    <span className="text-sky-300 font-mono font-bold">点击右下角 🎯 自动缩放自适应容器</span>
+                    <span className="flex items-center gap-2"><Maximize2 className="w-3.5 h-3.5 text-sky-400" /> 桌面端画布缩放</span>
+                    <span className="text-sky-300 font-mono font-bold">鼠标悬停普通画板或大画板后滚动滚轮，以光标位置为中心缩放</span>
+                  </div>
+                  <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                    <span className="flex items-center gap-2"><Keyboard className="w-3.5 h-3.5 text-indigo-400" /> 画板快捷缩放</span>
+                    <span className="text-indigo-300 font-mono font-bold">Ctrl/Command + + / −；Ctrl/Command + 0 适配全部有效内容</span>
                   </div>
                   <div className="flex items-center justify-between bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                     <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-indigo-400" /> 撤销操作 (Undo)</span>
@@ -150,6 +154,16 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 </div>
               </div>
             </div>
+          </div>
+
+          <div className="rounded-xl border border-purple-500/30 bg-purple-950/20 p-4 text-xs text-slate-300">
+            <div className="flex items-center gap-2 font-bold text-purple-300">
+              <Maximize2 className="h-3.5 w-3.5 text-purple-400" />
+              普通画板与大画板缩放 (Canvas Zoom)
+            </div>
+            <p className="mt-2 leading-relaxed">
+              鼠标悬停普通画板或大画板后直接滚动滚轮即可围绕光标缩放；<kbd className="mx-1 rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 font-mono font-bold text-purple-300">Ctrl/Command + + / −</kbd>可逐级缩放，<kbd className="mx-1 rounded border border-slate-700 bg-slate-800 px-1.5 py-0.5 font-mono font-bold text-purple-300">Ctrl/Command + 0</kbd>适配当前画板全部有效内容。移动端保留原有触控手势与绘制行为。
+            </p>
           </div>
 
           {/* SECTION 2: FUNCTIONAL FEATURE BREAKDOWN */}

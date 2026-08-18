@@ -18,6 +18,8 @@ export interface ApiRequestOptions {
   retryDelayMs?: number;
 }
 
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+
 export const DEFAULT_API_TIMEOUT_MS = 8_000;
 export const AUTH_API_TIMEOUT_MS = 15_000;
 export const HEALTH_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
@@ -136,9 +138,11 @@ export function getApiToken(): string | null {
   }
 }
 
+export const WORKER_API_DEFAULT_URL = 'https://stellabean-api.wwzj012.workers.dev';
+
 function apiBaseUrl(): string {
   const value = import.meta.env.VITE_WORKER_API_URL?.trim();
-  const base = value || (typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+  const base = value || WORKER_API_DEFAULT_URL;
   return base.endsWith('/') ? base : `${base}/`;
 }
 
@@ -184,7 +188,7 @@ function normalizedRetries(retries?: number): number {
   return Math.max(0, Math.floor(retries ?? 0));
 }
 
-function allowedNetworkRetries(method: 'GET' | 'POST', path: string, requestedRetries?: number): number {
+function allowedNetworkRetries(method: ApiMethod, path: string, requestedRetries?: number): number {
   if (method === 'GET' || (method === 'POST' && path === '/api/auth/signin')) {
     return normalizedRetries(requestedRetries);
   }
@@ -196,7 +200,7 @@ function waitForRetry(delayMs: number): Promise<void> {
 }
 
 async function apiRequestOnce<T>(
-  method: 'GET' | 'POST',
+  method: ApiMethod,
   path: string,
   body: unknown,
   params: Record<string, string> | undefined,
@@ -229,16 +233,25 @@ async function apiRequestOnce<T>(
       const adminSession = getAdminSessionToken();
       if (adminSession) headers.set('X-Admin-Session', adminSession);
     }
-    if (method === 'POST') headers.set('Content-Type', 'application/json');
+    if (method === 'POST' || method === 'PUT') headers.set('Content-Type', 'application/json');
 
     const response = await fetch(url, {
       method,
       headers,
-      body: method === 'POST' ? JSON.stringify(body ?? {}) : undefined,
+      body: method === 'POST' || method === 'PUT' ? JSON.stringify(body ?? {}) : undefined,
       signal: controller.signal,
     });
-    if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT
-      && (response.status === 401 || response.status === 403)) {
+    if (response.status === 401) {
+      if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT) {
+        clearAdminSession();
+      }
+      if (path !== '/api/auth/signin' && path !== '/api/auth/signup') {
+        clearApiToken();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('unauthorized'));
+        }
+      }
+    } else if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT && response.status === 403) {
       clearAdminSession();
     }
     const contentType = response.headers.get('Content-Type') ?? '';
@@ -268,7 +281,7 @@ async function apiRequestOnce<T>(
 }
 
 async function apiRequest<T>(
-  method: 'GET' | 'POST',
+  method: ApiMethod,
   path: string,
   body?: unknown,
   params?: Record<string, string>,
@@ -298,6 +311,62 @@ export function apiGet<T>(
 
 export function apiPost<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
   return apiRequest<T>('POST', path, body, undefined, options);
+}
+
+export function apiPut<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
+  return apiRequest<T>('PUT', path, body, undefined, options);
+}
+
+export function apiDelete<T>(path: string, params?: Record<string, string>, options?: ApiRequestOptions): Promise<ApiResult<T>> {
+  return apiRequest<T>('DELETE', path, undefined, params, options);
+}
+
+/** Builds a public Worker API URL without exposing storage binding details to the client. */
+export function apiPublicUrl(path: string, params?: Record<string, string>): string {
+  return apiUrl(path, params).toString();
+}
+
+/** Posts a known-size image Blob to the Worker community asset endpoint. */
+export async function apiPostBlob<T>(
+  path: string,
+  body: Blob,
+  contentType: string,
+  timeoutMs = DEFAULT_API_TIMEOUT_MS,
+): Promise<ApiResult<T>> {
+  let url: URL;
+  try {
+    url = apiUrl(path);
+  } catch (error: unknown) {
+    return { ok: false, status: 0, error: error instanceof Error ? error.message : '请求配置错误' };
+  }
+
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => controller.abort(), normalizedTimeout(timeoutMs));
+  try {
+    const headers = new Headers({ Accept: 'application/json', 'Content-Type': contentType });
+    const token = getApiToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    // Browsers set Content-Length for a known-size Blob; script code may not set that forbidden header.
+    const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
+    if (response.status === 401) {
+      clearApiToken();
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('unauthorized'));
+    }
+    const contentTypeHeader = response.headers.get('Content-Type') ?? '';
+    if (!contentTypeHeader.toLowerCase().includes('application/json')) {
+      return { ok: false, status: response.status, error: `后端返回了非 JSON 响应 (${response.status})` };
+    }
+    const payload: unknown = await response.json();
+    if (!isApiResp<T>(payload)) return { ok: false, status: response.status, error: '后端响应格式不正确' };
+    if (!response.ok || !payload.success) {
+      return { ok: false, status: response.status, error: payload.message ?? `HTTP ${response.status}` };
+    }
+    return { ok: true, status: response.status, data: payload.data };
+  } catch (error: unknown) {
+    return { ok: false, status: 0, error: networkErrorMessage(error), isNetworkError: true };
+  } finally {
+    globalThis.clearTimeout(timeoutId);
+  }
 }
 
 export async function createAdminSession(secret: string): Promise<ApiResult<AdminSessionResponse>> {
@@ -339,6 +408,12 @@ export async function apiGetBlob(path: string, params?: Record<string, string>, 
     const token = getApiToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+    if (response.status === 401) {
+      clearApiToken();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('unauthorized'));
+      }
+    }
     const type = response.headers.get('Content-Type')?.split(';', 1)[0]?.toLowerCase();
     if (!response.ok || (type !== 'image/webp' && type !== 'image/png')) {
       return { ok: false, status: response.status, error: `预览图不可用 (${response.status})` };

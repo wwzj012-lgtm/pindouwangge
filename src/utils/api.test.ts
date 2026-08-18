@@ -110,14 +110,31 @@ describe('Worker API client', () => {
     expect(getAdminSessionToken()).toBeNull();
   });
 
-  it('uses the current origin when no API URL is configured', async () => {
+  it('uses default worker API URL when no API URL is configured', async () => {
     vi.stubEnv('VITE_WORKER_API_URL', '');
-    vi.stubGlobal('window', { location: { origin: 'https://stellabean.pages.dev' } });
     fetchMock.mockResolvedValue(successResponse({ status: 'ok' }));
 
     await apiGet('/api/health');
 
-    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://stellabean.pages.dev/api/health'));
+    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://stellabean-api.wwzj012.workers.dev/api/health'));
+  });
+
+  it('clears token and dispatches unauthorized event on HTTP 401', async () => {
+    setApiToken('expired-jwt');
+    const unauthorizedListener = vi.fn();
+    const mockWindow = new EventTarget();
+    vi.stubGlobal('window', mockWindow);
+    mockWindow.addEventListener('unauthorized', unauthorizedListener);
+
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: false, message: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await apiGet('/api/user-profile');
+
+    expect(getApiToken()).toBeNull();
+    expect(unauthorizedListener).toHaveBeenCalled();
   });
 
   it('stores remembered tokens in localStorage only', () => {

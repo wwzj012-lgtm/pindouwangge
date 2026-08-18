@@ -58,6 +58,17 @@ describe('pattern history list merging', () => {
     expect(merged[0]).toMatchObject({ hasLocalCopy: true, hasCloudCopy: true, syncState: 'synced' });
   });
 
+  it('retains the published work status and treats records without a status as private', () => {
+    const published = mergePatternRecordSummaries([
+      summary({ updatedAt: 1, status: 0 }),
+      summary({ updatedAt: 2, status: 1, hasCloudCopy: true }),
+    ]);
+    expect(published[0]?.status).toBe(1);
+
+    const legacy = mergePatternRecordSummaries([summary({ status: undefined })]);
+    expect(legacy[0]?.status ?? 0).toBe(0);
+  });
+
   it('uses the cloud title after a successful rename, but preserves a pending local title', () => {
     const synced = mergePatternRecordSummaries([
       summary({ title: 'Old local', updatedAt: 1, syncState: 'synced', hasLocalCopy: true }),

@@ -29,6 +29,7 @@ export interface PatternSettingsSnapshot {
   kmeansClustering?: boolean;
   pipelineOverride?: ConvertSettings['pipelineOverride'];
   ditherStrength?: number;
+  quantizationStrength?: number;
 }
 
 export interface StoredPatternProject {
@@ -125,7 +126,7 @@ export function validatePatternSettings(settings: PatternSettingsSnapshot, width
   assertInteger(settings.saturation, 'settings.saturation', -100, 100);
   assertInteger(settings.transparentCutoff, 'settings.transparentCutoff', 0, 255);
   assertInteger(settings.boardSize, 'settings.boardSize', 1, 256);
-  if (!['ciede2000_bright', 'ciede2000_vivid', 'ciede2000', 'cie76', 'rgb_weighted'].includes(settings.colorMatchAlgo)) {
+  if (!['ciede2000_bright', 'ciede2000_vivid', 'ciede2000', 'cie76', 'rgb_weighted', 'oklab', 'rgb'].includes(settings.colorMatchAlgo)) {
     throw new PatternCodecError('settings.colorMatchAlgo is invalid');
   }
   assertInteger(settings.sharpening, 'settings.sharpening', 0, 100);
@@ -136,10 +137,11 @@ export function validatePatternSettings(settings: PatternSettingsSnapshot, width
   }
   assertInteger(settings.chromaKeyTolerance, 'settings.chromaKeyTolerance', 0, 100);
   if (settings.kmeansClustering !== undefined && typeof settings.kmeansClustering !== 'boolean') throw new PatternCodecError('settings.kmeansClustering must be boolean');
-  if (settings.pipelineOverride !== undefined && !['auto', 'logo', 'photo'].includes(settings.pipelineOverride)) {
+  if (settings.pipelineOverride !== undefined && !['auto', 'cartoon', 'logo', 'photo'].includes(settings.pipelineOverride)) {
     throw new PatternCodecError('settings.pipelineOverride is invalid');
   }
   if (settings.ditherStrength !== undefined) assertNumber(settings.ditherStrength, 'settings.ditherStrength', 0, 1);
+  if (settings.quantizationStrength !== undefined) assertNumber(settings.quantizationStrength, 'settings.quantizationStrength', 0, 100);
 }
 
 function assertPalette(palette: BeadColor[]): Map<string, number> {

@@ -1,7 +1,21 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown } from 'lucide-react';
+import React, { useRef, useEffect, useState, useCallback, useLayoutEffect } from 'react';
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, Upload, RotateCcw } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
+import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
+import {
+  changeImagePreviewScale,
+  createInitialImagePreviewView,
+  forwardReferenceImageUpload,
+  IMAGE_PREVIEW_CONTROLS,
+  IMAGE_PREVIEW_TOOLBAR_CLASS,
+  resetImagePreviewView,
+} from '../utils/imagePreviewView';
+import {
+  clampReferencePanelPosition,
+  getInitialReferencePanelPosition,
+  type ReferencePanelPosition,
+} from '../utils/referencePanelPosition';
 
 interface GridCanvasProps {
   grid: (string | null)[][];
@@ -20,13 +34,18 @@ interface GridCanvasProps {
   zoom: number;
   setZoom: (zoom: number) => void;
   onCellClick: (x: number, y: number) => void;
+  onHistoryTransactionStart?: () => void;
+  onHistoryTransactionEnd?: () => void;
   onMultiCellClick?: (points: { x: number; y: number }[]) => void;
+  onApplyShape?: (points: { x: number; y: number }[]) => void;
   onEyedropColor: (color: BeadColor) => void;
   symmetryMode?: SymmetryMode;
   canvasBackdrop?: CanvasBackdrop;
   sourceImage?: HTMLImageElement | null;
   overlayImage?: HTMLImageElement | null;
   showOverlay?: boolean;
+  onReferenceImageUpload?: (file: File) => void;
+  onResetCanvas?: () => void;
 }
 
 // Bresenham's Line Algorithm
@@ -117,6 +136,11 @@ function getCirclePoints(x0: number, y0: number, x1: number, y1: number): { x: n
   });
 }
 
+function isCanvasInteractionIgnoredTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], [data-canvas-interaction-ignore], [role="dialog"], [aria-modal="true"]'));
+}
+
 export const GridCanvas: React.FC<GridCanvasProps> = ({
   grid,
   paletteMap,
@@ -134,16 +158,25 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   zoom,
   setZoom,
   onCellClick,
+  onHistoryTransactionStart,
+  onHistoryTransactionEnd,
   onMultiCellClick,
+  onApplyShape,
   onEyedropColor,
   symmetryMode = 'none',
   canvasBackdrop = 'dark_grid',
   sourceImage = null,
   overlayImage = null,
   showOverlay = false,
+  onReferenceImageUpload,
+  onResetCanvas,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const referencePanelRef = useRef<HTMLDivElement>(null);
+  const canvasHoveredRef = useRef(false);
+  const spacePressedRef = useRef(false);
 
   // Pan offsets
   const [pan, setPan] = useState({ x: 40, y: 40 });
@@ -156,8 +189,144 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   // Original image reference preview state
   const effectiveImage = sourceImage || overlayImage;
   const [isEnlargedModalOpen, setIsEnlargedModalOpen] = useState(false);
-  const [modalImageScale, setModalImageScale] = useState(1);
+  const [modalImageView, setModalImageView] = useState(createInitialImagePreviewView);
   const [isThumbnailMinimized, setIsThumbnailMinimized] = useState(false);
+  const modalImageDragRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
+  const [referencePanelPosition, setReferencePanelPosition] = useState<ReferencePanelPosition>({ x: 8, y: 8 });
+  const referencePanelDragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startPosition: ReferencePanelPosition } | null>(null);
+  const referencePanelInitializedRef = useRef(false);
+  const [isCanvasResetDialogOpen, setIsCanvasResetDialogOpen] = useState(false);
+  const confirmCanvasResetRef = useRef<HTMLButtonElement>(null);
+
+  const resetModalImageView = useCallback(() => {
+    setModalImageView(resetImagePreviewView());
+  }, []);
+
+  const openEnlargedImagePreview = useCallback(() => {
+    resetModalImageView();
+    setIsEnlargedModalOpen(true);
+  }, [resetModalImageView]);
+
+  useEffect(() => {
+    resetModalImageView();
+  }, [effectiveImage, resetModalImageView]);
+
+  const clampReferencePanel = useCallback((position: ReferencePanelPosition) => {
+    const container = containerRef.current;
+    const panel = referencePanelRef.current;
+    if (!container || !panel) return position;
+
+    return clampReferencePanelPosition(
+      position,
+      { width: container.clientWidth, height: container.clientHeight },
+      { width: panel.offsetWidth, height: panel.offsetHeight },
+    );
+  }, []);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    const panel = referencePanelRef.current;
+    if (!container || !panel) return;
+
+    const updatePosition = () => {
+      setReferencePanelPosition(current => {
+        if (!referencePanelInitializedRef.current) {
+          referencePanelInitializedRef.current = true;
+          return getInitialReferencePanelPosition(
+            { width: container.clientWidth, height: container.clientHeight },
+            { width: panel.offsetWidth, height: panel.offsetHeight },
+          );
+        }
+        return clampReferencePanelPosition(
+          current,
+          { width: container.clientWidth, height: container.clientHeight },
+          { width: panel.offsetWidth, height: panel.offsetHeight },
+        );
+      });
+    };
+
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(container);
+    observer.observe(panel);
+    return () => observer.disconnect();
+  }, [effectiveImage, isThumbnailMinimized]);
+
+  const handleReferencePanelPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    referencePanelDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition: referencePanelPosition,
+    };
+  }, [referencePanelPosition]);
+
+  const handleReferencePanelPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = referencePanelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    setReferencePanelPosition(clampReferencePanel({
+      x: drag.startPosition.x + event.clientX - drag.startClientX,
+      y: drag.startPosition.y + event.clientY - drag.startClientY,
+    }));
+  }, [clampReferencePanel]);
+
+  const stopReferencePanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (referencePanelDragRef.current?.pointerId === event.pointerId) {
+      referencePanelDragRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isCanvasResetDialogOpen) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    confirmCanvasResetRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsCanvasResetDialogOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      window.removeEventListener('keydown', closeOnEscape);
+      previousFocus?.focus();
+    };
+  }, [isCanvasResetDialogOpen]);
+
+  const confirmCanvasReset = useCallback(() => {
+    onResetCanvas?.();
+    setIsCanvasResetDialogOpen(false);
+  }, [onResetCanvas]);
+
+  const handleModalImagePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    modalImageDragRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    };
+  }, []);
+
+  const handleModalImagePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = modalImageDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - drag.clientX;
+    const deltaY = event.clientY - drag.clientY;
+    drag.clientX = event.clientX;
+    drag.clientY = event.clientY;
+    setModalImageView(view => ({
+      ...view,
+      pan: { x: view.pan.x + deltaX, y: view.pan.y + deltaY },
+    }));
+  }, []);
+
+  const stopModalImagePan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (modalImageDragRef.current?.pointerId === event.pointerId) {
+      modalImageDragRef.current = null;
+    }
+  }, []);
 
   // Fullscreen Full Pattern Preview State
   const [isFullscreenPreview, setIsFullscreenPreview] = useState<boolean>(false);
@@ -197,6 +366,22 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [isDrawing, setIsDrawing] = useState(false);
   const [shapeStartCell, setShapeStartCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+  const spacePanPointerIdRef = useRef<number | null>(null);
+  const isHistoryTransactionActiveRef = useRef(false);
+  const historyTransactionEndRef = useRef(onHistoryTransactionEnd);
+
+  useEffect(() => {
+    historyTransactionEndRef.current = onHistoryTransactionEnd;
+  }, [onHistoryTransactionEnd]);
+
+  const finishHistoryTransaction = useCallback(() => {
+    if (!isHistoryTransactionActiveRef.current) return;
+    isHistoryTransactionActiveRef.current = false;
+    historyTransactionEndRef.current?.();
+  }, []);
+
+  useEffect(() => finishHistoryTransaction, [finishHistoryTransaction]);
 
   // Cell size base in pixels
   const baseCellSize = 20;
@@ -212,6 +397,37 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+
+  const changeZoomAtClient = useCallback((targetZoom: number, clientX: number, clientY: number): boolean => {
+    const previousZoom = zoomRef.current;
+    const nextZoom = Math.min(4.5, Math.max(0.1, targetZoom));
+    if (nextZoom === previousZoom) return false;
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (rect) {
+      const localX = clientX - rect.left;
+      const localY = clientY - rect.top;
+      const ratio = nextZoom / previousZoom;
+      setPan(current => {
+        const nextPan = {
+          x: localX - (localX - current.x) * ratio,
+          y: localY - (localY - current.y) * ratio,
+        };
+        panRef.current = nextPan;
+        return nextPan;
+      });
+    }
+
+    zoomRef.current = nextZoom;
+    setZoom(nextZoom);
+    return true;
+  }, [setZoom]);
+
+  const changeZoomAtCanvasCenter = useCallback((factor: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    return changeZoomAtClient(zoomRef.current * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }, [changeZoomAtClient]);
 
   // Touch tracking ref for pinch-to-zoom & two-finger pan
   const touchStateRef = useRef<{
@@ -286,6 +502,47 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     });
   }, [width, height, coordOffset, baseCellSize, setZoom]);
 
+  const fitContentToView = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    grid.forEach((row, y) => row.forEach((colorId, x) => {
+      if (!colorId) return;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }));
+
+    if (maxX < minX || maxY < minY) {
+      fitToView();
+      return;
+    }
+
+    const padding = container.clientWidth < 640 ? 20 : 36;
+    const contentWidth = (maxX - minX + 1) * baseCellSize;
+    const contentHeight = (maxY - minY + 1) * baseCellSize;
+    const bestZoom = Math.min(4.5, Math.max(0.1, Math.min(
+      Math.max(100, container.clientWidth - padding * 2) / contentWidth,
+      Math.max(100, container.clientHeight - padding * 2) / contentHeight,
+    )));
+    const scaledWidth = contentWidth * bestZoom;
+    const scaledHeight = contentHeight * bestZoom;
+    const nextPan = {
+      x: (container.clientWidth - scaledWidth) / 2 - coordOffset - minX * baseCellSize * bestZoom,
+      y: (container.clientHeight - scaledHeight) / 2 - coordOffset - minY * baseCellSize * bestZoom,
+    };
+
+    zoomRef.current = bestZoom;
+    panRef.current = nextPan;
+    setZoom(bestZoom);
+    setPan(nextPan);
+  }, [baseCellSize, coordOffset, fitToView, grid, height, setZoom, width]);
+
   useEffect(() => {
     fitToView();
   }, [width, height]);
@@ -324,6 +581,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           lastSingleTouchY: 0,
           isPanningSingle: false,
         };
+        finishHistoryTransaction();
         setIsDrawing(false);
         setIsPanning(true);
       } else if (e.touches.length === 1) {
@@ -400,27 +658,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [setZoom]);
+  }, [finishHistoryTransaction, setZoom]);
 
-  // Handle Mouse Wheel Zoom
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
+  // Handle mouse-wheel zoom around the current pointer position.
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (isCanvasInteractionIgnoredTarget(e.target) || e.deltaY === 0) return;
     const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    const newZoom = Math.min(4.5, Math.max(0.1, zoom * zoomFactor));
-
-    const rect = canvasRef.current?.getBoundingClientRect();
-    if (rect) {
-      const mouseX = e.clientX - rect.left - pan.x;
-      const mouseY = e.clientY - rect.top - pan.y;
-
-      const zoomRatio = newZoom / zoom;
-      setPan({
-        x: mouseX - (mouseX - pan.x) * zoomRatio,
-        y: mouseY - (mouseY - pan.y) * zoomRatio,
-      });
-    }
-
-    setZoom(newZoom);
+    e.preventDefault();
+    changeZoomAtClient(zoomRef.current * zoomFactor, e.clientX, e.clientY);
   };
 
   // Expand points by Symmetry Mode
@@ -478,24 +723,40 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     // 1. Render Coordinate Labels (Top letters A..Z, Left numbers 1..N)
     if (showCoordinates) {
-      ctx.fillStyle = '#94A3B8';
+      ctx.fillStyle = '#6B21A8';
       ctx.font = `bold ${Math.max(10, Math.floor(11 * Math.min(zoom, 1.2)))}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      for (let x = 0; x < width; x++) {
-        const px = startX + x * cellSize + cellSize / 2;
-        if (px >= 0 && px <= canvasWidth) {
-          ctx.fillText(getColumnLetter(x), px, pan.y + coordOffset / 2);
-        }
+      const columnLabels = getColumnLabelPositions({
+        columns: width,
+        cellSize,
+        boardSize,
+        originX: startX,
+        viewportWidth: canvasWidth,
+        getLabel: getColumnLetter,
+        measureLabel: label => ctx.measureText(label).width,
+      });
+      for (const { label, center } of columnLabels) {
+        ctx.fillText(label, center, pan.y + coordOffset / 2);
       }
 
       ctx.textAlign = 'right';
-      for (let y = 0; y < height; y++) {
-        const py = startY + y * cellSize + cellSize / 2;
-        if (py >= 0 && py <= canvasHeight) {
-          ctx.fillText((y + 1).toString(), startX - 6, py);
-        }
+      const rowMetrics = ctx.measureText('0');
+      const rowLabelHeight = Math.max(
+        10,
+        rowMetrics.actualBoundingBoxAscent + rowMetrics.actualBoundingBoxDescent,
+      );
+      const rowLabels = getRowLabelPositions({
+        rows: height,
+        cellSize,
+        boardSize,
+        originY: startY,
+        viewportHeight: canvasHeight,
+        measureLabel: () => rowLabelHeight,
+      });
+      for (const { label, center } of rowLabels) {
+        ctx.fillText(label, startX - 6, center);
       }
     }
 
@@ -504,15 +765,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const gridPixelHeight = height * cellSize;
 
     if (canvasBackdrop === 'light_pegboard') {
-      ctx.fillStyle = '#E2E8F0';
+      ctx.fillStyle = '#FAF8FF';
     } else if (canvasBackdrop === 'wood') {
-      ctx.fillStyle = '#78350F';
+      ctx.fillStyle = '#F5E6D3';
     } else if (canvasBackdrop === 'studio') {
-      ctx.fillStyle = '#0F172A';
+      ctx.fillStyle = '#F3E8FF';
     } else if (canvasBackdrop === 'slate') {
-      ctx.fillStyle = '#1E293B';
+      ctx.fillStyle = '#F1F5F9';
     } else {
-      ctx.fillStyle = '#090D16'; // dark_grid
+      ctx.fillStyle = '#FAF8FF'; // clean light pegboard
     }
     ctx.fillRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
@@ -587,21 +848,21 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         } else {
           // Empty peg styling based on backdrop
           ctx.fillStyle =
-            canvasBackdrop === 'light_pegboard' ? '#F1F5F9' : '#0F172A';
+            canvasBackdrop === 'wood' ? '#FAF0E6' : '#FFFFFF';
           ctx.fillRect(px, py, cellSize, cellSize);
 
           if (showGridLines) {
             ctx.strokeStyle =
-              canvasBackdrop === 'light_pegboard' ? '#CBD5E1' : '#334155';
+              canvasBackdrop === 'wood' ? '#FCD34D' : '#E9D5FF';
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, cellSize, cellSize);
           }
 
           // Peg dot center
           ctx.beginPath();
-          ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.1), 0, Math.PI * 2);
+          ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
           ctx.fillStyle =
-            canvasBackdrop === 'light_pegboard' ? '#94A3B8' : '#475569';
+            canvasBackdrop === 'wood' ? '#D97706' : '#C4B5FD';
           ctx.fill();
         }
       }
@@ -609,7 +870,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     // 6. Symmetry Crosshairs Guidelines
     if (symmetryMode !== 'none') {
-      ctx.strokeStyle = '#F43F5E';
+      ctx.strokeStyle = '#9333EA';
       ctx.lineWidth = 1.5;
       ctx.setLineDash([4, 4]);
 
@@ -633,7 +894,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     // 7. Board Boundary Outlines
     if (boardSize > 0) {
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.45)';
       ctx.lineWidth = 1.5;
 
       for (let x = 0; x <= width; x += boardSize) {
@@ -672,25 +933,25 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           const bgW = metrics.width + 6;
           const bgH = fontSize + 4;
 
-          // Soft dark translucent background pill so board index is readable without obscuring beads
-          ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
+          // Soft light purple translucent background pill
+          ctx.fillStyle = 'rgba(243, 232, 255, 0.9)';
           if (ctx.roundRect) {
             ctx.beginPath();
-            ctx.roundRect(px - 2, py - 2, bgW, bgH, 3);
+            ctx.roundRect(px - 2, py - 2, bgW, bgH, 4);
             ctx.fill();
           } else {
             ctx.fillRect(px - 2, py - 2, bgW, bgH);
           }
 
-          // Translucent sky blue text label
-          ctx.fillStyle = 'rgba(125, 211, 252, 0.75)';
+          // Deep purple text label
+          ctx.fillStyle = '#6B21A8';
           ctx.fillText(labelText, px, py);
         }
       }
     }
 
     // 8. Grid Outer Border
-    ctx.strokeStyle = '#64748B';
+    ctx.strokeStyle = '#7C3AED';
     ctx.lineWidth = 2;
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
@@ -749,7 +1010,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     // If pinch gesture active, ignore pointerdown
     if (touchStateRef.current.isPinch) return;
 
-    if (e.button === 1 || e.button === 2 || e.shiftKey || activeTool === 'hand') {
+    const isSpacePan = e.button === 0 && spacePressedRef.current && !isCanvasInteractionIgnoredTarget(e.target);
+    if (e.button === 1 || e.button === 2 || e.shiftKey || activeTool === 'hand' || isSpacePan) {
+      if (isSpacePan) e.preventDefault();
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      activePointerIdRef.current = e.pointerId;
+      if (isSpacePan) spacePanPointerIdRef.current = e.pointerId;
       setIsPanning(true);
       setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y });
       return;
@@ -769,6 +1035,13 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     setIsDrawing(true);
     setShapeStartCell(cell);
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    activePointerIdRef.current = e.pointerId;
+
+    if (activeTool === 'pencil' || activeTool === 'eraser') {
+      onHistoryTransactionStart?.();
+      isHistoryTransactionActiveRef.current = true;
+    }
 
     if (activeTool === 'pencil' || activeTool === 'eraser' || activeTool === 'bucket' || activeTool === 'replace') {
       const symPoints = applySymmetryToPoints([cell]);
@@ -781,7 +1054,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    if (isPanning) {
+    if (isPanning || spacePanPointerIdRef.current === e.pointerId) {
+      if (spacePanPointerIdRef.current === e.pointerId) e.preventDefault();
       setPan({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
       return;
     }
@@ -801,8 +1075,16 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     }
   };
 
-  const handlePointerUp = () => {
-    if (isDrawing && shapeStartCell && hoverCell) {
+  const handlePointerUp = (e: React.PointerEvent, applyShape = true) => {
+    if (activePointerIdRef.current !== e.pointerId) return;
+    activePointerIdRef.current = null;
+    const wasSpacePan = spacePanPointerIdRef.current === e.pointerId;
+    if (wasSpacePan) {
+      spacePanPointerIdRef.current = null;
+      e.preventDefault();
+    }
+
+    if (applyShape && isDrawing && shapeStartCell && hoverCell) {
       let finalPoints: { x: number; y: number }[] = [];
       if (activeTool === 'line') {
         finalPoints = getLinePoints(shapeStartCell.x, shapeStartCell.y, hoverCell.x, hoverCell.y);
@@ -813,17 +1095,72 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       }
 
       if (finalPoints.length > 0) {
-        const symPoints = applySymmetryToPoints(finalPoints);
-        if (onMultiCellClick) {
-          onMultiCellClick(symPoints);
-        }
+        if (onApplyShape) onApplyShape(finalPoints);
+        else if (onMultiCellClick) onMultiCellClick(applySymmetryToPoints(finalPoints));
       }
     }
 
     setIsPanning(false);
     setIsDrawing(false);
     setShapeStartCell(null);
+    finishHistoryTransaction();
   };
+
+  const stopSpacePan = useCallback(() => {
+    const pointerId = spacePanPointerIdRef.current;
+    if (pointerId === null) return;
+    const canvas = canvasRef.current;
+    if (canvas?.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+    if (activePointerIdRef.current === pointerId) activePointerIdRef.current = null;
+    spacePanPointerIdRef.current = null;
+    setIsPanning(false);
+    setIsDrawing(false);
+    setShapeStartCell(null);
+    finishHistoryTransaction();
+  }, [finishHistoryTransaction]);
+
+  useEffect(() => {
+    const canUseCanvasShortcut = () => Boolean(
+      containerRef.current
+      && (canvasHoveredRef.current || document.activeElement === containerRef.current)
+      && !isCanvasInteractionIgnoredTarget(document.activeElement),
+    );
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && canUseCanvasShortcut()) {
+        spacePressedRef.current = true;
+        event.preventDefault();
+        return;
+      }
+      if (!canUseCanvasShortcut() || (!event.ctrlKey && !event.metaKey)) return;
+      if (event.key === '+' || event.key === '=' || event.code === 'NumpadAdd') {
+        changeZoomAtCanvasCenter(1.12);
+        event.preventDefault();
+      } else if (event.key === '-' || event.code === 'NumpadSubtract') {
+        changeZoomAtCanvasCenter(0.88);
+        event.preventDefault();
+      } else if (event.key === '0' || event.code === 'Numpad0') {
+        fitContentToView();
+        event.preventDefault();
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.code !== 'Space') return;
+      spacePressedRef.current = false;
+      stopSpacePan();
+    };
+    const handleWindowBlur = () => {
+      spacePressedRef.current = false;
+      stopSpacePan();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [changeZoomAtCanvasCenter, fitContentToView, stopSpacePan]);
 
   const hoveredBead = hoverCell && grid[hoverCell.y]?.[hoverCell.x]
     ? paletteMap.get(grid[hoverCell.y][hoverCell.x]!)
@@ -841,23 +1178,26 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full h-full bg-slate-950 overflow-hidden select-none touch-none transition-all ${
-        isFullscreenPreview ? 'fixed inset-0 z-[9999] bg-slate-950 w-screen h-screen' : ''
+      tabIndex={0}
+      className={`relative w-full h-full bg-[#F5F0FD] bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:20px_20px] overflow-hidden select-none touch-none transition-all ${
+        isFullscreenPreview ? 'fixed inset-0 z-[9999] bg-[#F5F0FD] w-screen h-screen' : ''
       } ${
-        activeTool === 'hand' ? (isPanning ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-crosshair'
+        isPanning ? 'cursor-grabbing' : activeTool === 'hand' ? 'cursor-grab' : 'cursor-crosshair'
       }`}
+      onPointerEnter={() => { canvasHoveredRef.current = true; }}
+      onPointerLeave={() => { canvasHoveredRef.current = false; }}
       onWheel={handleWheel}
       onContextMenu={e => e.preventDefault()}
     >
       {/* Fullscreen Pattern Preview Top Banner */}
       {isFullscreenPreview && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-slate-900/90 border border-sky-500/50 text-white px-4 py-1.5 rounded-full shadow-2xl backdrop-blur-md">
-          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span className="text-xs font-bold text-sky-300">全屏全图预览模式</span>
-          <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(按 ESC 或点击退出)</span>
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/95 border border-purple-200 text-purple-950 px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <span className="text-xs font-extrabold text-purple-900">全屏全图预览模式</span>
+          <span className="text-[10px] text-purple-500 font-mono hidden sm:inline">(按 ESC 或点击退出)</span>
           <button
             onClick={toggleFullscreenPreview}
-            className="p-1 hover:bg-rose-500/20 text-rose-400 rounded-full cursor-pointer transition-colors"
+            className="p-1 hover:bg-rose-50 text-rose-600 rounded-full cursor-pointer transition-colors"
             title="退出全屏"
           >
             <X className="w-3.5 h-3.5" />
@@ -870,65 +1210,67 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onPointerCancel={event => handlePointerUp(event, false)}
+        onLostPointerCapture={event => handlePointerUp(event, false)}
+        onPointerLeave={() => setHoverCell(null)}
         className="w-full h-full block touch-none"
       />
 
       {/* Hover Pixel Info Popover Card */}
       {hoverCell && (
-        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-200 text-[10px] sm:text-xs px-2 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl backdrop-blur-md shadow-lg flex items-center gap-2 sm:gap-3 pointer-events-none z-10">
-          <div className="font-mono text-sky-400 font-bold">
+        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-950 text-[10px] sm:text-xs px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl backdrop-blur-md shadow-md flex items-center gap-2 sm:gap-3 pointer-events-none z-10">
+          <div className="font-mono text-purple-800 font-black">
             {getColumnLetter(hoverCell.x)}{hoverCell.y + 1} ({hoverCell.x + 1}, {hoverCell.y + 1})
           </div>
           {hoveredBead ? (
-            <div className="flex items-center gap-1.5 border-l border-slate-700 pl-2 sm:pl-3">
+            <div className="flex items-center gap-1.5 border-l border-purple-200 pl-2 sm:pl-3">
               <div
-                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border border-black/30 shadow-inner shrink-0"
+                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border border-black/20 shadow-inner shrink-0"
                 style={{ backgroundColor: hoveredBead.hex }}
               />
-              <span className="font-bold">{hoveredBead.code}</span>
-              <span className="text-slate-400 hidden xs:inline">({hoveredBead.name})</span>
+              <span className="font-extrabold text-purple-950">{hoveredBead.code}</span>
+              <span className="text-purple-600 font-medium hidden xs:inline">({hoveredBead.name})</span>
             </div>
           ) : (
-            <span className="text-slate-500 border-l border-slate-700 pl-2 sm:pl-3">空位置</span>
+            <span className="text-purple-400 font-medium border-l border-purple-200 pl-2 sm:pl-3">空位置</span>
           )}
         </div>
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-slate-900/90 border border-slate-800 text-slate-300 text-[9px] sm:text-[11px] px-2 py-1 sm:px-2.5 sm:py-1.5 rounded-lg backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-180px)] sm:max-w-none z-10">
-        <span><strong className="text-white">{width} × {height}</strong> 豆</span>
-        <span><strong className="text-sky-400">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
+      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-900 text-[9px] sm:text-[11px] px-2.5 py-1.5 rounded-2xl backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-180px)] sm:max-w-none z-10 font-bold">
+        <span><strong className="text-purple-950 font-black">{width} × {height}</strong> 豆</span>
+        <span><strong className="text-purple-700 font-black">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
-          <span className="text-rose-400 font-bold bg-rose-950/60 px-1 py-0.2 rounded border border-rose-600/40 text-[8px] sm:text-[10px]">
+          <span className="text-purple-900 font-bold bg-purple-100 px-1.5 py-0.5 rounded-lg border border-purple-300 text-[8px] sm:text-[10px]">
             {symmetryMode === 'horizontal' ? '左右镜像' : symmetryMode === 'vertical' ? '上下镜像' : '4向镜像'}
           </span>
         )}
       </div>
 
       {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
-      <div className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-slate-900/95 border border-slate-800 rounded-xl p-1 shadow-2xl flex items-center gap-1 z-10 backdrop-blur-md">
+      <div data-canvas-interaction-ignore className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-white/95 border border-purple-200/90 rounded-2xl p-1.5 shadow-md flex items-center gap-1 z-10 backdrop-blur-md">
         {/* Toggle Hand / Pan Tool Button */}
         {setActiveTool && (
           <button
             onClick={toggleHandTool}
-            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
               activeTool === 'hand'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/30 ring-2 ring-amber-400/50'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                ? 'bg-purple-600 text-white font-bold shadow-xs'
+                : 'bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80'
             }`}
             title={activeTool === 'hand' ? '切换回画笔模式' : '平移/拖拽画布模式'}
           >
-            {activeTool === 'hand' ? <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Hand className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-400" />}
+            {activeTool === 'hand' ? <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Hand className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600" />}
           </button>
         )}
 
-        <div className="w-px h-4 bg-slate-800" />
+        <div className="w-px h-4 bg-purple-200" />
 
         {/* Focus / Auto-Fit View Button */}
         <button
           onClick={fitToView}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sky-400 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="居中适应屏幕"
         >
           <Focus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -937,24 +1279,24 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Fullscreen Full Pattern Preview Button */}
         <button
           onClick={toggleFullscreenPreview}
-          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-lg flex items-center justify-center cursor-pointer transition-all border ${
+          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
             isFullscreenPreview
-              ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/30 ring-2 ring-rose-400/50'
-              : 'bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 border-slate-700/80'
+              ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
+              : 'bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 border-purple-200/80'
           }`}
           title={isFullscreenPreview ? '退出全屏预览' : '全屏全图预览'}
         >
-          {isFullscreenPreview ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-sky-400" />}
+          {isFullscreenPreview ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-700" />}
         </button>
 
-        <span className="text-[9px] sm:text-[10px] font-mono font-bold text-sky-400 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
+        <span className="text-[9px] sm:text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
           {Math.round(zoom * 100)}%
         </span>
 
         {/* Zoom Out */}
         <button
           onClick={() => setZoom(Math.max(0.1, zoom * 0.8))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="缩小"
         >
           <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -963,169 +1305,274 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Zoom In */}
         <button
           onClick={() => setZoom(Math.min(4.5, zoom * 1.25))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 flex items-center justify-center cursor-pointer transition-colors border border-slate-700/80"
+          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="放大"
         >
           <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
 
-      {/* Top Right Original Image Thumbnail Box ("这边放原图，点击可以放大") */}
-      {effectiveImage && (
-        <div className="absolute top-2 right-2 sm:top-3 sm:right-3 z-20 flex flex-col items-end gap-1 pointer-events-auto">
-          {!isThumbnailMinimized ? (
-            <div className="bg-slate-900/90 border border-slate-700/80 hover:border-sky-500/80 rounded-lg p-1 shadow-xl backdrop-blur-md transition-all flex flex-col gap-1 max-w-[140px] sm:max-w-[180px]">
-              {/* Ultra Compact Header Bar */}
-              <div className="flex items-center justify-between text-[10px] font-bold text-slate-200 px-0.5 pb-0.5 border-b border-slate-800/80">
-                <div className="flex items-center gap-1 text-sky-400">
-                  <ImageIcon className="w-3 h-3" />
-                  <span className="leading-none">原图参考</span>
-                </div>
-                <div className="flex items-center gap-0.5">
-                  <button
-                    onClick={() => {
-                      setModalImageScale(1);
-                      setIsEnlargedModalOpen(true);
-                    }}
-                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-sky-300 transition-colors cursor-pointer"
-                    title="点击放大查看"
-                  >
-                    <ZoomIn className="w-3 h-3" />
-                  </button>
-                  <button
-                    onClick={() => setIsThumbnailMinimized(true)}
-                    className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
-                    title="最小化"
-                  >
-                    <ChevronUp className="w-3 h-3" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Clickable Image Container - Fits tight around image ratio without extra blank space */}
-              <div
-                onClick={() => {
-                  setModalImageScale(1);
-                  setIsEnlargedModalOpen(true);
-                }}
-                className="relative group rounded overflow-hidden bg-slate-950 border border-slate-800/80 cursor-pointer shadow-xs transition-transform active:scale-98 flex items-center justify-center"
-              >
-                <img
-                  src={effectiveImage.src}
-                  alt="原图参考"
-                  className="max-h-[90px] sm:max-h-[110px] w-auto h-auto max-w-full object-contain block"
-                />
-
-                {/* Hover Overlay with "点击放大" */}
-                <div className="absolute inset-0 bg-slate-950/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-0.5 text-slate-100 backdrop-blur-xs p-1">
-                  <ZoomIn className="w-4 h-4 text-sky-400" />
-                  <span className="text-[9px] font-bold text-sky-300 text-center leading-tight">点击放大原图</span>
-                </div>
-
-                {/* Small "点击放大" hint badge */}
-                <div className="absolute bottom-0.5 right-0.5 bg-slate-950/85 text-[8px] text-slate-300 px-1 py-0.2 rounded font-sans pointer-events-none group-hover:hidden border border-slate-700/60 leading-none">
-                  点击放大
-                </div>
-              </div>
+      {/* Draggable Original Image Reference Box */}
+      <div
+        ref={referencePanelRef}
+        data-canvas-interaction-ignore
+        className="absolute z-20 w-[min(300px,calc(100vw-16px))] sm:w-[300px] pointer-events-auto"
+        style={{ left: referencePanelPosition.x, top: referencePanelPosition.y }}
+      >
+        <input
+          type="file"
+          ref={fileInputRef}
+          onChange={e => {
+            forwardReferenceImageUpload(e.target.files?.[0], onReferenceImageUpload);
+            e.target.value = '';
+          }}
+          accept="image/*"
+          className="hidden"
+        />
+        <div className="overflow-hidden rounded-2xl border border-purple-200/90 bg-white/95 shadow-lg backdrop-blur-md">
+          <div
+            onPointerDown={handleReferencePanelPointerDown}
+            onPointerMove={handleReferencePanelPointerMove}
+            onPointerUp={stopReferencePanelDrag}
+            onPointerCancel={stopReferencePanelDrag}
+            onLostPointerCapture={stopReferencePanelDrag}
+            className="flex cursor-grab touch-none items-center gap-1.5 border-b border-purple-200/80 bg-purple-50/80 px-1.5 py-1.5 text-purple-950 active:cursor-grabbing"
+            title="拖动原图参考位置"
+            aria-label="拖动原图参考位置"
+          >
+            <div className="flex shrink-0 items-center gap-0.5">
+              <ImageIcon className="h-3.5 w-3.5 shrink-0 text-purple-600" />
+              <span className="whitespace-nowrap text-[13px] font-extrabold">原图参考</span>
             </div>
-          ) : (
-            <button
-              onClick={() => setIsThumbnailMinimized(false)}
-              className="bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-sky-400 text-[11px] px-2 py-1 rounded-lg shadow-lg backdrop-blur-md flex items-center gap-1 font-bold transition-all cursor-pointer"
-              title="展开原图对比"
+            <div
+              className="ml-auto grid min-w-0 flex-1 grid-cols-3 gap-0.5"
+              onPointerDown={event => event.stopPropagation()}
+              data-reference-panel-controls
             >
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span>显示原图</span>
-              <ChevronDown className="w-3 h-3 text-slate-400" />
-            </button>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={!onReferenceImageUpload}
+                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-0.5 text-[11px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                title="上传原图作为画板参考"
+                aria-label="上传原图"
+              >
+                <Upload className="h-[13px] w-[13px] shrink-0" />
+                <span>上传</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCanvasResetDialogOpen(true)}
+                disabled={!onResetCanvas}
+                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-0.5 text-[11px] font-bold text-rose-800 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                title="清空当前画板"
+                aria-label="重置当前画板"
+              >
+                <RotateCcw className="h-[13px] w-[13px] shrink-0" />
+                <span>重置</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsThumbnailMinimized(value => !value)}
+                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-purple-300 bg-purple-100 px-0.5 text-[11px] font-bold text-purple-900 transition-colors hover:bg-purple-200"
+                title={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
+                aria-label={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
+                aria-expanded={!isThumbnailMinimized}
+              >
+                {isThumbnailMinimized ? <ChevronDown className="h-[13px] w-[13px] shrink-0" /> : <ChevronUp className="h-[13px] w-[13px] shrink-0" />}
+                <span>{isThumbnailMinimized ? '展开' : '收起'}</span>
+              </button>
+            </div>
+          </div>
+
+          {!isThumbnailMinimized && (
+            <div className="p-2">
+              {effectiveImage ? (
+                <button
+                  type="button"
+                  onClick={openEnlargedImagePreview}
+                  className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl border border-purple-200/80 bg-purple-50 shadow-xs transition-transform active:scale-[0.99]"
+                  title="点击放大查看原图"
+                  aria-label="放大原图查看"
+                >
+                  <img
+                    src={effectiveImage.src}
+                    alt="原图参考"
+                    className="max-h-[150px] w-auto max-w-full object-contain sm:max-h-[180px]"
+                  />
+                  <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-purple-950/70 p-2 text-[11px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    <ZoomIn className="h-5 w-5 text-purple-200" />
+                    点击放大原图
+                  </span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300/90 bg-purple-50/70 p-3 text-center transition-colors hover:border-purple-500 hover:bg-purple-100/70"
+                  title="点击上传图片做原图对照手动绘制"
+                  aria-label="上传原图"
+                >
+                  <Upload className="mb-0.5 h-5 w-5 text-purple-600" />
+                  <span className="text-[13px] font-extrabold text-purple-950">上传原图</span>
+                  <span className="mt-0.5 text-[11px] font-medium text-purple-500">对照原图手动绘制</span>
+                </button>
+              )}
+            </div>
           )}
+        </div>
+      </div>
+
+      {isCanvasResetDialogOpen && (
+        <div
+          data-canvas-interaction-ignore
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
+          onClick={() => setIsCanvasResetDialogOpen(false)}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="reset-canvas-title"
+            aria-describedby="reset-canvas-description"
+            className="w-full max-w-sm rounded-xl border border-rose-200 bg-white p-5 text-slate-900 shadow-2xl"
+            onClick={event => event.stopPropagation()}
+          >
+            <h2 id="reset-canvas-title" className="text-base font-extrabold">清空当前画板？</h2>
+            <p id="reset-canvas-description" className="mt-2 text-sm leading-6 text-slate-600">
+              此操作会永久清空当前未保存图案，以及撤销和重做历史，且无法恢复。原图参考、网格尺寸、调色板和算法设置会保留。
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCanvasResetDialogOpen(false)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                取消
+              </button>
+              <button
+                ref={confirmCanvasResetRef}
+                type="button"
+                onClick={confirmCanvasReset}
+                className="rounded-lg border border-rose-700 bg-rose-600 px-3 py-2 text-sm font-bold text-white transition-colors hover:bg-rose-700"
+              >
+                确认清空
+              </button>
+            </div>
+          </section>
         </div>
       )}
 
       {/* Enlarged Original Image Lightbox Modal */}
       {isEnlargedModalOpen && effectiveImage && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in"
+          data-canvas-interaction-ignore
+          className="fixed inset-0 z-50 bg-purple-950/40 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 animate-fade-in"
           onClick={() => setIsEnlargedModalOpen(false)}
         >
           <div
-            className="relative bg-slate-900/95 border border-slate-800 rounded-2xl max-w-5xl max-h-[92vh] w-full flex flex-col overflow-hidden shadow-2xl"
+            className="relative bg-white border border-purple-200 rounded-3xl max-w-5xl max-h-[92vh] w-full flex flex-col overflow-hidden shadow-2xl text-purple-950"
             onClick={e => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-950/50">
-              <div className="flex items-center gap-2.5">
-                <div className="p-1.5 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-400">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-purple-200/80 bg-purple-50/60">
+              <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between w-full">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <div className="p-1.5 rounded-xl bg-purple-100 border border-purple-300 text-purple-700">
                   <ImageIcon className="w-5 h-5" />
                 </div>
-                <div>
-                  <h3 className="text-sm sm:text-base font-bold text-slate-100 flex items-center gap-2">
+                <div className="min-w-0">
+                  <h3 className="text-sm sm:text-base font-extrabold text-purple-950 flex items-center gap-2">
                     原图高清对比与查看
                   </h3>
-                  <p className="text-[11px] text-slate-400 font-mono">
+                  <p className="text-[11px] text-purple-600 font-mono">
                     分辨率: {effectiveImage.naturalWidth || effectiveImage.width} × {effectiveImage.naturalHeight || effectiveImage.height} px
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className={IMAGE_PREVIEW_TOOLBAR_CLASS}>
                 <button
-                  onClick={() => setModalImageScale(s => Math.max(0.4, s - 0.25))}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
-                  title="缩小"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!onReferenceImageUpload}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-purple-100 px-2 py-1.5 text-xs font-bold text-purple-900 border border-purple-300 transition-colors hover:bg-purple-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={IMAGE_PREVIEW_CONTROLS.upload.title}
+                  aria-label={IMAGE_PREVIEW_CONTROLS.upload.ariaLabel}
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>上传原图</span>
+                </button>
+                <button
+                  onClick={() => setModalImageView(view => changeImagePreviewScale(view, -0.25))}
+                  className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs flex items-center gap-1 border border-purple-300 transition-colors cursor-pointer font-bold"
+                  title={IMAGE_PREVIEW_CONTROLS.zoomOut.title}
+                  aria-label={IMAGE_PREVIEW_CONTROLS.zoomOut.ariaLabel}
                 >
                   <ZoomOut className="w-4 h-4" />
                 </button>
-                <span className="text-xs font-mono text-sky-400 min-w-[40px] text-center font-bold">
-                  {Math.round(modalImageScale * 100)}%
+                <span className="text-xs font-mono text-purple-900 min-w-[40px] text-center font-bold">
+                  {Math.round(modalImageView.scale * 100)}%
                 </span>
                 <button
-                  onClick={() => setModalImageScale(s => Math.min(3, s + 0.25))}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
-                  title="放大"
+                  onClick={() => setModalImageView(view => changeImagePreviewScale(view, 0.25))}
+                  className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs flex items-center gap-1 border border-purple-300 transition-colors cursor-pointer font-bold"
+                  title={IMAGE_PREVIEW_CONTROLS.zoomIn.title}
+                  aria-label={IMAGE_PREVIEW_CONTROLS.zoomIn.ariaLabel}
                 >
                   <ZoomIn className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => setModalImageScale(1)}
-                  className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700 transition-colors cursor-pointer"
-                  title="恢复 100%"
+                  onClick={() => setIsCanvasResetDialogOpen(true)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-xl border border-rose-300 bg-rose-50 px-2 py-1.5 text-xs font-bold text-rose-800 transition-colors hover:bg-rose-100"
+                  title="重置图纸"
+                  aria-label="重置图纸"
                 >
-                  100%
+                  <RotateCcw className="w-4 h-4" />
+                  <span>重置图纸</span>
                 </button>
-                <div className="w-px h-5 bg-slate-800 mx-1" />
+                <div className="w-px h-5 bg-purple-200 mx-1" />
                 <button
                   onClick={() => setIsEnlargedModalOpen(false)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600/80 text-slate-300 hover:text-white transition-colors border border-slate-700 cursor-pointer"
-                  title="关闭"
+                  className="p-1.5 rounded-xl bg-purple-100 hover:bg-rose-100 text-purple-700 hover:text-rose-700 transition-colors border border-purple-200 cursor-pointer"
+                  title={IMAGE_PREVIEW_CONTROLS.close.title}
+                  aria-label={IMAGE_PREVIEW_CONTROLS.close.ariaLabel}
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
+              </div>
             </div>
 
-            {/* Modal Body: Scrollable / Zoomable image preview */}
-            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-slate-950/90 min-h-[320px] select-none">
-              <div className="relative border border-slate-800 rounded-xl overflow-hidden shadow-2xl bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:16px_16px] max-w-full max-h-full flex items-center justify-center">
+            {/* Modal Body: Draggable / Zoomable image preview */}
+            <div className="flex-1 overflow-hidden p-4 flex items-center justify-center bg-purple-50/40 min-h-[320px] select-none">
+              <div
+                onPointerDown={handleModalImagePointerDown}
+                onPointerMove={handleModalImagePointerMove}
+                onPointerUp={stopModalImagePan}
+                onPointerCancel={stopModalImagePan}
+                onLostPointerCapture={stopModalImagePan}
+                className="relative border border-purple-200/80 rounded-2xl overflow-hidden shadow-xl bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:16px_16px] max-w-full max-h-full flex items-center justify-center p-2 cursor-grab active:cursor-grabbing touch-none"
+              >
                 <img
                   src={effectiveImage.src}
                   alt="原图放大预览"
                   style={{
-                    transform: `scale(${modalImageScale})`,
+                    transform: `translate(${modalImageView.pan.x}px, ${modalImageView.pan.y}px) scale(${modalImageView.scale})`,
                     transformOrigin: 'center center',
                     transition: 'transform 0.15s ease-out'
                   }}
-                  className="max-h-[68vh] max-w-full object-contain pointer-events-auto"
+                  className="max-h-[68vh] max-w-full object-contain pointer-events-none rounded-lg"
                 />
               </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="px-4 py-2.5 border-t border-slate-800 bg-slate-950/50 flex items-center justify-between text-xs text-slate-400">
+            <div className="px-4 py-2.5 border-t border-purple-200/80 bg-purple-50/60 flex items-center justify-between text-xs text-purple-600">
               <span className="hidden sm:inline">提示：点击顶部 +/- 或按钮自由放大/缩小原图细节</span>
               <button
                 onClick={() => setIsEnlargedModalOpen(false)}
-                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-medium transition-colors shadow-md ml-auto cursor-pointer"
+                className="px-4 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold transition-colors shadow-xs ml-auto cursor-pointer"
+                title={IMAGE_PREVIEW_CONTROLS.close.title}
+                aria-label={IMAGE_PREVIEW_CONTROLS.close.ariaLabel}
               >
                 关闭预览
               </button>

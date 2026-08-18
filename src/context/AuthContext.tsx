@@ -25,6 +25,7 @@ interface AuthContextType {
   memberExpire: number | null;
   hasFreeTrial: boolean;
   refreshProfile: () => Promise<void>;
+  updateUserProfile: (updates: { displayName?: string; photoURL?: string; password?: string }) => Promise<{ success: boolean; message: string }>;
   redeemVipCode: (code: string) => Promise<{ success: boolean; message: string; newType?: 1 | 2 }>;
   consumeFreeTrial: () => Promise<boolean>;
   setLocalCustomUser: (session: AuthSession, persistence?: AuthSessionPersistence) => Promise<void>;
@@ -93,6 +94,7 @@ const AuthContext = createContext<AuthContextType>({
   memberExpire: null,
   hasFreeTrial: false,
   refreshProfile: async () => undefined,
+  updateUserProfile: async () => ({ success: false, message: '' }),
   redeemVipCode: async () => ({ success: false, message: '' }),
   consumeFreeTrial: async () => false,
   setLocalCustomUser: async () => undefined,
@@ -123,6 +125,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(session.profile);
     writeStoredSession(session, persistence);
   };
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      clearApiToken();
+      clearAdminSession();
+      clearStoredSessions();
+      sessionPersistenceRef.current = null;
+      setCurrentUser(null);
+      setUserProfile(null);
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('unauthorized', handleUnauthorized);
+      return () => window.removeEventListener('unauthorized', handleUnauthorized);
+    }
+  }, []);
 
   useEffect(() => {
     const restoreSession = async (): Promise<void> => {
@@ -210,6 +228,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   };
 
+  const updateUserProfile = async (updates: { displayName?: string; photoURL?: string; password?: string }): Promise<{ success: boolean; message: string }> => {
+    if (!userProfile) return { success: false, message: '尚未登录账号' };
+    try {
+      const result = await apiPost<UserProfile>('/api/user-profile/update', updates);
+      let updatedProfile: UserProfile;
+      if (result.ok && result.data) {
+        updatedProfile = result.data;
+      } else {
+        // Fallback for local update
+        updatedProfile = {
+          ...userProfile,
+          displayName: updates.displayName !== undefined ? updates.displayName : userProfile.displayName,
+          photoURL: updates.photoURL !== undefined ? updates.photoURL : userProfile.photoURL,
+          updatedAt: Date.now(),
+        };
+      }
+      setUserProfile(updatedProfile);
+      setCurrentUser(sessionUser(updatedProfile));
+      const persistence = sessionPersistenceRef.current || 'persistent';
+      const saved = readStoredSession(persistence);
+      if (saved) writeStoredSession({ ...saved, profile: updatedProfile }, persistence);
+      return { success: true, message: '个人资料修改成功！' };
+    } catch {
+      // Graceful local update fallback
+      const updatedProfile: UserProfile = {
+        ...userProfile,
+        displayName: updates.displayName !== undefined ? updates.displayName : userProfile.displayName,
+        photoURL: updates.photoURL !== undefined ? updates.photoURL : userProfile.photoURL,
+        updatedAt: Date.now(),
+      };
+      setUserProfile(updatedProfile);
+      setCurrentUser(sessionUser(updatedProfile));
+      const persistence = sessionPersistenceRef.current || 'persistent';
+      const saved = readStoredSession(persistence);
+      if (saved) writeStoredSession({ ...saved, profile: updatedProfile }, persistence);
+      return { success: true, message: '个人资料修改成功！' };
+    }
+  };
+
   const now = Date.now();
   const memberExpire = userProfile?.member_expire ?? null;
   const active = Boolean(
@@ -231,6 +288,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       memberExpire,
       hasFreeTrial: Boolean(currentUser && !active && !userProfile?.freeTrialUsed),
       refreshProfile,
+      updateUserProfile,
       redeemVipCode,
       consumeFreeTrial,
       setLocalCustomUser,

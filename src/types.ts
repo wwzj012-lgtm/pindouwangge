@@ -1,4 +1,4 @@
-export type BrandKey = 'MARD' | 'ARTKAL_S' | 'PERLER' | 'HAMA' | 'CUSTOM';
+export type BrandKey = 'MARD' | 'ARTKAL_S' | 'ARTKAL_MINI' | 'PERLER' | 'HAMA' | 'CUSTOM';
 
 export interface BeadColor {
   id: string;
@@ -11,11 +11,11 @@ export interface BeadColor {
   enabled?: boolean;  // Whether user includes this color in auto-conversion
 }
 
-export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat';
+export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat' | 'ironed';
 
 export type DitherMode = 'none' | 'floyd' | 'atkinson';
 
-export type ColorMatchAlgo = 'ciede2000_bright' | 'ciede2000_vivid' | 'ciede2000' | 'cie76' | 'rgb_weighted';
+export type ColorMatchAlgo = 'ciede2000_bright' | 'ciede2000_vivid' | 'ciede2000' | 'cie76' | 'rgb_weighted' | 'oklab' | 'rgb';
 
 export type ToolType =
   | 'pencil'
@@ -56,8 +56,10 @@ export interface ConvertSettings {
   /** Explicit opt-in. Missing on historical projects means background is kept. */
   backgroundRemovalEnabled?: boolean;
   kmeansClustering?: boolean;     // Group similar colors before mapping to reduce noise
-  pipelineOverride?: 'auto' | 'logo' | 'photo'; // Defaults to automatic V2 classification
+  pipelineOverride?: 'auto' | 'cartoon' | 'logo' | 'photo'; // Defaults to automatic V2 classification
   ditherStrength?: number;        // 0-1, defaults to 0.65 for Floyd-Steinberg
+  /** Photo-only K-Means merge amount, 0-100. Missing values keep the current default. */
+  quantizationStrength?: number;
 }
 
 export interface GridCell {

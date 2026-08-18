@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Trash2,
   Check,
+  Compass,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -21,6 +22,7 @@ import {
   deleteLocalExportedPatternCopy,
   getExportedPatternPreview,
   getPatternProject,
+  markExportedPatternPublished,
   getUserExportedPatterns,
   normalizePatternTitle,
   patternDeletionActions,
@@ -30,12 +32,16 @@ import {
   type ExportedPatternRecord,
   type EditablePatternProject,
 } from '../utils/patternHistory';
+import { renderPatternPreview } from '../utils/patternPreview';
+import { publishCommunityPost, uploadCommunityAsset } from '../utils/communityApi';
 import { formatChinaDate } from '../utils/dateUtils';
 
 interface UserPatternsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onContinueEditing: (project: EditablePatternProject) => void;
+  onOpenCommunity: () => void;
+  onOpenAuthModal: () => void;
 }
 
 function PatternCover({ record, userId }: { record: ExportedPatternRecord; userId: string | null }): React.ReactElement {
@@ -91,6 +97,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   isOpen,
   onClose,
   onContinueEditing,
+  onOpenCommunity,
+  onOpenAuthModal,
 }) => {
   const { currentUser } = useAuth();
   const { language } = useLanguage();
@@ -101,12 +109,13 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
+  const [section, setSection] = useState<'private' | 'published'>('private');
 
   const loadPatterns = async (): Promise<void> => {
     setLoading(true);
     setMessage(null);
     try {
-      setRecords(await getUserExportedPatterns(currentUser?.uid ?? null));
+      setRecords((await getUserExportedPatterns(currentUser?.uid ?? null)).filter((record) => record.status !== 2));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (isEn ? 'Unable to load pattern history.' : '无法读取图纸记录。'));
     } finally {
@@ -213,6 +222,46 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     }
   };
 
+  const handlePublish = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!currentUser) {
+      setMessage(isEn ? 'Sign in and save this pattern to cloud before publishing.' : '请先登录并保存到云端后再发布。');
+      onOpenAuthModal();
+      return;
+    }
+    if (!record.hasCloudCopy || record.userId !== currentUser.uid) {
+      setMessage(isEn ? 'Save this pattern to your cloud gallery before publishing.' : '本地作品需先保存到当前账号的云端图库后才能发布。');
+      return;
+    }
+    if ((record.status ?? 0) === 2) return;
+    setBusyId(record.id);
+    setMessage(null);
+    try {
+      let preview = record.previewBlob ?? null;
+      if (!preview && record.cloudRevision) {
+        preview = await getExportedPatternPreview(record.id, record.cloudRevision, currentUser.uid);
+      }
+      if (!preview) preview = await renderPatternPreview(await getPatternProject(record.id, currentUser.uid));
+      const contentType = ['image/png', 'image/webp', 'image/jpeg'].includes(preview.type) ? preview.type : 'image/png';
+      const file = new File([preview], `${record.title}.png`, { type: contentType });
+      const upload = await uploadCommunityAsset(file);
+      if (!upload.ok || !upload.data) throw new Error(upload.error ?? '社区图片上传失败');
+      const published = await publishCommunityPost(record.title, upload.data.asset.id, record.id);
+      if (!published.ok) throw new Error(published.error ?? '作品发布失败');
+      await markExportedPatternPublished(record.id, currentUser.uid);
+      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: 1, hasCloudCopy: true } : item));
+      setSection('published');
+      setMessage(isEn ? 'Published to the community.' : '作品已发布到社区。');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const privateRecords = records.filter((record) => (record.status ?? 0) === 0);
+  const publishedRecords = records.filter((record) => record.status === 1);
+  const visibleRecords = section === 'private' ? privateRecords : publishedRecords;
+
   if (!isOpen) return null;
 
   return (
@@ -247,6 +296,15 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
           </button>
         </div>
 
+        <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
+          <button onClick={() => setSection('private')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${section === 'private' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {isEn ? `Private gallery (${privateRecords.length})` : `私有图库 (${privateRecords.length})`}
+          </button>
+          <button onClick={() => setSection('published')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${section === 'published' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {isEn ? `Published works (${publishedRecords.length})` : `已发布作品 (${publishedRecords.length})`}
+          </button>
+        </div>
+
         {message && (
           <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-rose-500/40 bg-rose-950/50 p-3 text-xs text-rose-200">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -260,14 +318,14 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
               <Loader2 className="h-7 w-7 animate-spin text-sky-400" />
               <span>{isEn ? 'Loading editable patterns...' : '正在读取可编辑图纸...'}</span>
             </div>
-          ) : records.length === 0 ? (
+          ) : visibleRecords.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 text-center text-slate-500">
               <HardDrive className="h-7 w-7" />
-              <span>{isEn ? 'No saved editable patterns yet.' : '尚未保存可编辑图纸。'}</span>
+              <span>{section === 'private' ? (isEn ? 'Private gallery has 0 works.' : '私有图库作品为 0。') : (isEn ? 'Published works are 0.' : '已发布作品为 0。')}</span>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {records.map((record) => {
+              {visibleRecords.map((record) => {
                 const busy = busyId === record.id;
                 const canBindToCurrentAccount = requiresExplicitCloudBinding(record, currentUser?.uid ?? null);
                 const deletionActions = patternDeletionActions(record);
@@ -317,6 +375,9 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                         <span>{record.totalBeads} {isEn ? 'beads' : '颗'}</span>
                       </div>
                       <div className="mx-3 mt-2 text-[10px] text-slate-500">{formatChinaDate(record.updatedAt, true)}</div>
+                      <div className={`mx-3 mt-2 text-[10px] font-bold ${(record.status ?? 0) === 1 ? 'text-emerald-300' : 'text-sky-300'}`}>
+                        {(record.status ?? 0) === 1 ? (isEn ? 'Published' : '已发布') : (isEn ? 'Private' : '私有')}
+                      </div>
                       {record.userId === null && (
                         <p className="mx-3 mt-2 text-[10px] leading-4 text-amber-300">{isEn ? 'Unbound account: stored on this device only.' : '未绑定账号，仅本机可用。'}</p>
                       )}
@@ -339,6 +400,25 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                         >
                           <Cloud className="h-3.5 w-3.5" />
                           {isEn ? 'Sync to this account' : '同步到当前账号'}
+                        </button>
+                      )}
+                      {(record.status ?? 0) === 0 && (
+                        <button
+                          onClick={() => void handlePublish(record)}
+                          disabled={busy}
+                          className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
+                        >
+                          <Compass className="h-3.5 w-3.5" />
+                          {isEn ? 'Publish' : '发布到社区'}
+                        </button>
+                      )}
+                      {record.status === 1 && (
+                        <button
+                          onClick={onOpenCommunity}
+                          className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20"
+                        >
+                          <Compass className="h-3.5 w-3.5" />
+                          {isEn ? 'Open community' : '进入社区'}
                         </button>
                       )}
                       {(record.syncState === 'failed' || record.syncState === 'pending') && record.userId === currentUser?.uid && (

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Zap } from 'lucide-react';
+import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Save, Zap } from 'lucide-react';
+import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
   BeadColor,
@@ -18,6 +19,14 @@ import type { ConversionDiagnostics } from './utils/imagePipeline';
 import { smartCropSubject } from './utils/cropUtils';
 import { resetBackgroundRemovalForNewImage } from './utils/imageStudioControls';
 import { createImageRequestGate } from './utils/imageRequestGate';
+import { resolveCanvasReset } from './utils/canvasReset';
+import {
+  commitHistorySnapshot,
+  getRedoState,
+  getUndoState,
+  gridsEqual,
+  type GridSnapshot,
+} from './utils/historyTransactions';
 
 import { Header } from './components/Header';
 import { Toolbar } from './components/Toolbar';
@@ -33,15 +42,46 @@ import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
 import { AuthModal } from './components/AuthModal';
 import { UserPatternsModal } from './components/UserPatternsModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
-import type { EditablePatternProject } from './utils/patternHistory';
+import { UserProfileModal } from './components/UserProfileModal';
+import { AccountManagementModal } from './components/AccountManagementModal';
+import { HomeView, type HeroExample } from './components/HomeView';
+import { CommunityView } from './components/CommunityView';
+import { LargeCanvasView, type LargeCanvasFrame } from './components/LargeCanvasView';
+import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
+import type { CommunityPattern } from './data/communityData';
+import { saveExportedPatternRecord, type EditablePatternProject } from './utils/patternHistory';
+
+function createLargeCanvasSourceDataUrl(image: HTMLImageElement): string {
+  const sourceWidth = image.naturalWidth || image.width || 1;
+  const sourceHeight = image.naturalHeight || image.height || 1;
+  const scale = Math.min(1, 100 / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return image.src;
+    context.drawImage(image, 0, 0, width, height);
+    return canvas.toDataURL('image/png');
+  } catch {
+    return image.src;
+  }
+}
 
 export default function App() {
   const { language } = useLanguage();
+  const { currentUser } = useAuth();
   const isEn = language === 'en';
 
   // 1. Core State
+  const [currentTab, setCurrentTab] = useState<'home' | 'community' | 'studio' | 'largeCanvas'>('home');
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
   const [activePatternId, setActivePatternId] = useState<string | null>(null);
+  const [isSavingPattern, setIsSavingPattern] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [imageLoadMessage, setImageLoadMessage] = useState<string | null>(null);
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
   const [isConverting, setIsConverting] = useState<boolean>(false);
@@ -65,7 +105,18 @@ export default function App() {
     chromaKeyColor: null,
     chromaKeyTolerance: 20,
     colorMatchAlgo: 'ciede2000',
+    kmeansClustering: true,
+    quantizationStrength: 28,
+    pipelineOverride: 'cartoon',
   });
+
+  // Quantization is a required preprocessing step for every conversion mode.
+  // Normalize imported or legacy project settings before the next interaction.
+  useEffect(() => {
+    if (settings.kmeansClustering !== true) {
+      setSettings(previous => ({ ...previous, kmeansClustering: true }));
+    }
+  }, [settings.kmeansClustering]);
 
   // Source Image element reference
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
@@ -101,6 +152,22 @@ export default function App() {
   // Undo / Redo History Stack
   const [history, setHistory] = useState<(string | null)[][][]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const gridRef = useRef<GridSnapshot>(grid);
+  const historyRef = useRef<GridSnapshot[]>(history);
+  const historyIndexRef = useRef(historyIndex);
+  const historyTransactionRef = useRef<GridSnapshot | null>(null);
+
+  useEffect(() => {
+    gridRef.current = grid;
+  }, [grid]);
+
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   // Editing Tool State
   const [activeTool, setActiveTool] = useState<ToolType>('pencil');
@@ -125,10 +192,22 @@ export default function App() {
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
+  const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
   const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
+  const [alignedPixels, setAlignedPixels] = useState<Uint8ClampedArray | undefined>(undefined);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
+
+  // Open login modal on 401 unauthorized event
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setIsAuthModalOpen(true);
+    };
+    window.addEventListener('unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('unauthorized', handleUnauthorized);
+  }, []);
 
   // Palette Lookup Map
   const paletteMap = useMemo(() => {
@@ -144,29 +223,86 @@ export default function App() {
     }
   }, [brand]);
 
-  // Push new state to undo history stack
-  const pushHistory = useCallback((newGrid: (string | null)[][]) => {
-    setHistory(prev => {
-      const sliced = prev.slice(0, historyIndex + 1);
-      return [...sliced, newGrid];
-    });
-    setHistoryIndex(prev => prev + 1);
-  }, [historyIndex]);
+  // SettingsPanel and imported projects store the selected brand on settings.
+  // Normalize that value into the App-level brand so conversion, palette maps,
+  // large-canvas rendering, and export all consume the same palette.
+  useEffect(() => {
+    const requestedBrand = settings.brand;
+    const resolvedBrand: BrandKey = requestedBrand && BRAND_PALETTES[requestedBrand]
+      ? requestedBrand
+      : 'MARD';
+    if (brand !== resolvedBrand) setBrand(resolvedBrand);
+    if (settings.brand !== resolvedBrand) {
+      setSettings(previous => ({ ...previous, brand: resolvedBrand }));
+    }
+  }, [settings.brand, brand]);
+
+  const commitGridHistory = useCallback((currentGrid: GridSnapshot, nextGrid: GridSnapshot) => {
+    const nextHistoryState = commitHistorySnapshot(
+      historyRef.current,
+      historyIndexRef.current,
+      currentGrid,
+      nextGrid,
+    );
+    if (!nextHistoryState.changed) return false;
+
+    historyRef.current = nextHistoryState.history;
+    historyIndexRef.current = nextHistoryState.historyIndex;
+    setHistory(nextHistoryState.history);
+    setHistoryIndex(nextHistoryState.historyIndex);
+    return true;
+  }, []);
+
+  const applyGridChange = useCallback((nextGrid: GridSnapshot, invalidateRequest = true) => {
+    const currentGrid = gridRef.current;
+    if (gridsEqual(currentGrid, nextGrid)) return false;
+
+    if (invalidateRequest) invalidateImageRequest();
+    gridRef.current = nextGrid;
+    setGrid(nextGrid);
+
+    if (historyTransactionRef.current) return true;
+    commitGridHistory(currentGrid, nextGrid);
+    return true;
+  }, [commitGridHistory, invalidateImageRequest]);
+
+  const beginHistoryTransaction = useCallback(() => {
+    if (!historyTransactionRef.current) {
+      historyTransactionRef.current = gridRef.current.map(row => [...row]);
+    }
+  }, []);
+
+  const finishHistoryTransaction = useCallback(() => {
+    const startGrid = historyTransactionRef.current;
+    historyTransactionRef.current = null;
+    if (!startGrid || gridsEqual(startGrid, gridRef.current)) return false;
+    return commitGridHistory(startGrid, gridRef.current);
+  }, [commitGridHistory]);
 
   // Handle Undo / Redo
   const handleUndo = useCallback(() => {
-    if (historyIndex > 0) {
-      setHistoryIndex(prev => prev - 1);
-      setGrid(history[historyIndex - 1]);
-    }
-  }, [history, historyIndex]);
+    const nextHistoryState = getUndoState(historyRef.current, historyIndexRef.current);
+    if (!nextHistoryState) return false;
+
+    const nextGrid = nextHistoryState.history[nextHistoryState.historyIndex];
+    historyIndexRef.current = nextHistoryState.historyIndex;
+    gridRef.current = nextGrid;
+    setHistoryIndex(nextHistoryState.historyIndex);
+    setGrid(nextGrid);
+    return true;
+  }, []);
 
   const handleRedo = useCallback(() => {
-    if (historyIndex < history.length - 1) {
-      setHistoryIndex(prev => prev + 1);
-      setGrid(history[historyIndex + 1]);
-    }
-  }, [history, historyIndex]);
+    const nextHistoryState = getRedoState(historyRef.current, historyIndexRef.current);
+    if (!nextHistoryState) return false;
+
+    const nextGrid = nextHistoryState.history[nextHistoryState.historyIndex];
+    historyIndexRef.current = nextHistoryState.historyIndex;
+    gridRef.current = nextGrid;
+    setHistoryIndex(nextHistoryState.historyIndex);
+    setGrid(nextGrid);
+    return true;
+  }, []);
 
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
@@ -192,16 +328,20 @@ export default function App() {
           const newGrid = conversion.grid;
 
           if (isCurrentImageRequest(requestToken)) {
-            setGrid(newGrid);
+            applyGridChange(newGrid, false);
             setConversionDiagnostics(conversion.diagnostics);
-            pushHistory(newGrid);
+            setAlignedPixels(conversion.alignedSourcePixels);
+          }
+        } catch (error) {
+          if (isCurrentImageRequest(requestToken)) {
+            setImageLoadMessage(error instanceof Error ? error.message : (isEn ? 'Image conversion failed. Your current grid is unchanged.' : '图像转换失败，当前图纸未改变。'));
           }
         } finally {
           finishImageRequest(requestToken);
         }
       }, 50);
     },
-    [beginImageRequest, finishImageRequest, isCurrentImageRequest, pushHistory]
+    [applyGridChange, beginImageRequest, finishImageRequest, isCurrentImageRequest, isEn]
   );
 
   // Re-convert on settings update if source image exists
@@ -230,6 +370,8 @@ export default function App() {
           setProjectName(file.name.replace(/\.[^/.]+$/, ''));
           setSettings(safeSettings);
           convertImageToGrid(img, safeSettings, activePalette, requestToken);
+          setCurrentTab('studio');
+          setIsStudioModalOpen(true);
         };
         img.onerror = () => {
           finishImageRequest(requestToken);
@@ -246,12 +388,14 @@ export default function App() {
   // Load Sample Preset Image
   const handleLoadSample = (sampleUrl: string, name = '安妮亚粉发眼镜示例拼豆') => {
     const requestToken = beginImageRequest();
-    setActivePatternId(null);
+    setImageLoadMessage(null);
     setIsConverting(true);
+    setCurrentTab('studio');
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       if (!isCurrentImageRequest(requestToken)) return;
+      setActivePatternId(null);
       setSourceImage(img);
       setProjectName(name);
       const presetSettings = { ...resetBackgroundRemovalForNewImage(settings), width: 79, height: 44 };
@@ -259,62 +403,116 @@ export default function App() {
       convertImageToGrid(img, presetSettings, activePalette, requestToken);
     };
     img.onerror = () => {
+      if (isCurrentImageRequest(requestToken)) {
+        setImageLoadMessage(isEn ? 'Unable to load this example. Your current grid is unchanged.' : '示例图片加载失败，当前图纸未改变。');
+      }
       finishImageRequest(requestToken);
     };
     img.src = sampleUrl;
   };
 
-  // Load default sample image on first load
-  useEffect(() => {
-    handleLoadSample(SAMPLE_IMAGES[0].url, SAMPLE_IMAGES[0].name);
+  const handleConvertLargeCanvasImage = useCallback((file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('无法读取图片'));
+      reader.onload = event => {
+        const imageUrl = typeof event.target?.result === 'string' ? event.target.result : null;
+        if (!imageUrl) {
+          reject(new Error('图片内容为空'));
+          return;
+        }
+        const img = new Image();
+        img.onload = () => {
+          try {
+            const width = Math.max(1, Math.min(100, Math.round(gridW)));
+            const height = Math.max(1, Math.min(100, Math.round(gridH)));
+            const modeSettings = getLargeCanvasModeSettings(mode);
+            const frameSettings = { ...settings, ...modeSettings, width, height, keepAspectRatio: false };
+            const result = imageToGridWithDiagnostics(img, frameSettings, activePalette);
+            resolve({ grid: result.grid, sourceImageDataUrl: createLargeCanvasSourceDataUrl(img) });
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error('图片转换失败'));
+          }
+        };
+        img.onerror = () => reject(new Error('图片加载失败'));
+        img.src = imageUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [activePalette, settings]);
+
+  const handleOpenLargeCanvasFrame = useCallback((frame: LargeCanvasFrame) => {
+    if (!frame.beanResult?.length || !frame.beanResult[0]?.length) return;
+    invalidateImageRequest();
+    setActivePatternId(null);
+    setProjectName(frame.title);
+    setSettings(current => ({ ...current, width: frame.rect.width, height: frame.rect.height, keepAspectRatio: false }));
+    applyGridChange(frame.beanResult, false);
+    setCurrentTab('studio');
+    if (frame.sourceImageDataUrl) {
+      const image = new Image();
+      image.onload = () => setSourceImage(image);
+      image.src = frame.sourceImageDataUrl;
+    } else {
+      setSourceImage(null);
+    }
+  }, [applyGridChange, invalidateImageRequest]);
+
+  // Handle Reference Image Upload (for manual tracing / reference only)
+  const handleReferenceImageUpload = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = evt => {
+      if (evt.target?.result) {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          setSourceImage(img);
+        };
+        img.src = evt.target.result as string;
+      }
+    };
+    reader.readAsDataURL(file);
   }, []);
 
   // Clear Canvas
   const handleClearCanvas = () => {
-    invalidateImageRequest();
     setActivePatternId(null);
     const emptyGrid = Array.from({ length: settings.height }, () =>
       Array(settings.width).fill(null)
     );
-    setGrid(emptyGrid);
-    pushHistory(emptyGrid);
+    applyGridChange(emptyGrid);
   };
 
-  // Shift Grid in cardinal direction
-  const handleShiftGrid = (dir: 'up' | 'down' | 'left' | 'right') => {
-    const h = settings.height;
-    const w = settings.width;
-    const newGrid = Array.from({ length: h }, () => Array(w).fill(null));
-
-    for (let y = 0; y < h; y++) {
-      for (let x = 0; x < w; x++) {
-        let sx = x;
-        let sy = y;
-        if (dir === 'left') sx = x + 1;
-        if (dir === 'right') sx = x - 1;
-        if (dir === 'up') sy = y + 1;
-        if (dir === 'down') sy = y - 1;
-
-        if (sx >= 0 && sx < w && sy >= 0 && sy < h) {
-          newGrid[y][x] = grid[sy][sx];
-        }
-      }
-    }
+  const handleResetCurrentCanvas = useCallback(() => {
     invalidateImageRequest();
-    setGrid(newGrid);
-    pushHistory(newGrid);
-  };
+    historyTransactionRef.current = null;
+    historyRef.current = [];
+    historyIndexRef.current = -1;
+
+    const resetState = resolveCanvasReset(true, gridRef.current);
+    if (!resetState) return;
+
+    gridRef.current = resetState.grid;
+    setGrid(resetState.grid);
+    setHistory(resetState.history);
+    setHistoryIndex(resetState.historyIndex);
+    setActivePatternId(null);
+    setHighlightColorId(null);
+    setReplaceSourceColor(null);
+    setErasedColorCoords(new Map());
+  }, [invalidateImageRequest]);
 
   // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
     if (x < 0 || x >= settings.width || y < 0 || y >= settings.height) return;
+    const currentGrid = gridRef.current;
 
     if (activeTool === 'pencil') {
       if (!selectedColor) return;
       const nextColorId = selectedColor.id;
-      if (grid[y][x] === nextColorId) return;
+      if (currentGrid[y][x] === nextColorId) return;
 
-      const newGrid = grid.map(row => [...row]);
+      const newGrid = currentGrid.map(row => [...row]);
 
       const applyPoint = (px: number, py: number) => {
         if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
@@ -334,12 +532,10 @@ export default function App() {
         applyPoint(settings.width - 1 - x, settings.height - 1 - y);
       }
 
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
+      applyGridChange(newGrid);
     } else if (activeTool === 'eraser') {
-      if (grid[y][x] === null) return;
-      const newGrid = grid.map(row => [...row]);
+      if (currentGrid[y][x] === null) return;
+      const newGrid = currentGrid.map(row => [...row]);
 
       const erasePoint = (px: number, py: number) => {
         if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
@@ -358,16 +554,14 @@ export default function App() {
         erasePoint(settings.width - 1 - x, settings.height - 1 - y);
       }
 
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
+      applyGridChange(newGrid);
     } else if (activeTool === 'bucket') {
       if (!selectedColor) return;
-      const targetColorId = grid[y][x];
+      const targetColorId = currentGrid[y][x];
       const fillColorId = selectedColor.id;
       if (targetColorId === fillColorId) return;
 
-      const newGrid = grid.map(row => [...row]);
+      const newGrid = currentGrid.map(row => [...row]);
       const queue: [number, number][] = [[x, y]];
       const visited = new Set<string>();
 
@@ -389,11 +583,9 @@ export default function App() {
         }
       }
 
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
+      applyGridChange(newGrid);
     } else if (activeTool === 'replace') {
-      const sourceId = grid[y][x];
+      const sourceId = currentGrid[y][x];
       if (sourceId) {
         const sourceBead = paletteMap.get(sourceId);
         if (sourceBead) setReplaceSourceColor(sourceBead);
@@ -405,7 +597,7 @@ export default function App() {
   const handleApplyShape = (points: { x: number; y: number }[]) => {
     if (!selectedColor || points.length === 0) return;
     const colorId = selectedColor.id;
-    const newGrid = grid.map(row => [...row]);
+    const newGrid = gridRef.current.map(row => [...row]);
 
     const applyPoint = (px: number, py: number) => {
       if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
@@ -426,14 +618,12 @@ export default function App() {
       }
     });
 
-    invalidateImageRequest();
-    setGrid(newGrid);
-    pushHistory(newGrid);
+    applyGridChange(newGrid);
   };
 
   // Replace all instances of sourceColorId with targetColorId or erase if TRANSPARENT_ERASE
   const handleExecuteReplace = (sourceId: string, targetId: string) => {
-    const newGrid = grid.map(row =>
+    const newGrid = gridRef.current.map(row =>
       row.map(cell => {
         if (cell === sourceId) {
           return targetId === 'TRANSPARENT_ERASE' ? null : targetId;
@@ -441,15 +631,14 @@ export default function App() {
         return cell;
       })
     );
-    invalidateImageRequest();
-    setGrid(newGrid);
-    pushHistory(newGrid);
+    applyGridChange(newGrid);
   };
 
   // Erase all instances of a specific colorId
   const handleEraseColor = useCallback((colorId: string) => {
+    const currentGrid = gridRef.current;
     const coords: [number, number][] = [];
-    grid.forEach((row, y) => {
+    currentGrid.forEach((row, y) => {
       row.forEach((cell, x) => {
         if (cell === colorId) {
           coords.push([x, y]);
@@ -465,29 +654,25 @@ export default function App() {
         return next;
       });
 
-      const newGrid = grid.map(row =>
+      const newGrid = currentGrid.map(row =>
         row.map(cell => (cell === colorId ? null : cell))
       );
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
+      applyGridChange(newGrid);
     }
-  }, [grid, pushHistory]);
+  }, [applyGridChange]);
 
   // Restore an erased color back to the grid
   const handleRestoreColor = useCallback((colorId: string) => {
     const coords = erasedColorCoords.get(colorId);
 
     if (coords && coords.length > 0) {
-      const newGrid = grid.map(row => [...row]);
+      const newGrid = gridRef.current.map(row => [...row]);
       for (const [x, y] of coords) {
         if (y < newGrid.length && x < newGrid[y].length && newGrid[y][x] === null) {
           newGrid[y][x] = colorId;
         }
       }
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
+      applyGridChange(newGrid);
     }
 
     setErasedColorCoords(prev => {
@@ -500,98 +685,87 @@ export default function App() {
     if (restoredColor) {
       setSelectedColor(restoredColor);
     }
-  }, [grid, erasedColorCoords, pushHistory, paletteMap]);
+  }, [applyGridChange, erasedColorCoords, paletteMap]);
 
-  // Flood-fill clear connected outer background beads starting from grid edges
+  // Flood-fill clear connected outer background beads starting from grid edges.
   const handleClearOuterBackground = useCallback(() => {
+    const currentGrid = gridRef.current;
     const h = settings.height;
     const w = settings.width;
     if (h === 0 || w === 0) return;
 
-    const newGrid = grid.map(row => [...row]);
+    const newGrid = currentGrid.map(row => [...row]);
     const visited = Array.from({ length: h }, () => Array(w).fill(false));
 
-    // Sample potential outer background color IDs from edge coordinates
     const sampleColorIds = new Set<string>();
     const edgeCoords = [
       [0, 0], [w - 1, 0], [0, h - 1], [w - 1, h - 1],
       [Math.floor(w / 2), 0], [Math.floor(w / 2), h - 1],
-      [0, Math.floor(h / 2)], [w - 1, Math.floor(h / 2)]
+      [0, Math.floor(h / 2)], [w - 1, Math.floor(h / 2)],
     ];
     for (const [cx, cy] of edgeCoords) {
-      const cid = grid[cy]?.[cx];
-      if (cid) sampleColorIds.add(cid);
+      const colorId = currentGrid[cy]?.[cx];
+      if (colorId) sampleColorIds.add(colorId);
     }
 
     if (sampleColorIds.size === 0) return;
 
-    // Queue for BFS
     const queue: [number, number][] = [];
-
-    // Push all border cells that match a sampled background color
     for (let x = 0; x < w; x++) {
-      if (grid[0][x] && sampleColorIds.has(grid[0][x]!)) {
+      if (currentGrid[0][x] && sampleColorIds.has(currentGrid[0][x]!)) {
         queue.push([x, 0]);
         visited[0][x] = true;
       }
-      if (grid[h - 1][x] && sampleColorIds.has(grid[h - 1][x]!)) {
+      if (currentGrid[h - 1][x] && sampleColorIds.has(currentGrid[h - 1][x]!)) {
         queue.push([x, h - 1]);
         visited[h - 1][x] = true;
       }
     }
     for (let y = 0; y < h; y++) {
-      if (grid[y][0] && sampleColorIds.has(grid[y][0]!)) {
+      if (currentGrid[y][0] && sampleColorIds.has(currentGrid[y][0]!)) {
         queue.push([0, y]);
         visited[y][0] = true;
       }
-      if (grid[y][w - 1] && sampleColorIds.has(grid[y][w - 1]!)) {
+      if (currentGrid[y][w - 1] && sampleColorIds.has(currentGrid[y][w - 1]!)) {
         queue.push([w - 1, y]);
         visited[y][w - 1] = true;
       }
     }
 
     const clearedByColor = new Map<string, [number, number][]>();
-    let clearedCount = 0;
-
     while (queue.length > 0) {
       const [cx, cy] = queue.shift()!;
-      const curColor = grid[cy][cx];
-      if (curColor) {
-        if (!clearedByColor.has(curColor)) {
-          clearedByColor.set(curColor, []);
-        }
-        clearedByColor.get(curColor)!.push([cx, cy]);
+      const currentColor = currentGrid[cy][cx];
+      if (currentColor) {
+        const coords = clearedByColor.get(currentColor) || [];
+        coords.push([cx, cy]);
+        clearedByColor.set(currentColor, coords);
       }
       newGrid[cy][cx] = null;
-      clearedCount++;
 
-      const dirs = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-      for (const [dx, dy] of dirs) {
+      for (const [dx, dy] of [[0, 1], [0, -1], [1, 0], [-1]]) {
         const nx = cx + dx;
         const ny = cy + dy;
-        if (nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny][nx]) {
-          if (grid[ny][nx] && grid[ny][nx] === curColor) {
-            visited[ny][nx] = true;
-            queue.push([nx, ny]);
-          }
+        if (
+          nx >= 0 && nx < w && ny >= 0 && ny < h && !visited[ny][nx] &&
+          currentGrid[ny][nx] && currentGrid[ny][nx] === currentColor
+        ) {
+          visited[ny][nx] = true;
+          queue.push([nx, ny]);
         }
       }
     }
 
-    if (clearedCount > 0) {
-      setErasedColorCoords(prev => {
-        const next = new Map<string, [number, number][]>(prev);
-        clearedByColor.forEach((coords, cid) => {
-          const existing = next.get(cid) || [];
-          next.set(cid, [...existing, ...coords]);
-        });
-        return next;
+    if (clearedByColor.size === 0) return;
+    setErasedColorCoords(prev => {
+      const next = new Map<string, [number, number][]>(prev);
+      clearedByColor.forEach((coords, colorId) => {
+        next.set(colorId, [...(next.get(colorId) || []), ...coords]);
       });
-      invalidateImageRequest();
-      setGrid(newGrid);
-      pushHistory(newGrid);
-    }
-  }, [grid, settings, pushHistory]);
+      return next;
+    });
+    applyGridChange(newGrid);
+  }, [applyGridChange, settings]);
 
   // Export & Import Project JSON
   const handleExportJson = () => {
@@ -630,8 +804,7 @@ export default function App() {
           height: project.height || project.grid.length,
           boardSize: project.boardSize || 29,
         }));
-        setGrid(project.grid);
-        pushHistory(project.grid);
+        applyGridChange(project.grid, false);
       }
     } catch {
       alert('解析拼豆工程文件失败，请确保格式正确');
@@ -653,8 +826,37 @@ export default function App() {
     }));
     setSettings({ ...project.settings });
     const restoredGrid = project.grid.map((row) => [...row]);
-    setGrid(restoredGrid);
-    pushHistory(restoredGrid);
+    applyGridChange(restoredGrid, false);
+  };
+
+  const handleSaveCurrentPattern = async (): Promise<void> => {
+    if (isSavingPattern) return;
+    setIsSavingPattern(true);
+    setSaveMessage(null);
+    const totalBeads = gridRef.current.reduce((total, row) => total + row.filter((cell) => cell !== null).length, 0);
+    try {
+      const record = await saveExportedPatternRecord({
+        id: activePatternId ?? undefined,
+        userId: currentUser?.uid ?? null,
+        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
+        width: settings.width,
+        height: settings.height,
+        totalBeads,
+        boardSize: settings.boardSize,
+        brand,
+        settings,
+        grid: gridRef.current,
+        palette: activePalette,
+      });
+      setActivePatternId(record.id);
+      setSaveMessage(currentUser
+        ? (record.syncState === 'synced' ? (isEn ? 'Saved to your private cloud gallery.' : '已保存到云端私有图库。') : (isEn ? 'Saved locally. Cloud sync can be retried from your gallery.' : '已保存到本地，云端同步可在图库重试。'))
+        : (isEn ? 'Saved to this browser only.' : '已保存到当前浏览器本地图库。'));
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : (isEn ? 'Save failed. Your canvas is unchanged.' : '保存失败，当前画板未改变。'));
+    } finally {
+      setIsSavingPattern(false);
+    }
   };
 
   // Keyboard Shortcuts (P, B, I, E, R, Ctrl+Z, Ctrl+Y)
@@ -689,8 +891,28 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [handleUndo, handleRedo]);
 
+  const handleImportPattern = useCallback(() => {
+    setCurrentTab('studio');
+    setTimeout(() => {
+      setIsUserPatternsModalOpen(true);
+    }, 100);
+  }, []);
+
+  const handleRemixPattern = useCallback((pattern: CommunityPattern) => {
+    setProjectName(pattern.title);
+    setSettings(prev => ({
+      ...prev,
+      width: pattern.width,
+      height: pattern.height,
+    }));
+    setCurrentTab('studio');
+    if (pattern.imageUrl) {
+      handleLoadSample(pattern.imageUrl);
+    }
+  }, [handleLoadSample]);
+
   return (
-    <div className="flex flex-col h-screen bg-slate-950 font-sans text-slate-100 overflow-hidden">
+    <div className="flex flex-col h-screen bg-[#F5F0FD] font-sans text-purple-950 overflow-hidden">
       {/* Top Main Navigation Header */}
       <Header
         projectName={projectName}
@@ -703,12 +925,43 @@ export default function App() {
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
         onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
+        onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onClearCanvas={handleClearCanvas}
+        currentTab={currentTab}
+        setCurrentTab={setCurrentTab}
+        onImportPattern={handleImportPattern}
       />
 
-      {/* Editing Toolbar */}
+      {currentTab === 'home' && (
+        <HomeView
+          onNavigateTab={setCurrentTab}
+          onStartPhotoToBead={handleImageUpload}
+          onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
+          onImportPattern={handleImportPattern}
+        />
+      )}
+
+      {currentTab === 'community' && (
+        <CommunityView
+          onRemixPattern={handleRemixPattern}
+          onNavigateToStudio={() => setCurrentTab('studio')}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        />
+      )}
+
+      {currentTab === 'largeCanvas' && (
+        <LargeCanvasView
+          paletteMap={paletteMap}
+          onConvertImage={handleConvertLargeCanvasImage}
+          onOpenFrame={handleOpenLargeCanvasFrame}
+        />
+      )}
+
+      {currentTab === 'studio' && (
+        <>
       <Toolbar
         activeTool={activeTool}
         setActiveTool={setActiveTool}
@@ -734,11 +987,12 @@ export default function App() {
         setSymmetryMode={setSymmetryMode}
         canvasBackdrop={canvasBackdrop}
         setCanvasBackdrop={setCanvasBackdrop}
-        onShiftGrid={handleShiftGrid}
         onClearOuterBackground={handleClearOuterBackground}
         hasImage={sourceImage !== null}
         showOverlay={showOverlay}
         setShowOverlay={setShowOverlay}
+        onSavePattern={() => void handleSaveCurrentPattern()}
+        isSavingPattern={isSavingPattern}
       />
 
       {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
@@ -796,20 +1050,24 @@ export default function App() {
             zoom={zoom}
             setZoom={setZoom}
             onCellClick={handleCellClick}
+            onHistoryTransactionStart={beginHistoryTransaction}
+            onHistoryTransactionEnd={finishHistoryTransaction}
             onApplyShape={handleApplyShape}
             onEyedropColor={color => setSelectedColor(color)}
+            onReferenceImageUpload={handleReferenceImageUpload}
+            onResetCanvas={handleResetCurrentCanvas}
           />
 
           {/* Loading Animation Overlay */}
           {isConverting && (
-            <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-3 transition-opacity duration-200">
+            <div className="absolute inset-0 bg-purple-950/20 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-3 transition-opacity duration-200">
               <div className="relative flex items-center justify-center">
-                <div className="w-14 h-14 rounded-full border-4 border-rose-500/20 border-t-rose-500 animate-spin" />
-                <div className="w-8 h-8 rounded-full border-2 border-amber-400/30 border-b-amber-400 animate-spin absolute" style={{ animationDirection: 'reverse', animationDuration: '0.8s' }} />
-                <Sparkles className="w-5 h-5 text-amber-400 absolute animate-pulse" />
+                <div className="w-14 h-14 rounded-full border-4 border-purple-600/20 border-t-purple-600 animate-spin" />
+                <div className="w-8 h-8 rounded-full border-2 border-purple-400/30 border-b-purple-400 animate-spin absolute" style={{ animationDirection: 'reverse', animationDuration: '0.8s' }} />
+                <Sparkles className="w-5 h-5 text-purple-600 absolute animate-pulse" />
               </div>
-              <div className="text-xs font-bold text-slate-100 flex items-center gap-2 bg-slate-900/90 border border-slate-700/80 px-3.5 py-1.5 rounded-full shadow-lg">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+              <div className="text-xs font-extrabold text-purple-950 flex items-center gap-2 bg-white/95 border border-purple-200 px-4 py-2 rounded-full shadow-lg">
+                <span className="w-2 h-2 rounded-full bg-purple-600 animate-ping" />
                 <span>{isEn ? 'Quantizing beads & matching colors...' : '✨ 正在精准计算拼豆像素与色卡匹配...'}</span>
               </div>
             </div>
@@ -843,13 +1101,13 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Navigation Bar (< lg screens) */}
-      <nav className="lg:hidden bg-slate-900/95 border-t border-slate-800 backdrop-blur-md px-1.5 py-1.5 flex items-center justify-around z-30 shrink-0 text-[10px]">
+      <nav className="lg:hidden bg-white/95 border-t border-purple-200/90 backdrop-blur-md px-1.5 py-1.5 flex items-center justify-around z-30 shrink-0 text-[10px]">
         <button
           onClick={() => setMobileDrawer('none')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
             mobileDrawer === 'none'
-              ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-purple-900 font-bold bg-purple-100 border border-purple-300 shadow-2xs'
+              : 'text-purple-600 hover:text-purple-900'
           }`}
         >
           <LayoutGrid className="w-3.5 h-3.5" />
@@ -858,10 +1116,10 @@ export default function App() {
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'settings' ? 'none' : 'settings')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
             mobileDrawer === 'settings'
-              ? 'text-rose-400 font-bold bg-rose-500/15 border border-rose-500/30 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-purple-900 font-bold bg-purple-100 border border-purple-300 shadow-2xs'
+              : 'text-purple-600 hover:text-purple-900'
           }`}
         >
           <Sliders className="w-3.5 h-3.5" />
@@ -870,10 +1128,10 @@ export default function App() {
 
         <button
           onClick={() => setMobileDrawer(mobileDrawer === 'stats' ? 'none' : 'stats')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg transition-all cursor-pointer ${
+          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
             mobileDrawer === 'stats'
-              ? 'text-emerald-400 font-bold bg-emerald-500/15 border border-emerald-500/30 shadow-xs'
-              : 'text-slate-400 hover:text-slate-200'
+              ? 'text-emerald-900 font-bold bg-emerald-100 border border-emerald-300 shadow-2xs'
+              : 'text-purple-600 hover:text-purple-900'
           }`}
         >
           <BarChart3 className="w-3.5 h-3.5" />
@@ -882,21 +1140,42 @@ export default function App() {
 
         <button
           onClick={() => setIsSmartReduceModalOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-lg text-sky-300 hover:text-sky-200 font-bold transition-all cursor-pointer"
+          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl text-amber-800 hover:text-amber-950 font-bold transition-all cursor-pointer bg-amber-50 border border-amber-200"
           title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
         >
-          <Zap className="w-3.5 h-3.5" />
+          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse" />
           <span>{isEn ? 'Save' : '省豆'}</span>
         </button>
 
         <button
+          onClick={() => void handleSaveCurrentPattern()}
+          disabled={isSavingPattern}
+          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-bold transition-all cursor-pointer shadow-xs active:scale-95"
+        >
+          {isSavingPattern ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          <span>{isEn ? 'Save' : '保存'}</span>
+        </button>
+
+        <button
           onClick={() => setIsExportModalOpen(true)}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg transition-all cursor-pointer shadow-xs active:scale-95"
+          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
         >
           <Download className="w-3.5 h-3.5" />
           <span>{isEn ? 'Export' : '导出'}</span>
         </button>
       </nav>
+      {saveMessage && (
+        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-sky-300 bg-white px-3 py-2 text-xs font-medium text-sky-950 shadow-lg">
+          {saveMessage}
+        </div>
+      )}
+      {imageLoadMessage && (
+        <div role="status" className="fixed bottom-20 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 shadow-lg">
+          {imageLoadMessage}
+        </div>
+      )}
+      </>
+      )}
 
       {/* Modals */}
       <PaletteManagerModal
@@ -946,8 +1225,7 @@ export default function App() {
         palette={activePalette}
         onApplyReducedGrid={(newGrid) => {
           invalidateImageRequest();
-          setGrid(newGrid);
-          pushHistory(newGrid);
+          applyGridChange(newGrid, false);
           setSettings(s => ({
             ...s,
             width: newGrid[0]?.length || s.width,
@@ -964,10 +1242,30 @@ export default function App() {
         onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
       />
 
+      <UserProfileModal
+        isOpen={isUserProfileModalOpen}
+        onClose={() => setIsUserProfileModalOpen(false)}
+        onOpenAccountManagement={() => setIsAccountManagementModalOpen(true)}
+        onOpenVipModal={() => setIsVipModalOpen(true)}
+        onSelectPattern={handleRemixPattern}
+        onContinueEditing={handleRestorePattern}
+      />
+
+      <AccountManagementModal
+        isOpen={isAccountManagementModalOpen}
+        onClose={() => setIsAccountManagementModalOpen(false)}
+        onOpenVipModal={() => setIsVipModalOpen(true)}
+      />
+
       <UserPatternsModal
         isOpen={isUserPatternsModalOpen}
         onClose={() => setIsUserPatternsModalOpen(false)}
         onContinueEditing={handleRestorePattern}
+        onOpenCommunity={() => {
+          setIsUserPatternsModalOpen(false);
+          setCurrentTab('community');
+        }}
+        onOpenAuthModal={() => setIsAuthModalOpen(true)}
       />
 
       <VipPrivilegesModal
@@ -989,8 +1287,7 @@ export default function App() {
             if (updatedImg) {
               setSourceImage(updatedImg);
             }
-            setGrid(newGrid);
-            pushHistory(newGrid);
+            applyGridChange(newGrid, false);
           }}
         />
       )}

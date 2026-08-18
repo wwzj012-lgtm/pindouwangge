@@ -138,27 +138,27 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   };
 
   return (
-    <div className="w-80 max-w-[85vw] bg-slate-900 border-l border-slate-800 text-slate-200 p-4 flex flex-col h-full overflow-hidden text-xs select-none shrink-0">
+    <div className="w-80 max-w-[85vw] bg-white/90 backdrop-blur-md border-l border-purple-200/90 text-purple-950 p-4 flex flex-col h-full overflow-hidden text-xs select-none shrink-0 shadow-sm">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-        <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-          <BarChart3 className="w-4 h-4" />
+      <div className="flex items-center justify-between border-b border-purple-200/80 pb-3">
+        <div className="flex items-center gap-2 text-purple-900 font-extrabold text-sm">
+          <BarChart3 className="w-4 h-4 text-purple-600" />
           <span>{isEn ? 'Bead Usage Stats & Palette' : '豆数用量统计与色卡清单'}</span>
         </div>
 
         <div className="flex items-center gap-1.5">
           <button
             onClick={handleCopyList}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors"
+            className="bg-purple-50 hover:bg-purple-100 text-purple-900 px-2 py-1 rounded-xl border border-purple-200 flex items-center gap-1 cursor-pointer transition-colors font-bold text-[11px]"
             title={isEn ? 'Copy list' : '复制用量清单'}
           >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-purple-600" />}
             <span>{copied ? (isEn ? 'Copied' : '已复制') : (isEn ? 'Copy List' : '复制用量')}</span>
           </button>
           {onCloseMobile && (
             <button
               onClick={onCloseMobile}
-              className="lg:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 cursor-pointer"
+              className="lg:hidden p-1 text-purple-500 hover:text-purple-900 rounded-lg hover:bg-purple-100 cursor-pointer"
               title={isEn ? 'Close' : '关闭'}
             >
               <X className="w-5 h-5" />
@@ -169,39 +169,39 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
       {/* Overview Cards */}
       <div className="grid grid-cols-3 gap-2 my-3">
-        <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">{isEn ? 'Total Beads' : '总用豆数'}</div>
-          <div className="text-sm font-bold text-emerald-400 font-mono mt-0.5">{totalBeads}</div>
+        <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
+          <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Total Beads' : '总用豆数'}</div>
+          <div className="text-sm font-black text-purple-900 font-mono mt-0.5">{totalBeads}</div>
         </div>
-        <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">{isEn ? 'Colors Used' : '使用色数'}</div>
-          <div className="text-sm font-bold text-rose-400 font-mono mt-0.5">{stats.length}</div>
+        <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
+          <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Colors Used' : '使用色数'}</div>
+          <div className="text-sm font-black text-purple-900 font-mono mt-0.5">{stats.length}</div>
         </div>
-        <div className="bg-slate-800/80 p-2.5 rounded-xl border border-slate-700/80 text-center">
-          <div className="text-[10px] text-slate-400">{isEn ? 'Boards Needed' : '需拼豆板'}</div>
-          <div className="text-sm font-bold text-sky-400 font-mono mt-0.5">{totalBoards} {isEn ? 'boards' : '板'}</div>
+        <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
+          <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Boards Needed' : '需拼豆板'}</div>
+          <div className="text-sm font-black text-indigo-700 font-mono mt-0.5">{totalBoards} {isEn ? 'boards' : '板'}</div>
         </div>
       </div>
 
       {/* Search Input */}
       <div className="relative mb-3">
-        <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-2.5" />
+        <Search className="w-3.5 h-3.5 text-purple-400 absolute left-3 top-2.5" />
         <input
           type="text"
           value={search}
           onChange={e => setSearch(e.target.value)}
           placeholder={isEn ? 'Search color code / name...' : '搜索色号(如 M01 / 纯白)...'}
-          className="w-full bg-slate-800/80 border border-slate-700/80 rounded-lg pl-8 pr-3 py-1.5 text-slate-200 text-xs outline-none focus:border-emerald-500"
+          className="w-full bg-purple-50/80 border border-purple-200/90 rounded-xl pl-8 pr-3 py-1.5 text-purple-950 text-xs outline-none focus:ring-2 focus:ring-purple-400/30 placeholder-purple-400 font-medium"
         />
       </div>
 
       {/* Highlight Active Indicator */}
       {highlightColorId && (
-        <div className="bg-rose-950/80 border border-rose-600/80 text-rose-200 p-2 rounded-lg mb-2 flex items-center justify-between">
-          <span className="text-[11px] font-medium">{isEn ? 'Highlighting color on canvas' : '当前正点亮网格中的特定颜色'}</span>
+        <div className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-2xl mb-2 flex items-center justify-between">
+          <span className="text-[11px] font-bold">{isEn ? 'Highlighting color on canvas' : '当前正点亮网格中的特定颜色'}</span>
           <button
             onClick={() => onSetHighlightColorId(null)}
-            className="text-xs text-rose-300 underline font-bold cursor-pointer"
+            className="text-xs text-amber-700 underline font-extrabold cursor-pointer hover:text-amber-900"
           >
             {isEn ? 'Unhighlight' : '取消点亮'}
           </button>
@@ -216,16 +216,16 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           return (
             <div
               key={s.color.id}
-              className={`p-2 rounded-xl border transition-all flex items-center gap-2.5 ${
+              className={`p-2 rounded-2xl border transition-all flex items-center gap-2.5 ${
                 isHighlighted
-                  ? 'bg-rose-950/70 border-rose-500 text-white shadow-md'
-                  : 'bg-slate-800/60 border-slate-700/60 text-slate-300 hover:bg-slate-800'
+                  ? 'bg-purple-600 border-purple-600 text-white shadow-md'
+                  : 'bg-purple-50/60 border-purple-200/70 text-purple-950 hover:bg-purple-100/80'
               }`}
             >
               {/* Color Swatch & Symbol */}
               <button
                 onClick={() => onSelectColor(s.color)}
-                className="w-7 h-7 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer"
+                className="w-7 h-7 rounded-lg border border-black/20 shadow-inner flex items-center justify-center font-extrabold text-xs shrink-0 cursor-pointer"
                 style={{ backgroundColor: s.color.hex }}
                 title={isEn ? 'Set as active paint color' : '设为画笔涂色'}
               >
@@ -237,14 +237,14 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
               {/* Code & Name */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <span className="font-mono font-bold text-slate-100 text-xs">{s.color.code}</span>
-                  <span className="text-[10px] text-slate-400 truncate">{s.color.name}</span>
+                  <span className={`font-mono font-black text-xs ${isHighlighted ? 'text-white' : 'text-purple-950'}`}>{s.color.code}</span>
+                  <span className={`text-[10px] truncate ${isHighlighted ? 'text-purple-100' : 'text-purple-600'}`}>{s.color.name}</span>
                 </div>
 
                 {/* Progress bar */}
-                <div className="w-full bg-slate-700 h-1.5 rounded-full mt-1 overflow-hidden">
+                <div className="w-full bg-purple-200/80 h-1.5 rounded-full mt-1 overflow-hidden">
                   <div
-                    className="bg-emerald-500 h-full rounded-full"
+                    className="bg-purple-600 h-full rounded-full"
                     style={{ width: `${Math.min(100, Math.max(5, s.percentage))}%` }}
                   />
                 </div>
@@ -252,18 +252,18 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
               {/* Count & Percentage */}
               <div className="text-right shrink-0">
-                <div className="font-mono font-bold text-emerald-400 text-xs">{s.count} {isEn ? 'pcs' : '粒'}</div>
-                <div className="text-[10px] text-slate-500">{s.percentage.toFixed(1)}%</div>
+                <div className={`font-mono font-bold text-xs ${isHighlighted ? 'text-white' : 'text-purple-950'}`}>{s.count} {isEn ? 'pcs' : '粒'}</div>
+                <div className={`text-[10px] ${isHighlighted ? 'text-purple-200' : 'text-purple-500'}`}>{s.percentage.toFixed(1)}%</div>
               </div>
 
               {/* Actions: Highlight & Replace */}
               <div className="flex items-center gap-1 shrink-0">
                 <button
                   onClick={() => onSetHighlightColorId(isHighlighted ? null : s.color.id)}
-                  className={`p-1.5 rounded-md cursor-pointer transition-colors ${
+                  className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
                     isHighlighted
-                      ? 'bg-rose-600 text-white'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-700'
+                      ? 'bg-white text-purple-900'
+                      : 'text-purple-500 hover:text-purple-950 hover:bg-purple-200/80'
                   }`}
                   title={isEn ? 'Highlight this color' : '点亮/独占定位网格中的此颜色'}
                 >
@@ -272,7 +272,9 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
                 <button
                   onClick={() => onOpenReplaceModal(s.color)}
-                  className="p-1.5 rounded-md text-slate-400 hover:text-amber-300 hover:bg-slate-700 cursor-pointer transition-colors"
+                  className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                    isHighlighted ? 'text-purple-100 hover:text-white' : 'text-purple-500 hover:text-purple-950 hover:bg-purple-200/80'
+                  }`}
                   title={isEn ? 'Replace this color globally' : '全板替换此颜色'}
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
@@ -281,7 +283,9 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 {onEraseColor && (
                   <button
                     onClick={() => onEraseColor(s.color.id)}
-                    className="p-1.5 rounded-md text-slate-400 hover:text-rose-400 hover:bg-slate-700 cursor-pointer transition-colors"
+                    className={`p-1.5 rounded-lg cursor-pointer transition-colors ${
+                      isHighlighted ? 'text-purple-200 hover:text-rose-200' : 'text-purple-400 hover:text-rose-600 hover:bg-rose-50'
+                    }`}
                     title={isEn ? 'Erase this color from grid' : '擦除全板此颜色 (变为空白/无豆)'}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -293,29 +297,29 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         })}
 
         {filteredStats.length === 0 && filteredErasedStats.length === 0 && (
-          <div className="text-center py-8 text-slate-500">{isEn ? 'No matching color code found' : '未找到匹配的颜色号'}</div>
+          <div className="text-center py-8 text-purple-400 font-medium">{isEn ? 'No matching color code found' : '未找到匹配的颜色号'}</div>
         )}
 
         {/* Erased Colors Section (Displayed at the bottom with dimmed visual style) */}
         {filteredErasedStats.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-1.5">
-            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-1 mb-1">
-              <span className="flex items-center gap-1.5 text-slate-400">
-                <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+          <div className="mt-4 pt-3 border-t border-purple-200/80 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-purple-600 px-1 mb-1">
+              <span className="flex items-center gap-1.5">
+                <RotateCcw className="w-3.5 h-3.5 text-purple-500" />
                 {isEn ? `Erased Colors (${filteredErasedStats.length})` : `已擦除色卡 (${filteredErasedStats.length})`}
               </span>
-              <span className="text-[10px] text-slate-500 font-normal">{isEn ? 'Click restore' : '点击右侧恢复入板'}</span>
+              <span className="text-[10px] text-purple-400 font-normal">{isEn ? 'Click restore' : '点击右侧恢复入板'}</span>
             </div>
 
             {filteredErasedStats.map(s => (
               <div
                 key={s.color.id}
-                className="p-2 rounded-xl border border-dashed border-slate-800 bg-slate-900/50 text-slate-400 opacity-60 hover:opacity-100 transition-all flex items-center gap-2.5 group"
+                className="p-2 rounded-2xl border border-dashed border-purple-200 bg-purple-50/40 text-purple-600 opacity-70 hover:opacity-100 transition-all flex items-center gap-2.5 group"
               >
                 {/* Color Swatch */}
                 <button
                   onClick={() => onSelectColor(s.color)}
-                  className="w-7 h-7 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer opacity-70 group-hover:opacity-100 transition-all"
+                  className="w-7 h-7 rounded-lg border border-black/20 shadow-inner flex items-center justify-center font-bold text-xs shrink-0 cursor-pointer opacity-80 group-hover:opacity-100 transition-all"
                   style={{ backgroundColor: s.color.hex }}
                   title={isEn ? 'Set as active paint color' : '设为画笔涂色'}
                 >
@@ -326,11 +330,11 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
                 {/* Code & Name */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 line-through decoration-slate-600">
-                    <span className="font-mono font-bold text-slate-400 text-xs">{s.color.code}</span>
-                    <span className="text-[10px] text-slate-500 truncate">{s.color.name}</span>
+                  <div className="flex items-center gap-1.5 line-through decoration-purple-400">
+                    <span className="font-mono font-bold text-purple-800 text-xs">{s.color.code}</span>
+                    <span className="text-[10px] text-purple-500 truncate">{s.color.name}</span>
                   </div>
-                  <div className="text-[10px] text-slate-500 mt-0.5">
+                  <div className="text-[10px] text-purple-400 mt-0.5">
                     {isEn ? 'Erased' : '已擦除'} {s.count > 0 ? `(${s.count} ${isEn ? 'pcs' : '粒'})` : ''}
                   </div>
                 </div>
@@ -339,7 +343,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
                 {onRestoreColor && (
                   <button
                     onClick={() => onRestoreColor(s.color.id)}
-                    className="px-2.5 py-1 rounded-lg bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-600/70 text-emerald-300 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 shadow-sm"
+                    className="px-2.5 py-1 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-all shrink-0 shadow-xs"
                     title={isEn ? 'Restore this color back to grid' : '点击恢复此颜色到网格原本位置'}
                   >
                     <RotateCcw className="w-3.5 h-3.5" />

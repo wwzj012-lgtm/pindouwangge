@@ -1,4 +1,5 @@
 import type { BrandKey, BeadColor } from '../types';
+export type WorkStatus = 0 | 1 | 2;
 import { apiGet, apiGetBlob, apiPost } from './api';
 import {
   base64ToBytes,
@@ -40,6 +41,7 @@ export interface PatternRecordSummary {
   hasPreview?: boolean;
   hasLocalCopy: boolean;
   hasCloudCopy: boolean;
+  status?: WorkStatus;
 }
 
 interface LocalPatternRecord extends PatternRecordSummary {
@@ -66,6 +68,7 @@ interface CloudPatternSummary {
   thumbnailUrl: string | null;
   hasPreview?: boolean;
   previewRevision?: number | null;
+  status?: WorkStatus;
 }
 
 interface CloudManifestResponse {
@@ -362,6 +365,7 @@ export async function savePatternRecord(input: SavePatternInput): Promise<SavePa
     hasPreview: false,
     hasLocalCopy: true,
     hasCloudCopy: previous?.hasCloudCopy ?? false,
+    status: previous?.status ?? 0,
     project,
   };
 
@@ -382,6 +386,7 @@ export async function savePatternRecord(input: SavePatternInput): Promise<SavePa
       syncError: undefined,
       cloudRevision: cloud.revision,
       hasCloudCopy: true,
+      status: localRecord.status ?? 0,
     };
     await putLocal(synced);
     localRecord = await uploadPreviewIfPossible(synced);
@@ -413,6 +418,7 @@ export async function retryPatternCloudSync(id: string, userId: string | null): 
       syncState: 'synced',
       cloudRevision: cloud.revision,
       hasCloudCopy: true,
+      status: pending.status ?? 0,
     };
     await putLocal(synced);
     return toSummary(await uploadPreviewIfPossible(synced));
@@ -484,6 +490,7 @@ export async function getPatternProject(id: string, userId: string | null = null
     hasPreview: response.data.work.hasPreview ?? false,
     hasLocalCopy: true,
     hasCloudCopy: true,
+    status: response.data.work.status ?? 0,
     project,
   };
   await putLocal(cached);
@@ -520,6 +527,8 @@ export async function getPatternHistory(userId: string | null): Promise<PatternR
           previewRevision: remote.previewRevision ?? local?.previewRevision ?? null,
           hasLocalCopy: local?.hasLocalCopy ?? false,
           hasCloudCopy: true,
+          // Publication state is committed by the Worker and must win over a stale local cache.
+          status: remote.status ?? local?.status ?? 0,
         });
       }
     }
@@ -598,6 +607,14 @@ export function requiresExplicitCloudBinding(record: PatternRecordSummary, curre
     && currentUserId !== null
     && record.hasLocalCopy
     && !record.hasCloudCopy;
+}
+
+export async function markPatternPublished(id: string, userId: string): Promise<PatternRecordSummary | null> {
+  const local = await getLocal(id);
+  if (!local || local.userId !== userId) return local ? toSummary(local) : null;
+  const updated: LocalPatternRecord = { ...local, status: 1 };
+  await putLocal(updated);
+  return toSummary(updated);
 }
 
 export async function deleteLocalPatternCopy(id: string, userId: string | null): Promise<void> {

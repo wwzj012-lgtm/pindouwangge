@@ -1,9 +1,18 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
+import {
+  classifyGridRegions,
+  classifySourceRegions,
+  computeDitherAdaptationMap,
+  preprocessSourceImage,
+  suppressSmoothAreaClutterClusters,
+  type PreprocessQuantizationMode,
+  type RegionMasks,
+} from './pipelineAuxiliaries';
 
 export type Lab = [number, number, number];
 type Rgb = [number, number, number];
 
-export type ConversionPipeline = 'logo' | 'photo';
+export type ConversionPipeline = 'cartoon' | 'logo' | 'photo';
 export type BackgroundInferenceSource = 'auto' | 'manual';
 
 export interface ImageClassification {
@@ -46,6 +55,8 @@ export interface ConversionDiagnostics extends ImageClassification {
 
 export interface ConversionResult {
   grid: (string | null)[][];
+  /** UI compatibility only; the restored pipeline deliberately does not populate it. */
+  alignedSourcePixels?: Uint8ClampedArray;
   diagnostics: ConversionDiagnostics;
 }
 
@@ -220,16 +231,28 @@ function paletteDistance(target: Lab, candidate: PaletteEntry, algorithm: 'cie76
   return algorithm === 'cie76' ? deltaE76(target, candidate.lab) : deltaE2000(target, candidate.lab);
 }
 
+function compareRankedEntries(first: RankedPaletteEntry, second: RankedPaletteEntry, targetChroma: number): number {
+  if (targetChroma < 8 && Math.abs(first.distance - second.distance) <= 0.1) {
+    return first.entry.chroma - second.entry.chroma || first.order - second.order;
+  }
+  return first.distance - second.distance || first.order - second.order;
+}
+
 function rankPaletteMatches(target: Lab, palette: PaletteEntry[], algorithm: 'cie76' | 'ciede2000'): RankedPaletteEntry[] {
   const targetChroma = Math.hypot(target[1], target[2]);
-  return palette
-    .map((entry, order) => ({ entry, order, distance: paletteDistance(target, entry, algorithm) }))
-    .sort((first, second) => {
-      if (targetChroma < 8 && Math.abs(first.distance - second.distance) <= 0.1) {
-        return first.entry.chroma - second.entry.chroma || first.order - second.order;
-      }
-      return first.distance - second.distance || first.order - second.order;
-    });
+  let first: RankedPaletteEntry | null = null;
+  let second: RankedPaletteEntry | null = null;
+  for (let order = 0; order < palette.length; order += 1) {
+    const entry = palette[order];
+    const candidate = { entry, order, distance: paletteDistance(target, entry, algorithm) };
+    if (!first || compareRankedEntries(candidate, first, targetChroma) < 0) {
+      second = first;
+      first = candidate;
+    } else if (!second || compareRankedEntries(candidate, second, targetChroma) < 0) {
+      second = candidate;
+    }
+  }
+  return first ? (second ? [first, second] : [first]) : [];
 }
 
 function diagnosticForMatch(sourceLab: Lab, matchingLab: Lab, ranked: RankedPaletteEntry[]): ColorMatchDiagnostic {
@@ -550,12 +573,62 @@ function diagnosticForReplacement(
   };
 }
 
+function hasEightNeighborComponent(
+  grid: (string | null)[][],
+  x: number,
+  y: number,
+  color: string,
+): boolean {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  for (let oy = -1; oy <= 1; oy += 1) {
+    for (let ox = -1; ox <= 1; ox += 1) {
+      if (ox === 0 && oy === 0) continue;
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx >= 0 && nx < width && ny >= 0 && ny < height && grid[ny][nx] === color) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function contentAwareSampleWeight(
+  alphaWeight: number,
+  x: number,
+  y: number,
+  startX: number,
+  endX: number,
+  startY: number,
+  endY: number,
+  r: number,
+  g: number,
+  b: number,
+  detail: number,
+  edgeMagnitude: number,
+): number {
+  const centerX = (startX + endX) / 2;
+  const centerY = (startY + endY) / 2;
+  const halfWidth = Math.max(0.5, (endX - startX) / 2);
+  const halfHeight = Math.max(0.5, (endY - startY) / 2);
+  const distance = Math.min(1, Math.hypot((x + 0.5 - centerX) / halfWidth, (y + 0.5 - centerY) / halfHeight) / Math.SQRT2);
+  const centerBoost = 1 + 0.1 * (1 - distance);
+  const saturation = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+  const saturationBoost = 1 + 0.06 * saturation;
+  const detailBoost = 1 + 0.6 * detail;
+  const edgeBoost = 1 + 0.15 * clampUnit(edgeMagnitude / 35);
+  return alphaWeight * Math.min(1.9, centerBoost * saturationBoost * detailBoost * edgeBoost);
+}
+
 function cleanLogoNoise(
   grid: (string | null)[][],
   sourceLabs: Array<Lab | null>,
   width: number,
   palette: PaletteEntry[],
   matches: (ColorMatchDiagnostic | null)[][],
+  regionMasks?: RegionMasks,
+  algorithm: 'cie76' | 'ciede2000' = 'cie76',
 ): void {
   const height = grid.length;
   const updates: Array<{ x: number; y: number; color: string }> = [];
@@ -563,8 +636,10 @@ function cleanLogoNoise(
     for (let x = 1; x + 1 < width; x += 1) {
       const current = grid[y][x];
       if (!current) continue;
+      if (regionMasks && regionMasks.regionType[y * width + x] !== 0) continue;
       const neighbors = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
       if (neighbors.includes(current) || neighbors.some((value) => !value)) continue;
+      if (hasEightNeighborComponent(grid, x, y, current)) continue;
       if (neighbors.every((value) => value === neighbors[0])) updates.push({ x, y, color: neighbors[0]! });
     }
   }
@@ -574,7 +649,7 @@ function cleanLogoNoise(
     const sourceLab = sourceLabs[update.y * width + update.x];
     const replacement = paletteById.get(update.color);
     if (sourceLab && replacement) {
-      matches[update.y][update.x] = diagnosticForReplacement(sourceLab, replacement, palette, 'cie76');
+      matches[update.y][update.x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
     }
   }
 }
@@ -585,6 +660,7 @@ function cleanPhotoNoise(
   width: number,
   palette: PaletteEntry[],
   matches: (ColorMatchDiagnostic | null)[][],
+  regionMasks?: RegionMasks,
 ): void {
   const height = grid.length;
   const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
@@ -594,6 +670,8 @@ function cleanPhotoNoise(
     for (let x = 1; x + 1 < width; x += 1) {
       const current = grid[y][x];
       if (!current) continue;
+      if (regionMasks && regionMasks.regionType[y * width + x] !== 0) continue;
+      if (hasEightNeighborComponent(grid, x, y, current)) continue;
       const neighbors = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
       const replacement = neighbors[0];
       if (!replacement || replacement === current || !neighbors.every((color) => color === replacement)) continue;
@@ -684,10 +762,32 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   if (activePalette.length === 0) return emptyResult();
 
   const alphaCutoff = normalizeAlphaCutoff(settings.transparentCutoff);
-
+  // Detect before preprocessing. Explicit cartoon, photo, and logo requests
+  // remain separate end-to-end; only auto falls back to the lightweight
+  // photo/logo classifier.
   const detected = classifyImageColors(data, sourceWidth, sourceHeight, alphaCutoff);
   const override = settings.pipelineOverride ?? 'auto';
-  const pipeline = override === 'auto' ? detected.pipeline : override;
+  const requestedPipeline = override === 'auto' ? detected.pipeline : override;
+  const pipeline: ConversionPipeline = requestedPipeline;
+  const quantizationMode: PreprocessQuantizationMode = settings.kmeansClustering === false
+    ? 'none'
+    : pipeline;
+
+  const preprocessed = preprocessSourceImage(
+    data,
+    sourceWidth,
+    sourceHeight,
+    alphaCutoff,
+    quantizationMode,
+    settings.quantizationStrength ?? 55,
+  );
+  const sourceRegions = classifySourceRegions(preprocessed.detailMask, sourceWidth, sourceHeight);
+  const sampleData = preprocessed.sampleData ?? preprocessed.denoised;
+  const sampleWidth = preprocessed.sampleWidth ?? sourceWidth;
+  const sampleHeight = preprocessed.sampleHeight ?? sourceHeight;
+  const sampleScaleX = sampleWidth / sourceWidth;
+  const sampleScaleY = sampleHeight / sourceHeight;
+
   const backgroundResult = settings.backgroundRemovalEnabled === true
     ? createEdgeConnectedBackgroundMask(
       data,
@@ -712,7 +812,8 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       let linearR = 0;
       let linearG = 0;
       let linearB = 0;
-      const dominant = new Map<string, { weight: number; rgb: Rgb }>();
+      let weightedValid = 0;
+      const dominant = new Map<number, { weight: number; rgb: Rgb; maxDetail: number }>();
       for (let y = Math.floor(startY); y < Math.min(sourceHeight, Math.ceil(endY)); y += 1) {
         const verticalWeight = Math.max(0, Math.min(y + 1, endY) - Math.max(y, startY));
         for (let x = Math.floor(startX); x < Math.min(sourceWidth, Math.ceil(endX)); x += 1) {
@@ -724,15 +825,35 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           if (backgroundResult.mask[sourceIndex] || data[offset + 3] < alphaCutoff) continue;
           const alphaWeight = weight * data[offset + 3] / 255;
           valid += alphaWeight;
-          const r = data[offset];
-          const g = data[offset + 1];
-          const b = data[offset + 2];
-          linearR += srgbToLinear(r) * alphaWeight;
-          linearG += srgbToLinear(g) * alphaWeight;
-          linearB += srgbToLinear(b) * alphaWeight;
-          const key = `${r >> 4}:${g >> 4}:${b >> 4}`;
-          const entry = dominant.get(key) ?? { weight: 0, rgb: [r, g, b] };
-          entry.weight += alphaWeight;
+          const sampleX = Math.min(sampleWidth - 1, Math.floor((x + 0.5) * sampleScaleX));
+          const sampleY = Math.min(sampleHeight - 1, Math.floor((y + 0.5) * sampleScaleY));
+          const sampleOffset = (sampleY * sampleWidth + sampleX) * 4;
+          const r = sampleData[sampleOffset];
+          const g = sampleData[sampleOffset + 1];
+          const b = sampleData[sampleOffset + 2];
+          const detail = sourceRegions.detailProtection[sourceIndex] ?? 0;
+          const contentWeight = contentAwareSampleWeight(
+            alphaWeight,
+            x,
+            y,
+            startX,
+            endX,
+            startY,
+            endY,
+            r,
+            g,
+            b,
+            detail,
+            sourceRegions.edgeMagnitude[sourceIndex] ?? 0,
+          );
+          weightedValid += contentWeight;
+          linearR += srgbToLinear(r) * contentWeight;
+          linearG += srgbToLinear(g) * contentWeight;
+          linearB += srgbToLinear(b) * contentWeight;
+          const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+          const entry = dominant.get(key) ?? { weight: 0, rgb: [r, g, b], maxDetail: 0 };
+          entry.weight += contentWeight;
+          entry.maxDetail = Math.max(entry.maxDetail, detail);
           dominant.set(key, entry);
         }
       }
@@ -740,9 +861,38 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
         targetPixels.push({ r: 0, g: 0, b: 0, alpha: 0 });
         continue;
       }
+      const dominantEntries = Array.from(dominant.values());
+      const eligibleDominant = dominantEntries.filter((entry) => (
+        entry.weight / Math.max(weightedValid, 0.00001) >= 0.08 || entry.maxDetail >= 0.65
+      ));
+      const dominantCandidates = eligibleDominant.length > 0 ? eligibleDominant : dominantEntries;
+      const logoEntry = dominantCandidates
+        .sort((first, second) => second.weight - first.weight)[0];
       const rgb: Rgb = pipeline === 'logo'
-        ? Array.from(dominant.values()).sort((first, second) => second.weight - first.weight)[0].rgb
-        : [linearToSrgb(linearR / valid), linearToSrgb(linearG / valid), linearToSrgb(linearB / valid)];
+        ? logoEntry?.rgb ?? [0, 0, 0]
+        : pipeline === 'cartoon'
+          ? (() => {
+            let cartoonWeight = 0;
+            let cartoonR = 0;
+            let cartoonG = 0;
+            let cartoonB = 0;
+            for (const entry of dominantCandidates) {
+              cartoonWeight += entry.weight;
+              cartoonR += srgbToLinear(entry.rgb[0]) * entry.weight;
+              cartoonG += srgbToLinear(entry.rgb[1]) * entry.weight;
+              cartoonB += srgbToLinear(entry.rgb[2]) * entry.weight;
+            }
+            return [
+              linearToSrgb(cartoonR / Math.max(cartoonWeight, 0.00001)),
+              linearToSrgb(cartoonG / Math.max(cartoonWeight, 0.00001)),
+              linearToSrgb(cartoonB / Math.max(cartoonWeight, 0.00001)),
+            ];
+          })()
+          : [
+          linearToSrgb(linearR / Math.max(weightedValid, 0.00001)),
+          linearToSrgb(linearG / Math.max(weightedValid, 0.00001)),
+          linearToSrgb(linearB / Math.max(weightedValid, 0.00001)),
+        ];
       const adjusted = adjustColor(rgb, settings);
       targetPixels.push({ r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 });
     }
@@ -755,6 +905,12 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const mappingPalette = selectedPalette.length > 0 ? selectedPalette : activePalette;
   // targetPixels remains immutable so diagnostics always represent the source grid sample.
   const sourceLabs = targetPixels.map((pixel) => pixel.alpha === 0 ? null : rgbToLab([pixel.r, pixel.g, pixel.b]));
+  const gridRegions = classifyGridRegions(sourceLabs, settings.width, settings.height);
+  const ditherAdaptation = computeDitherAdaptationMap(
+    sourceLabs,
+    mappingPalette.map((entry) => entry.lab),
+    gridRegions,
+  );
   const working = targetPixels.map((pixel) => ({ ...pixel }));
   const grid = Array.from({ length: settings.height }, () => Array<string | null>(settings.width).fill(null));
   const matches = Array.from({ length: settings.height }, () => Array<ColorMatchDiagnostic | null>(settings.width).fill(null));
@@ -783,7 +939,9 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
         if (neighbor.alpha === 0) return;
         const lumaDifference = Math.abs((pixel.r + pixel.g + pixel.b - neighbor.r - neighbor.g - neighbor.b) / 3);
         if (lumaDifference > 55) return;
-        const scaledWeight = weight * ditherStrength;
+        const receivingIndex = nextY * settings.width + nextX;
+        const scaledWeight = weight * ditherStrength * ditherAdaptation[index] * ditherAdaptation[receivingIndex];
+        if (scaledWeight <= 0) return;
         neighbor.r += Math.max(-48, Math.min(48, error[0])) * scaledWeight;
         neighbor.g += Math.max(-48, Math.min(48, error[1])) * scaledWeight;
         neighbor.b += Math.max(-48, Math.min(48, error[2])) * scaledWeight;
@@ -794,8 +952,28 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       diffuse(x + direction, y + 1, 1 / 16);
     }
   }
-  if (pipeline === 'logo') cleanLogoNoise(grid, sourceLabs, settings.width, mappingPalette, matches);
-  else if (useFloydSteinberg) cleanPhotoNoise(grid, sourceLabs, settings.width, mappingPalette, matches);
+  if (pipeline === 'logo' || pipeline === 'cartoon') {
+    cleanLogoNoise(grid, sourceLabs, settings.width, mappingPalette, matches, gridRegions, matchAlgorithm);
+  }
+  else if (useFloydSteinberg) cleanPhotoNoise(grid, sourceLabs, settings.width, mappingPalette, matches, gridRegions);
+
+  const paletteMap = new Map(mappingPalette.map((entry) => [entry.color.id, { lab: entry.lab, color: entry.color }]));
+  if (pipeline === 'logo' || pipeline === 'cartoon' || useFloydSteinberg) {
+    suppressSmoothAreaClutterClusters(
+      grid,
+      gridRegions,
+      sourceLabs,
+      paletteMap,
+      settings.width,
+      settings.height,
+      (x, y, replacementId) => {
+        const sourceLab = sourceLabs[y * settings.width + x];
+        const replacement = mappingPalette.find((entry) => entry.color.id === replacementId);
+        if (!sourceLab || !replacement) return;
+        matches[y][x] = diagnosticForReplacement(sourceLab, replacement, mappingPalette, matchAlgorithm);
+      },
+    );
+  }
   const summary = summarizeMatches(matches, mappingPalette);
   return {
     grid,

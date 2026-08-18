@@ -5,6 +5,7 @@ import {
   getPatternHistory,
   getPatternPreview,
   getPatternProject as getPatternProjectFromStore,
+  markPatternPublished as markPatternPublishedInStore,
   normalizePatternTitle,
   patternDeletionActions,
   renamePatternRecord,
@@ -56,6 +57,10 @@ export async function getPatternProject(id: string, userId: string | null): Prom
 
 export async function retryPatternCloudSync(id: string, userId: string | null): Promise<ExportedPatternRecord> {
   return retryPatternCloudSyncFromStore(id, userId);
+}
+
+export function markExportedPatternPublished(id: string, userId: string): Promise<ExportedPatternRecord | null> {
+  return markPatternPublishedInStore(id, userId);
 }
 
 export function getExportedPatternPreview(id: string, revision: number, userId: string | null): Promise<Blob | null> {

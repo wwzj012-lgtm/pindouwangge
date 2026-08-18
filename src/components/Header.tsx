@@ -15,11 +15,16 @@ import {
   X,
   Globe,
   Loader2,
+  Cpu,
+  Palette,
+  LayoutGrid,
+  Search,
 } from 'lucide-react';
 import { BRAND_NAMES } from '../data/palettes';
 import { SAMPLE_IMAGES } from '../data/samples';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
+import { consumeSelectedImageFile } from '../utils/imageFileSelection';
 
 interface HeaderProps {
   projectName: string;
@@ -32,10 +37,67 @@ interface HeaderProps {
   onOpenGuideModal: () => void;
   onOpenSmartReduceModal?: () => void;
   onOpenPatternsModal?: () => void;
+  onOpenPaletteModal?: () => void;
   onOpenAuthModal?: () => void;
+  onOpenUserProfileModal?: () => void;
   onOpenVipModal?: () => void;
   onClearCanvas: () => void;
+  currentTab?: 'home' | 'community' | 'studio' | 'largeCanvas';
+  setCurrentTab?: (tab: 'home' | 'community' | 'studio' | 'largeCanvas') => void;
+  onImportPattern?: () => void;
 }
+
+interface HeaderAccountTriggerProps {
+  isAuthenticated: boolean;
+  displayName: string | null;
+  photoURL: string | null;
+  onOpenAuthModal?: () => void;
+  onOpenUserProfileModal?: () => void;
+  loginLabel: string;
+}
+
+export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
+  isAuthenticated,
+  displayName,
+  photoURL,
+  onOpenAuthModal,
+  onOpenUserProfileModal,
+  loginLabel,
+}) => {
+  if (!isAuthenticated) {
+    return (
+      <button
+        onClick={onOpenAuthModal}
+        className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100/90 hover:bg-purple-200 text-purple-950 text-xs font-bold border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:scale-102 active:scale-95"
+        title={loginLabel}
+      >
+        <User className="w-4 h-4 shrink-0" />
+        <span>{loginLabel}</span>
+      </button>
+    );
+  }
+
+  const accountName = displayName?.trim() || '账户';
+  return (
+    <button
+      onClick={() => {
+        if (onOpenUserProfileModal) onOpenUserProfileModal();
+        else onOpenAuthModal?.();
+      }}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100/90 hover:bg-purple-200 text-purple-950 text-xs font-bold border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:scale-102 active:scale-95"
+      title="点击进入个人中心"
+    >
+      {photoURL ? (
+        <img src={photoURL} alt="Avatar" className="w-5 h-5 rounded-full object-cover border border-purple-300 shrink-0" />
+      ) : (
+        <div className="w-5 h-5 rounded-full bg-purple-600 text-white font-black text-[10px] flex items-center justify-center shrink-0">
+          {accountName[0]}
+        </div>
+      )}
+      <span className="truncate max-w-[95px] font-extrabold">{accountName}</span>
+    </button>
+  );
+};
 
 export const Header: React.FC<HeaderProps> = ({
   projectName,
@@ -48,21 +110,26 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenGuideModal,
   onOpenSmartReduceModal,
   onOpenPatternsModal,
+  onOpenPaletteModal,
   onOpenAuthModal,
+  onOpenUserProfileModal,
   onOpenVipModal,
   onClearCanvas,
+  currentTab = 'home',
+  setCurrentTab,
+  onImportPattern,
 }) => {
   const { currentUser, userProfile, loading: authLoading, isVip, isPro } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const isEn = language === 'en';
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [headerSearchQuery, setHeaderSearchQuery] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      onImageUpload(e.target.files[0]);
-    }
+    const file = consumeSelectedImageFile(e.target);
+    if (file) onImageUpload(file);
   };
 
   const handleJsonChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -79,112 +146,170 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-white px-3 py-2 md:px-4 md:py-2.5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-2 shadow-md sticky top-0 z-30">
-      {/* Top Row / Main Header Row */}
-      <div className="flex items-center justify-between gap-2">
-        {/* Brand & Logo */}
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl overflow-hidden bg-purple-950/60 border border-purple-500/40 flex items-center justify-center shadow-md shadow-purple-500/20 shrink-0">
+    <header className="bg-white/95 backdrop-blur-md border-b border-purple-200/80 text-purple-950 px-4 py-2.5 md:px-8 md:py-3 shadow-2xs sticky top-0 z-30 transition-all select-none">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleFileChange}
+      />
+      <div className="w-full flex items-center justify-between gap-3 md:gap-6">
+        
+        {/* Left: Logo & Brand Name */}
+        <div className="flex items-center gap-4 shrink-0">
+          <div
+            onClick={() => setCurrentTab?.('home')}
+            className="flex items-center gap-2.5 cursor-pointer group"
+          >
             <img
               src="/douzhixingge_logo.svg"
-              alt="豆织星格图标"
-              className="w-full h-full object-cover"
+              alt="豆织星格"
+              className="w-9 h-9 object-contain shrink-0 group-hover:scale-105 transition-transform"
             />
+            <div className="flex flex-col">
+              <span className="text-lg md:text-xl font-black text-purple-950 tracking-tight flex items-center gap-1 leading-none">
+                豆织<span className="text-purple-600">星格</span>
+              </span>
+              <span className="text-[10px] font-bold text-purple-400 tracking-wider">BEADGRID STUDIO</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="text-base md:text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-rose-200 to-amber-200 tracking-wide select-none whitespace-nowrap">
-              {t('appName')}
-            </span>
-            {onOpenVipModal && (
-              <button
-                onClick={onOpenVipModal}
-                className={`border text-[9px] font-black px-1.5 py-0.5 rounded transition-colors ${
-                  isPro
-                    ? 'bg-amber-500/15 text-amber-300 border-amber-500/50'
-                    : isVip
-                    ? 'bg-purple-500/15 text-purple-300 border-purple-500/50'
-                    : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200'
-                }`}
-                title={isEn ? 'View membership benefits' : '查看当前会员权益'}
-              >
-                {isPro ? (isEn ? 'MERCHANT · 40%' : '商家VIP · 40%省豆') : isVip ? (isEn ? 'VIP · 15/25%' : 'VIP · 15/25%省豆') : (isEn ? 'FREE' : '免费版')}
-              </button>
-            )}
-          </div>
+
+          {/* Main Navigation Tabs */}
+          <nav className="hidden md:flex items-center gap-1.5 ml-3">
+            <button
+              onClick={() => setCurrentTab?.('home')}
+              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+                currentTab === 'home'
+                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
+                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
+              }`}
+            >
+              首页
+              {currentTab === 'home' && (
+                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setCurrentTab?.('community')}
+              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+                currentTab === 'community'
+                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
+                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
+              }`}
+            >
+              豆社
+              {currentTab === 'community' && (
+                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setCurrentTab?.('studio')}
+              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+                currentTab === 'studio'
+                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
+                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
+              }`}
+            >
+              画板
+              {currentTab === 'studio' && (
+                <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setCurrentTab?.('largeCanvas')}
+              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+                currentTab === 'largeCanvas'
+                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
+                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
+              }`}
+            >
+              大画板
+              {currentTab === 'largeCanvas' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
+            </button>
+          </nav>
         </div>
 
-        {/* Right Corner Controls for Mobile & All Devices */}
-        <div className="flex items-center gap-1.5">
+        {/* Right Corner: Search bar, Guide, VIP, User badge & Actions */}
+        <div className="flex items-center gap-3">
+          {/* Header Search Input Bar */}
+          <div className="hidden lg:flex items-center relative w-48 xl:w-56">
+            <input
+              type="text"
+              value={headerSearchQuery}
+              onChange={e => setHeaderSearchQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  setCurrentTab?.('community');
+                }
+              }}
+              placeholder="搜索作品、图纸、豆色..."
+              className="w-full pl-8 pr-3 py-1.5 rounded-full bg-purple-50/80 border border-purple-200/80 text-purple-950 placeholder-purple-400 font-medium text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
+            />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 text-purple-500 pointer-events-none" />
+          </div>
+
+          {onOpenSmartReduceModal && (
+            <button
+              onClick={onOpenSmartReduceModal}
+              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors cursor-pointer"
+              title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
+            >
+              <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+              <span>{isEn ? 'Save Beads' : '智能省豆'}</span>
+            </button>
+          )}
+
+          {/* Guide Modal Trigger */}
           <button
             onClick={onOpenGuideModal}
-            className="hidden md:flex p-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:text-white"
-            title={isEn ? 'Guide' : '使用指南'}
+            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-purple-800 hover:bg-purple-100/60 transition-all cursor-pointer"
+            title="拼豆新手指导与功能说明"
           >
-            <BookOpen className="w-3.5 h-3.5" />
+            <BookOpen className="w-3.5 h-3.5 text-purple-600" />
+            <span>使用指南</span>
           </button>
+
+          {/* VIP Perks */}
+          {onOpenVipModal && (
+            <button
+              onClick={onOpenVipModal}
+              className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer"
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
+              <span>会员</span>
+            </button>
+          )}
+
           {/* Language Toggle Button */}
           <button
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
-            className="text-xs font-bold px-2 py-1.5 sm:px-2.5 sm:py-2 rounded-xl flex items-center gap-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-all cursor-pointer shrink-0 active:scale-95"
+            className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80 transition-all cursor-pointer shrink-0"
             title={language === 'zh' ? 'Switch to English' : '切换为中文'}
           >
-            <Globe className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <Globe className="w-3.5 h-3.5 text-purple-600 shrink-0" />
             <span>{language === 'zh' ? 'EN' : '中文'}</span>
           </button>
 
-          {/* User Account & VIP Button */}
-          {onOpenAuthModal && (
-            <button
-              onClick={onOpenAuthModal}
-              className={`text-xs font-bold px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 border ${
-                isPro
-                  ? 'bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-amber-300 border-amber-500/60 hover:brightness-125 shadow-md shadow-amber-500/20'
-                  : isVip
-                  ? 'bg-gradient-to-r from-amber-500/20 via-amber-600/30 to-amber-500/20 text-amber-300 border-amber-500/50 hover:brightness-125 shadow-md shadow-amber-500/10'
-                  : currentUser
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                  : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black border-amber-400 hover:brightness-110 shadow'
-              }`}
-              title={currentUser ? '个人账号与会员中心' : '登录账号解锁 VIP / 商家Pro 权限'}
-            >
-              {authLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                  <span className="text-[11px] font-bold text-slate-300">{isEn ? 'Syncing...' : '账号同步中'}</span>
-                </>
-              ) : isPro ? (
-                <>
-                  <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-amber-400" />
-                  <Store className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-                  <span className="hidden sm:inline font-black">{t('proMember')}</span>
-                  <span className="sm:hidden text-[10px] font-black">{t('proTag')}</span>
-                </>
-              ) : isVip ? (
-                <>
-                  <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0 fill-current" />
-                  <span className="hidden sm:inline">{t('vipMember')}</span>
-                  <span className="sm:hidden text-[10px]">{t('vipMember')}</span>
-                </>
-              ) : currentUser ? (
-                <>
-                  <User className="w-3.5 h-3.5 text-slate-300 shrink-0" />
-                  <span className="truncate max-w-[80px] sm:max-w-none">
-                    {userProfile?.displayName || t('personalCenter')}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Crown className="w-3.5 h-3.5 shrink-0 fill-current" />
-                  <span>{t('loginActivate')}</span>
-                </>
-              )}
-            </button>
-          )}
+          {/* Account entry */}
+          <div className="flex items-center gap-2">
+            <HeaderAccountTrigger
+              isAuthenticated={Boolean(currentUser)}
+              displayName={userProfile?.displayName ?? currentUser?.displayName ?? null}
+              photoURL={userProfile?.photoURL ?? currentUser?.photoURL ?? null}
+              onOpenAuthModal={onOpenAuthModal}
+              onOpenUserProfileModal={onOpenUserProfileModal}
+              loginLabel={isEn ? 'Log in' : '登录'}
+            />
+          </div>
 
           {/* Mobile Hamburger Toggle Button */}
           <button
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center active:scale-95"
+            className="md:hidden p-2 bg-purple-100 hover:bg-purple-200 text-purple-900 rounded-xl border border-purple-200 cursor-pointer min-h-[36px] min-w-[36px] flex items-center justify-center active:scale-95"
             aria-label="打开导航菜单"
           >
             {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -192,148 +317,156 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Action Buttons Row for Tablet & Desktop (>= md) */}
-      <div className="hidden md:flex items-center justify-end gap-1.5 overflow-x-auto scrollbar-none">
-        {/* Exported Pattern History Records Button */}
-        {onOpenPatternsModal && (
-          <button
-            onClick={onOpenPatternsModal}
-            className="bg-slate-800 hover:bg-slate-700 text-purple-300 text-xs font-bold px-2.5 py-1.5 rounded-lg border border-purple-500/30 flex items-center gap-1 transition-all cursor-pointer shadow-sm shrink-0 whitespace-nowrap active:scale-95"
-            title={language === 'zh' ? '查看可继续编辑的拼豆图纸记录' : 'View editable pattern history'}
-          >
-            <ImageIcon className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-            <span>{language === 'zh' ? '图纸记录' : 'History'}</span>
-          </button>
-        )}
-
-        {/* Upload Image Button */}
-        <input
-          type="file"
-          ref={fileInputRef}
-          onChange={handleFileChange}
-          accept="image/*"
-          className="hidden"
-        />
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-md shadow-rose-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-        >
-          <Upload className="w-3.5 h-3.5 shrink-0" />
-          <span>{t('uploadImage')}</span>
-        </button>
-
-        {/* Smart Bead Reducer Studio Button */}
-        {onOpenSmartReduceModal && (
-          <button
-            onClick={onOpenSmartReduceModal}
-            className="bg-gradient-to-r from-sky-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white text-xs font-bold px-2.5 py-1.5 rounded-lg shadow-md shadow-sky-500/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95 ring-1 ring-sky-400/40"
-            title={isEn ? 'Feature-preserving bead saving: VIP 15/25%, Merchant VIP 40%' : '特征保真省豆：VIP 15%/25%，商家VIP 40%'}
-          >
-            <Zap className="w-3.5 h-3.5 shrink-0 fill-current text-amber-300 animate-pulse" />
-            <span>{t('smartReduce')}</span>
-          </button>
-        )}
-
-
-
-        {/* High-Res Tutorial Export */}
-        <button
-          onClick={onOpenExportModal}
-          className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-md shadow-emerald-600/20 flex items-center gap-1 transition-all cursor-pointer shrink-0 whitespace-nowrap active:scale-95"
-        >
-          <Download className="w-3.5 h-3.5 shrink-0" />
-          <span>{t('exportPattern')}</span>
-        </button>
-
-        {/* Clear */}
-        <button
-          onClick={onClearCanvas}
-          className="bg-slate-800/80 hover:bg-rose-950/60 text-slate-400 hover:text-rose-400 p-2 rounded-lg border border-slate-700/80 transition-colors cursor-pointer shrink-0"
-          title={t('clearCanvas')}
-        >
-          <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-        </button>
-      </div>
-
-      {/* Mobile Drawer Navigation overlay (< md) */}
+      {/* Mobile Drawer Navigation overlay (< lg) */}
       {isMobileMenuOpen && (
-        <div className="md:hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex flex-col p-4 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-purple-950 border border-purple-500/40 flex items-center justify-center">
-                <img src="/douzhixingge_logo.svg" alt="logo" className="w-full h-full" />
+        <div className="lg:hidden fixed inset-0 z-50 bg-purple-950/40 backdrop-blur-md flex flex-col p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl p-5 border border-purple-200 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-purple-100">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-purple-100 border border-purple-300 flex items-center justify-center p-0.5">
+                  <img src="/douzhixingge_logo.svg" alt="logo" className="w-full h-full rounded-lg" />
+                </div>
+                <span className="font-black text-purple-950 text-base">{t('appName')} · 功能导航</span>
               </div>
-              <span className="font-black text-white text-base">{t('appName')} · {language === 'zh' ? '功能菜单' : 'Menu'}</span>
+              <button
+                onClick={() => setIsMobileMenuOpen(false)}
+                className="p-2 text-purple-600 hover:bg-purple-100 rounded-xl cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
             </div>
-            <button
-              onClick={() => setIsMobileMenuOpen(false)}
-              className="p-2 text-slate-400 hover:text-white rounded-xl bg-slate-800 cursor-pointer min-h-[48px] min-w-[48px] flex items-center justify-center"
-            >
-              <X className="w-6 h-6" />
-            </button>
-          </div>
 
-          <div className="flex-1 overflow-y-auto py-4 space-y-3">
-            {/* Upload Image */}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                fileInputRef.current?.click();
-              }}
-              className="w-full p-3.5 rounded-xl bg-rose-600 text-white font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px] active:scale-98"
-            >
-              <Upload className="w-5 h-5" />
-              <span>{t('uploadImage')}</span>
-            </button>
-
-            {/* Open & Save Project */}
+            {/* Quick Navigation Jump List */}
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
-                  jsonInputRef.current?.click();
+                  onOpenSmartReduceModal?.();
                 }}
-                className="p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
+                className="p-3 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 text-amber-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
               >
-                <FolderOpen className="w-4 h-4 text-blue-400" />
-                <span>{t('openProject')}</span>
+                <Zap className="w-4 h-4 text-amber-500 fill-amber-400 animate-pulse" />
+                <span>智能省豆</span>
               </button>
 
               <button
                 onClick={() => {
                   setIsMobileMenuOpen(false);
-                  onExportJson();
+                  onOpenPaletteModal?.();
                 }}
-                className="p-3.5 rounded-xl bg-slate-800 text-slate-200 border border-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer min-h-[48px]"
+                className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
               >
-                <FileJson className="w-4 h-4 text-emerald-400" />
-                <span>{t('saveProject')}</span>
+                <Palette className="w-4 h-4 text-purple-600" />
+                <span>品牌色板</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenPatternsModal?.();
+                }}
+                className="p-3 rounded-2xl bg-indigo-50 border border-indigo-200 text-indigo-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <ImageIcon className="w-4 h-4 text-indigo-600" />
+                <span>我的图纸</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  setCurrentTab?.('studio');
+                }}
+                className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <Palette className="w-4 h-4 text-purple-600" />
+                <span>主画板</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  setCurrentTab?.('largeCanvas');
+                }}
+                className="p-3 rounded-2xl bg-violet-50 border border-violet-200 text-violet-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <LayoutGrid className="w-4 h-4 text-violet-600" />
+                <span>大画板</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenVipModal?.();
+                }}
+                className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-900 font-bold text-xs flex items-center gap-2 cursor-pointer shadow-2xs"
+              >
+                <Crown className="w-4 h-4 text-amber-500" />
+                <span>会员特权</span>
               </button>
             </div>
 
-            {/* Design Guide */}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                onOpenGuideModal();
-              }}
-              className="w-full p-3.5 rounded-xl bg-purple-950/80 text-purple-200 border border-purple-700/60 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px]"
-            >
-              <BookOpen className="w-5 h-5 text-purple-300" />
-              <span>{t('guide')}</span>
-            </button>
+            <div className="space-y-2 pt-2 border-t border-purple-100">
+              {/* Upload Image */}
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  fileInputRef.current?.click();
+                }}
+                className="w-full p-3.5 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-98"
+              >
+                <Upload className="w-4 h-4" />
+                <span>{t('uploadImage')}</span>
+              </button>
 
-            {/* Clear Canvas */}
-            <button
-              onClick={() => {
-                setIsMobileMenuOpen(false);
-                onClearCanvas();
-              }}
-              className="w-full p-3.5 rounded-xl bg-slate-900 hover:bg-rose-950 text-slate-400 hover:text-rose-400 border border-slate-800 font-bold text-xs flex items-center gap-3 cursor-pointer min-h-[48px]"
-            >
-              <RotateCcw className="w-5 h-5" />
-              <span>{t('clearCanvas')}</span>
-            </button>
+              {/* Open & Save Project */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    jsonInputRef.current?.click();
+                  }}
+                  className="p-3 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FolderOpen className="w-4 h-4 text-purple-600" />
+                  <span>{t('openProject')}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    onExportJson();
+                  }}
+                  className="p-3 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <FileJson className="w-4 h-4 text-emerald-600" />
+                  <span>{t('saveProject')}</span>
+                </button>
+              </div>
+
+              {/* Design Guide */}
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onOpenGuideModal();
+                }}
+                className="w-full p-3 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <BookOpen className="w-4 h-4 text-purple-600" />
+                <span>{t('guide')}</span>
+              </button>
+
+              {/* Clear Canvas */}
+              <button
+                onClick={() => {
+                  setIsMobileMenuOpen(false);
+                  onClearCanvas();
+                }}
+                className="w-full p-3 rounded-2xl bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>{t('clearCanvas')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

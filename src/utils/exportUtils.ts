@@ -166,6 +166,22 @@ export function drawBeadOnCanvas(
     ctx.strokeStyle = '#00000033';
     ctx.lineWidth = Math.max(0.5, size * 0.03);
     ctx.stroke();
+  } else if (shape === 'ironed') {
+    // Fused beads fill more of each cell with softened joints and a subtle, shrunken center recess.
+    const inset = Math.max(0.2, size * 0.015);
+    const fusedSize = size - inset * 2;
+    ctx.beginPath();
+    ctx.roundRect(x + inset, y + inset, fusedSize, fusedSize, Math.max(1, size * 0.2));
+    ctx.fillStyle = colorHex;
+    ctx.fill();
+    ctx.strokeStyle = '#ffffff26';
+    ctx.lineWidth = Math.max(0.4, size * 0.018);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, Math.max(0.6, size * 0.075), 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff1f';
+    ctx.fill();
   } else {
     // 'fuse_3d' Realistic fuse bead with center peg hole
     const cx = x + size / 2;

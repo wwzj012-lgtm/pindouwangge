@@ -46,6 +46,9 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
 
   if (!isOpen) return null;
 
+  const resolvedBrand: BrandKey = BRAND_PALETTES[brand] ? brand : 'MARD';
+  const resolvedBrandPalette = BRAND_PALETTES[resolvedBrand] || BRAND_PALETTES.MARD;
+
   const handleToggleColor = (id: string) => {
     setActivePalette(
       activePalette.map(c => (c.id === id ? { ...c, enabled: c.enabled === false } : c))
@@ -57,7 +60,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
   };
 
   const handleResetToDefault = () => {
-    setActivePalette([...BRAND_PALETTES[brand]]);
+    setActivePalette([...resolvedBrandPalette]);
   };
 
   const handleDeleteCustomColor = (id: string) => {
@@ -74,7 +77,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
       name: newName.trim(),
       hex: newHex.toUpperCase(),
       rgb: hexToRgb(newHex),
-      brand,
+      brand: resolvedBrand,
       symbol: newCode.trim().slice(0, 2),
       enabled: true,
     };
@@ -101,7 +104,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="font-bold text-xs sm:text-base text-slate-100 truncate">
-                拼豆色卡管理 ({BRAND_NAMES[brand]})
+                拼豆色卡管理 ({BRAND_NAMES[resolvedBrand]})
               </h3>
               <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                 只使用自己拥有的颜色，转换时会自动匹配已选中的色卡！
@@ -339,4 +342,3 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
     </div>
   );
 };
-

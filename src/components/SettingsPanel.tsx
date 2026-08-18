@@ -17,7 +17,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { BrandKey, ConvertSettings, DitherMode } from '../types';
-import { BRAND_NAMES, BOARD_PRESETS, getBrandNames, getBoardPresetName } from '../data/palettes';
+import { BOARD_PRESETS, getBrandOptions } from '../data/palettes';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
 import { resetBackgroundRemovalForNewImage } from '../utils/imageStudioControls';
 
@@ -43,7 +43,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { isVip, isPro } = useAuth();
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const brandNames = getBrandNames(isEn);
+  const brandOptions = getBrandOptions(isEn);
   const clarityEnabled = settings.sharpening > 0 || settings.outlineBoost;
 
   // Tier max canvas limits
@@ -347,12 +347,22 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onChange={e => updateSetting('brand', e.target.value as BrandKey)}
             className="w-full bg-purple-50/80 border border-purple-200 rounded-xl px-2.5 py-1.5 text-purple-950 text-xs outline-none focus:ring-2 focus:ring-purple-400/30 cursor-pointer font-bold"
           >
-            {Object.entries(brandNames).map(([key, name]) => (
+            {brandOptions.map(({ key, name }) => (
               <option key={key} value={key}>
                 {name}
               </option>
             ))}
           </select>
+          {settings.brand === 'MARD_291' && (
+            <div className="mt-1.5 flex items-start gap-1.5 text-[10px] leading-relaxed text-amber-800">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+              <span>
+                {isEn
+                  ? 'P/Q/R/T/Y/ZG special materials use screen-reference colors only; pearl, fluorescent, and glow effects are not physically reproduced.'
+                  : 'P/Q/R/T/Y/ZG 为特殊材质，珠光、荧光、夜光仅按屏幕参考匹配，不能代表实物效果。'}
+              </span>
+            </div>
+          )}
         </div>
 
         <div className="space-y-1">

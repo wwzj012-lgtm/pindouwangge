@@ -1,6 +1,7 @@
 {
   "name": "beadgrid-frontend",
   "private": true,
+  "packageManager": "pnpm@11.19.0",
   "version": "1.0.0",
   "type": "module",
   "scripts": {

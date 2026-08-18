@@ -48,6 +48,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
 
   const resolvedBrand: BrandKey = BRAND_PALETTES[brand] ? brand : 'MARD';
   const resolvedBrandPalette = BRAND_PALETTES[resolvedBrand] || BRAND_PALETTES.MARD;
+  const hasScreenReferenceColors = activePalette.some(color => color.screenReferenceOnly);
 
   const handleToggleColor = (id: string) => {
     setActivePalette(
@@ -109,6 +110,11 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
               <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                 只使用自己拥有的颜色，转换时会自动匹配已选中的色卡！
               </p>
+              {hasScreenReferenceColors && (
+                <p className="mt-1 text-[10px] leading-relaxed text-amber-300">
+                  P/Q/R/T/Y/ZG 特殊材质仅作屏幕参考，珠光、荧光、夜光效果请以实物为准。
+                </p>
+              )}
             </div>
           </div>
           <button

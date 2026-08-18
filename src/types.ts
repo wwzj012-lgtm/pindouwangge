@@ -1,4 +1,12 @@
-export type BrandKey = 'MARD' | 'ARTKAL_S' | 'ARTKAL_MINI' | 'PERLER' | 'HAMA' | 'CUSTOM';
+export type BrandKey =
+  | 'MARD'
+  | 'MARD_291'
+  | 'COCO'
+  | 'ARTKAL_S'
+  | 'ARTKAL_MINI'
+  | 'PERLER'
+  | 'HAMA'
+  | 'CUSTOM';
 
 export interface BeadColor {
   id: string;
@@ -9,6 +17,8 @@ export interface BeadColor {
   brand: BrandKey;
   symbol?: string;    // Character symbol for pattern printing (e.g. "A", "1", "★")
   enabled?: boolean;  // Whether user includes this color in auto-conversion
+  /** Screen-only reference for materials whose physical effects cannot be represented by RGB. */
+  screenReferenceOnly?: boolean;
 }
 
 export type BeadShape = 'fuse_3d' | 'square' | 'circle_flat' | 'ironed';

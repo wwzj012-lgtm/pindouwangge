@@ -24,6 +24,7 @@ import {
   ChevronUp,
   ChevronDown,
   Save,
+  Download,
   Flame,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
@@ -62,6 +63,8 @@ interface ToolbarProps {
   setShowOverlay: (show: boolean) => void;
   onSavePattern: () => void;
   isSavingPattern: boolean;
+  onOpenExport: () => void;
+  canExport: boolean;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -95,6 +98,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   setShowOverlay,
   onSavePattern,
   isSavingPattern,
+  onOpenExport,
+  canExport,
 }) => {
   const { language, t } = useLanguage();
   const isEn = language === 'en';
@@ -313,6 +318,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         >
           <Save className={`w-3.5 h-3.5 ${isSavingPattern ? 'animate-pulse' : ''}`} />
           <span className="hidden md:inline">{isSavingPattern ? (isEn ? 'Saving' : '保存中') : (isEn ? 'Save' : '保存')}</span>
+        </button>
+        <button
+          onClick={onOpenExport}
+          disabled={!canExport}
+          className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-600 px-2 py-1.5 text-[11px] font-bold text-white shadow-2xs transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
+          title={canExport
+            ? (isEn ? 'Export pattern and materials list' : '导出图纸与用量清单')
+            : (isEn ? 'Add beads to the canvas before exporting' : '请先导入图片或在画布上绘制拼豆')}
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span className="hidden md:inline">{isEn ? 'Export' : '导出'}</span>
         </button>
 
         {/* Canvas Backdrop Selector */}

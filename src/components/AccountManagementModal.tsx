@@ -34,6 +34,47 @@ const PRESET_AVATARS = [
   { id: 'game', name: '极客星人', url: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80' },
 ];
 
+const MAX_AVATAR_SOURCE_BYTES = 8 * 1024 * 1024;
+const MAX_AVATAR_DATA_URL_LENGTH = 600_000;
+const AVATAR_EDGE = 256;
+
+function loadAvatarImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('无法读取头像图片'));
+    };
+    image.src = url;
+  });
+}
+
+async function compressAvatar(file: File): Promise<string> {
+  const image = await loadAvatarImage(file);
+  const scale = Math.min(1, AVATAR_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('当前浏览器无法处理头像图片');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(image, 0, 0, width, height);
+
+  for (const quality of [0.82, 0.68, 0.52]) {
+    const dataUrl = canvas.toDataURL('image/webp', quality);
+    if (dataUrl.length <= MAX_AVATAR_DATA_URL_LENGTH) return dataUrl;
+  }
+  throw new Error('头像压缩后仍然过大，请选择更简单的图片');
+}
+
 export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   isOpen,
   onClose,
@@ -71,21 +112,27 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
     setMsg({ text: '已预选头像，请点击下方的“保存修改”完成更新', isError: false });
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.currentTarget;
     const file = e.target.files?.[0];
     if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        setMsg({ text: '图片文件大小需在 2MB 以内', isError: true });
+      if (!file.type.startsWith('image/')) {
+        setMsg({ text: '请选择图片文件', isError: true });
         return;
       }
-      const reader = new FileReader();
-      reader.onload = evt => {
-        if (evt.target?.result) {
-          setPhotoURL(evt.target.result as string);
-          setMsg({ text: '自定义头像读取成功，点击保存以提交修改', isError: false });
-        }
-      };
-      reader.readAsDataURL(file);
+      if (file.size > MAX_AVATAR_SOURCE_BYTES) {
+        setMsg({ text: '原图需小于 8MB', isError: true });
+        return;
+      }
+      try {
+        const compressed = await compressAvatar(file);
+        setPhotoURL(compressed);
+        setMsg({ text: '头像已压缩，点击保存以提交修改', isError: false });
+      } catch (error) {
+        setMsg({ text: error instanceof Error ? error.message : '头像处理失败', isError: true });
+      } finally {
+        input.value = '';
+      }
     }
   };
 

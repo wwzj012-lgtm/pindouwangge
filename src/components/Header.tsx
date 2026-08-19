@@ -154,13 +154,6 @@ export const Header: React.FC<HeaderProps> = ({
         className="hidden"
         onChange={handleFileChange}
       />
-      <input
-        ref={jsonInputRef}
-        type="file"
-        accept=".json,application/json"
-        className="hidden"
-        onChange={handleJsonChange}
-      />
       <div className="flex w-full min-w-0 items-center justify-between gap-1.5 sm:gap-3 md:gap-6">
         
         {/* Left: Logo & Brand Name */}

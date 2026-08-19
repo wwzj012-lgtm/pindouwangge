@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { cancelLargeCanvasRaf } from '../components/LargeCanvasView';
 import {
   clampLargeCanvasFramePosition,
   getMovedLargeCanvasGridRectCandidate,
@@ -28,6 +29,17 @@ describe('large canvas modes', () => {
 
   it('keeps dragged frames inside the large board', () => {
     expect(clampLargeCanvasFramePosition({ x: -40, y: 1400 }, { width: 1880, height: 1120 }, { width: 292, height: 330 })).toEqual({ x: 16, y: 774 });
+  });
+});
+
+describe('large canvas RAF cleanup', () => {
+  it('does not dereference an empty transaction and only cancels real request ids', () => {
+    const cancelled: number[] = [];
+    expect(() => cancelLargeCanvasRaf(null, rafId => cancelled.push(rafId))).not.toThrow();
+    expect(() => cancelLargeCanvasRaf(undefined, rafId => cancelled.push(rafId))).not.toThrow();
+    cancelLargeCanvasRaf({ rafId: null }, rafId => cancelled.push(rafId));
+    cancelLargeCanvasRaf({ rafId: 42 }, rafId => cancelled.push(rafId));
+    expect(cancelled).toEqual([42]);
   });
 });
 

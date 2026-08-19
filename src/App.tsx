@@ -12,7 +12,7 @@ import {
   SymmetryMode,
   CanvasBackdrop,
 } from './types';
-import { BRAND_PALETTES } from './data/palettes';
+import { BRAND_NAMES, BRAND_PALETTES } from './data/palettes';
 import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
@@ -51,23 +51,34 @@ import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './ut
 import type { CommunityPattern } from './data/communityData';
 import { saveExportedPatternRecord, type EditablePatternProject } from './utils/patternHistory';
 
-function createLargeCanvasSourceDataUrl(image: HTMLImageElement): string {
-  const sourceWidth = image.naturalWidth || image.width || 1;
-  const sourceHeight = image.naturalHeight || image.height || 1;
-  const scale = Math.min(1, 100 / Math.max(sourceWidth, sourceHeight));
-  const width = Math.max(1, Math.round(sourceWidth * scale));
-  const height = Math.max(1, Math.round(sourceHeight * scale));
-  try {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) return image.src;
-    context.drawImage(image, 0, 0, width, height);
-    return canvas.toDataURL('image/png');
-  } catch {
-    return image.src;
-  }
+const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
+
+type LargeCanvasStudioRequest = {
+  id: number;
+  sourceImage: HTMLImageElement;
+  fileName: string;
+};
+
+function imageElementToFile(image: HTMLImageElement, fileName: string): Promise<File> {
+  return new Promise((resolve, reject) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = image.naturalWidth || image.width || 1;
+      canvas.height = image.naturalHeight || image.height || 1;
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('无法处理预览图片');
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(blob => {
+        if (!blob) {
+          reject(new Error('无法生成预处理图片'));
+          return;
+        }
+        resolve(new File([blob], fileName, { type: blob.type || 'image/png' }));
+      }, 'image/png');
+    } catch (error) {
+      reject(error instanceof Error ? error : new Error('无法处理预览图片'));
+    }
+  });
 }
 
 export default function App() {
@@ -121,6 +132,14 @@ export default function App() {
   // Source Image element reference
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
   const imageRequestGateRef = useRef(createImageRequestGate());
+  const [largeCanvasStudioRequest, setLargeCanvasStudioRequest] = useState<LargeCanvasStudioRequest | null>(null);
+  const [largeCanvasStudioSettings, setLargeCanvasStudioSettings] = useState<ConvertSettings>(() => ({ ...settings }));
+  const largeCanvasStudioRequestRef = useRef<{
+    id: number;
+    resolve: (file: File) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  const largeCanvasStudioRequestIdRef = useRef(0);
 
   const beginImageRequest = useCallback(() => {
     return imageRequestGateRef.current.begin();
@@ -181,6 +200,8 @@ export default function App() {
   const [showSymbols, setShowSymbols] = useState(true);
   const [showGridLines, setShowGridLines] = useState(true);
   const [showCoordinates, setShowCoordinates] = useState(true);
+  const [showLargeCodeLabels, setShowLargeCodeLabels] = useState(false);
+  const [showLargeDataPreview, setShowLargeDataPreview] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [zoom, setZoom] = useState(1.0);
 
@@ -213,6 +234,11 @@ export default function App() {
   const paletteMap = useMemo(() => {
     return new Map(activePalette.map(c => [c.id, c]));
   }, [activePalette]);
+
+  const largeCanvasPaletteOptions = useMemo(
+    () => (Object.keys(BRAND_PALETTES) as BrandKey[]).map(id => ({ id, label: BRAND_NAMES[id] ?? id })),
+    [],
+  );
 
   // Sync palette when brand changes
   useEffect(() => {
@@ -411,6 +437,64 @@ export default function App() {
     img.src = sampleUrl;
   };
 
+  const cancelLargeCanvasPreprocess = useCallback(() => {
+    const request = largeCanvasStudioRequestRef.current;
+    if (!request) return;
+    largeCanvasStudioRequestRef.current = null;
+    setLargeCanvasStudioRequest(null);
+    request.reject(new Error(LARGE_CANVAS_PREPROCESS_CANCELLED));
+  }, []);
+
+  const prepareLargeCanvasImage = useCallback((file: File): Promise<File> => {
+    const previous = largeCanvasStudioRequestRef.current;
+    if (previous) {
+      previous.reject(new Error(LARGE_CANVAS_PREPROCESS_CANCELLED));
+      setLargeCanvasStudioRequest(null);
+    }
+
+    const id = largeCanvasStudioRequestIdRef.current + 1;
+    largeCanvasStudioRequestIdRef.current = id;
+    return new Promise((resolve, reject) => {
+      largeCanvasStudioRequestRef.current = { id, resolve, reject };
+      const fail = (error: Error) => {
+        if (largeCanvasStudioRequestRef.current?.id !== id) return;
+        largeCanvasStudioRequestRef.current = null;
+        setLargeCanvasStudioRequest(null);
+        reject(error);
+      };
+      const reader = new FileReader();
+      reader.onerror = () => fail(new Error('无法读取图片'));
+      reader.onload = event => {
+        if (largeCanvasStudioRequestRef.current?.id !== id) return;
+        const imageUrl = typeof event.target?.result === 'string' ? event.target.result : null;
+        if (!imageUrl) {
+          fail(new Error('图片内容为空'));
+          return;
+        }
+        const image = new Image();
+        image.onload = () => {
+          if (largeCanvasStudioRequestRef.current?.id !== id) return;
+          setLargeCanvasStudioSettings({ ...settings, keepAspectRatio: false });
+          setLargeCanvasStudioRequest({ id, sourceImage: image, fileName: file.name || 'large-canvas-source.png' });
+        };
+        image.onerror = () => fail(new Error('图片加载失败'));
+        image.src = imageUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }, [settings]);
+
+  const applyLargeCanvasPreprocess = useCallback((_newGrid: (string | null)[][], updatedImage?: HTMLImageElement) => {
+    const request = largeCanvasStudioRequestRef.current;
+    const studioRequest = largeCanvasStudioRequest;
+    if (!request || !studioRequest || request.id !== studioRequest.id) return;
+    largeCanvasStudioRequestRef.current = null;
+    setLargeCanvasStudioRequest(null);
+    void imageElementToFile(updatedImage ?? studioRequest.sourceImage, studioRequest.fileName)
+      .then(request.resolve)
+      .catch(error => request.reject(error instanceof Error ? error : new Error('无法处理预览图片')));
+  }, [largeCanvasStudioRequest]);
+
   const handleConvertLargeCanvasImage = useCallback((file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -429,7 +513,8 @@ export default function App() {
             const modeSettings = getLargeCanvasModeSettings(mode);
             const frameSettings = { ...settings, ...modeSettings, width, height, keepAspectRatio: false };
             const result = imageToGridWithDiagnostics(img, frameSettings, activePalette);
-            resolve({ grid: result.grid, sourceImageDataUrl: createLargeCanvasSourceDataUrl(img) });
+            // This stays in the active frame only; LargeCanvasView deliberately omits it from localStorage.
+            resolve({ grid: result.grid, sourceImageDataUrl: imageUrl });
           } catch (error) {
             reject(error instanceof Error ? error : new Error('图片转换失败'));
           }
@@ -955,7 +1040,36 @@ export default function App() {
       {currentTab === 'largeCanvas' && (
         <LargeCanvasView
           paletteMap={paletteMap}
+          brandName={BRAND_NAMES[brand]}
+          paletteOptions={largeCanvasPaletteOptions}
+          selectedPaletteId={brand}
+          onChangePalette={paletteId => {
+            const nextBrand = paletteId as BrandKey;
+            if (!BRAND_PALETTES[nextBrand]) return;
+            setBrand(nextBrand);
+            setActivePalette(BRAND_PALETTES[nextBrand]);
+            setSettings(current => ({ ...current, brand: nextBrand }));
+          }}
+          beadShape={beadShape}
+          onChangeBeadShape={setBeadShape}
+          canvasBackdrop={canvasBackdrop}
+          onChangeCanvasBackdrop={setCanvasBackdrop}
+          showGridLines={showGridLines}
+          onChangeShowGridLines={setShowGridLines}
+          showCodeLabels={showLargeCodeLabels}
+          onChangeShowCodeLabels={setShowLargeCodeLabels}
+          showDataPreview={showLargeDataPreview}
+          onChangeShowDataPreview={setShowLargeDataPreview}
+          conversionSettings={{
+            quantizationStrength: settings.quantizationStrength,
+            sharpening: settings.sharpening,
+            backgroundRemovalEnabled: settings.backgroundRemovalEnabled,
+            dither: settings.dither,
+            colorMatchAlgo: settings.colorMatchAlgo,
+          }}
+          onChangeConversionSettings={updates => setSettings(current => ({ ...current, ...updates }))}
           onConvertImage={handleConvertLargeCanvasImage}
+          onPrepareImage={prepareLargeCanvasImage}
           onOpenFrame={handleOpenLargeCanvasFrame}
         />
       )}
@@ -993,6 +1107,8 @@ export default function App() {
         setShowOverlay={setShowOverlay}
         onSavePattern={() => void handleSaveCurrentPattern()}
         isSavingPattern={isSavingPattern}
+        onOpenExport={() => setIsExportModalOpen(true)}
+        canExport={grid.some(row => row.some(colorId => colorId !== null))}
       />
 
       {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
@@ -1289,6 +1405,18 @@ export default function App() {
             }
             applyGridChange(newGrid, false);
           }}
+        />
+      )}
+
+      {largeCanvasStudioRequest && (
+        <ImageStudioModal
+          isOpen
+          onClose={cancelLargeCanvasPreprocess}
+          sourceImage={largeCanvasStudioRequest.sourceImage}
+          settings={largeCanvasStudioSettings}
+          setSettings={setLargeCanvasStudioSettings}
+          activePalette={activePalette}
+          onApplyConversion={applyLargeCanvasPreprocess}
         />
       )}
     </div>

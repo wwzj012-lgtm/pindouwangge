@@ -424,9 +424,9 @@ function createEdgeConnectedBackgroundMask(
   }
 
   const visited = new Uint8Array(width * height);
-  const minComponentSize = Math.max(4, Math.ceil(width * height * 0.01));
+  const minComponentSize = Math.max(4, Math.ceil(width * height * 0.02));
   const perimeter = width * 2 + Math.max(0, height - 2) * 2;
-  const minEdgeCoverage = Math.max(2, Math.ceil(perimeter * 0.08));
+  const minEdgeCoverage = Math.max(2, Math.ceil(perimeter * 0.16));
   for (const start of edgePixelIndexes(width, height)) {
     if (!candidate[start] || visited[start]) continue;
     const component: number[] = [];

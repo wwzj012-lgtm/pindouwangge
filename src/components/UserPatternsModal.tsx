@@ -110,6 +110,9 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
   const [section, setSection] = useState<'private' | 'published'>('private');
+  const [publishTarget, setPublishTarget] = useState<ExportedPatternRecord | null>(null);
+  const [publishTitle, setPublishTitle] = useState('');
+  const [publishError, setPublishError] = useState<string | null>(null);
 
   const loadPatterns = async (): Promise<void> => {
     setLoading(true);
@@ -222,7 +225,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     }
   };
 
-  const handlePublish = async (record: ExportedPatternRecord): Promise<void> => {
+  const openPublishDialog = (record: ExportedPatternRecord): void => {
     if (!currentUser) {
       setMessage(isEn ? 'Sign in and save this pattern to cloud before publishing.' : '请先登录并保存到云端后再发布。');
       onOpenAuthModal();
@@ -233,8 +236,22 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       return;
     }
     if ((record.status ?? 0) === 2) return;
+    setPublishTarget(record);
+    setPublishTitle(record.title.trim().slice(0, 60));
+    setPublishError(null);
+  };
+
+  const handlePublish = async (): Promise<void> => {
+    if (!publishTarget || !currentUser || busyId) return;
+    const title = publishTitle.trim();
+    if (title.length < 1 || title.length > 60) {
+      setPublishError(isEn ? 'A work name must contain 1 to 60 characters.' : '作品名称需为 1 至 60 个字符。');
+      return;
+    }
+    const record = publishTarget;
     setBusyId(record.id);
     setMessage(null);
+    setPublishError(null);
     try {
       let preview = record.previewBlob ?? null;
       if (!preview && record.cloudRevision) {
@@ -245,14 +262,16 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       const file = new File([preview], `${record.title}.png`, { type: contentType });
       const upload = await uploadCommunityAsset(file);
       if (!upload.ok || !upload.data) throw new Error(upload.error ?? '社区图片上传失败');
-      const published = await publishCommunityPost(record.title, upload.data.asset.id, record.id);
+      const published = await publishCommunityPost(title, upload.data.asset.id, record.id);
       if (!published.ok) throw new Error(published.error ?? '作品发布失败');
       await markExportedPatternPublished(record.id, currentUser.uid);
       setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: 1, hasCloudCopy: true } : item));
       setSection('published');
+      setPublishTarget(null);
+      setPublishTitle('');
       setMessage(isEn ? 'Published to the community.' : '作品已发布到社区。');
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
+      setPublishError(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
     } finally {
       setBusyId(null);
     }
@@ -404,7 +423,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                       )}
                       {(record.status ?? 0) === 0 && (
                         <button
-                          onClick={() => void handlePublish(record)}
+                          onClick={() => openPublishDialog(record)}
                           disabled={busy}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                         >
@@ -459,6 +478,40 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
           )}
         </main>
       </section>
+      {publishTarget && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/75 p-4">
+          <section role="dialog" aria-modal="true" aria-labelledby="publish-pattern-title" className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h4 id="publish-pattern-title" className="truncate text-base font-bold text-white">{isEn ? 'Publish work' : '发布作品'}</h4>
+                <p className="mt-1 truncate text-xs text-slate-400">{publishTarget.title}</p>
+              </div>
+              <button type="button" onClick={() => { if (!busyId) { setPublishTarget(null); setPublishError(null); } }} disabled={Boolean(busyId)} className="grid h-10 w-10 shrink-0 place-items-center text-slate-400 hover:text-white disabled:opacity-50" title={isEn ? 'Close' : '关闭'} aria-label={isEn ? 'Close' : '关闭'}>
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <label className="mt-5 block text-xs font-bold text-slate-400">
+              {isEn ? 'Work name' : '作品名称'}
+              <input
+                value={publishTitle}
+                onChange={(event) => { setPublishTitle(event.target.value); setPublishError(null); }}
+                maxLength={60}
+                autoFocus
+                disabled={Boolean(busyId)}
+                className="mt-2 min-h-11 w-full rounded-md border border-slate-700 bg-slate-950 px-3 text-sm text-white outline-none focus:border-sky-400 disabled:opacity-60"
+                aria-describedby="publish-name-help"
+                onKeyDown={(event) => { if (event.key === 'Enter') void handlePublish(); }}
+              />
+            </label>
+            <p id="publish-name-help" className="mt-2 text-[11px] text-slate-500">{isEn ? `${publishTitle.trim().length}/60 characters` : `${publishTitle.trim().length}/60 个字符`}</p>
+            {publishError && <div role="alert" className="mt-3 flex items-start gap-2 rounded-md border border-rose-500/40 bg-rose-950/50 p-3 text-xs leading-5 text-rose-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{publishError}</div>}
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <button type="button" onClick={() => { setPublishTarget(null); setPublishError(null); }} disabled={Boolean(busyId)} className="min-h-11 rounded-md border border-slate-700 text-sm font-bold text-slate-300 hover:text-white disabled:opacity-50">{isEn ? 'Cancel' : '取消'}</button>
+              <button type="button" onClick={() => void handlePublish()} disabled={Boolean(busyId)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50">{busyId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Compass className="h-4 w-4" />}{isEn ? 'Confirm publish' : '确认发布'}</button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

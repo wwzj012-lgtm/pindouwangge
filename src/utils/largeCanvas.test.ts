@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { cancelLargeCanvasRaf } from '../components/LargeCanvasView';
+import {
+  cancelLargeCanvasRaf,
+  fillLargeCanvasConnectedRegion,
+  getLargeCanvasPaletteDisplay,
+} from '../components/LargeCanvasView';
 import {
   clampLargeCanvasFramePosition,
   getMovedLargeCanvasGridRectCandidate,
@@ -40,6 +44,86 @@ describe('large canvas RAF cleanup', () => {
     cancelLargeCanvasRaf({ rafId: null }, rafId => cancelled.push(rafId));
     cancelLargeCanvasRaf({ rafId: 42 }, rafId => cancelled.push(rafId));
     expect(cancelled).toEqual([42]);
+  });
+});
+
+describe('large canvas bucket fill', () => {
+  const fillGrid = (grid: (string | null)[][], start: { x: number; y: number }, replacement: string | null): number => {
+    const source = grid[start.y]?.[start.x] ?? null;
+    return fillLargeCanvasConnectedRegion(
+      grid[0]?.length ?? 0,
+      grid.length,
+      start,
+      source,
+      replacement,
+      (x, y) => grid[y]?.[x] ?? null,
+      (x, y, colorId) => { grid[y][x] = colorId; },
+    );
+  };
+
+  it('fills all 320 by 220 empty-board cells through one bounded four-connected traversal', () => {
+    const width = 320;
+    const height = 220;
+    const grid = Array.from({ length: height }, () => Array<string | null>(width).fill(null));
+    const startedAt = performance.now();
+    const changed = fillGrid(grid, { x: 0, y: 0 }, 'A1');
+    const elapsed = performance.now() - startedAt;
+
+    expect(changed).toBe(width * height);
+    expect(grid.every(row => row.every(colorId => colorId === 'A1'))).toBe(true);
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it('does not cross closed borders or diagonal-only connections', () => {
+    const grid: (string | null)[][] = [
+      ['wall', 'wall', 'wall', 'wall', 'wall'],
+      ['wall', null, null, null, 'wall'],
+      ['wall', null, 'wall', null, 'wall'],
+      ['wall', 'wall', 'wall', 'wall', 'wall'],
+    ];
+
+    expect(fillGrid(grid, { x: 1, y: 1 }, 'A1')).toBe(5);
+    expect(grid).toEqual([
+      ['wall', 'wall', 'wall', 'wall', 'wall'],
+      ['wall', 'A1', 'A1', 'A1', 'wall'],
+      ['wall', 'A1', 'wall', 'A1', 'wall'],
+      ['wall', 'wall', 'wall', 'wall', 'wall'],
+    ]);
+
+    const diagonal: (string | null)[][] = [[null, 'wall'], ['wall', null]];
+    expect(fillGrid(diagonal, { x: 0, y: 0 }, 'A1')).toBe(1);
+    expect(diagonal).toEqual([['A1', 'wall'], ['wall', null]]);
+  });
+
+  it('does not emit a second batch when the source already has the selected color', () => {
+    const grid: (string | null)[][] = [['A1']];
+    let writes = 0;
+    const changed = fillLargeCanvasConnectedRegion(
+      1,
+      1,
+      { x: 0, y: 0 },
+      'A1',
+      'A1',
+      () => grid[0][0],
+      () => { writes += 1; },
+    );
+
+    expect(changed).toBe(0);
+    expect(writes).toBe(0);
+  });
+});
+
+describe('large canvas palette display', () => {
+  it('uses the code and HEX for missing or duplicate color names', () => {
+    expect(getLargeCanvasPaletteDisplay('A1', { hex: '#AABBCC', code: 'A1' }))
+      .toEqual({ code: 'A1', hex: '#AABBCC', name: null });
+    expect(getLargeCanvasPaletteDisplay('A1', { hex: '#AABBCC', code: 'A1', name: 'A1' }))
+      .toEqual({ code: 'A1', hex: '#AABBCC', name: null });
+  });
+
+  it('preserves a real palette name alongside the code and HEX', () => {
+    expect(getLargeCanvasPaletteDisplay('A1', { hex: '#AABBCC', code: 'A1', name: '晨雾蓝' }))
+      .toEqual({ code: 'A1', hex: '#AABBCC', name: '晨雾蓝' });
   });
 });
 

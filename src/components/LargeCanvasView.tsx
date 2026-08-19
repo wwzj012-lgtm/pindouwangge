@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
@@ -39,6 +39,7 @@ import {
 } from '../utils/largeCanvas';
 import type { BeadShape, CanvasBackdrop, ColorMatchAlgo, DitherMode } from '../types';
 import { getColumnLetter } from '../utils/exportUtils';
+import { useAuth } from '../context/AuthContext';
 
 export interface LargeCanvasFrame {
   id: string;
@@ -93,6 +94,12 @@ interface LargeCanvasViewProps {
 
 const IMAGE_PREPROCESSING_CANCELLED = '图片预处理已取消';
 
+function isGuestAccount(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const account = value as Record<string, unknown>;
+  return account.authProvider === 'guest' || account.auth_provider === 'guest' || account.provider === 'guest';
+}
+
 const LARGE_CANVAS_STORAGE_KEY = 'beadgrid.large-canvas.v3';
 const LARGE_CANVAS_VIEW_SCALE_KEY = 'beadgrid.large-canvas.view-scale';
 const GRID_CELL_SIZE = 10;
@@ -104,7 +111,8 @@ const MAX_VIEW_SCALE = 1.2;
 const VIEW_SCALE_STEP = 0.1;
 const DEFAULT_VIEW_SCALE = 0.6;
 
-type GridPoint = { x: number; y: number };
+export type LargeCanvasGridPoint = { x: number; y: number };
+type GridPoint = LargeCanvasGridPoint;
 type LargeCanvasTool = 'pan' | 'pencil' | 'line' | 'rectangle' | 'circle' | 'bucket' | 'eyedropper' | 'eraser' | 'replace' | 'cut';
 type LargeCanvasSymmetry = 'none' | 'horizontal' | 'vertical' | 'both';
 type GridSnapshot = (string | null)[][];
@@ -141,9 +149,82 @@ type ManualDrawingTransaction = {
 
 type RafTarget = { rafId: number | null } | null | undefined;
 
+export type LargeCanvasPaletteDisplay = {
+  code: string;
+  hex: string;
+  name: string | null;
+};
+
 export function cancelLargeCanvasRaf(target: RafTarget, cancel: (rafId: number) => void): void {
   const rafId = target?.rafId;
   if (typeof rafId === 'number') cancel(rafId);
+}
+
+export function getLargeCanvasPaletteDisplay(
+  id: string,
+  color: { hex: string; code?: string; name?: string } | undefined,
+): LargeCanvasPaletteDisplay {
+  const code = color?.code?.trim() || id;
+  const name = color?.name?.trim();
+  return {
+    code,
+    hex: color?.hex ?? '#CBD5E1',
+    name: name && name !== code ? name : null,
+  };
+}
+
+/** Visits each matching four-connected cell at most once with a bounded queue. */
+export function fillLargeCanvasConnectedRegion(
+  width: number,
+  height: number,
+  start: LargeCanvasGridPoint,
+  source: string | null,
+  replacement: string | null,
+  read: (x: number, y: number) => string | null,
+  write: (x: number, y: number, colorId: string | null) => void,
+): number {
+  if (
+    source === replacement
+    || !Number.isInteger(width)
+    || !Number.isInteger(height)
+    || width < 1
+    || height < 1
+    || start.x < 0
+    || start.x >= width
+    || start.y < 0
+    || start.y >= height
+  ) return 0;
+
+  const capacity = width * height;
+  const queue = new Int32Array(capacity);
+  const queued = new Uint8Array(capacity);
+  let head = 0;
+  let tail = 1;
+  let changed = 0;
+  const startIndex = start.y * width + start.x;
+  queue[0] = startIndex;
+  queued[startIndex] = 1;
+
+  while (head < tail) {
+    const cellIndex = queue[head++];
+    const x = cellIndex % width;
+    const y = (cellIndex - x) / width;
+    if (read(x, y) !== source) continue;
+
+    write(x, y, replacement);
+    changed += 1;
+
+    let neighbor = cellIndex - 1;
+    if (x > 0 && !queued[neighbor]) { queued[neighbor] = 1; queue[tail++] = neighbor; }
+    neighbor = cellIndex + 1;
+    if (x + 1 < width && !queued[neighbor]) { queued[neighbor] = 1; queue[tail++] = neighbor; }
+    neighbor = cellIndex - width;
+    if (y > 0 && !queued[neighbor]) { queued[neighbor] = 1; queue[tail++] = neighbor; }
+    neighbor = cellIndex + width;
+    if (y + 1 < height && !queued[neighbor]) { queued[neighbor] = 1; queue[tail++] = neighbor; }
+  }
+
+  return changed;
 }
 
 const MAX_FRAME_HISTORY = 40;
@@ -601,35 +682,60 @@ function FrameBeanGrid({ frame, paletteMap, rect, beadShape, showCodeLabels }: {
 }
 
 function ManualBeanLayer({ cells, paletteMap, beadShape, cellSize, showCodeLabels }: { cells: ManualCells; paletteMap: Map<string, { hex: string; code?: string }>; beadShape: BeadShape; cellSize: number; showCodeLabels: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const isRound = beadShape === 'circle_flat' || beadShape === 'fuse_3d';
   const inset = isRound || beadShape === 'ironed' ? Math.max(0.5, cellSize * 0.1) : 0;
   const beadSize = Math.max(1, cellSize - inset * 2);
-  return (
-    <div className="pointer-events-none absolute inset-0 z-20" aria-hidden="true">
-      {Array.from(cells.entries()).map(([key, colorId]) => {
-        const [x, y] = key.split(',').map(Number);
-        if (!Number.isInteger(x) || !Number.isInteger(y) || !isBoardPoint({ x, y })) return null;
-        const color = paletteMap.get(colorId);
-        return (
-          <span
-            key={key}
-            className="absolute flex items-center justify-center overflow-hidden text-[5px] font-black leading-none text-slate-950/75"
-            style={{
-              left: x * cellSize + inset,
-              top: y * cellSize + inset,
-              width: beadSize,
-              height: beadSize,
-              backgroundColor: color?.hex ?? '#CBD5E1',
-              borderRadius: isRound ? '999px' : beadShape === 'ironed' ? '2px' : '0',
-              boxShadow: beadShape === 'fuse_3d' ? 'inset 1px 1px 2px rgba(255,255,255,0.65), inset -1px -1px 2px rgba(15,23,42,0.25)' : undefined,
-            }}
-          >
-            {showCodeLabels ? color?.code ?? colorId : ''}
-          </span>
-        );
-      })}
-    </div>
-  );
+  const width = BOARD_GRID_WIDTH * cellSize;
+  const height = BOARD_GRID_HEIGHT * cellSize;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const pixelRatio = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.round(width * pixelRatio));
+    canvas.height = Math.max(1, Math.round(height * pixelRatio));
+    const context = canvas.getContext('2d');
+    if (!context) return;
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (showCodeLabels) {
+      context.font = `900 ${Math.max(4, Math.round(cellSize * 0.45))}px sans-serif`;
+      context.textAlign = 'center';
+      context.textBaseline = 'middle';
+    }
+
+    cells.forEach((colorId, key) => {
+      const separator = key.indexOf(',');
+      const x = Number(key.slice(0, separator));
+      const y = Number(key.slice(separator + 1));
+      if (!Number.isInteger(x) || !Number.isInteger(y) || !isBoardPoint({ x, y })) return;
+      const color = paletteMap.get(colorId);
+      const left = x * cellSize + inset;
+      const top = y * cellSize + inset;
+      context.fillStyle = color?.hex ?? '#CBD5E1';
+      if (isRound) {
+        context.beginPath();
+        context.arc(left + beadSize / 2, top + beadSize / 2, beadSize / 2, 0, Math.PI * 2);
+        context.fill();
+        if (beadShape === 'fuse_3d') {
+          context.fillStyle = 'rgba(255,255,255,0.35)';
+          context.beginPath();
+          context.arc(left + beadSize * 0.36, top + beadSize * 0.34, Math.max(0.5, beadSize * 0.13), 0, Math.PI * 2);
+          context.fill();
+        }
+      } else {
+        context.fillRect(left, top, beadSize, beadSize);
+      }
+      if (showCodeLabels) {
+        context.fillStyle = 'rgba(15,23,42,0.75)';
+        context.fillText(color?.code ?? colorId, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
+      }
+    });
+    canvas.dataset.renderedCellCount = String(cells.size);
+  }, [beadShape, beadSize, cells, cellSize, height, inset, isRound, paletteMap, showCodeLabels, width]);
+
+  return <canvas ref={canvasRef} data-large-canvas-manual-layer data-cell-count={cells.size} aria-hidden="true" className="pointer-events-none absolute left-0 top-0 z-20" style={{ width, height }} />;
 }
 
 function findAvailableRect(width: number, height: number, frames: readonly LargeCanvasFrame[], id = createId('large-frame')): LargeCanvasGridRect | null {
@@ -665,6 +771,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   onPrepareImage,
   onOpenFrame,
 }) => {
+  const { currentUser, userProfile } = useAuth();
   const initialState = useRef<{ frames: LargeCanvasFrame[]; selectedId: string | null; manualEntries: ManualEntry[]; restoreNotice: string | null } | null>(null);
   if (!initialState.current) initialState.current = restorePersistedFrames();
   const [frames, setFrames] = useState<LargeCanvasFrame[]>(() => initialState.current?.frames ?? []);
@@ -677,6 +784,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   const [activeTool, setActiveTool] = useState<LargeCanvasTool>('pan');
   const [symmetryMode, setSymmetryMode] = useState<LargeCanvasSymmetry>('none');
   const [toolbarExpanded, setToolbarExpanded] = useState(true);
+  const [mobileToolbarPanel, setMobileToolbarPanel] = useState<'tools' | 'view' | 'settings'>('tools');
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [colorPickerAnchor, setColorPickerAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
   const colorPickerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -716,6 +824,21 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   const inputRefs = useRef(new Map<string, HTMLInputElement>());
   const requestVersions = useRef(new Map<string, number>());
 
+  const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
+
+  const requireFormalLoginForExport = useCallback((): boolean => {
+    if (hasFormalLogin) return true;
+    setMessage('请先登录，再导出图纸。');
+    window.dispatchEvent(new Event('unauthorized'));
+    return false;
+  }, [hasFormalLogin]);
+
+  useEffect(() => {
+    if (hasFormalLogin) {
+      setMessage(current => current === '请先登录，再导出图纸。' ? null : current);
+    }
+  }, [hasFormalLogin]);
+
   const chooseDrawColor = (colorId: string | null) => {
     setDrawColorId(colorId);
     setActiveTool(colorId === null ? 'eraser' : 'pencil');
@@ -724,12 +847,12 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
     setIsColorPickerOpen(false);
   };
 
-  const toggleColorPicker = () => {
+  const toggleColorPicker = (trigger: HTMLButtonElement | null = colorPickerTriggerRef.current) => {
     if (isColorPickerOpen) {
       setIsColorPickerOpen(false);
       return;
     }
-    const bounds = colorPickerTriggerRef.current?.getBoundingClientRect();
+    const bounds = trigger?.getBoundingClientRect();
     if (bounds) {
       const width = Math.min(Math.max(bounds.width, 230), window.innerWidth - 16);
       setColorPickerAnchor({
@@ -739,6 +862,14 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
       });
     }
     setIsColorPickerOpen(true);
+  };
+
+  const selectTool = (tool: LargeCanvasTool) => {
+    setActiveTool(tool);
+    setPanMode(tool === 'pan');
+    setDrawMode(tool !== 'pan');
+    if (tool === 'pencil' && !drawColorId) setDrawColorId(Array.from(paletteMap.keys())[0] ?? null);
+    if (tool === 'eraser') setDrawColorId(null);
   };
 
   useEffect(() => () => {
@@ -891,23 +1022,15 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
     const replacement = drawColorId;
     getManualSymmetricPoints(point).forEach(seed => {
       const source = readManualCell(cells, seed);
-      if (source === replacement) return;
-      const queue: GridPoint[] = [seed];
-      const visited = new Set<string>();
-      for (let index = 0; index < queue.length; index += 1) {
-        const current = queue[index];
-        const key = manualCellKey(current.x, current.y);
-        if (!isBoardPoint(current) || visited.has(key)) continue;
-        visited.add(key);
-        if (readManualCell(cells, current) !== source) continue;
-        writeManualCell(cells, current, replacement);
-        queue.push(
-          { x: current.x - 1, y: current.y },
-          { x: current.x + 1, y: current.y },
-          { x: current.x, y: current.y - 1 },
-          { x: current.x, y: current.y + 1 },
-        );
-      }
+      fillLargeCanvasConnectedRegion(
+        BOARD_GRID_WIDTH,
+        BOARD_GRID_HEIGHT,
+        seed,
+        source,
+        replacement,
+        (x, y) => readManualCell(cells, { x, y }),
+        (x, y, colorId) => writeManualCell(cells, { x, y }, colorId),
+      );
     });
   };
 
@@ -1429,19 +1552,16 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
       const x = seed.x - frame.rect.x;
       const y = seed.y - frame.rect.y;
       const source = grid[y]?.[x];
-      if (source === undefined || source === replacement) return;
-      const queue: GridPoint[] = [{ x, y }];
-      const visited = new Set<string>();
-      while (queue.length) {
-        const current = queue.pop();
-        if (!current) continue;
-        const key = `${current.x},${current.y}`;
-        if (visited.has(key) || current.x < 0 || current.y < 0 || current.x >= frame.rect.width || current.y >= frame.rect.height) continue;
-        visited.add(key);
-        if (grid[current.y][current.x] !== source) continue;
-        grid[current.y][current.x] = replacement;
-        queue.push({ x: current.x - 1, y: current.y }, { x: current.x + 1, y: current.y }, { x: current.x, y: current.y - 1 }, { x: current.x, y: current.y + 1 });
-      }
+      if (source === undefined) return;
+      fillLargeCanvasConnectedRegion(
+        frame.rect.width,
+        frame.rect.height,
+        { x, y },
+        source,
+        replacement,
+        (cellX, cellY) => grid[cellY]?.[cellX] ?? null,
+        (cellX, cellY, colorId) => { grid[cellY][cellX] = colorId; },
+      );
     });
   };
 
@@ -1659,6 +1779,8 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   };
 
   const exportFrame = (frame: LargeCanvasFrame) => {
+    if (!requireFormalLoginForExport()) return;
+    setMessage(null);
     if (!frame.beanResult && !getManualCellsInRect(manualCells, frame.rect).size) {
       setMessage('该图框还没有生成图纸。');
       return;
@@ -1669,6 +1791,8 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   };
 
   const exportWholeCanvas = () => {
+    if (!requireFormalLoginForExport()) return;
+    setMessage(null);
     const completed = frames.filter(frame => frame.beanResult);
     if (!completed.length && !manualCells.size) {
       setMessage('当前没有可导出的图纸。');
@@ -1685,8 +1809,11 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   const canRedoManual = manualHistoryVersion >= 0 && manualHistoryRef.current.future.length > 0;
   const selectedFrame = selectedId ? frames.find(frame => frame.id === selectedId) ?? null : null;
   const selectedDrawColor = drawColorId ? paletteMap.get(drawColorId) : undefined;
-  const selectedDrawColorCode = selectedDrawColor?.code ?? drawColorId ?? '橡皮擦';
-  const selectedDrawColorName = selectedDrawColor?.name ?? (drawColorId ? '未知颜色' : '清除颜色');
+  const selectedDrawColorDisplay = drawColorId ? getLargeCanvasPaletteDisplay(drawColorId, selectedDrawColor) : null;
+  const selectedDrawColorCode = selectedDrawColorDisplay?.code ?? '橡皮擦';
+  const selectedDrawColorName = selectedDrawColorDisplay
+    ? selectedDrawColorDisplay.name ? `${selectedDrawColorDisplay.name} · ${selectedDrawColorDisplay.hex}` : selectedDrawColorDisplay.hex
+    : drawColorId ? '未知颜色' : '清除颜色';
   const selectedFrameCounts = selectedFrame?.beanResult
     ? [...selectedFrame.beanResult.flat().reduce((counts, colorId) => {
         if (colorId) counts.set(colorId, (counts.get(colorId) ?? 0) + 1);
@@ -1706,6 +1833,17 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
     studio: '#f3e8ff',
     slate: '#e2e8f0',
   };
+  const drawingTools = [
+    ['pan', '平移拖拽', Hand],
+    ['pencil', '画笔', Paintbrush],
+    ['line', '直线', Minus],
+    ['rectangle', '矩形', Square],
+    ['circle', '圆形', Circle],
+    ['bucket', '油漆桶', PaintBucket],
+    ['eyedropper', '吸管', Pipette],
+    ['eraser', '橡皮擦', Eraser],
+    ['replace', '转换全图此色', RefreshCw],
+  ] as [LargeCanvasTool, string, typeof Hand][];
 
   return (
     <main className="min-h-0 flex-1 overflow-hidden bg-slate-100 text-slate-900">
@@ -1721,6 +1859,11 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
                 {paletteOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
             </label>
+            {selectedPaletteId === 'MARD_291' && (
+              <p role="status" className="basis-full text-[10px] leading-4 text-amber-800 sm:ml-auto sm:max-w-xl">
+                P/Q/R/T/Y/ZG 珠光、荧光、夜光等特殊材质为屏幕模拟色，仅用于算法匹配参考，不能作为实物精准对色依据。
+              </p>
+            )}
           </div>
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="ml-auto flex shrink-0 items-center gap-1">
@@ -1732,53 +1875,59 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
             </div>
           </div>
           {toolbarExpanded && (
-            <div className="flex min-w-0 items-center gap-2 overflow-x-auto pb-0.5" role="toolbar" aria-label="大画板工具栏">
-              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="绘图与平移工具">
-                {([
-                  ['pan', '平移拖拽', Hand],
-                  ['pencil', '画笔', Paintbrush],
-                  ['line', '直线', Minus],
-                  ['rectangle', '矩形', Square],
-                  ['circle', '圆形', Circle],
-                  ['bucket', '油漆桶', PaintBucket],
-                  ['eyedropper', '吸管', Pipette],
-                  ['eraser', '橡皮擦', Eraser],
-                  ['replace', '转换全图此色', RefreshCw],
-                ] as [LargeCanvasTool, string, typeof Hand][]).map(([tool, title, Icon]) => <button key={tool} type="button" title={title} aria-label={title} onClick={() => { setActiveTool(tool); setPanMode(tool === 'pan'); setDrawMode(tool !== 'pan'); if (tool === 'pencil' && !drawColorId) setDrawColorId(Array.from(paletteMap.keys())[0] ?? null); if (tool === 'eraser') setDrawColorId(null); }} className={`rounded p-1.5 ${activeTool === tool ? (tool === 'eraser' ? 'bg-rose-600 text-white' : 'bg-purple-600 text-white') : 'text-purple-700 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" /></button>)}
-                <label className="flex items-center gap-1 border-l border-slate-200 pl-1 text-[10px] font-bold text-purple-700">对称<select aria-label="对称模式" value={symmetryMode} onChange={event => setSymmetryMode(event.target.value as LargeCanvasSymmetry)} className="max-w-[98px] rounded border border-purple-200 bg-white px-1 py-1 text-[10px] font-bold text-purple-900"><option value="none">无对称</option><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">水平+垂直</option></select></label>
-                <button
-                  ref={colorPickerTriggerRef}
-                  type="button"
-                  title="选择绘图颜色"
-                  aria-label={`选择绘图颜色：${selectedDrawColorCode} ${selectedDrawColorName}`}
-                  aria-expanded={isColorPickerOpen}
-                  onClick={toggleColorPicker}
-                  className="inline-flex min-w-0 max-w-[180px] items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-left text-[10px] font-bold text-slate-700 hover:border-purple-300"
-                >
-                  <span className="h-3.5 w-3.5 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: selectedDrawColor?.hex ?? 'transparent' }} />
-                  <span className="shrink-0 text-purple-800">{selectedDrawColorCode}</span>
-                  <span className="truncate text-slate-500">{selectedDrawColorName}</span>
-                </button>
-                <button type="button" title="撤销" aria-label="撤销" disabled={drawMode ? !canUndoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.past.length ?? 0))} onClick={() => drawMode ? undoManual() : selectedId && undoFrame(selectedId)} className="rounded p-1.5 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Undo2 className="h-3.5 w-3.5" /></button>
-                <button type="button" title="重做" aria-label="重做" disabled={drawMode ? !canRedoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.future.length ?? 0))} onClick={() => drawMode ? redoManual() : selectedId && redoFrame(selectedId)} className="rounded p-1.5 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Redo2 className="h-3.5 w-3.5" /></button>
-                <button type="button" title="剪切到拖选区域" aria-label="剪切到拖选区域" onClick={() => { setActiveTool('cut'); setPanMode(false); setDrawMode(true); }} className={`rounded p-1.5 ${activeTool === 'cut' ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}><Scissors className="h-3.5 w-3.5" /></button>
+            <div className="min-w-0 pb-0.5" role="toolbar" aria-label="大画板工具栏">
+              <div className="grid min-h-[116px] gap-2 sm:hidden">
+                <div className="grid grid-cols-3 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist" aria-label="大画板移动工具分组">
+                  {([
+                    ['tools', '工具'],
+                    ['view', '视图'],
+                    ['settings', '设置'],
+                  ] as const).map(([panel, label]) => <button key={panel} type="button" role="tab" aria-selected={mobileToolbarPanel === panel} onClick={() => setMobileToolbarPanel(panel)} className={`min-h-8 rounded px-2 text-[11px] font-bold ${mobileToolbarPanel === panel ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}
+                </div>
+                <div className="min-h-[78px]">
+                  {mobileToolbarPanel === 'tools' && (
+                    <div className="space-y-1.5" role="tabpanel" aria-label="绘图工具">
+                      <div className="grid grid-cols-10 gap-1" role="group" aria-label="绘图与平移工具">
+                        {drawingTools.map(([tool, title, Icon]) => <button key={tool} type="button" title={title} aria-label={title} onClick={() => selectTool(tool)} className={`flex h-8 min-w-0 items-center justify-center rounded border border-slate-200 ${activeTool === tool ? (tool === 'eraser' ? 'bg-rose-600 text-white' : 'bg-purple-600 text-white') : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" /></button>)}
+                        <button type="button" title="剪切到拖选区域" aria-label="剪切到拖选区域" onClick={() => selectTool('cut')} className={`flex h-8 items-center justify-center rounded border border-slate-200 ${activeTool === 'cut' ? 'bg-purple-600 text-white' : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Scissors className="h-3.5 w-3.5" /></button>
+                      </div>
+                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1">
+                        <label className="flex min-w-0 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-bold text-purple-700">对称<select aria-label="对称模式" value={symmetryMode} onChange={event => setSymmetryMode(event.target.value as LargeCanvasSymmetry)} className="min-w-0 flex-1 rounded border border-purple-200 bg-white px-1 py-1 text-[10px] font-bold text-purple-900"><option value="none">无对称</option><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">水平+垂直</option></select></label>
+                        <button type="button" title="撤销" aria-label="撤销" disabled={drawMode ? !canUndoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.past.length ?? 0))} onClick={() => drawMode ? undoManual() : selectedId && undoFrame(selectedId)} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Undo2 className="h-3.5 w-3.5" /></button>
+                        <button type="button" title="重做" aria-label="重做" disabled={drawMode ? !canRedoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.future.length ?? 0))} onClick={() => drawMode ? redoManual() : selectedId && redoFrame(selectedId)} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Redo2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                      <button ref={colorPickerTriggerRef} type="button" title="选择绘图颜色" aria-label={`选择绘图颜色：${selectedDrawColorCode} ${selectedDrawColorName}`} aria-expanded={isColorPickerOpen} onClick={event => toggleColorPicker(event.currentTarget)} className="inline-flex h-8 w-full min-w-0 items-center gap-1.5 rounded border border-slate-200 bg-white px-2 text-left text-[10px] font-bold text-slate-700 hover:border-purple-300"><span className="h-4 w-4 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: selectedDrawColor?.hex ?? 'transparent' }} /><span className="shrink-0 text-purple-800">{selectedDrawColorCode}</span><span className="truncate text-slate-500">{selectedDrawColorName}</span></button>
+                    </div>
+                  )}
+                  {mobileToolbarPanel === 'view' && (
+                    <div className="space-y-1.5" role="tabpanel" aria-label="画板视图">
+                      <div className="flex h-8 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1"><button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-4 w-4" /></button><input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="min-w-0 flex-1 accent-purple-600" /><span className="w-10 text-center text-[10px] font-bold text-slate-600">{Math.round(viewScale * 100)}%</span><button type="button" title="放大画板" aria-label="放大画板" disabled={viewScale >= MAX_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current + VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="h-4 w-4" /></button></div>
+                      <div className="grid grid-cols-3 gap-1 rounded border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="拼豆形态">{([['fuse_3d', '3D立体豆'], ['circle_flat', '平面圆豆'], ['square', '像素方块']] as [BeadShape, string][]).map(([shape, label]) => <button key={shape} type="button" onClick={() => onChangeBeadShape(shape)} className={`h-8 rounded px-1 text-[10px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{label}</button>)}</div>
+                      <div className="grid grid-cols-2 gap-1" role="group" aria-label="显示选项"><button type="button" onClick={() => onChangeShowCodeLabels(!showCodeLabels)} className={`h-8 rounded border border-slate-200 px-2 text-[10px] font-bold ${showCodeLabels ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}>色号标记</button><button type="button" onClick={() => onChangeShowDataPreview(!showDataPreview)} className={`inline-flex h-8 items-center justify-center gap-1 rounded border border-slate-200 px-2 text-[10px] font-bold ${showDataPreview ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}><Eye className="h-3.5 w-3.5" />数据预览</button></div>
+                    </div>
+                  )}
+                  {mobileToolbarPanel === 'settings' && (
+                    <div className="space-y-1.5" role="tabpanel" aria-label="画板设置">
+                      <label className="flex h-8 items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 text-[10px] font-bold text-slate-600">背景<select aria-label="大画板背景" value={canvasBackdrop} onChange={event => onChangeCanvasBackdrop(event.target.value as CanvasBackdrop)} className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-semibold"><option value="dark_grid">浅灰网格</option><option value="light_pegboard">浅色底板</option><option value="wood">木纹色</option><option value="studio">工作室紫</option><option value="slate">石板灰</option></select></label>
+                      <div className="grid grid-cols-3 gap-1 rounded border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="新图框档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" onClick={() => setNewFrameMaxSide(side)} className={`h-8 rounded px-2 text-[10px] font-bold ${newFrameMaxSide === side ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{side}格</button>)}</div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="画板缩放">
-                <button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-3.5 w-3.5" /></button>
-                <input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="w-20 accent-purple-600" />
-                <span className="w-10 text-center text-[10px] font-bold text-slate-600">{Math.round(viewScale * 100)}%</span>
-                <button type="button" title="放大画板" aria-label="放大画板" disabled={viewScale >= MAX_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current + VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="h-3.5 w-3.5" /></button>
-              </div>
-              <label className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">背景<select aria-label="大画板背景" value={canvasBackdrop} onChange={event => onChangeCanvasBackdrop(event.target.value as CanvasBackdrop)} className="max-w-[110px] rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] font-semibold"><option value="dark_grid">浅灰网格</option><option value="light_pegboard">浅色底板</option><option value="wood">木纹色</option><option value="studio">工作室紫</option><option value="slate">石板灰</option></select></label>
-              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="拼豆形态">
-                {([['fuse_3d', '3D立体豆'], ['circle_flat', '平面圆豆'], ['square', '像素方块']] as [BeadShape, string][]).map(([shape, label]) => <button key={shape} type="button" onClick={() => onChangeBeadShape(shape)} className={`rounded px-1.5 py-1 text-[10px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{label}</button>)}
-              </div>
-              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="显示选项">
-                <button type="button" onClick={() => onChangeShowCodeLabels(!showCodeLabels)} className={`rounded px-1.5 py-1 text-[10px] font-bold ${showCodeLabels ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-white'}`}>色号标记</button>
-                <button type="button" onClick={() => onChangeShowDataPreview(!showDataPreview)} className={`inline-flex items-center gap-0.5 rounded px-1.5 py-1 text-[10px] font-bold ${showDataPreview ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-white'}`}><Eye className="h-3 w-3" />数据预览</button>
-              </div>
-              <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="新图框档位">
-                {LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" onClick={() => setNewFrameMaxSide(side)} className={`rounded-md px-2 py-1 text-[10px] font-bold ${newFrameMaxSide === side ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-purple-100'}`}>{side}</button>)}
+              <div className="hidden min-w-0 items-center gap-2 overflow-x-auto pb-0.5 sm:flex">
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="绘图与平移工具">
+                  {drawingTools.map(([tool, title, Icon]) => <button key={tool} type="button" title={title} aria-label={title} onClick={() => selectTool(tool)} className={`rounded p-1.5 ${activeTool === tool ? (tool === 'eraser' ? 'bg-rose-600 text-white' : 'bg-purple-600 text-white') : 'text-purple-700 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" /></button>)}
+                  <label className="flex items-center gap-1 border-l border-slate-200 pl-1 text-[10px] font-bold text-purple-700">对称<select aria-label="对称模式" value={symmetryMode} onChange={event => setSymmetryMode(event.target.value as LargeCanvasSymmetry)} className="max-w-[98px] rounded border border-purple-200 bg-white px-1 py-1 text-[10px] font-bold text-purple-900"><option value="none">无对称</option><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">水平+垂直</option></select></label>
+                  <button ref={colorPickerTriggerRef} type="button" title="选择绘图颜色" aria-label={`选择绘图颜色：${selectedDrawColorCode} ${selectedDrawColorName}`} aria-expanded={isColorPickerOpen} onClick={event => toggleColorPicker(event.currentTarget)} className="inline-flex min-w-0 max-w-[180px] items-center gap-1 rounded border border-slate-200 bg-white px-1.5 py-1 text-left text-[10px] font-bold text-slate-700 hover:border-purple-300"><span className="h-3.5 w-3.5 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: selectedDrawColor?.hex ?? 'transparent' }} /><span className="shrink-0 text-purple-800">{selectedDrawColorCode}</span><span className="truncate text-slate-500">{selectedDrawColorName}</span></button>
+                  <button type="button" title="撤销" aria-label="撤销" disabled={drawMode ? !canUndoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.past.length ?? 0))} onClick={() => drawMode ? undoManual() : selectedId && undoFrame(selectedId)} className="rounded p-1.5 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Undo2 className="h-3.5 w-3.5" /></button>
+                  <button type="button" title="重做" aria-label="重做" disabled={drawMode ? !canRedoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.future.length ?? 0))} onClick={() => drawMode ? redoManual() : selectedId && redoFrame(selectedId)} className="rounded p-1.5 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Redo2 className="h-3.5 w-3.5" /></button>
+                  <button type="button" title="剪切到拖选区域" aria-label="剪切到拖选区域" onClick={() => selectTool('cut')} className={`rounded p-1.5 ${activeTool === 'cut' ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}><Scissors className="h-3.5 w-3.5" /></button>
+                </div>
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="画板缩放"><button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-3.5 w-3.5" /></button><input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="w-20 accent-purple-600" /><span className="w-10 text-center text-[10px] font-bold text-slate-600">{Math.round(viewScale * 100)}%</span><button type="button" title="放大画板" aria-label="放大画板" disabled={viewScale >= MAX_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current + VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="h-3.5 w-3.5" /></button></div>
+                <label className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 text-[10px] font-bold text-slate-600">背景<select aria-label="大画板背景" value={canvasBackdrop} onChange={event => onChangeCanvasBackdrop(event.target.value as CanvasBackdrop)} className="max-w-[110px] rounded border border-slate-200 bg-white px-1 py-0.5 text-[10px] font-semibold"><option value="dark_grid">浅灰网格</option><option value="light_pegboard">浅色底板</option><option value="wood">木纹色</option><option value="studio">工作室紫</option><option value="slate">石板灰</option></select></label>
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="拼豆形态">{([['fuse_3d', '3D立体豆'], ['circle_flat', '平面圆豆'], ['square', '像素方块']] as [BeadShape, string][]).map(([shape, label]) => <button key={shape} type="button" onClick={() => onChangeBeadShape(shape)} className={`rounded px-1.5 py-1 text-[10px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{label}</button>)}</div>
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="显示选项"><button type="button" onClick={() => onChangeShowCodeLabels(!showCodeLabels)} className={`rounded px-1.5 py-1 text-[10px] font-bold ${showCodeLabels ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-white'}`}>色号标记</button><button type="button" onClick={() => onChangeShowDataPreview(!showDataPreview)} className={`inline-flex items-center gap-0.5 rounded px-1.5 py-1 text-[10px] font-bold ${showDataPreview ? 'bg-purple-600 text-white' : 'text-slate-500 hover:bg-white'}`}><Eye className="h-3 w-3" />数据预览</button></div>
+                <div className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1" role="group" aria-label="新图框档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" onClick={() => setNewFrameMaxSide(side)} className={`rounded-md px-2 py-1 text-[10px] font-bold ${newFrameMaxSide === side ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-purple-100'}`}>{side}</button>)}</div>
               </div>
             </div>
           )}
@@ -1800,6 +1949,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
               <div className="max-h-60 space-y-0.5 overflow-y-auto overscroll-contain pr-0.5">
                 {Array.from(paletteMap.entries()).map(([id, color]) => {
                   const isSelected = id === drawColorId;
+                  const display = getLargeCanvasPaletteDisplay(id, color);
                   return (
                     <button
                       key={id}
@@ -1808,8 +1958,9 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
                       className={`flex w-full min-w-0 items-center gap-2 rounded px-1.5 py-1 text-left text-[10px] font-semibold ${isSelected ? 'bg-purple-100 text-purple-900' : 'text-slate-700 hover:bg-slate-50'}`}
                     >
                       <span className="h-4 w-4 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: color.hex }} />
-                      <span className="w-16 shrink-0 font-extrabold">{color.code ?? id}</span>
-                      <span className="truncate text-slate-500">{color.name ?? color.hex}</span>
+                      <span className="w-16 shrink-0 font-extrabold">{display.code}</span>
+                      {display.name && <span className="min-w-0 flex-1 truncate text-slate-600">{display.name}</span>}
+                      <span className="shrink-0 font-mono text-[9px] text-slate-500">{display.hex}</span>
                     </button>
                   );
                 })}

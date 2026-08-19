@@ -92,7 +92,10 @@ interface BackgroundMaskResult {
 const MAX_ANALYSIS_SAMPLES = 4096;
 const COLOR_CLUSTER_DELTA_E = 7;
 const BACKGROUND_CLUSTER_DELTA_E = 8;
-const MIN_AUTO_BACKGROUND_EDGE_COVERAGE = 0.2;
+// Auto removal must have one clearly dominant edge colour. Ambiguous multi-colour
+// borders stay intact until the user explicitly picks a chroma-key colour.
+const MIN_AUTO_BACKGROUND_EDGE_COVERAGE = 0.35;
+const MIN_AUTO_BACKGROUND_DOMINANCE_GAP = 0.12;
 
 function clampByte(value: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(255, Math.round(value))) : 0;
@@ -366,8 +369,9 @@ function inferEdgeBackgroundCandidate(data: Uint8ClampedArray, width: number, he
   const ranked = [...clusters].sort((first, second) => second.count - first.count);
   const winner = ranked[0];
   const coverage = winner.count / samples;
-  if (coverage < MIN_AUTO_BACKGROUND_EDGE_COVERAGE) return null;
   const runnerUpCoverage = (ranked[1]?.count ?? 0) / samples;
+  if (coverage < MIN_AUTO_BACKGROUND_EDGE_COVERAGE
+    || coverage - runnerUpCoverage < MIN_AUTO_BACKGROUND_DOMINANCE_GAP) return null;
   const confidence = clampUnit(0.45 + coverage * 0.45 + Math.max(0, coverage - runnerUpCoverage) * 0.1);
   return {
     lab: winner.lab,
@@ -427,22 +431,25 @@ function createEdgeConnectedBackgroundMask(
   const minComponentSize = Math.max(4, Math.ceil(width * height * 0.02));
   const perimeter = width * 2 + Math.max(0, height - 2) * 2;
   const minEdgeCoverage = Math.max(2, Math.ceil(perimeter * 0.16));
+  const isManualBackground = candidateBackground.inference.source === 'manual';
+  // Reused for each component so large backgrounds do not allocate JS number arrays.
+  const componentQueue = new Int32Array(width * height);
   for (const start of edgePixelIndexes(width, height)) {
     if (!candidate[start] || visited[start]) continue;
-    const component: number[] = [];
-    const queue = [start];
+    let componentLength = 1;
+    componentQueue[0] = start;
     let edgeCoverage = 0;
     visited[start] = 1;
-    for (let cursor = 0; cursor < queue.length; cursor += 1) {
-      const index = queue[cursor];
-      component.push(index);
+    for (let cursor = 0; cursor < componentLength; cursor += 1) {
+      const index = componentQueue[cursor];
       const x = index % width;
       const y = Math.floor(index / width);
       if (x === 0 || x === width - 1 || y === 0 || y === height - 1) edgeCoverage += 1;
       const visit = (next: number) => {
         if (!candidate[next] || visited[next]) return;
         visited[next] = 1;
-        queue.push(next);
+        componentQueue[componentLength] = next;
+        componentLength += 1;
       };
       // 4-neighbour flood fill deliberately prevents diagonal leaks into protected holes.
       if (x > 0) visit(index - 1);
@@ -450,8 +457,8 @@ function createEdgeConnectedBackgroundMask(
       if (y > 0) visit(index - width);
       if (y + 1 < height) visit(index + width);
     }
-    if (component.length >= minComponentSize && edgeCoverage >= minEdgeCoverage) {
-      for (const index of component) mask[index] = 1;
+    if (isManualBackground || (componentLength >= minComponentSize && edgeCoverage >= minEdgeCoverage)) {
+      for (let index = 0; index < componentLength; index += 1) mask[componentQueue[index]] = 1;
     }
   }
   return { mask, inference: candidateBackground.inference };

@@ -94,8 +94,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const [pendingDownloadType, setPendingDownloadType] = useState<'single' | 'all' | null>(null);
   const [wechatPreviewUrl, setWechatPreviewUrl] = useState<string | null>(null);
   const [archiveMessage, setArchiveMessage] = useState<string | null>(null);
+  const [downloadState, setDownloadState] = useState<'idle' | 'generating' | 'downloading' | 'success' | 'error'>('idle');
+  const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
 
   const previewContainerRef = useRef<HTMLDivElement>(null);
+  const downloadMessageTimerRef = useRef<number | null>(null);
 
   const boardsX = Math.ceil(width / boardSize);
   const boardsY = Math.ceil(height / boardSize);
@@ -180,7 +183,37 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     isVip,
   ]);
 
+  useEffect(() => () => {
+    if (downloadMessageTimerRef.current !== null) {
+      window.clearTimeout(downloadMessageTimerRef.current);
+    }
+  }, []);
+
   if (!isOpen) return null;
+
+  const setDownloadFeedback = (
+    state: 'idle' | 'generating' | 'downloading' | 'success' | 'error',
+    message: string | null,
+    resetAfterMs?: number,
+  ) => {
+    if (downloadMessageTimerRef.current !== null) {
+      window.clearTimeout(downloadMessageTimerRef.current);
+      downloadMessageTimerRef.current = null;
+    }
+    setDownloadState(state);
+    setDownloadMessage(message);
+    if (resetAfterMs) {
+      downloadMessageTimerRef.current = window.setTimeout(() => {
+        setDownloadState('idle');
+        setDownloadMessage(null);
+        downloadMessageTimerRef.current = null;
+      }, resetAfterMs);
+    }
+  };
+
+  const yieldForDownloadFeedback = () => new Promise<void>(resolve => {
+    window.requestAnimationFrame(() => resolve());
+  });
 
   const archiveEditablePattern = async (): Promise<void> => {
     const totalBeadsCount = grid.reduce((acc, row) => acc + row.filter(cell => cell !== null).length, 0);
@@ -212,98 +245,124 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   };
 
   // Actual Download Execution
-  const executeSingleDownload = () => {
-    const options: ExportOptions = {
-      grid,
-      paletteMap,
-      width,
-      height,
-      boardSize,
-      brandName,
-      projectName,
-      showSymbols,
-      symbolDisplayType,
-      symbolFontScale,
-      exportQuality,
-      showCoordinates,
-      beadShape,
-      selectedBoardIndex: selectedBoard,
-      watermarkType,
-      watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
-      watermarkOpacity,
-      watermarkColor: isVip ? watermarkColor : '#A855F7',
-      watermarkAngle: isVip ? watermarkAngle : -25,
-      legendPosition,
-      legendScaleMode,
-      hideEmptyPegs,
-      isEn,
-    };
-    const canvas = generatePatternCanvas(options);
-    const suffix = selectedBoard !== null
-      ? (isEn ? `_Board${selectedBoard + 1}` : `_板${selectedBoard + 1}`)
-      : (isEn ? '_FullPattern' : '_完整图纸');
-    downloadCanvasImage(canvas, `${projectName}${suffix}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
+  const executeSingleDownload = async () => {
+    setDownloadFeedback('generating', isEn ? 'Generating PNG…' : '正在生成 PNG 图纸…');
+    await yieldForDownloadFeedback();
 
-    void archiveEditablePattern();
+    try {
+      const options: ExportOptions = {
+        grid,
+        paletteMap,
+        width,
+        height,
+        boardSize,
+        brandName,
+        projectName,
+        showSymbols,
+        symbolDisplayType,
+        symbolFontScale,
+        exportQuality,
+        showCoordinates,
+        beadShape,
+        selectedBoardIndex: selectedBoard,
+        watermarkType,
+        watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
+        watermarkOpacity,
+        watermarkColor: isVip ? watermarkColor : '#A855F7',
+        watermarkAngle: isVip ? watermarkAngle : -25,
+        legendPosition,
+        legendScaleMode,
+        hideEmptyPegs,
+        isEn,
+      };
+      const canvas = generatePatternCanvas(options);
+      const suffix = selectedBoard !== null
+        ? (isEn ? `_Board${selectedBoard + 1}` : `_板${selectedBoard + 1}`)
+        : (isEn ? '_FullPattern' : '_完整图纸');
+
+      setDownloadFeedback('downloading', isEn ? 'Starting download…' : '正在启动下载…');
+      const result = await downloadCanvasImage(canvas, `${projectName}${suffix}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
+      void archiveEditablePattern();
+      setDownloadFeedback(
+        'success',
+        result === 'wechat-preview'
+          ? (isEn ? 'Preview is ready. Long-press the image to save it.' : '预览已生成，请长按图片保存。')
+          : (isEn ? 'PNG download started.' : 'PNG 下载已开始。'),
+        4_000,
+      );
+    } catch (error) {
+      setDownloadFeedback('error', error instanceof Error ? error.message : (isEn ? 'PNG export failed. Please try again.' : 'PNG 导出失败，请重试。'));
+    }
   };
 
-  const executeAllBoardsDownload = () => {
-    const fullOptions: ExportOptions = {
-      grid,
-      paletteMap,
-      width,
-      height,
-      boardSize,
-      brandName,
-      projectName,
-      showSymbols,
-      symbolDisplayType,
-      symbolFontScale,
-      exportQuality,
-      showCoordinates,
-      beadShape,
-      selectedBoardIndex: null,
-      watermarkType,
-      watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
-      watermarkOpacity,
-      watermarkColor: isVip ? watermarkColor : '#A855F7',
-      watermarkAngle: isVip ? watermarkAngle : -25,
-      legendPosition,
-      legendScaleMode,
-      hideEmptyPegs,
-      isEn,
-    };
-    const fullCanvas = generatePatternCanvas(fullOptions);
-    downloadCanvasImage(fullCanvas, isEn ? `${projectName}_FullPattern.png` : `${projectName}_完整图纸.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
+  const executeAllBoardsDownload = async () => {
+    setDownloadFeedback('generating', isEn ? 'Preparing pattern files…' : '正在准备图纸文件…');
+    await yieldForDownloadFeedback();
 
-    for (let i = 0; i < totalBoards; i++) {
-      setTimeout(() => {
+    try {
+      const fullOptions: ExportOptions = {
+        grid,
+        paletteMap,
+        width,
+        height,
+        boardSize,
+        brandName,
+        projectName,
+        showSymbols,
+        symbolDisplayType,
+        symbolFontScale,
+        exportQuality,
+        showCoordinates,
+        beadShape,
+        selectedBoardIndex: null,
+        watermarkType,
+        watermarkText: isVip ? watermarkText : (isEn ? 'BeadGrid' : '豆织星格'),
+        watermarkOpacity,
+        watermarkColor: isVip ? watermarkColor : '#A855F7',
+        watermarkAngle: isVip ? watermarkAngle : -25,
+        legendPosition,
+        legendScaleMode,
+        hideEmptyPegs,
+        isEn,
+      };
+      const fullCanvas = generatePatternCanvas(fullOptions);
+      setDownloadFeedback('downloading', isEn ? `Downloading 1 of ${totalBoards + 1}…` : `正在下载第 1/${totalBoards + 1} 张…`);
+      await downloadCanvasImage(fullCanvas, isEn ? `${projectName}_FullPattern.png` : `${projectName}_完整图纸.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
+
+      for (let i = 0; i < totalBoards; i++) {
+        await new Promise<void>(resolve => window.setTimeout(resolve, 250));
         const subOptions: ExportOptions = {
           ...fullOptions,
           selectedBoardIndex: i,
         };
-        downloadCanvasImage(generatePatternCanvas(subOptions), isEn ? `${projectName}_Board${i + 1}.png` : `${projectName}_板${i + 1}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
-      }, i * 300);
-    }
+        setDownloadFeedback('downloading', isEn ? `Downloading ${i + 2} of ${totalBoards + 1}…` : `正在下载第 ${i + 2}/${totalBoards + 1} 张…`);
+        await downloadCanvasImage(generatePatternCanvas(subOptions), isEn ? `${projectName}_Board${i + 1}.png` : `${projectName}_板${i + 1}.png`, (dataUrl) => setWechatPreviewUrl(dataUrl));
+      }
 
-    void archiveEditablePattern();
+      void archiveEditablePattern();
+      setDownloadFeedback('success', isEn ? 'Pattern downloads started.' : '图纸下载已开始。', 4_000);
+    } catch (error) {
+      setDownloadFeedback('error', error instanceof Error ? error.message : (isEn ? 'PNG export failed. Please try again.' : 'PNG 导出失败，请重试。'));
+    }
   };
 
   // Download Trigger Handler with VIP check
   const handleDownloadClick = (type: 'single' | 'all') => {
+    if (downloadState === 'generating' || downloadState === 'downloading') return;
     if (!isVip) {
       setPendingDownloadType(type);
       setShowFreeDownloadModal(true);
     } else {
-      if (type === 'single') executeSingleDownload();
-      else executeAllBoardsDownload();
+      if (type === 'single') void executeSingleDownload();
+      else void executeAllBoardsDownload();
     }
   };
 
   const confirmFreeDownload = () => {
+    if (downloadState === 'generating' || downloadState === 'downloading') return;
     setShowFreeDownloadModal(false);
-    if (pendingDownloadType === 'single') executeSingleDownload();
-    else if (pendingDownloadType === 'all') executeAllBoardsDownload();
+    if (pendingDownloadType === 'single') void executeSingleDownload();
+    else if (pendingDownloadType === 'all') void executeAllBoardsDownload();
     setPendingDownloadType(null);
   };
 
@@ -688,15 +747,16 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
         {/* Footer Actions */}
         <div className="p-2 sm:p-3 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div className="text-slate-400 text-[10px] sm:text-[11px] text-center sm:text-left hidden sm:block">
-            {isEn ? `Export Mode: ${watermarkType === 'none' ? '✨ Clean Pattern' : '🛡️ Watermark Protected'} (${width}x${height} beads)` : `当前导出模式: ${watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} (${width}x${height} 豆)`}
+          <div className={`min-h-4 text-[10px] sm:text-[11px] text-center sm:text-left ${downloadState === 'error' ? 'text-rose-300' : downloadState === 'success' ? 'text-emerald-300' : 'text-slate-400'}`} aria-live="polite" role="status">
+            {downloadMessage ?? (isEn ? `Export Mode: ${watermarkType === 'none' ? '✨ Clean Pattern' : '🛡️ Watermark Protected'} (${width}x${height} beads)` : `当前导出模式: ${watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} (${width}x${height} 豆)`) }
           </div>
 
           <div className="flex flex-row items-center gap-2 w-full sm:w-auto">
             {totalBoards > 1 && (
               <button
                 onClick={() => handleDownloadClick('all')}
-                className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold px-2.5 py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors text-xs"
+                disabled={downloadState === 'generating' || downloadState === 'downloading'}
+                className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60 text-slate-200 border border-slate-700 font-bold px-2.5 py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors text-xs"
               >
                 <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span className="truncate">{isEn ? `Download All (${totalBoards + 1})` : `批量全部分板 (${totalBoards + 1}张)`}</span>
@@ -705,10 +765,13 @@ export const ExportModal: React.FC<ExportModalProps> = ({
 
             <button
               onClick={() => handleDownloadClick('single')}
-              className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95 text-xs whitespace-nowrap"
+              disabled={downloadState === 'generating' || downloadState === 'downloading'}
+              className="flex-1 sm:flex-none bg-emerald-600 hover:bg-emerald-500 disabled:cursor-wait disabled:opacity-60 text-white font-bold px-3 py-2 rounded-xl shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1 cursor-pointer transition-all active:scale-95 text-xs whitespace-nowrap"
             >
-              <Download className="w-3.5 h-3.5 shrink-0" />
-              <span>{isEn ? 'Download PNG' : '下载高清 PNG 图纸'}</span>
+              {downloadState === 'generating' || downloadState === 'downloading'
+                ? <RotateCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
+                : <Download className="w-3.5 h-3.5 shrink-0" />}
+              <span>{downloadState === 'generating' || downloadState === 'downloading' ? (isEn ? 'Generating…' : '生成中…') : (isEn ? 'Download PNG' : '下载高清 PNG 图纸')}</span>
             </button>
           </div>
         </div>

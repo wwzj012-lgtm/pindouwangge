@@ -1516,7 +1516,7 @@ export const BRAND_ORDER: readonly BrandKey[] = [
 export const BRAND_NAMES: Record<BrandKey, string> = {
   MARD: 'Mard-221',
   MARD_291: 'Mard-291',
-  COCO: 'COCO-291',
+  COCO: 'Coco-291',
   ARTKAL_S: 'Artkal-176',
   ARTKAL_MINI: 'Artkal Mini-221',
   HAMA: 'Hama-89',
@@ -1527,7 +1527,7 @@ export const BRAND_NAMES: Record<BrandKey, string> = {
 export const BRAND_NAMES_EN: Record<BrandKey, string> = {
   MARD: 'Mard-221',
   MARD_291: 'Mard-291',
-  COCO: 'COCO-291',
+  COCO: 'Coco-291',
   ARTKAL_S: 'Artkal-176',
   ARTKAL_MINI: 'Artkal Mini-221',
   HAMA: 'Hama-89',

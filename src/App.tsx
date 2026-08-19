@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Save, Zap } from 'lucide-react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Save, X, Zap } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -38,20 +38,162 @@ import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
 import { ImageStudioModal } from './components/ImageStudioModal';
 import { UserGuideModal } from './components/UserGuideModal';
-import { SmartBeadReducerModal } from './components/SmartBeadReducerModal';
 import { AuthModal } from './components/AuthModal';
-import { UserPatternsModal } from './components/UserPatternsModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { AccountManagementModal } from './components/AccountManagementModal';
 import { HomeView, type HeroExample } from './components/HomeView';
-import { CommunityView } from './components/CommunityView';
-import { LargeCanvasView, type LargeCanvasFrame } from './components/LargeCanvasView';
+import type { LargeCanvasFrame } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
 import type { CommunityPattern } from './data/communityData';
 import { saveExportedPatternRecord, type EditablePatternProject } from './utils/patternHistory';
 
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
+const AdminPage = lazy(() => import('./pages/AdminPage'));
+const CommunityView = lazy(() =>
+  import('./components/CommunityView').then(({ CommunityView: Component }) => ({ default: Component })),
+);
+const LargeCanvasView = lazy(() =>
+  import('./components/LargeCanvasView').then(({ LargeCanvasView: Component }) => ({ default: Component })),
+);
+const UserPatternsModal = lazy(() =>
+  import('./components/UserPatternsModal').then(({ UserPatternsModal: Component }) => ({ default: Component })),
+);
+const SmartBeadReducerModal = lazy(() =>
+  import('./components/SmartBeadReducerModal').then(({ SmartBeadReducerModal: Component }) => ({ default: Component })),
+);
+
+function AdminPageLoading() {
+  return <main className="grid min-h-screen place-items-center bg-slate-950 p-4 text-slate-100"><div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-slate-800 bg-slate-900 px-4 text-sm text-slate-300"><Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-300" aria-hidden="true" /><span>正在加载管理后台...</span></div></main>;
+}
+
+type DeferredFeatureSurface = 'page' | 'modal';
+
+interface DeferredFeatureBoundaryProps {
+  label: string;
+  surface: DeferredFeatureSurface;
+  onDismiss?: () => void;
+  children: React.ReactNode;
+}
+
+interface DeferredFeatureBoundaryState {
+  hasError: boolean;
+}
+
+function DeferredFeaturePageLoading({ label }: Pick<DeferredFeatureBoundaryProps, 'label'>) {
+  return (
+    <section role="status" className="grid min-h-[52dvh] place-items-center p-4 sm:p-6" aria-live="polite">
+      <div className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-sky-200 bg-white px-4 text-sm text-sky-950 shadow-sm">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
+        <span>正在加载{label}...</span>
+      </div>
+    </section>
+  );
+}
+
+function DeferredFeatureModalLoading({ label }: Pick<DeferredFeatureBoundaryProps, 'label'>) {
+  return (
+    <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`正在加载${label}`}>
+      <div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-sky-200 bg-white px-4 text-sm text-sky-950 shadow-xl" aria-live="polite">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
+        <span>正在加载{label}...</span>
+      </div>
+    </div>
+  );
+}
+
+function DeferredFeatureLoadFailure({ label, surface, onDismiss }: Omit<DeferredFeatureBoundaryProps, 'children'>) {
+  const message = <div className="w-full max-w-sm border border-rose-200 bg-white p-5 text-center shadow-xl">
+    <h2 className="text-base font-bold text-rose-950">{label}加载失败</h2>
+    <p className="mt-2 text-sm leading-6 text-rose-800">当前图纸和登录状态仍会保留。重新加载页面后可重新获取此功能。</p>
+    <div className="mt-5 flex justify-center gap-2">
+      {onDismiss && <button type="button" onClick={onDismiss} className="border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">关闭</button>}
+      <button type="button" onClick={() => window.location.reload()} className="bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800">重新加载页面</button>
+    </div>
+  </div>;
+
+  return surface === 'modal'
+    ? <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${label}加载失败`}>{message}</div>
+    : <section className="grid min-h-[52dvh] place-items-center p-4 sm:p-6" role="alert">{message}</section>;
+}
+
+class DeferredFeatureBoundary extends React.Component<DeferredFeatureBoundaryProps, DeferredFeatureBoundaryState> {
+  declare readonly props: Readonly<DeferredFeatureBoundaryProps>;
+  state: DeferredFeatureBoundaryState = { hasError: false };
+
+  static getDerivedStateFromError(): DeferredFeatureBoundaryState {
+    return { hasError: true };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const { children: _children, ...props } = this.props;
+      return <DeferredFeatureLoadFailure {...props} />;
+    }
+    return this.props.children;
+  }
+}
+
+type StudioTab = 'home' | 'community' | 'studio' | 'largeCanvas';
+type PublicFeatureKey = 'public.community' | 'public.large_canvas' | 'public.smart_reducer';
+
+interface PublicAnnouncement {
+  id: string;
+  title: string;
+  content: string;
+  pinned: boolean;
+  publishAt: number;
+}
+
+const PUBLIC_FEATURE_DEFAULTS: Record<PublicFeatureKey, boolean> = {
+  'public.community': true,
+  'public.large_canvas': true,
+  'public.smart_reducer': true,
+};
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function publicData(value: unknown): unknown {
+  const envelope = recordValue(value);
+  return envelope?.success === true ? envelope.data : null;
+}
+
+function parsePublicAnnouncements(value: unknown): PublicAnnouncement[] {
+  const rows = recordValue(value)?.announcements;
+  if (!Array.isArray(rows)) return [];
+  return rows.slice(0, 3).flatMap((row) => {
+    const item = recordValue(row);
+    const id = typeof item?.id === 'string' ? item.id.trim().slice(0, 64) : '';
+    const title = typeof item?.title === 'string' ? item.title.trim().slice(0, 120) : '';
+    const content = typeof item?.content === 'string' ? item.content.trim().slice(0, 10_000) : '';
+    const publishAt = typeof item?.publishAt === 'number' && Number.isSafeInteger(item.publishAt) ? item.publishAt : 0;
+    if (!id || !title || !content || publishAt <= 0 || typeof item?.pinned !== 'boolean') return [];
+    return [{ id, title, content, pinned: item.pinned, publishAt }];
+  });
+}
+
+function isPublicFeatureKey(value: unknown): value is PublicFeatureKey {
+  return value === 'public.community' || value === 'public.large_canvas' || value === 'public.smart_reducer';
+}
+
+function parsePublicFeatureFlags(value: unknown): Record<PublicFeatureKey, boolean> {
+  const flags = { ...PUBLIC_FEATURE_DEFAULTS };
+  const rows = recordValue(value)?.flags;
+  if (!Array.isArray(rows)) return flags;
+  for (const row of rows) {
+    const item = recordValue(row);
+    if (isPublicFeatureKey(item?.key) && typeof item.enabled === 'boolean') flags[item.key] = item.enabled;
+  }
+  return flags;
+}
+
+function isGuestAccount(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const account = value as Record<string, unknown>;
+  return account.authProvider === 'guest' || account.auth_provider === 'guest' || account.provider === 'guest';
+}
 
 type LargeCanvasStudioRequest = {
   id: number;
@@ -81,18 +223,25 @@ function imageElementToFile(image: HTMLImageElement, fileName: string): Promise<
   });
 }
 
-export default function App() {
+function StudioApp() {
   const { language } = useLanguage();
-  const { currentUser } = useAuth();
+  const { currentUser, userProfile } = useAuth();
   const isEn = language === 'en';
 
   // 1. Core State
-  const [currentTab, setCurrentTab] = useState<'home' | 'community' | 'studio' | 'largeCanvas'>('home');
+  const [currentTab, setCurrentTab] = useState<StudioTab>('home');
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
   const [activePatternId, setActivePatternId] = useState<string | null>(null);
   const [isSavingPattern, setIsSavingPattern] = useState(false);
+  const saveSubmissionRef = useRef(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [isSaveNameDialogOpen, setIsSaveNameDialogOpen] = useState(false);
+  const [saveNameInput, setSaveNameInput] = useState('');
+  const [saveNameError, setSaveNameError] = useState<string | null>(null);
   const [imageLoadMessage, setImageLoadMessage] = useState<string | null>(null);
+  const [publicAnnouncements, setPublicAnnouncements] = useState<PublicAnnouncement[]>([]);
+  const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<Set<string>>(() => new Set());
+  const [publicFeatureFlags, setPublicFeatureFlags] = useState<Record<PublicFeatureKey, boolean>>(() => ({ ...PUBLIC_FEATURE_DEFAULTS }));
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
   const [isConverting, setIsConverting] = useState<boolean>(false);
@@ -211,7 +360,7 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
-  const [isSmartReduceModalOpen, setIsSmartReduceModalOpen] = useState(false);
+  const [isSmartReduceModalOpen, setRawSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
   const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
@@ -221,6 +370,24 @@ export default function App() {
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
+  const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
+
+  const requireFormalLogin = useCallback((message: string): boolean => {
+    if (hasFormalLogin) return true;
+    setSaveMessage(message);
+    setIsAuthModalOpen(true);
+    return false;
+  }, [hasFormalLogin]);
+
+  const openUserPatternsModal = useCallback(() => {
+    if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
+    setIsUserPatternsModalOpen(true);
+  }, [isEn, requireFormalLogin]);
+
+  useEffect(() => {
+    if (!hasFormalLogin) setIsUserPatternsModalOpen(false);
+  }, [hasFormalLogin]);
+
   // Open login modal on 401 unauthorized event
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -229,6 +396,77 @@ export default function App() {
     window.addEventListener('unauthorized', handleUnauthorized);
     return () => window.removeEventListener('unauthorized', handleUnauthorized);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const readPublic = async (path: string): Promise<unknown> => {
+      try {
+        const response = await fetch(path, { headers: { Accept: 'application/json' }, credentials: 'omit' });
+        if (!response.ok) return null;
+        return publicData(await response.json());
+      } catch {
+        return null;
+      }
+    };
+    void Promise.all([
+      readPublic('/api/public/announcements'),
+      readPublic('/api/public/feature-flags'),
+    ]).then(([announcements, flags]) => {
+      if (!active) return;
+      if (announcements !== null) setPublicAnnouncements(parsePublicAnnouncements(announcements));
+      if (flags !== null) setPublicFeatureFlags(parsePublicFeatureFlags(flags));
+    });
+    return () => { active = false; };
+  }, []);
+
+  const showDisabledFeature = useCallback((label: string) => {
+    setSaveMessage(`${label}当前未开放`);
+  }, []);
+
+  const setIsSmartReduceModalOpen = useCallback((open: boolean) => {
+    if (open && !publicFeatureFlags['public.smart_reducer']) {
+      showDisabledFeature('智能省豆');
+      return;
+    }
+    setRawSmartReduceModalOpen(open);
+  }, [publicFeatureFlags, showDisabledFeature]);
+
+  const guardedSetCurrentTab = useCallback<React.Dispatch<React.SetStateAction<StudioTab>>>((next) => {
+    const tab = typeof next === 'function' ? next(currentTab) : next;
+    const feature = tab === 'community'
+      ? 'public.community'
+      : tab === 'largeCanvas'
+        ? 'public.large_canvas'
+        : null;
+    if (feature && !publicFeatureFlags[feature]) {
+      showDisabledFeature(tab === 'community' ? '社区' : '大画板');
+      return;
+    }
+    setCurrentTab(tab);
+  }, [currentTab, publicFeatureFlags, showDisabledFeature]);
+
+  const openSmartReduce = useCallback(() => {
+    if (!publicFeatureFlags['public.smart_reducer']) {
+      showDisabledFeature('智能省豆');
+      return;
+    }
+    setIsSmartReduceModalOpen(true);
+  }, [publicFeatureFlags, showDisabledFeature]);
+
+  useEffect(() => {
+    if (!publicFeatureFlags['public.smart_reducer'] && isSmartReduceModalOpen) {
+      setIsSmartReduceModalOpen(false);
+      showDisabledFeature('智能省豆');
+    }
+    if (currentTab === 'community' && !publicFeatureFlags['public.community']) {
+      setCurrentTab('home');
+      showDisabledFeature('社区');
+    }
+    if (currentTab === 'largeCanvas' && !publicFeatureFlags['public.large_canvas']) {
+      setCurrentTab('home');
+      showDisabledFeature('大画板');
+    }
+  }, [currentTab, isSmartReduceModalOpen, publicFeatureFlags, showDisabledFeature]);
 
   // Palette Lookup Map
   const paletteMap = useMemo(() => {
@@ -854,6 +1092,7 @@ export default function App() {
 
   // Export & Import Project JSON
   const handleExportJson = () => {
+    if (!requireFormalLogin(isEn ? 'Sign in before downloading project files.' : '请先登录，再下载工程文件。')) return;
     const project: ProjectData = {
       version: '1.0',
       name: projectName,
@@ -914,8 +1153,10 @@ export default function App() {
     applyGridChange(restoredGrid, false);
   };
 
-  const handleSaveCurrentPattern = async (): Promise<void> => {
-    if (isSavingPattern) return;
+  const handleSaveCurrentPattern = async (title: string): Promise<void> => {
+    if (!requireFormalLogin(isEn ? 'Sign in before saving patterns.' : '请先登录，再保存图纸。')) return;
+    if (isSavingPattern || saveSubmissionRef.current) return;
+    saveSubmissionRef.current = true;
     setIsSavingPattern(true);
     setSaveMessage(null);
     const totalBeads = gridRef.current.reduce((total, row) => total + row.filter((cell) => cell !== null).length, 0);
@@ -923,7 +1164,7 @@ export default function App() {
       const record = await saveExportedPatternRecord({
         id: activePatternId ?? undefined,
         userId: currentUser?.uid ?? null,
-        title: projectName || (isEn ? 'Perler Pattern' : '拼豆图纸'),
+        title,
         width: settings.width,
         height: settings.height,
         totalBeads,
@@ -940,8 +1181,41 @@ export default function App() {
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : (isEn ? 'Save failed. Your canvas is unchanged.' : '保存失败，当前画板未改变。'));
     } finally {
+      saveSubmissionRef.current = false;
       setIsSavingPattern(false);
     }
+  };
+
+  const openSaveNameDialog = (): void => {
+    if (!requireFormalLogin(isEn ? 'Sign in before saving patterns.' : '请先登录，再保存图纸。')) return;
+    if (isSavingPattern) return;
+    setSaveNameInput((projectName.trim() || (isEn ? 'Perler Pattern' : '我的拼豆图纸')).slice(0, 60));
+    setSaveNameError(null);
+    setIsSaveNameDialogOpen(true);
+  };
+
+  const confirmSaveCurrentPattern = (): void => {
+    if (!requireFormalLogin(isEn ? 'Sign in before saving patterns.' : '请先登录，再保存图纸。')) {
+      setIsSaveNameDialogOpen(false);
+      return;
+    }
+    const title = saveNameInput.trim();
+    if (!title) {
+      setSaveNameError(isEn ? 'Enter a pattern name.' : '请输入作品名称');
+      return;
+    }
+    if (title.length > 60) {
+      setSaveNameError(isEn ? 'Use 60 characters or fewer.' : '作品名称不能超过 60 个字符');
+      return;
+    }
+    setProjectName(title);
+    setIsSaveNameDialogOpen(false);
+    void handleSaveCurrentPattern(title);
+  };
+
+  const openExportModal = (): void => {
+    if (!requireFormalLogin(isEn ? 'Sign in before downloading patterns.' : '请先登录，再导出图纸。')) return;
+    setIsExportModalOpen(true);
   };
 
   // Keyboard Shortcuts (P, B, I, E, R, Ctrl+Z, Ctrl+Y)
@@ -977,11 +1251,12 @@ export default function App() {
   }, [handleUndo, handleRedo]);
 
   const handleImportPattern = useCallback(() => {
+    if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
     setCurrentTab('studio');
     setTimeout(() => {
-      setIsUserPatternsModalOpen(true);
+      openUserPatternsModal();
     }, 100);
-  }, []);
+  }, [isEn, openUserPatternsModal, requireFormalLogin]);
 
   const handleRemixPattern = useCallback((pattern: CommunityPattern) => {
     setProjectName(pattern.title);
@@ -996,6 +1271,8 @@ export default function App() {
     }
   }, [handleLoadSample]);
 
+  const activeAnnouncement = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(item.id)) ?? null;
+
   return (
     <div className="flex flex-col h-screen bg-[#F5F0FD] font-sans text-purple-950 overflow-hidden">
       {/* Top Main Navigation Header */}
@@ -1006,23 +1283,30 @@ export default function App() {
         onLoadSample={handleLoadSample}
         onExportJson={handleExportJson}
         onImportJson={handleImportJson}
-        onOpenExportModal={() => setIsExportModalOpen(true)}
+        onOpenExportModal={openExportModal}
         onOpenGuideModal={() => setIsGuideModalOpen(true)}
         onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
-        onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
+        onOpenPatternsModal={openUserPatternsModal}
         onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
         onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onClearCanvas={handleClearCanvas}
         currentTab={currentTab}
-        setCurrentTab={setCurrentTab}
+        setCurrentTab={guardedSetCurrentTab}
         onImportPattern={handleImportPattern}
       />
 
+      {activeAnnouncement && (
+        <aside role="status" className="mx-3 mt-2 flex min-w-0 shrink-0 items-start gap-2 border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950 sm:mx-5 sm:px-4" aria-label="系统公告">
+          <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold">{activeAnnouncement.pinned ? '置顶公告 · ' : '公告 · '}{activeAnnouncement.title}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-sky-800">{activeAnnouncement.content}</p></div>
+          <button type="button" title="关闭公告" aria-label="关闭公告" onClick={() => setDismissedAnnouncementIds(current => new Set([...current, activeAnnouncement.id]))} className="grid h-8 w-8 shrink-0 place-items-center text-sky-700 hover:bg-sky-100 hover:text-sky-950"><X className="h-4 w-4" /></button>
+        </aside>
+      )}
+
       {currentTab === 'home' && (
         <HomeView
-          onNavigateTab={setCurrentTab}
+          onNavigateTab={guardedSetCurrentTab}
           onStartPhotoToBead={handleImageUpload}
           onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
           onImportPattern={handleImportPattern}
@@ -1030,48 +1314,56 @@ export default function App() {
       )}
 
       {currentTab === 'community' && (
-        <CommunityView
-          onRemixPattern={handleRemixPattern}
-          onNavigateToStudio={() => setCurrentTab('studio')}
-          onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        />
+        <DeferredFeatureBoundary label="社区" surface="page" onDismiss={() => setCurrentTab('home')}>
+          <Suspense fallback={<DeferredFeaturePageLoading label="社区" />}>
+            <CommunityView
+              onRemixPattern={handleRemixPattern}
+              onNavigateToStudio={() => setCurrentTab('studio')}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            />
+          </Suspense>
+        </DeferredFeatureBoundary>
       )}
 
       {currentTab === 'largeCanvas' && (
-        <LargeCanvasView
-          paletteMap={paletteMap}
-          brandName={BRAND_NAMES[brand]}
-          paletteOptions={largeCanvasPaletteOptions}
-          selectedPaletteId={brand}
-          onChangePalette={paletteId => {
-            const nextBrand = paletteId as BrandKey;
-            if (!BRAND_PALETTES[nextBrand]) return;
-            setBrand(nextBrand);
-            setActivePalette(BRAND_PALETTES[nextBrand]);
-            setSettings(current => ({ ...current, brand: nextBrand }));
-          }}
-          beadShape={beadShape}
-          onChangeBeadShape={setBeadShape}
-          canvasBackdrop={canvasBackdrop}
-          onChangeCanvasBackdrop={setCanvasBackdrop}
-          showGridLines={showGridLines}
-          onChangeShowGridLines={setShowGridLines}
-          showCodeLabels={showLargeCodeLabels}
-          onChangeShowCodeLabels={setShowLargeCodeLabels}
-          showDataPreview={showLargeDataPreview}
-          onChangeShowDataPreview={setShowLargeDataPreview}
-          conversionSettings={{
-            quantizationStrength: settings.quantizationStrength,
-            sharpening: settings.sharpening,
-            backgroundRemovalEnabled: settings.backgroundRemovalEnabled,
-            dither: settings.dither,
-            colorMatchAlgo: settings.colorMatchAlgo,
-          }}
-          onChangeConversionSettings={updates => setSettings(current => ({ ...current, ...updates }))}
-          onConvertImage={handleConvertLargeCanvasImage}
-          onPrepareImage={prepareLargeCanvasImage}
-          onOpenFrame={handleOpenLargeCanvasFrame}
-        />
+        <DeferredFeatureBoundary label="大画板" surface="page" onDismiss={() => setCurrentTab('home')}>
+          <Suspense fallback={<DeferredFeaturePageLoading label="大画板" />}>
+            <LargeCanvasView
+              paletteMap={paletteMap}
+              brandName={BRAND_NAMES[brand]}
+              paletteOptions={largeCanvasPaletteOptions}
+              selectedPaletteId={brand}
+              onChangePalette={paletteId => {
+                const nextBrand = paletteId as BrandKey;
+                if (!BRAND_PALETTES[nextBrand]) return;
+                setBrand(nextBrand);
+                setActivePalette(BRAND_PALETTES[nextBrand]);
+                setSettings(current => ({ ...current, brand: nextBrand }));
+              }}
+              beadShape={beadShape}
+              onChangeBeadShape={setBeadShape}
+              canvasBackdrop={canvasBackdrop}
+              onChangeCanvasBackdrop={setCanvasBackdrop}
+              showGridLines={showGridLines}
+              onChangeShowGridLines={setShowGridLines}
+              showCodeLabels={showLargeCodeLabels}
+              onChangeShowCodeLabels={setShowLargeCodeLabels}
+              showDataPreview={showLargeDataPreview}
+              onChangeShowDataPreview={setShowLargeDataPreview}
+              conversionSettings={{
+                quantizationStrength: settings.quantizationStrength,
+                sharpening: settings.sharpening,
+                backgroundRemovalEnabled: settings.backgroundRemovalEnabled,
+                dither: settings.dither,
+                colorMatchAlgo: settings.colorMatchAlgo,
+              }}
+              onChangeConversionSettings={updates => setSettings(current => ({ ...current, ...updates }))}
+              onConvertImage={handleConvertLargeCanvasImage}
+              onPrepareImage={prepareLargeCanvasImage}
+              onOpenFrame={handleOpenLargeCanvasFrame}
+            />
+          </Suspense>
+        </DeferredFeatureBoundary>
       )}
 
       {currentTab === 'studio' && (
@@ -1105,9 +1397,9 @@ export default function App() {
         hasImage={sourceImage !== null}
         showOverlay={showOverlay}
         setShowOverlay={setShowOverlay}
-        onSavePattern={() => void handleSaveCurrentPattern()}
+        onSavePattern={openSaveNameDialog}
         isSavingPattern={isSavingPattern}
-        onOpenExport={() => setIsExportModalOpen(true)}
+        onOpenExport={openExportModal}
         canExport={grid.some(row => row.some(colorId => colorId !== null))}
       />
 
@@ -1255,7 +1547,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setIsSmartReduceModalOpen(true)}
+          onClick={openSmartReduce}
           className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl text-amber-800 hover:text-amber-950 font-bold transition-all cursor-pointer bg-amber-50 border border-amber-200"
           title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
         >
@@ -1264,7 +1556,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => void handleSaveCurrentPattern()}
+          onClick={openSaveNameDialog}
           disabled={isSavingPattern}
           className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-bold transition-all cursor-pointer shadow-xs active:scale-95"
         >
@@ -1273,7 +1565,7 @@ export default function App() {
         </button>
 
         <button
-          onClick={() => setIsExportModalOpen(true)}
+          onClick={openExportModal}
           className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
         >
           <Download className="w-3.5 h-3.5" />
@@ -1334,28 +1626,84 @@ export default function App() {
         onClose={() => setIsGuideModalOpen(false)}
       />
 
-      <SmartBeadReducerModal
-        isOpen={isSmartReduceModalOpen}
-        onClose={() => setIsSmartReduceModalOpen(false)}
-        grid={grid}
-        palette={activePalette}
-        onApplyReducedGrid={(newGrid) => {
-          invalidateImageRequest();
-          applyGridChange(newGrid, false);
-          setSettings(s => ({
-            ...s,
-            width: newGrid[0]?.length || s.width,
-            height: newGrid.length || s.height,
-          }));
-        }}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-      />
+      {isSaveNameDialogOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-purple-200 bg-white p-5 shadow-2xl">
+            <h2 className="text-base font-black text-purple-950">保存作品</h2>
+            <p className="mt-1 text-xs text-purple-600">为图纸命名后保存到你的图库。</p>
+            <label className="mt-4 block text-xs font-bold text-purple-900">
+              作品名称
+              <input
+                autoFocus
+                maxLength={60}
+                value={saveNameInput}
+                onChange={event => {
+                  setSaveNameInput(event.target.value);
+                  if (saveNameError) setSaveNameError(null);
+                }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter') confirmSaveCurrentPattern();
+                }}
+                className="mt-1.5 w-full rounded-xl border border-purple-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-500/30"
+                placeholder="例如：我的向日葵拼豆图"
+                disabled={isSavingPattern}
+              />
+            </label>
+            <div className="mt-1 flex justify-between text-[11px] text-purple-500">
+              <span>必填，1-60 个字符</span>
+              <span>{saveNameInput.trim().length}/60</span>
+            </div>
+            {saveNameError && <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{saveNameError}</p>}
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setIsSaveNameDialogOpen(false)}
+                disabled={isSavingPattern}
+                className="rounded-xl border border-purple-200 px-4 py-2.5 text-xs font-bold text-purple-800 transition-colors hover:bg-purple-50 disabled:opacity-60"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={confirmSaveCurrentPattern}
+                disabled={isSavingPattern}
+                className="rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-60"
+              >
+                确认保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isSmartReduceModalOpen && (
+        <DeferredFeatureBoundary label="智能省豆" surface="modal" onDismiss={() => setIsSmartReduceModalOpen(false)}>
+          <Suspense fallback={<DeferredFeatureModalLoading label="智能省豆" />}>
+            <SmartBeadReducerModal
+              isOpen={isSmartReduceModalOpen}
+              onClose={() => setIsSmartReduceModalOpen(false)}
+              grid={grid}
+              palette={activePalette}
+              onApplyReducedGrid={(newGrid) => {
+                invalidateImageRequest();
+                applyGridChange(newGrid, false);
+                setSettings(s => ({
+                  ...s,
+                  width: newGrid[0]?.length || s.width,
+                  height: newGrid.length || s.height,
+                }));
+              }}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            />
+          </Suspense>
+        </DeferredFeatureBoundary>
+      )}
 
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onOpenAdminPanel={() => window.location.assign('/admin')}
-        onOpenPatternsModal={() => setIsUserPatternsModalOpen(true)}
+        onOpenPatternsModal={openUserPatternsModal}
       />
 
       <UserProfileModal
@@ -1373,16 +1721,26 @@ export default function App() {
         onOpenVipModal={() => setIsVipModalOpen(true)}
       />
 
-      <UserPatternsModal
-        isOpen={isUserPatternsModalOpen}
-        onClose={() => setIsUserPatternsModalOpen(false)}
-        onContinueEditing={handleRestorePattern}
-        onOpenCommunity={() => {
-          setIsUserPatternsModalOpen(false);
-          setCurrentTab('community');
-        }}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-      />
+      {isUserPatternsModalOpen && hasFormalLogin && (
+        <DeferredFeatureBoundary label="我的图库" surface="modal" onDismiss={() => setIsUserPatternsModalOpen(false)}>
+          <Suspense fallback={<DeferredFeatureModalLoading label="我的图库" />}>
+            <UserPatternsModal
+              isOpen={isUserPatternsModalOpen}
+              onClose={() => setIsUserPatternsModalOpen(false)}
+              onContinueEditing={handleRestorePattern}
+              onOpenCommunity={() => {
+                if (!publicFeatureFlags['public.community']) {
+                  showDisabledFeature('社区');
+                  return;
+                }
+                setIsUserPatternsModalOpen(false);
+                setCurrentTab('community');
+              }}
+              onOpenAuthModal={() => setIsAuthModalOpen(true)}
+            />
+          </Suspense>
+        </DeferredFeatureBoundary>
+      )}
 
       <VipPrivilegesModal
         isOpen={isVipModalOpen}
@@ -1421,4 +1779,10 @@ export default function App() {
       )}
     </div>
   );
+}
+
+export default function App() {
+  return /^\/admin(?:\/|$)/.test(window.location.pathname)
+    ? <Suspense fallback={<AdminPageLoading />}><AdminPage /></Suspense>
+    : <StudioApp />;
 }

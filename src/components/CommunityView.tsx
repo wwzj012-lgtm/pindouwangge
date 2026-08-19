@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Search,
   Sparkles,
@@ -24,6 +24,7 @@ import {
   Upload,
 } from 'lucide-react';
 import type { CommunityPattern } from '../data/communityData';
+import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
 import {
   type CommunityPost,
@@ -43,6 +44,17 @@ interface CommunityViewProps {
 type SortMode = 'hot' | 'new' | 'favorites';
 
 const COMMUNITY_CATEGORIES = ['全部'];
+const GUEST_COMMUNITY_MESSAGE = '游客账号仅可浏览社区。请登录或注册后再使用喜欢、收藏和发布功能。';
+
+function isGuestCommunityUser(profile: unknown): boolean {
+  if (!profile || typeof profile !== 'object') return false;
+  const value = profile as Record<string, unknown>;
+  return value.authProvider === 'guest' || value.auth_provider === 'guest' || value.provider === 'guest';
+}
+
+function isGuestCommunityError(error: string | undefined): boolean {
+  return error?.includes('Guest accounts can only browse the community') ?? false;
+}
 
 function publishedLabel(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(timestamp));
@@ -75,6 +87,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   onNavigateToStudio,
   onOpenAuthModal,
 }) => {
+  const { currentUser, userProfile } = useAuth();
   const [activeCategory, setActiveCategory] = useState<string>('全部');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
@@ -91,6 +104,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const [publishFile, setPublishFile] = useState<File | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
+  const publishSubmissionRef = useRef(false);
 
   const refreshPatterns = useCallback(async () => {
     setIsLoading(true);
@@ -137,12 +151,25 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     });
   }, [patternsState, searchQuery, sortBy]);
 
-  const requireLogin = (message: string): boolean => {
-    if (getApiToken()) return false;
-    setRequestError(message);
+  const requireRegisteredCommunityAccount = useCallback((message: string): boolean => {
+    const hasFormalLogin = Boolean(currentUser)
+      && Boolean(getApiToken())
+      && !isGuestCommunityUser(currentUser)
+      && !isGuestCommunityUser(userProfile);
+    if (hasFormalLogin) return false;
+    setRequestError(isGuestCommunityUser(currentUser) || isGuestCommunityUser(userProfile)
+      ? GUEST_COMMUNITY_MESSAGE
+      : message);
     onOpenAuthModal();
     return true;
-  };
+  }, [currentUser, onOpenAuthModal, userProfile]);
+
+  const handleGuestCommunityResponse = useCallback((error: string | undefined): boolean => {
+    if (!isGuestCommunityError(error)) return false;
+    setRequestError(GUEST_COMMUNITY_MESSAGE);
+    onOpenAuthModal();
+    return true;
+  }, [onOpenAuthModal]);
 
   const updatePattern = (id: string, update: (pattern: CommunityPost) => CommunityPost) => {
     setPatternsState(current => current.map(pattern => pattern.id === id ? update(pattern) : pattern));
@@ -160,13 +187,15 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
 
   const handleReaction = async (event: React.MouseEvent, pattern: CommunityPost, reaction: 'like' | 'favorite') => {
     event.stopPropagation();
-    if (requireLogin('登录后即可参与社区互动')) return;
+    if (requireRegisteredCommunityAccount('登录后即可参与社区互动')) return;
     const active = reaction === 'like' ? !pattern.liked : !pattern.favorited;
     const action = `${reaction}:${pattern.id}`;
     setPendingAction(action);
     const result = await reactToCommunityPost(pattern.id, reaction, active);
     if (!result.ok) {
-      setRequestError(result.error ?? '操作未完成，请重试');
+      if (!handleGuestCommunityResponse(result.error)) {
+        setRequestError(result.error ?? '操作未完成，请重试');
+      }
     } else {
       updatePattern(pattern.id, current => reaction === 'like'
         ? { ...current, liked: active, likeCount: Math.max(0, current.likeCount + (active ? 1 : -1)) }
@@ -176,36 +205,59 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   };
 
   const openPublish = () => {
-    if (requireLogin('登录后即可投稿社区作品')) return;
+    if (requireRegisteredCommunityAccount('登录后即可投稿社区作品')) return;
     setPublishError(null);
+    setPublishTitle('我的拼豆作品');
     setIsPublishOpen(true);
   };
 
   const publishPattern = async () => {
     const title = publishTitle.trim();
-    if (!title || !publishFile) {
-      setPublishError('请填写作品标题并选择一张图片');
+    if (requireRegisteredCommunityAccount('登录后即可投稿社区作品')) {
+      setIsPublishOpen(false);
       return;
     }
+    if (!title || title.length > 60) {
+      setPublishError('请填写 1-60 个字符的作品标题');
+      return;
+    }
+    if (!publishFile) {
+      setPublishError('请选择一张作品图片');
+      return;
+    }
+    if (isPublishing || publishSubmissionRef.current) return;
+    publishSubmissionRef.current = true;
     setIsPublishing(true);
     setPublishError(null);
-    const upload = await uploadCommunityAsset(publishFile);
-    if (!upload.ok || !upload.data) {
-      setPublishError(upload.error ?? '图片上传失败，请重试');
+    try {
+      const upload = await uploadCommunityAsset(publishFile);
+      if (!upload.ok || !upload.data) {
+        if (handleGuestCommunityResponse(upload.error)) {
+          setIsPublishOpen(false);
+          return;
+        }
+        setPublishError(upload.error ?? '图片上传失败，请重试');
+        return;
+      }
+      const published = await publishCommunityPost(title, upload.data.asset.id);
+      if (!published.ok) {
+        if (handleGuestCommunityResponse(published.error)) {
+          setIsPublishOpen(false);
+          return;
+        }
+        setPublishError(published.error ?? '作品发布失败，请重试');
+        return;
+      }
+      setIsPublishOpen(false);
+      setPublishTitle('');
+      setPublishFile(null);
+      await refreshPatterns();
+    } catch {
+      setPublishError('作品发布失败，请检查网络后重试');
+    } finally {
+      publishSubmissionRef.current = false;
       setIsPublishing(false);
-      return;
     }
-    const published = await publishCommunityPost(title, upload.data.asset.id);
-    if (!published.ok) {
-      setPublishError(published.error ?? '作品发布失败，请重试');
-      setIsPublishing(false);
-      return;
-    }
-    setIsPublishOpen(false);
-    setPublishTitle('');
-    setPublishFile(null);
-    setIsPublishing(false);
-    await refreshPatterns();
   };
 
   return (
@@ -590,11 +642,15 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 <input
                   maxLength={60}
                   value={publishTitle}
-                  onChange={event => setPublishTitle(event.target.value)}
+                  onChange={event => {
+                    setPublishTitle(event.target.value);
+                    if (publishError) setPublishError(null);
+                  }}
                   className="mt-1.5 w-full rounded-xl border border-purple-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-500/30"
                   placeholder="给作品起个名字"
                   disabled={isPublishing}
                 />
+                <span className="mt-1 block text-right text-[11px] font-medium text-purple-500">必填，1-60 个字符 · {publishTitle.trim().length}/60</span>
               </label>
               <label className="block text-xs font-bold text-purple-900">
                 作品图片

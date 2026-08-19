@@ -48,7 +48,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
 
   const resolvedBrand: BrandKey = BRAND_PALETTES[brand] ? brand : 'MARD';
   const resolvedBrandPalette = BRAND_PALETTES[resolvedBrand] || BRAND_PALETTES.MARD;
-  const hasScreenReferenceColors = activePalette.some(color => color.screenReferenceOnly);
+  const hasScreenReferenceColors = resolvedBrand === 'MARD_291' || activePalette.some(color => color.screenReferenceOnly);
 
   const handleToggleColor = (id: string) => {
     setActivePalette(
@@ -112,7 +112,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
               </p>
               {hasScreenReferenceColors && (
                 <p className="mt-1 text-[10px] leading-relaxed text-amber-300">
-                  P/Q/R/T/Y/ZG 特殊材质仅作屏幕参考，珠光、荧光、夜光效果请以实物为准。
+                  P/Q/R/T/Y/ZG 珠光、荧光、夜光等特殊材质为屏幕模拟色，仅用于算法匹配参考，不能作为实物精准对色依据。
                 </p>
               )}
             </div>
@@ -297,6 +297,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
                 <div className="flex-1 min-w-0">
                   <div className="font-mono font-bold leading-tight text-[11px] sm:text-xs text-slate-100 truncate flex items-center gap-1">
                     <span>{color.code}</span>
+                    {color.screenReferenceOnly && <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/20 px-0.5 text-[8px] text-amber-300">屏幕参考</span>}
                     {isCustom && <span className="text-[8px] bg-amber-500/20 text-amber-300 px-0.5 rounded border border-amber-500/30">自定</span>}
                   </div>
                   <div className="text-[10px] text-slate-400 truncate">{color.name}</div>

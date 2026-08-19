@@ -28,20 +28,14 @@ import {
   Loader2,
   RotateCcw,
   Clock,
+  LogOut,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import {
-  apiGet,
-  apiPost,
-  clearAdminSession,
-  createAdminSession,
-  hasAdminSession,
-} from '../utils/api';
+import { apiPost as apiPostWithBearer } from '../utils/api';
 import { formatChinaDate } from '../utils/dateUtils';
 import {
   UserProfile,
   sha256,
-  recordAuditLog,
   AuditLog,
 } from '../lib/accountApi';
 import {
@@ -56,6 +50,14 @@ interface AdminPanelModalProps {
 }
 
 type UserRoleFilter = 'all' | 'admin' | 'pro' | 'vip' | 'free';
+type AdminAccessState = 'checking' | 'ready' | 'session-required' | 'forbidden' | 'signed-out' | 'unavailable';
+
+interface AdminApiResult<T> {
+  ok: boolean;
+  status: number;
+  data?: T;
+  error?: string;
+}
 
 interface VipCodeData {
   id: string;
@@ -74,16 +76,16 @@ interface VipCodeData {
 }
 
 export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClose, standalone = false }) => {
-  const { currentUser, isAdmin } = useAuth();
+  const { currentUser } = useAuth();
   const [activeTab, setActiveTab] = useState<'users' | 'codes' | 'logs'>('users');
 
   const [usersList, setUsersList] = useState<UserProfile[]>([]);
   const [codesList, setCodesList] = useState<VipCodeData[]>([]);
   const [auditLogsList, setAuditLogsList] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
-  const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(false);
-  const [adminSecretInput, setAdminSecretInput] = useState<string>('');
-  const [adminSecretError, setAdminSecretError] = useState<string>('');
+  const [adminAccessState, setAdminAccessState] = useState<AdminAccessState>('checking');
+  const [adminAccessError, setAdminAccessError] = useState<string>('');
+  const [trustedDevice, setTrustedDevice] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedUserUids, setSelectedUserUids] = useState<string[]>([]);
 
@@ -102,9 +104,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const [lastGeneratedPlaintextCodes, setLastGeneratedPlaintextCodes] = useState<string[]>([]);
   const [batchCopied, setBatchCopied] = useState<boolean>(false);
 
-  // Table row unmask state & row copy state
+  // Table row unmask state. Sale markers are persisted on each code record.
   const [revealedCodeIds, setRevealedCodeIds] = useState<Record<string, boolean>>({});
-  const [copiedRowId, setCopiedRowId] = useState<string | null>(null);
 
   // CSV Export confirmation modal state
   const [showExportConfirmModal, setShowExportConfirmModal] = useState<boolean>(false);
@@ -156,39 +157,55 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     setShowResetPasswordInput(false);
   };
 
-  useEffect(() => {
-    if (!isOpen || !isAdmin) {
-      clearAdminSession();
-      setIsAdminUnlocked(false);
-      setAdminSecretInput('');
-      setAdminSecretError('');
-      return;
-    }
+  const adminRequest = async <T,>(path: string, init: RequestInit = {}): Promise<AdminApiResult<T>> => {
+    const headers = new Headers(init.headers);
+    headers.set('Accept', 'application/json');
+    if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+    const response = await fetch(path, { ...init, credentials: 'include', headers });
+    const payload: unknown = await response.json().catch(() => null);
+    const envelope = payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? payload as { success?: unknown; data?: unknown; message?: unknown }
+      : null;
+    return {
+      ok: response.ok && envelope?.success !== false,
+      status: response.status,
+      data: (envelope && 'data' in envelope ? envelope.data : payload) as T | undefined,
+      error: typeof envelope?.message === 'string' ? envelope.message : undefined,
+    };
+  };
 
-    const unlocked = hasAdminSession();
-    setIsAdminUnlocked(unlocked);
-    setAdminSecretError('');
-    if (unlocked) {
-      void loadData();
-    }
-  }, [isOpen, isAdmin]);
+  const adminGet = <T,>(path: string) => adminRequest<T>(path);
+  const adminPost = <T,>(path: string, body: unknown) => adminRequest<T>(path, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+  const sessionErrorMessage = (result: AdminApiResult<unknown>, fallback: string): string => (
+    result.status >= 500
+      ? '管理员数据库尚未初始化，请先执行后台数据库迁移。'
+      : result.error ?? fallback
+  );
 
   const loadData = async (): Promise<boolean> => {
     setLoading(true);
     try {
       const [usersRes, codesRes, logsRes] = await Promise.all([
-        apiGet<UserProfile[]>('/api/admin/users'),
-        apiGet<VipCodeData[]>('/api/admin/codes'),
-        apiGet<AuditLog[]>('/api/admin/audit-logs'),
+        adminGet<UserProfile[]>('/api/admin/users'),
+        adminGet<VipCodeData[]>('/api/admin/codes'),
+        adminGet<AuditLog[]>('/api/admin/audit-logs'),
       ]);
-      if ([usersRes, codesRes, logsRes].some(result => result.status === 401 || result.status === 403)) {
-        clearAdminSession();
-        setIsAdminUnlocked(false);
-        setAdminSecretError('后台会话已失效，请重新解锁');
+      const rejected = [usersRes, codesRes, logsRes].find(result => result.status === 401 || result.status === 403);
+      if (rejected) {
+        setAdminAccessState(rejected.status === 403 ? 'forbidden' : 'session-required');
+        setAdminAccessError(
+          rejected.status === 403 ? '当前账号没有所需的后台权限。' : '后台会话已失效，请重新建立会话。',
+        );
         return false;
       }
       if (!usersRes.ok || !codesRes.ok || !logsRes.ok) {
-        throw new Error(usersRes.error ?? codesRes.error ?? logsRes.error ?? '后台数据加载失败');
+        const failed = [usersRes, codesRes, logsRes].find(result => !result.ok);
+        if (failed?.status && failed.status >= 500) setAdminAccessState('unavailable');
+        throw new Error(failed ? sessionErrorMessage(failed, '后台数据加载失败') : '后台数据加载失败');
       }
       const uList = usersRes.data ?? [];
       const cList = codesRes.data ?? [];
@@ -198,44 +215,96 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       setCodesList(cList);
       lList.sort((a, b) => b.timestamp - a.timestamp);
       setAuditLogsList(lList);
-      setAdminSecretError('');
+      setAdminAccessError('');
       return true;
     } catch (err) {
       console.error('Failed to load admin data:', err);
-      setAdminSecretError(err instanceof Error ? err.message : '后台数据加载失败，请重试');
+      setAdminAccessError(err instanceof Error ? err.message : '后台数据加载失败，请重试');
       return false;
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAdminUnlock = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const secret = adminSecretInput.trim();
-    if (!secret) {
-      setAdminSecretError('请输入管理员密钥');
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+
+    const checkAdminSession = async () => {
+      setAdminAccessState('checking');
+      setAdminAccessError('');
+      try {
+        const sessionResult = await adminGet('/api/admin/session');
+        if (cancelled) return;
+        if (sessionResult.ok) {
+          const loaded = await loadData();
+          if (!cancelled && loaded) setAdminAccessState('ready');
+          return;
+        }
+        if (sessionResult.status === 403) {
+          setAdminAccessState('forbidden');
+          setAdminAccessError('当前账号无管理员权限。');
+          return;
+        }
+        if (sessionResult.status >= 500) {
+          setAdminAccessState('unavailable');
+          setAdminAccessError('管理员数据库尚未初始化，请先执行后台数据库迁移。');
+          return;
+        }
+        setAdminAccessState(currentUser ? 'session-required' : 'signed-out');
+      } catch (error) {
+        if (!cancelled) {
+          setAdminAccessState('unavailable');
+          setAdminAccessError(error instanceof Error ? error.message : '无法连接后台服务。');
+        }
+      }
+    };
+
+    void checkAdminSession();
+    return () => { cancelled = true; };
+  }, [isOpen, currentUser]);
+
+  const handleCreateAdminSession = async () => {
+    if (!currentUser) {
+      setAdminAccessState('signed-out');
       return;
     }
-
-    setAdminSecretError('');
-    const sessionResult = await createAdminSession(secret);
+    setLoading(true);
+    setAdminAccessState('checking');
+    setAdminAccessError('');
+    const sessionResult = await apiPostWithBearer<{ authenticated: boolean; expiresAt: number }>(
+      '/api/admin/session',
+      { trustedDevice },
+    );
     if (!sessionResult.ok) {
-      setAdminSecretError(sessionResult.error ?? '管理员密钥无效或登录状态已失效，请重试');
+      setAdminAccessState(sessionResult.status === 403 ? 'forbidden' : sessionResult.status >= 500 ? 'unavailable' : 'session-required');
+      setAdminAccessError(sessionErrorMessage(sessionResult, '后台会话创建失败，请重新登录后再试。'));
+      setLoading(false);
       return;
     }
     const loaded = await loadData();
-    if (loaded) {
-      setIsAdminUnlocked(true);
-      setAdminSecretInput('');
-    }
+    if (loaded) setAdminAccessState('ready');
+    setLoading(false);
+  };
+
+  const recordAdminAudit = async (action: string, details: string) => {
+    const result = await adminPost('/api/admin/record-audit-log', {
+      operatorUid: currentUser?.uid,
+      operatorEmail: currentUser?.email || 'admin',
+      action,
+      details,
+    });
+    if (!result.ok) throw new Error(result.error ?? '审计日志写入失败');
+  };
+
+  const handleAdminLogout = async () => {
+    await adminPost('/api/admin/session/logout', {});
+    setAdminAccessState(currentUser ? 'session-required' : 'signed-out');
+    setAdminAccessError('');
   };
 
   const handleAdminClose = () => {
     clearResetPasswordState();
-    clearAdminSession();
-    setIsAdminUnlocked(false);
-    setAdminSecretInput('');
-    setAdminSecretError('');
     onClose();
   };
 
@@ -245,7 +314,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       const isPermanent = targetType > 0 && newCodeDays >= 3650;
       const newExpire = targetType === 0 ? null : (isPermanent ? null : Date.now() + 30 * 86400 * 1000);
 
-      const res = await apiPost('/api/admin/update-user', {
+      const res = await adminPost('/api/admin/update-user', {
         uid: user.uid,
         updates: {
           member_type: targetType,
@@ -278,7 +347,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     if (selectedUserUids.length === 0) return;
     setLoading(true);
     try {
-      const res = await apiPost('/api/admin/batch-grant-vip', {
+      const res = await adminPost('/api/admin/batch-grant-vip', {
         uids: selectedUserUids,
         targetType,
         days: 30,
@@ -323,7 +392,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         updatedAt: Date.now(),
       };
 
-      const res = await apiPost<{ profile: UserProfile; temporaryPassword: string }>(
+      const res = await adminPost<{ profile: UserProfile; temporaryPassword: string }>(
         '/api/admin/add-user',
         { profile: newProfile },
       );
@@ -379,7 +448,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         updatedAt: Date.now(),
       };
 
-      const res = await apiPost('/api/admin/update-user', { uid: editingUser.uid, updates });
+      const res = await adminPost('/api/admin/update-user', { uid: editingUser.uid, updates });
       if (!res.ok) throw new Error(res.error ?? '用户更新失败');
 
       setUsersList(prev =>
@@ -404,7 +473,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
     setLoading(true);
     try {
-      const res = await apiPost('/api/admin/delete-users', { uids: [userToDelete.uid] });
+      const res = await adminPost('/api/admin/delete-users', { uids: [userToDelete.uid] });
       if (!res.ok) throw new Error(res.error ?? '删除用户失败');
 
       setUsersList(prev => prev.filter(u => u.uid !== userToDelete.uid));
@@ -422,7 +491,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
 
     setLoading(true);
     try {
-      const res = await apiPost('/api/admin/delete-users', { uids: selectedUserUids });
+      const res = await adminPost('/api/admin/delete-users', { uids: selectedUserUids });
       if (!res.ok) throw new Error(res.error ?? '批量删除用户失败');
 
       setUsersList(prev => prev.filter(u => !selectedUserUids.includes(u.uid)));
@@ -480,7 +549,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     setLoading(true);
     setResetPasswordError('');
     try {
-      const result = await apiPost<{ mode: 'random' | 'custom'; temporaryPassword?: string }>('/api/admin/reset-password', {
+      const result = await adminPost<{ mode: 'random' | 'custom'; temporaryPassword?: string }>('/api/admin/reset-password', {
         uid: userToResetPassword.uid,
         mode: resetMode,
         ...(resetMode === 'custom' ? { password: customPassword } : {}),
@@ -514,6 +583,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
   const handleGenerateCodesBatch = async (e: React.FormEvent) => {
     e.preventDefault();
     setGenSuccessMsg('');
+    if (newCodeDays === 7 && codeMemberType !== 1) {
+      setGenSuccessMsg('7 天体验卡仅支持普通 VIP，请切换为普通 VIP 后生成。');
+      return;
+    }
     setIsGeneratingCodes(true);
 
     const countToGen = Math.min(Math.max(batchCount, 1), 50);
@@ -549,10 +622,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
         plainCodesList.push(codeStr);
       }
 
-      const typeName = codeMemberType === 2 ? '商家Pro (BP码)' : '普通VIP (PV码)';
+      const typeName = newCodeDays === 7
+        ? '7天VIP体验卡 (PV码)'
+        : (codeMemberType === 2 ? '商家Pro (BP码)' : '普通VIP (PV码)');
       const logDesc = `批量生成 ${countToGen} 张 ${typeName} 激活卡密（渠道: ${channelTag}，时长: ${newCodeDays}天）`;
 
-      const res = await apiPost('/api/admin/generate-codes', { codes: createdCodes, logDesc });
+      const res = await adminPost('/api/admin/generate-codes', { codes: createdCodes, logDesc });
       if (!res.ok) throw new Error(res.error ?? '卡密生成失败');
 
       setCodesList(prev => [...createdCodes, ...prev]);
@@ -608,12 +683,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       document.body.removeChild(link);
 
       if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'EXPORT_VIP_CODES',
-          `导出全量 VIP/PRO 卡密明文 CSV 档案（包含 ${codesList.length} 份卡密记录）`
-        );
+        await recordAdminAudit('EXPORT_VIP_CODES', `导出全量 VIP/PRO 卡密明文 CSV 档案（包含 ${codesList.length} 份卡密记录）`);
       }
 
       setShowExportConfirmModal(false);
@@ -630,16 +700,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }));
   };
 
+  const codeKey = (code: VipCodeData): string => code.id || code.code;
+
   // Toggle copied / after-sales status (yellow font toggle)
   const handleToggleCopiedState = async (c: VipCodeData) => {
+    const id = codeKey(c);
     const newCopied = !c.copied;
     setCodesList(prev =>
-      prev.map(item => (item.id === c.id ? { ...item, copied: newCopied } : item))
+      prev.map(item => (codeKey(item) === id ? { ...item, copied: newCopied } : item))
     );
 
     try {
-      const res = await apiPost('/api/admin/update-code', {
-        codeId: c.id,
+      const res = await adminPost('/api/admin/update-code', {
+        codeId: id,
         updates: { copied: newCopied },
         operatorUid: currentUser?.uid,
         operatorEmail: currentUser?.email || 'admin',
@@ -650,25 +723,29 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     } catch (err) {
       console.error('Server code status update failed:', err);
       setCodesList(prev =>
-        prev.map(item => (item.id === c.id ? { ...item, copied: c.copied } : item))
+        prev.map(item => (codeKey(item) === id ? { ...item, copied: c.copied } : item))
       );
     }
   };
 
   // Copy code to clipboard AND mark as copied (yellow font)
   const handleCopyRowCode = async (c: VipCodeData) => {
-    navigator.clipboard.writeText(c.code);
-    setCopiedRowId(c.id);
-    setTimeout(() => setCopiedRowId(null), 2000);
+    const id = codeKey(c);
+    try {
+      await navigator.clipboard.writeText(c.code);
+    } catch {
+      console.error('Failed to copy VIP code to clipboard');
+      return;
+    }
 
     if (!c.copied) {
       setCodesList(prev =>
-        prev.map(item => (item.id === c.id ? { ...item, copied: true } : item))
+        prev.map(item => (codeKey(item) === id ? { ...item, copied: true } : item))
       );
 
       try {
-        const res = await apiPost('/api/admin/update-code', {
-          codeId: c.id,
+        const res = await adminPost('/api/admin/update-code', {
+          codeId: id,
           updates: { copied: true },
           operatorUid: currentUser?.uid,
           operatorEmail: currentUser?.email || 'admin',
@@ -679,7 +756,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       } catch (err) {
         console.error('Server code update failed:', err);
         setCodesList(prev =>
-          prev.map(item => (item.id === c.id ? { ...item, copied: false } : item))
+          prev.map(item => (codeKey(item) === id ? { ...item, copied: false } : item))
         );
       }
     }
@@ -693,7 +770,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     );
 
     try {
-      const res = await apiPost('/api/admin/update-code', {
+      const res = await adminPost('/api/admin/update-code', {
         codeId: c.id,
         updates: { deletePendingAt: deleteTime },
         operatorUid: currentUser?.uid,
@@ -705,12 +782,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       }
 
       if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'DELETE_VIP_CODE_PENDING',
-          `申请删除卡密 [${c.code}]，卡密进入 3 天等待销毁期`
-        );
+        await recordAdminAudit('DELETE_VIP_CODE_PENDING', `申请删除卡密 [${c.code}]，卡密进入 3 天等待销毁期`);
       }
     } catch (err) {
       console.error('Server delete request failed:', err);
@@ -727,7 +799,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     );
 
     try {
-      const res = await apiPost('/api/admin/update-code', {
+      const res = await adminPost('/api/admin/update-code', {
         codeId: c.id,
         updates: { deletePendingAt: null },
         operatorUid: currentUser?.uid,
@@ -739,12 +811,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
       }
 
       if (currentUser) {
-        await recordAuditLog(
-          currentUser.uid,
-          currentUser.email || 'admin',
-          'CANCEL_DELETE_VIP_CODE',
-          `撤销了卡密 [${c.code}] 的删除申请，卡密已恢复正常有效状态`
-        );
+        await recordAdminAudit('CANCEL_DELETE_VIP_CODE', `撤销了卡密 [${c.code}] 的删除申请，卡密已恢复正常有效状态`);
       }
     } catch (err) {
       console.error('Server cancel delete failed:', err);
@@ -754,9 +821,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
     }
   };
 
-  if (!isOpen || !isAdmin) return null;
+  if (!isOpen) return null;
 
-  if (!isAdminUnlocked) {
+  if (adminAccessState !== 'ready') {
     return (
       <div className={standalone ? 'min-h-screen flex items-center justify-center bg-slate-950 p-4' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4'}>
         <div className="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden">
@@ -767,7 +834,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               </div>
               <div>
                 <h2 className="text-base font-bold text-white">后台控制中心</h2>
-                <p className="text-xs text-slate-400">请输入管理员密钥解锁</p>
+                <p className="text-xs text-slate-400">
+                  {adminAccessState === 'checking' && '正在验证后台会话'}
+                  {adminAccessState === 'session-required' && '使用当前正式登录账号进入'}
+                  {adminAccessState === 'forbidden' && '当前账号无后台访问权限'}
+                  {adminAccessState === 'signed-out' && '请先登录正式账号'}
+                  {adminAccessState === 'unavailable' && '后台服务暂不可用'}
+                </p>
               </div>
             </div>
             <button
@@ -779,38 +852,49 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
             </button>
           </div>
 
-          <form onSubmit={handleAdminUnlock} className="p-5 space-y-4">
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-slate-200">管理员密钥</span>
-              <div className="relative">
-                <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
-                <input
-                  type="password"
-                  value={adminSecretInput}
-                  onChange={event => setAdminSecretInput(event.target.value)}
-                  placeholder="输入后台访问密钥"
-                  autoComplete="off"
-                  autoFocus
-                  className="w-full rounded-xl border border-slate-700 bg-slate-950 py-3 pl-10 pr-3 text-sm text-white outline-none transition-colors placeholder:text-slate-600 focus:border-indigo-500"
-                  disabled={loading}
-                />
-              </div>
-            </label>
-            {adminSecretError && (
-              <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-200">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
-                <span>{adminSecretError}</span>
+          <div className="p-5 space-y-4">
+            {adminAccessState === 'checking' && (
+              <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-300">
+                <Loader2 className="h-4 w-4 animate-spin text-indigo-400" />
+                <span>正在验证账号权限...</span>
               </div>
             )}
+            {adminAccessError && (
+              <div className="flex items-start gap-2 rounded-xl border border-rose-500/40 bg-rose-950/40 px-3 py-2 text-sm text-rose-200" role="alert">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-400" />
+                <span>{adminAccessError}</span>
+              </div>
+            )}
+            {adminAccessState === 'session-required' && (
+              <>
+                <label className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={trustedDevice}
+                    onChange={event => setTrustedDevice(event.target.checked)}
+                    className="h-4 w-4 accent-indigo-500"
+                  />
+                  <span>信任此设备 30 天</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateAdminSession()}
+                  disabled={loading}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  {loading ? '正在进入...' : '进入后台'}
+                </button>
+              </>
+            )}
             <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+              type="button"
+              onClick={handleAdminClose}
+              className="w-full rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-medium text-slate-300 transition-colors hover:bg-slate-800"
             >
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
-              {loading ? '验证中...' : '解锁后台'}
+              返回
             </button>
-          </form>
+          </div>
         </div>
       </div>
     );
@@ -874,6 +958,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
               title="刷新最新数据"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={() => void handleAdminLogout()}
+              className="p-2 text-slate-400 hover:text-rose-300 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title="退出后台会话"
+              aria-label="退出后台会话"
+            >
+              <LogOut className="w-4 h-4" />
             </button>
             <button
               onClick={handleAdminClose}
@@ -1433,6 +1525,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                       onChange={e => setNewCodeDays(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs text-white focus:outline-none focus:border-amber-500 min-h-[44px]"
                     >
+                      <option value={7}>7 天 VIP 体验卡</option>
                       <option value={30}>30 天 (月卡)</option>
                       <option value={90}>90 天 (季卡)</option>
                       <option value={365}>365 天 (年卡)</option>
@@ -1517,8 +1610,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                       codesList
                         .filter(c => !c.deletePendingAt || c.deletePendingAt > Date.now())
                         .map(c => {
-                          const isRevealed = !!revealedCodeIds[c.id];
-                          const isCopied = copiedRowId === c.id;
+                          const id = codeKey(c);
+                          const isRevealed = !!revealedCodeIds[id];
+                          const isCopied = Boolean(c.copied);
                           const isPendingDelete = !!(c.deletePendingAt && c.deletePendingAt > Date.now());
 
                           // Calculate remaining time for deletion
@@ -1531,7 +1625,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                           }
 
                           return (
-                            <tr key={c.id} className="hover:bg-slate-900/50 transition-colors">
+                            <tr key={id} className="hover:bg-slate-900/50 transition-colors">
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <span
@@ -1557,7 +1651,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                                     </span>
                                   )}
                                   <button
-                                    onClick={() => toggleRevealRow(c.id)}
+                                    onClick={() => toggleRevealRow(id)}
                                     className="p-1 text-slate-500 hover:text-slate-200 transition-colors cursor-pointer"
                                     title={isRevealed ? '隐藏明文' : '查看完整卡密'}
                                   >

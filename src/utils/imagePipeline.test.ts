@@ -157,6 +157,31 @@ describe('topology-preserving background removal', () => {
     expect(mask[3 * 7 + 3]).toBe(0);
   });
 
+  it('keeps enclosed background-colour cells through the full conversion pipeline', () => {
+    const data = fromAscii([
+      '.......',
+      '.#####.',
+      '.#...#.',
+      '.#...#.',
+      '.#...#.',
+      '.#####.',
+      '.......',
+    ]);
+    const result = convertImageDataToGrid(data, 7, 7, {
+      ...baseSettings,
+      width: 7,
+      height: 7,
+      dither: 'none',
+      pipelineOverride: 'logo',
+      backgroundRemovalEnabled: true,
+      chromaKeyColor: '#FFFFFF',
+    }, palette);
+
+    expect(result.grid[0][0]).toBeNull();
+    expect(result.grid[1][1]).toBe('black');
+    expect(result.grid[3][3]).toBe('white');
+  });
+
   it.each([
     ['O', ['.###.', '#...#', '#...#', '#...#', '.###.']],
     ['A', ['.###.', '#...#', '#####', '#...#', '#...#']],
@@ -197,6 +222,38 @@ describe('topology-preserving background removal', () => {
     expect(mask[2 * 5 + 2]).toBe(0);
   });
 
+  it('uses the alpha cutoff for antialiased candidates without leaking into enclosed same-colour pixels', () => {
+    const data = makePixels(7, 7, [0, 0, 0]);
+    setPixel(data, 7, 0, 0, [255, 255, 255, 15]);
+    setPixel(data, 7, 1, 0, [250, 250, 250, 16]);
+    setPixel(data, 7, 2, 0, [255, 255, 255, 255]);
+    setPixel(data, 7, 4, 4, [250, 250, 250, 16]);
+
+    const mask = edgeConnectedBackgroundMask(data, 7, 7, '#FFFFFF', 20, 16);
+
+    expect(mask[0]).toBe(0);
+    expect(mask[1]).toBe(1);
+    expect(mask[2]).toBe(1);
+    expect(mask[4 * 7 + 4]).toBe(0);
+  });
+
+  it('makes a target grid cell transparent below 35% surviving coverage after removal', () => {
+    const data = makePixels(4, 4, [255, 255, 255]);
+    [[1, 1], [2, 1], [1, 2], [2, 2]].forEach(([x, y]) => setPixel(data, 4, x, y, [0, 0, 0, 255]));
+    const result = convertImageDataToGrid(data, 4, 4, {
+      ...baseSettings,
+      width: 1,
+      height: 1,
+      dither: 'none',
+      pipelineOverride: 'logo',
+      backgroundRemovalEnabled: true,
+      chromaKeyColor: '#FFFFFF',
+    }, palette);
+
+    expect(result.diagnostics.backgroundPixelsRemoved).toBe(12);
+    expect(result.grid[0][0]).toBeNull();
+  });
+
   it('does not leak through diagonal-only contact', () => {
     const data = makePixels(8, 8, [0, 0, 0]);
     [[0, 0], [1, 0], [0, 1], [0, 2], [0, 3]].forEach(([x, y]) => setPixel(data, 8, x, y, [255, 255, 255, 255]));
@@ -235,6 +292,73 @@ describe('topology-preserving background removal', () => {
     expect(inferred?.confidence).toBeGreaterThan(0.7);
     expect(mask[0]).toBe(1);
     expect(mask[3 * 7 + 3]).toBe(0);
+  });
+
+  it('does not auto-remove an ambiguous four-colour image border', () => {
+    const data = makePixels(8, 8, [0, 0, 0]);
+    const edgePixels: Array<[number, number]> = [];
+    for (let x = 0; x < 8; x += 1) {
+      edgePixels.push([x, 0], [x, 7]);
+    }
+    for (let y = 1; y < 7; y += 1) {
+      edgePixels.push([0, y], [7, y]);
+    }
+    const cornerBackgrounds: Array<[number, number, number]> = [
+      [255, 255, 255], [255, 0, 0], [0, 255, 0], [0, 0, 255],
+    ];
+    edgePixels.forEach(([x, y], index) => {
+      setPixel(data, 8, x, y, [...cornerBackgrounds[Math.floor(index / 7)], 255]);
+    });
+
+    expect(inferEdgeBackground(data, 8, 8, 16)).toBeNull();
+    expect(edgeConnectedBackgroundMask(data, 8, 8, null, 20, 16)).toEqual(new Uint8Array(64));
+  });
+
+  it('does not auto-remove when the two leading edge colours are too close', () => {
+    const data = makePixels(8, 8, [0, 0, 0]);
+    const edgePixels: Array<[number, number]> = [];
+    for (let x = 0; x < 8; x += 1) {
+      edgePixels.push([x, 0], [x, 7]);
+    }
+    for (let y = 1; y < 7; y += 1) {
+      edgePixels.push([0, y], [7, y]);
+    }
+    edgePixels.forEach(([x, y], index) => {
+      const rgb: [number, number, number] = index < 14
+        ? [255, 255, 255]
+        : index < 25
+          ? [0, 0, 255]
+          : [0, 255, 0];
+      setPixel(data, 8, x, y, [...rgb, 255]);
+    });
+
+    expect(inferEdgeBackground(data, 8, 8, 16)).toBeNull();
+  });
+
+  it('removes a manual edge-connected background component even when it is small', () => {
+    const data = makePixels(20, 20, [0, 0, 0]);
+    setPixel(data, 20, 0, 10, [255, 255, 255, 255]);
+    setPixel(data, 20, 1, 10, [255, 255, 255, 255]);
+    setPixel(data, 20, 10, 10, [255, 255, 255, 255]);
+
+    const mask = edgeConnectedBackgroundMask(data, 20, 20, '#FFFFFF', 20, 16);
+
+    expect(mask[10 * 20]).toBe(1);
+    expect(mask[10 * 20 + 1]).toBe(1);
+    expect(mask[10 * 20 + 10]).toBe(0);
+  });
+
+  it('handles a 512 by 512 background without recursive flood-fill growth', () => {
+    const data = makePixels(512, 512, [255, 255, 255]);
+    for (let y = 220; y < 292; y += 1) {
+      for (let x = 220; x < 292; x += 1) setPixel(data, 512, x, y, [0, 0, 0, 255]);
+    }
+
+    const mask = edgeConnectedBackgroundMask(data, 512, 512, '#FFFFFF', 20, 16);
+
+    expect(mask).toHaveLength(512 * 512);
+    expect(mask[0]).toBe(1);
+    expect(mask[256 * 512 + 256]).toBe(0);
   });
 });
 

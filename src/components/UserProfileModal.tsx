@@ -107,6 +107,21 @@ interface BeadStockItem {
 }
 
 const INVENTORY_STORAGE_KEY = 'beadgrid_user_inventory_v1';
+const GUEST_COMMUNITY_MESSAGE = '游客账号仅可浏览社区。请登录或注册后再使用喜欢、收藏和发布功能。';
+const FORMAL_LOGIN_REQUIRED_MESSAGE = '请登录或注册后再查看喜欢和管理个人图纸。';
+
+function isGuestAccount(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const account = value as Record<string, unknown>;
+  return account.authProvider === 'guest' || account.auth_provider === 'guest' || account.provider === 'guest';
+}
+
+function displayFavoriteError(error: string | undefined): string {
+  return error?.includes('Guest accounts can only browse the community')
+    ? GUEST_COMMUNITY_MESSAGE
+    : (error ?? '无法读取喜欢列表');
+}
+
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
   onClose,
@@ -116,6 +131,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onContinueEditing,
 }) => {
   const { userProfile, isVip, isPro, currentUser } = useAuth();
+  const openLoginModal = useCallback(() => {
+    onClose();
+    window.dispatchEvent(new Event('unauthorized'));
+  }, [onClose]);
+  const requireFormalLogin = useCallback((message = FORMAL_LOGIN_REQUIRED_MESSAGE): boolean => {
+    const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
+    if (hasFormalLogin) return true;
+    setActionMessage(message);
+    openLoginModal();
+    return false;
+  }, [currentUser, openLoginModal, userProfile]);
 
   // Active Main Tab inside Personal Center
   const [activeTab, setActiveTab] = useState<'works' | 'likes' | 'library' | 'inventory'>('library');
@@ -154,9 +180,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   }, [isOpen, currentUser]);
 
   const loadFavoritePosts = useCallback(async () => {
-    if (!currentUser) {
+    if (!requireFormalLogin('请登录或注册后再查看喜欢列表。')) {
       setFavoritePosts([]);
-      setFavoritesError(null);
+      setFavoritesError(FORMAL_LOGIN_REQUIRED_MESSAGE);
       return;
     }
 
@@ -166,22 +192,28 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       const result = await listFavoriteCommunityPosts();
       if (!result.ok || !result.data) {
         setFavoritePosts([]);
-        setFavoritesError(result.error ?? '无法读取喜欢列表');
+        setFavoritesError(displayFavoriteError(result.error));
         return;
       }
       setFavoritePosts(result.data.posts);
     } finally {
       setLoadingFavorites(false);
     }
-  }, [currentUser]);
+  }, [requireFormalLogin]);
 
   useEffect(() => {
-    if (isOpen) void loadFavoritePosts();
-  }, [isOpen, loadFavoritePosts]);
+    if (isOpen && activeTab === 'likes') void loadFavoritePosts();
+  }, [activeTab, isOpen, loadFavoritePosts]);
+
+  const handleOpenLikes = () => {
+    if (activeTab === 'likes') void loadFavoritePosts();
+    else setActiveTab('likes');
+  };
 
   // Actions for "我的图库"
   // 1. 编辑 (Edit / Continue Editing)
   const handleEditPattern = async (record: ExportedPatternRecord) => {
+    if (!requireFormalLogin('请登录或注册后再编辑个人图纸。')) return;
     setActionBusyId(record.id);
     try {
       const project = await getPatternProject(record.id, currentUser?.uid || null);
@@ -198,6 +230,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   // 3. 删除 (Delete pattern from 我的图库)
   const handleDeletePattern = async (record: ExportedPatternRecord) => {
+    if (!requireFormalLogin('请登录或注册后再删除个人图纸。')) return;
     if (!window.confirm(`确定要从【我的图库】中删除图纸《${record.title}》吗？`)) return;
     setActionBusyId(record.id);
     try {
@@ -214,6 +247,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   };
 
   const worksCount = publishedPatternCount;
+  const needsCommunityLogin = favoritesError === GUEST_COMMUNITY_MESSAGE;
+
+  const handleCommunityLogin = () => {
+    openLoginModal();
+  };
 
   // --- Bead Inventory State ("豆仓·我的库存") ---
   const [inventory, setInventory] = useState<Record<string, BeadStockItem>>({});
@@ -248,33 +286,32 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   // Save Inventory changes to localStorage
   const saveInventory = (updated: Record<string, BeadStockItem>) => {
+    if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return false;
     setInventory(updated);
     try {
       localStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(updated));
     } catch {
       // Storage error ignored
     }
+    return true;
   };
 
   // Adjust Single Color Quantity
   const handleAdjustCount = (code: string, delta: number) => {
-    setInventory(prev => {
-      const current = prev[code] || {
-        colorId: `MARD_${code}`,
-        code,
-        name: code,
-        hex: '#888888',
-        count: 0,
-        alertThreshold: 100,
-      };
-      const newCount = Math.max(0, current.count + delta);
-      const updated = {
-        ...prev,
-        [code]: { ...current, count: newCount },
-      };
-      saveInventory(updated);
-      return updated;
-    });
+    if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return;
+    const current = inventory[code] || {
+      colorId: `MARD_${code}`,
+      code,
+      name: code,
+      hex: '#888888',
+      count: 0,
+      alertThreshold: 100,
+    };
+    const updated = {
+      ...inventory,
+      [code]: { ...current, count: Math.max(0, current.count + delta) },
+    };
+    saveInventory(updated);
   };
 
   // Batch Set All Stock
@@ -283,8 +320,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     Object.keys(inventory).forEach(code => {
       updated[code] = { ...inventory[code], count: batchSetValue };
     });
-    saveInventory(updated);
-    setIsBatchSetOpen(false);
+    if (saveInventory(updated)) setIsBatchSetOpen(false);
   };
 
   // Batch Add / Subtract Stock
@@ -295,12 +331,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       const current = inventory[code];
       updated[code] = { ...current, count: Math.max(0, current.count + delta) };
     });
-    saveInventory(updated);
-    setIsBatchDeltaOpen(false);
+    if (saveInventory(updated)) setIsBatchDeltaOpen(false);
   };
 
   // Add Custom Color Code Handler
   const handleAddCustomColor = () => {
+    if (!requireFormalLogin('请登录或注册后再添加拼豆库存。')) return;
     const code = newColorCode.trim().toUpperCase();
     if (!code) {
       alert('请填写拼豆色号 (例如: M13, A24, X01)');
@@ -323,7 +359,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       ...inventory,
       [code]: newItem,
     };
-    saveInventory(updated);
+    if (!saveInventory(updated)) return;
     setIsAddColorOpen(false);
 
     // Reset Form
@@ -494,7 +530,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </button>
 
           <button
-            onClick={() => setActiveTab('likes')}
+            onClick={handleOpenLikes}
             className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'likes'
                 ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
@@ -566,7 +602,16 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 </div>
               ) : favoritesError ? (
                 <div className="rounded-2xl border border-rose-900/70 bg-rose-950/30 p-5 text-center text-sm text-rose-200">
-                  {favoritesError}
+                  <p>{favoritesError}</p>
+                  {needsCommunityLogin && (
+                    <button
+                      type="button"
+                      onClick={handleCommunityLogin}
+                      className="mt-3 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-purple-500"
+                    >
+                      登录或注册
+                    </button>
+                  )}
                 </div>
               ) : favoritePosts.length === 0 ? (
                 <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 bg-slate-950/60 border border-slate-800/80 rounded-3xl p-8">

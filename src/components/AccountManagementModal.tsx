@@ -35,44 +35,125 @@ const PRESET_AVATARS = [
 ];
 
 const MAX_AVATAR_SOURCE_BYTES = 8 * 1024 * 1024;
-const MAX_AVATAR_DATA_URL_LENGTH = 600_000;
-const AVATAR_EDGE = 256;
+const MAX_AVATAR_SOURCE_PIXELS = 16_000_000;
+const MAX_AVATAR_BYTES = 320 * 1024;
+const MAX_PROFILE_REQUEST_JSON_CHARS = 500_000;
+const AVATAR_EDGE = 512;
+const AVATAR_MIN_EDGE = 96;
+const AVATAR_QUALITIES = [0.86, 0.72, 0.58, 0.44];
 
-function loadAvatarImage(file: File): Promise<HTMLImageElement> {
+type AvatarImageSource = {
+  drawable: CanvasImageSource;
+  width: number;
+  height: number;
+  dispose: () => void;
+};
+
+function imageToDataURL(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => typeof reader.result === 'string'
+      ? resolve(reader.result)
+      : reject(new Error('无法生成头像预览'));
+    reader.onerror = () => reject(new Error('无法生成头像预览'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: 'image/webp' | 'image/jpeg', quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('当前浏览器无法压缩头像图片')), type, quality);
+  });
+}
+
+function loadAvatarImage(file: File): Promise<AvatarImageSource> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
     const image = new Image();
     image.onload = () => {
       URL.revokeObjectURL(url);
-      resolve(image);
+      if (!image.naturalWidth || !image.naturalHeight) {
+        image.src = '';
+        reject(new Error('无法读取头像图片'));
+        return;
+      }
+      resolve({
+        drawable: image,
+        width: image.naturalWidth,
+        height: image.naturalHeight,
+        dispose: () => { image.src = ''; },
+      });
     };
     image.onerror = () => {
       URL.revokeObjectURL(url);
+      image.src = '';
       reject(new Error('无法读取头像图片'));
     };
     image.src = url;
   });
 }
 
+function hasTransparency(context: CanvasRenderingContext2D, width: number, height: number): boolean {
+  const pixels = context.getImageData(0, 0, width, height).data;
+  for (let index = 3; index < pixels.length; index += 4) {
+    if (pixels[index] !== 255) return true;
+  }
+  return false;
+}
+
 async function compressAvatar(file: File): Promise<string> {
   const image = await loadAvatarImage(file);
-  const scale = Math.min(1, AVATAR_EDGE / Math.max(image.naturalWidth, image.naturalHeight));
-  const width = Math.max(1, Math.round(image.naturalWidth * scale));
-  const height = Math.max(1, Math.round(image.naturalHeight * scale));
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('当前浏览器无法处理头像图片');
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = 'high';
-  context.drawImage(image, 0, 0, width, height);
+  let canvas: HTMLCanvasElement | null = null;
 
-  for (const quality of [0.82, 0.68, 0.52]) {
-    const dataUrl = canvas.toDataURL('image/webp', quality);
-    if (dataUrl.length <= MAX_AVATAR_DATA_URL_LENGTH) return dataUrl;
+  try {
+    if (image.width * image.height > MAX_AVATAR_SOURCE_PIXELS) {
+      throw new Error('图片分辨率过高，请选择 1600 万像素以内的图片');
+    }
+
+    let maxEdge = Math.min(AVATAR_EDGE, Math.max(image.width, image.height));
+    const minimumEdge = Math.min(AVATAR_MIN_EDGE, maxEdge);
+
+    while (maxEdge >= minimumEdge) {
+      const scale = maxEdge / Math.max(image.width, image.height);
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+      canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { alpha: true });
+      if (!context) throw new Error('当前浏览器无法处理头像图片');
+
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
+      // Browser image decoding applies EXIF orientation before this draw call.
+      context.drawImage(image.drawable, 0, 0, width, height);
+
+      const formats: Array<'image/webp' | 'image/jpeg'> = hasTransparency(context, width, height)
+        ? ['image/webp']
+        : ['image/webp', 'image/jpeg'];
+      for (const type of formats) {
+        for (const quality of AVATAR_QUALITIES) {
+          const blob = await canvasToBlob(canvas, type, quality);
+          if (blob.size > MAX_AVATAR_BYTES) continue;
+          if (blob.type !== type) continue;
+          return imageToDataURL(blob);
+        }
+      }
+
+      canvas.width = 1;
+      canvas.height = 1;
+      canvas = null;
+      maxEdge = Math.floor(maxEdge * 0.72);
+    }
+
+    throw new Error('头像压缩后仍然过大，请选择更简单的图片');
+  } finally {
+    image.dispose();
+    if (canvas) {
+      canvas.width = 1;
+      canvas.height = 1;
+    }
   }
-  throw new Error('头像压缩后仍然过大，请选择更简单的图片');
 }
 
 export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
@@ -91,6 +172,8 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
+  const [isProcessingAvatar, setIsProcessingAvatar] = useState(false);
+  const isProcessingAvatarRef = useRef(false);
 
   // Loading & Notice State
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -108,6 +191,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
 
   // Handle Avatar Selection / Custom Upload
   const handleSelectPresetAvatar = (url: string) => {
+    if (isProcessingAvatar || isSubmitting) return;
     setPhotoURL(url);
     setMsg({ text: '已预选头像，请点击下方的“保存修改”完成更新', isError: false });
   };
@@ -115,24 +199,37 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const input = e.currentTarget;
     const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        setMsg({ text: '请选择图片文件', isError: true });
-        return;
+    if (!file || isProcessingAvatarRef.current || isSubmitting) {
+      input.value = '';
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      setMsg({ text: '请选择图片文件', isError: true });
+      input.value = '';
+      return;
+    }
+    if (file.size > MAX_AVATAR_SOURCE_BYTES) {
+      setMsg({ text: '原图需小于 8MB', isError: true });
+      input.value = '';
+      return;
+    }
+
+    isProcessingAvatarRef.current = true;
+    setIsProcessingAvatar(true);
+    setMsg({ text: '正在压缩头像…', isError: false });
+    try {
+      const compressed = await compressAvatar(file);
+      if (compressed.length >= MAX_PROFILE_REQUEST_JSON_CHARS) {
+        throw new Error('头像数据仍然过大，请选择更简单的图片');
       }
-      if (file.size > MAX_AVATAR_SOURCE_BYTES) {
-        setMsg({ text: '原图需小于 8MB', isError: true });
-        return;
-      }
-      try {
-        const compressed = await compressAvatar(file);
-        setPhotoURL(compressed);
-        setMsg({ text: '头像已压缩，点击保存以提交修改', isError: false });
-      } catch (error) {
-        setMsg({ text: error instanceof Error ? error.message : '头像处理失败', isError: true });
-      } finally {
-        input.value = '';
-      }
+      setPhotoURL(compressed);
+      setMsg({ text: '头像已压缩至安全大小，点击保存以提交修改', isError: false });
+    } catch (error) {
+      setMsg({ text: error instanceof Error ? error.message : '头像处理失败', isError: true });
+    } finally {
+      isProcessingAvatarRef.current = false;
+      setIsProcessingAvatar(false);
+      input.value = '';
     }
   };
 
@@ -141,35 +238,53 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
     e.preventDefault();
     setMsg(null);
 
-    if (!displayName.trim()) {
-      setMsg({ text: '用户昵称不能为空', isError: true });
+    if (isSubmitting || isProcessingAvatar) return;
+
+    const nextDisplayName = displayName.trim();
+    if (nextDisplayName.length < 1 || nextDisplayName.length > 80) {
+      setMsg({ text: '用户昵称长度需为 1 至 80 个字符', isError: true });
       return;
     }
 
-    if (newPassword) {
-      if (newPassword.length < 6) {
+    if (currentPassword || newPassword || confirmPassword) {
+      if (newPassword && newPassword.length < 6) {
         setMsg({ text: '新密码长度至少需要 6 个字符', isError: true });
         return;
       }
-      if (newPassword !== confirmPassword) {
+      if (newPassword && newPassword !== confirmPassword) {
         setMsg({ text: '两次输入的新密码不一致，请重试', isError: true });
         return;
       }
+      setMsg({ text: '密码修改需要使用独立的密码修改接口，请先清空密码栏后保存个人资料', isError: true });
+      return;
+    }
+
+    const changes: { displayName?: string; photoURL?: string } = {};
+    if (nextDisplayName !== (userProfile?.displayName ?? '').trim()) {
+      changes.displayName = nextDisplayName;
+    }
+    if (photoURL !== (userProfile?.photoURL ?? '')) {
+      changes.photoURL = photoURL;
+    }
+
+    if (Object.keys(changes).length === 0) {
+      setMsg({ text: '没有需要保存的资料修改', isError: false });
+      return;
+    }
+    if (JSON.stringify(changes).length >= MAX_PROFILE_REQUEST_JSON_CHARS) {
+      setMsg({ text: '资料请求过大，请重新选择头像后再试', isError: true });
+      return;
     }
 
     setIsSubmitting(true);
-    const res = await updateUserProfile({
-      displayName: displayName.trim(),
-      photoURL,
-      password: newPassword || undefined,
-    });
-    setIsSubmitting(false);
-
-    setMsg({ text: res.message, isError: !res.success });
-    if (res.success) {
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
+    try {
+      const res = await updateUserProfile(changes);
+      setMsg({ text: res.message, isError: !res.success });
+      if (res.success) {
+        setDisplayName(nextDisplayName);
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -250,6 +365,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={isProcessingAvatar || isSubmitting}
                     className="absolute -bottom-1 -right-1 p-1.5 bg-purple-600 text-white rounded-xl shadow-md hover:bg-purple-500 transition-transform active:scale-95 cursor-pointer"
                     title="上传本地图片作为头像"
                   >
@@ -259,7 +375,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileUpload}
-                    accept="image/*"
+                    accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
                     className="hidden"
                   />
                 </div>
@@ -273,6 +389,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
                         key={avatar.id}
                         type="button"
                         onClick={() => handleSelectPresetAvatar(avatar.url)}
+                        disabled={isProcessingAvatar || isSubmitting}
                         className={`relative rounded-xl overflow-hidden aspect-square border transition-all cursor-pointer ${
                           photoURL === avatar.url
                             ? 'border-purple-400 ring-2 ring-purple-400 scale-105 shadow-md'
@@ -305,7 +422,7 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
                 onChange={e => setDisplayName(e.target.value)}
                 placeholder="请输入创作者昵称 (如: 拼豆达人_小星)"
                 className="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700/80 text-white text-sm font-bold placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-purple-500 transition-all"
-                maxLength={30}
+                maxLength={80}
               />
               <div className="flex items-center justify-between text-[11px] text-slate-500 px-1">
                 <span>账号邮箱: {userProfile?.email || 'pindou_creator@studio.cn'}</span>
@@ -370,13 +487,13 @@ export const AccountManagementModal: React.FC<AccountManagementModalProps> = ({
             {/* Save Profile Button */}
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || isProcessingAvatar}
               className="w-full py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-sm shadow-lg shadow-purple-600/30 flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 disabled:opacity-50"
             >
-              {isSubmitting ? (
+              {isSubmitting || isProcessingAvatar ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>正在保存设置...</span>
+                  <span>{isProcessingAvatar ? '正在压缩头像...' : '正在保存设置...'}</span>
                 </>
               ) : (
                 <>

@@ -690,46 +690,77 @@ export function isWeChatBrowser(): boolean {
 }
 
 // Download canvas as PNG image (utilizes toBlob with object URL, handles WeChat restrictions)
-export function downloadCanvasImage(canvas: HTMLCanvasElement, filename: string, onWeChatSaveNotice?: (dataUrl: string) => void) {
+export type CanvasDownloadResult = 'downloaded' | 'wechat-preview';
+
+const MAX_EXPORT_PIXELS = 40_000_000;
+const DEFAULT_BLOB_TIMEOUT_MS = 20_000;
+
+function canvasToBlobWithTimeout(canvas: HTMLCanvasElement, timeoutMs: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error('PNG 生成超时，请降低图纸尺寸或切换分板导出后重试。'));
+    }, timeoutMs);
+
+    try {
+      canvas.toBlob(blob => {
+        window.clearTimeout(timeoutId);
+        if (!blob) {
+          reject(new Error('PNG 生成失败：浏览器未返回图像数据。'));
+          return;
+        }
+        resolve(blob);
+      }, 'image/png');
+    } catch (error) {
+      window.clearTimeout(timeoutId);
+      reject(error instanceof Error ? error : new Error('PNG 生成失败。'));
+    }
+  });
+}
+
+// Download canvas as a PNG via a Blob URL. The promise lets the UI report generation and failures.
+export async function downloadCanvasImage(
+  canvas: HTMLCanvasElement,
+  filename: string,
+  onWeChatSaveNotice?: (dataUrl: string) => void,
+  timeoutMs = DEFAULT_BLOB_TIMEOUT_MS,
+): Promise<CanvasDownloadResult> {
   const finalFilename = filename.endsWith('.png') ? filename : `${filename}.png`;
-  
-  if (isWeChatBrowser()) {
-    const dataUrl = canvas.toDataURL('image/png');
-    if (onWeChatSaveNotice) {
-      onWeChatSaveNotice(dataUrl);
-      return;
+  const pixels = canvas.width * canvas.height;
+
+  if (!Number.isFinite(pixels) || canvas.width < 1 || canvas.height < 1) {
+    throw new Error('PNG 生成失败：图纸尺寸无效。');
+  }
+  if (pixels > MAX_EXPORT_PIXELS) {
+    throw new Error('图纸尺寸过大，无法安全生成 PNG。请切换分板导出或降低导出画质。');
+  }
+
+  if (isWeChatBrowser() && onWeChatSaveNotice) {
+    try {
+      onWeChatSaveNotice(canvas.toDataURL('image/png'));
+      return 'wechat-preview';
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('微信预览生成失败。');
     }
   }
 
+  const blob = await canvasToBlobWithTimeout(canvas, timeoutMs);
+  let url: string | null = null;
+
   try {
-    canvas.toBlob((blob) => {
-      if (!blob) {
-        // Fallback to toDataURL if toBlob fails or is not supported in environment
-        const url = canvas.toDataURL('image/png');
-        const link = document.createElement('a');
-        link.download = finalFilename;
-        link.href = url;
-        link.click();
-        return;
-      }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.download = finalFilename;
-      link.href = url;
-      link.click();
-      
-      // Clean up the object URL after a short delay
-      setTimeout(() => {
-        URL.revokeObjectURL(url);
-      }, 200);
-    }, 'image/png');
-  } catch (err) {
-    // Fallback if toBlob errors out
-    const url = canvas.toDataURL('image/png');
+    url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.download = finalFilename;
     link.href = url;
+    link.download = finalFilename;
+    link.rel = 'noopener';
+    link.style.display = 'none';
+    document.body.appendChild(link);
     link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url!), 1_000);
+    return 'downloaded';
+  } catch (error) {
+    if (url) URL.revokeObjectURL(url);
+    throw error instanceof Error ? error : new Error('无法启动浏览器下载。');
   }
 }
 

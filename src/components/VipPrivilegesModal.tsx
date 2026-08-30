@@ -51,129 +51,111 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
 
   const features: Array<{ category: string; items: PrivilegeItem[] }> = [
     {
-      category: isEn ? 'Image Conversion & Canvas Limits' : '拼豆转换与画布尺寸',
+      category: isEn ? 'Credits & Pattern Creation' : '积分与图纸创作',
       items: [
         {
-          name: isEn ? 'Basic Canvas Grid Size' : '基础画布尺寸 (100x100内)',
-          desc: isEn ? 'Standard grid size for small crafts and accessories' : '满足常规钥匙扣、小摆件设计需求',
-          free: true,
-          vip: true,
-          pro: true,
+          name: isEn ? 'All canvas sizes' : '全部画板尺寸（按面积计费）',
+          desc: isEn ? '30×30 = 1 credit; larger boards scale by grid area.' : '30×30（900 格）= 1 积分，其他尺寸按格子数换算；52×52 约 3.1 积分。',
+          free: '按积分',
+          vip: '按积分',
+          pro: '按积分',
         },
         {
-          name: isEn ? '400x400 Large Canvas Grid' : '400x400 超大巨幅画布',
-          desc: isEn ? 'Create complex, high-detail pixel artwork' : '支持大型墙挂画、高精细度动漫人物设计',
+          name: isEn ? 'Image conversion & editing' : '图像转换、绘制与编辑',
+          desc: isEn ? 'Core creation tools are available to every signed-in user with enough credits.' : '核心生成和编辑对所有登录用户开放，提交保存或正式导出时扣积分。',
+          free: '按积分',
+          vip: '按积分',
+          pro: '按积分',
+        },
+        {
+          name: isEn ? 'Background removal' : '背景移除',
+          desc: isEn ? 'Free while quality improvements continue.' : '目前免费使用，不消耗积分；请以预览结果为准。',
+          free: '免费',
+          vip: '免费',
+          pro: '免费',
+        },
+      ],
+    },
+    {
+      category: isEn ? 'VIP Watermark & Commercial Benefits' : 'VIP 水印与商用权益',
+      items: [
+        {
+          name: isEn ? '✨ Watermark-free export' : '✨ 去平台水印导出',
+          desc: isEn ? 'Export clean pattern files for personal or commercial use.' : '导出不含平台水印的图纸，适合个人使用或商业交付。',
           free: false,
           vip: true,
           pro: true,
           badge: 'VIP',
         },
         {
-          name: isEn ? '900x900 Giant Merchant Canvas' : '900x900 商家级巨型尺寸',
-          desc: isEn ? 'Giant scale designs for commercial projects' : '极高精细度立体定制与大型展会艺术拼豆',
+          name: isEn ? '👑 Custom watermark' : '👑 自定义水印',
+          desc: isEn ? 'Use your own name or shop watermark with adjustable style.' : '使用个人或店铺名称水印，并调整样式和透明度。',
+          free: false,
+          vip: true,
+          pro: true,
+          badge: 'VIP',
+        },
+        {
+          name: isEn ? '⚡ Batch processing' : '⚡ 批量处理',
+          desc: isEn ? 'Process multiple images or exports in one workflow.' : '一次处理多张图片或多个导出任务，提高批量制作效率。',
+          free: false,
+          vip: true,
+          pro: true,
+          badge: 'VIP',
+        },
+        {
+          name: isEn ? 'Commercial authorization' : '商业授权支持',
+          desc: isEn ? 'Use VIP benefits for commercial pattern delivery.' : '为商用图纸交付提供会员权益支持，具体授权范围以订单说明为准。',
+          free: false,
+          vip: true,
+          pro: true,
+          badge: 'VIP',
+        },
+      ],
+    },
+    {
+      category: isEn ? 'Smart Tools & Palettes' : '智能工具与色卡',
+      items: [
+        {
+          name: isEn ? 'Smart bead saving' : '智能省豆',
+          desc: isEn ? 'Light, standard and strong targets all use credits; preview is free before applying.' : '轻度、标准、强力三档均按积分计费，应用前可免费预览；背景移除不消耗积分。',
+          free: '按积分',
+          vip: '按积分',
+          pro: '按积分',
+        },
+        {
+          name: isEn ? 'Merchant 40% saving discount' : '商家 VIP 40% 省豆折扣',
+          desc: isEn ? 'Only Merchant VIP can select the 40% saving target and receive its commercial discount.' : '仅商家 VIP 可选择 40% 省豆档位并享受对应商用折扣；普通积分用户和创作者 VIP 可使用其他档位。',
           free: false,
           vip: false,
           pro: true,
-          badge: 'Pro',
+          badge: '商家 VIP',
         },
-      ],
-    },
-    {
-      category: isEn ? 'Pattern Export & Anti-theft Watermark' : '图纸导出与防盗水印',
-      items: [
         {
-          name: isEn ? '2K HD PNG Pattern Export' : '2K 高清 PNG 图纸导出',
-          desc: isEn ? 'Clear grid lines with coordinates and color palette legends' : '清晰点阵、标尺坐标与完整色号图例',
+          name: isEn ? 'Drawing tools & color replace' : '绘画工具与整图改色',
+          desc: isEn ? 'Pixel editing tools are available to all plans.' : '画笔、填充、替换等编辑工具对所有方案开放。',
           free: true,
           vip: true,
           pro: true,
         },
         {
-          name: isEn ? '✨ Clean Watermark-Free Export' : '✨ 无水印纯净图纸导出',
-          desc: isEn ? 'Remove platform watermarks for direct commercial sales & stall printing' : '一键一键关闭防盗水印，导出极简纯净图纸，适合商业售卖与摆摊打印',
-          free: false,
-          vip: true,
-          pro: true,
-          badge: 'VIP',
-        },
-        {
-          name: isEn ? '👑 Custom Store Watermark' : '👑 自定义店铺专属水印',
-          desc: isEn ? 'Add your store name, customize opacity, angle, and text color' : '支持输入个人/店铺名称、自由调节透明度、斜向角度与梦幻颜色，防止盗图',
-          free: false,
-          vip: true,
-          pro: true,
-          badge: 'VIP',
-        },
-        {
-          name: isEn ? '💎 4K Ultra HD Export' : '💎 4K 极清分辨率导出',
-          desc: isEn ? 'Ultra-clear 4K resolution output for professional printing' : '超高像素打印级画质，大型印刷与精细纸质图纸无模糊',
-          free: false,
-          vip: true,
-          pro: true,
-          badge: 'VIP',
-        },
-      ],
-    },
-    {
-      category: isEn ? 'Smart Tools & Cost Saving' : '智能工具与提效省豆',
-      items: [
-        {
-          name: isEn ? 'Pencil, Bucket, Line, Eraser, Eyedropper' : '画笔、油漆桶、直线、橡皮擦、吸管',
-          desc: isEn ? 'Full suite of pixel editing and drawing tools' : '完整的像素画与点阵手工修改绘制工具集',
+          name: isEn ? 'Multi-brand palettes' : '多品牌色卡与色号',
+          desc: isEn ? 'Palette matching is available to all plans.' : '主流品牌色卡和色号匹配对所有方案开放。',
           free: true,
           vip: true,
           pro: true,
         },
-        {
-          name: isEn ? '⚡ Smart Bead Reducer Studio' : '⚡ 智能省豆与抠图工坊',
-          desc: isEn ? 'Preview feature-aware saving targets: free trial 15%, VIP 15%/25%, Merchant VIP 40%' : '预览特征保留省豆：免费体验 15%，VIP 15%/25%，商家 VIP 40%',
-          free: '体验 15%',
-          vip: '15% / 25%',
-          pro: true,
-          badge: 'VIP',
-        },
-        {
-          name: isEn ? '🎨 1-Click Smart Color Replacer' : '🎨 全图颜色一键替换',
-          desc: isEn ? 'Batch replace any color on the grid in seconds' : '快速将全图指定拼豆颜色批量替换为其他色号',
-          free: false,
-          vip: true,
-          pro: true,
-          badge: 'VIP',
-        },
-        {
-          name: isEn ? 'Font Scale Adjustment for Markers' : '色号标识字体比例调节 (75%~150%)',
-          desc: isEn ? 'Adjust text size of bead color tags on printed guides' : '自由缩放标尺与色号标识大小，适应不同打印尺寸',
-          free: false,
-          vip: true,
-          pro: true,
-          badge: 'VIP',
-        },
       ],
     },
     {
-      category: isEn ? 'Palettes & Cloud Archive' : '色卡管理与云端归档',
+      category: isEn ? 'Cloud Archive' : '云端空间',
       items: [
         {
-          name: isEn ? 'Multi-Brand Palette Support' : '多品牌色卡支持 (MARD, Perler, Artkal...)',
-          desc: isEn ? 'Supports MARD, Perler, Artkal, COCO, Hama, Nabbi, Yutu' : '内置各大主流拼豆品牌精准 RGB 色号库',
-          free: true,
-          vip: true,
-          pro: true,
-        },
-        {
-          name: isEn ? 'Editable pattern cloud history' : '可编辑图纸云端存档',
-          desc: isEn ? 'Restores editable grids across signed-in devices' : '同步完整可编辑网格，可在其他已登录设备继续编辑和高清导出',
-          free: '10条',
-          vip: '20条',
-          pro: '25条',
-        },
-        {
-          name: isEn ? 'Mixed Palette Matching' : '跨品牌混采色卡与自定义 CSV 导入',
-          desc: isEn ? 'Mix colors across brands or import custom palette CSV' : '支持自由组合不同品牌的色号库，导入个人专属色卡',
-          free: false,
-          vip: false,
-          pro: true,
-          badge: 'Pro',
+          name: isEn ? 'Editable pattern cloud archive' : '可编辑图纸云端存档',
+          desc: isEn ? 'Free accounts get basic space; VIP plans include more storage.' : '免费用户享有基础空间，VIP/商用会员提供更大云空间；云端保存按提示扣积分。',
+          free: '基础空间',
+          vip: '更大空间',
+          pro: '更大空间',
         },
       ],
     },
@@ -192,14 +174,14 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base sm:text-lg font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-200 via-purple-200 to-white">
-                  {isEn ? 'Feature List & VIP Privileges' : '功能清单与会员特权对比'}
+                  {isEn ? 'Credits & VIP Benefits' : '积分与 VIP 权益说明'}
                 </h3>
                 <span className="bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-extrabold px-2 py-0.5 rounded-full">
-                  {isPro ? (isEn ? 'Merchant Pro Active' : '商家Pro 已激活') : isVip ? (isEn ? 'VIP Active' : 'VIP 会员已激活') : (isEn ? 'Free Plan' : '免费版')}
+                  {isPro ? (isEn ? 'Merchant plan active' : '商用会员已激活') : isVip ? (isEn ? 'VIP active' : 'VIP 会员已激活') : (isEn ? 'Credits plan' : '积分用户')}
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                {isEn ? 'Explore all features and unlock VIP exclusives for commercial pattern creation.' : '了解豆织星格完整功能，升级 VIP 解锁无水印商用图纸与智能工具'}
+                {isEn ? 'Use credits for core creation and unlock a small set of VIP commercial benefits.' : '核心创作使用积分，VIP 仅解锁少量水印、批量和商用权益'}
               </p>
             </div>
           </div>
@@ -260,7 +242,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
               className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:brightness-110 text-slate-950 font-black text-xs flex items-center gap-1 shadow-md shadow-amber-500/20 cursor-pointer shrink-0 transition-all active:scale-95"
             >
               <Crown className="w-3.5 h-3.5 fill-current" />
-              <span>{isEn ? 'Upgrade VIP' : '开通 VIP 特权'}</span>
+              <span>{isEn ? 'View VIP benefits' : '查看 VIP 权益'}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           )}
@@ -276,12 +258,19 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                 <div>
                   <h4 className="text-sm font-black text-amber-300 flex items-center gap-1.5">
                     <Crown className="w-4 h-4 text-amber-400 fill-amber-400/20" />
-                    <span>{isEn ? 'VIP Member Privilege Highlights' : 'VIP 会员的核心专享特权'}</span>
+                    <span>{isEn ? 'What VIP unlocks' : 'VIP 仅解锁这些权益'}</span>
                   </h4>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    专门为拼豆创作者、商业摆摊、图纸定制卖家设计的提效与商用工具组合：
+                    核心生成、尺寸、色卡、省豆和背景移除均可使用积分完成；VIP 只保留水印、批量、商用和云空间权益。
                   </p>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">30×30</b><span className="block text-slate-300">1 积分</span></div>
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">52×52</b><span className="block text-slate-300">约 3.1 积分</span></div>
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2.5"><b className="text-emerald-300">每日签到</b><span className="block text-slate-300">约 40 积分</span></div>
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5"><b className="text-amber-300">背景移除</b><span className="block text-slate-300">免费</span></div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -321,12 +310,12 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                       <Zap className="w-4 h-4 fill-sky-400/20" />
                     </span>
                     <div>
-                      <h5 className="font-bold text-slate-200 text-xs">⚡ 智能抠图与省豆工坊</h5>
+                      <h5 className="font-bold text-slate-200 text-xs">⚡ 批量处理</h5>
                       <span className="text-[10px] text-amber-300 font-bold">VIP 专享解锁</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    在应用前对照预览：免费用户可体验 15%，VIP 可选 15% 或 25%，商家 VIP 另可选 40%。背景移除与色块平滑可单独调整。
+                    一次处理多张图片或多个导出任务，适合批量制作与商用交付；单张图纸仍可用积分完成。
                   </p>
                 </div>
 
@@ -336,27 +325,27 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                       <Grid2x2 className="w-4 h-4" />
                     </span>
                     <div>
-                      <h5 className="font-bold text-slate-200 text-xs">📐 400x400 超大画布设计</h5>
+                      <h5 className="font-bold text-slate-200 text-xs">🏷️ 商业授权支持</h5>
                       <span className="text-[10px] text-amber-300 font-bold">VIP 专享解锁</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    打破免费版 100 豆限制，支持大型挂画、巨幅场景点阵图纸创作，细节质感成倍提升。
+                    为商用图纸交付提供会员权益支持，具体授权范围以订单和平台规则为准。
                   </p>
                 </div>
 
                 <div className="bg-slate-900/90 rounded-xl p-3.5 border border-purple-500/30 flex flex-col gap-2 relative overflow-hidden">
                   <div className="flex items-center gap-2">
                     <span className="p-1.5 rounded-lg bg-rose-500/10 text-rose-400 font-bold border border-rose-500/20">
-                      <Palette className="w-4 h-4" />
+                      <Cloud className="w-4 h-4" />
                     </span>
                     <div>
-                      <h5 className="font-bold text-slate-200 text-xs">🎨 全图颜色一键批量替换</h5>
+                      <h5 className="font-bold text-slate-200 text-xs">☁️ 更大云端空间</h5>
                       <span className="text-[10px] text-amber-300 font-bold">VIP 专享解锁</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    遇到色号缺货或改色需求？一键将画布上的某一颜色替换为新色号，无需逐个像素重新涂抹。
+                    保存更多可编辑图纸和资源，跨设备继续编辑；保存操作按页面提示消耗积分。
                   </p>
                 </div>
 
@@ -366,12 +355,12 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                       <Cloud className="w-4 h-4" />
                     </span>
                     <div>
-                      <h5 className="font-bold text-slate-200 text-xs">可编辑图纸云端存档</h5>
-                      <span className="text-[10px] text-amber-300 font-bold">VIP 专享解锁</span>
+                      <h5 className="font-bold text-slate-200 text-xs">📦 会员周额度</h5>
+                      <span className="text-[10px] text-amber-300 font-bold">VIP 附赠积分</span>
                     </div>
                   </div>
                   <p className="text-[11px] text-slate-400 leading-relaxed">
-                    云端保存完整可编辑网格：免费 10 条、VIP 20 条、商家 VIP 25 条；可在其他设备继续编辑和高清导出。
+                    创作者会员每周 500 积分，商用会员每周 1500 积分；额度按周期发放，未使用部分按规则过期。
                   </p>
                 </div>
               </div>
@@ -404,9 +393,13 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                           }`}>
                             {item.badge}
                           </span>
+                        ) : typeof item.free === 'string' ? (
+                          <span className="px-1.5 py-0.5 bg-sky-500/10 text-sky-300 rounded text-[10px] font-semibold shrink-0">
+                            {isEn ? item.free === '按积分' ? 'Credits' : item.free : item.free}
+                          </span>
                         ) : (
                           <span className="px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded text-[10px] font-semibold shrink-0">
-                            基础免费
+                            {isEn ? (item.free ? 'Included' : 'Unavailable') : (item.free ? '基础免费' : '不可用')}
                           </span>
                         )}
                       </div>
@@ -422,7 +415,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
             <div className="bg-slate-900/90 rounded-xl border border-slate-800 overflow-hidden text-xs">
               <div className="grid grid-cols-12 bg-slate-800/90 p-3 font-bold text-slate-200 text-xs border-b border-slate-700">
                 <div className="col-span-5">{isEn ? 'Feature Capability' : '功能与特权服务'}</div>
-                <div className="col-span-2 text-center text-slate-400">{isEn ? 'Free' : '免费版'}</div>
+                <div className="col-span-2 text-center text-slate-400">{isEn ? 'Credits user' : '积分用户'}</div>
                 <div className="col-span-2 text-center text-amber-300 font-extrabold">{isEn ? 'VIP Member' : '👑 VIP会员'}</div>
                 <div className="col-span-3 text-center text-purple-300 font-extrabold">{isEn ? 'Merchant Pro' : '👑 商家Pro'}</div>
               </div>
@@ -460,7 +453,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
         {/* Footer CTA */}
         <div className="p-3.5 sm:p-4 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-slate-400 text-xs text-center sm:text-left">
-            <span>{isEn ? 'Instant activation via online checkout' : '支持微信 / 支付宝即时开通，无拘束享受完整功能'}</span>
+            <span>{isEn ? 'Credits are used at apply, cloud save, publish and protected export.' : '积分在应用结果、云端保存、发布和受保护导出时扣除；失败会自动释放。'}</span>
           </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -478,7 +471,7 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
               className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 via-amber-600 to-amber-500 hover:brightness-110 text-slate-950 font-black text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 flex-1 sm:flex-none whitespace-nowrap"
             >
               <Crown className="w-4 h-4 fill-current" />
-              <span>{isEn ? 'Upgrade VIP Privileges' : '立即开通 VIP / 商家Pro'}</span>
+              <span>{isEn ? 'Open VIP benefits' : '了解 VIP / 商用会员'}</span>
             </button>
           </div>
         </div>

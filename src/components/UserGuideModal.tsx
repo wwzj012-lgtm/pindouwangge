@@ -47,11 +47,11 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-black text-white">豆织星格 · 简体中文版使用指南</h2>
                 <span className="bg-purple-950 text-purple-300 border border-purple-800/60 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  v2.8 全功能说明书
+                  v3.0 积分制度说明
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                拼豆图纸网格编辑器 & 图像转像素工作台 · 触屏/桌面双端全功能说明
+                拼豆图纸网格编辑器 & 图像转像素工作台 · 积分与会员权益指南
               </p>
             </div>
           </div>
@@ -73,8 +73,33 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 欢迎体验【豆织星格】拼豆专业级像素创意工作台
               </h3>
               <p className="text-slate-300 text-xs mt-1 leading-relaxed">
-                【豆织星格】面向拼豆爱好者与像素创作者，提供图像转换、网格编辑、色卡管理、物料统计和图纸导出。桌面端左侧用于转换设置、顶部工具栏用于编辑、右侧用于用量统计；手机端通过底栏切换这些工作区。
+                【豆织星格】面向拼豆爱好者与像素创作者，提供图像转换、网格编辑、色卡管理、物料统计和图纸导出。核心创作使用积分，VIP 仅提供少量水印、批量、商用与云空间权益；桌面端左侧用于转换设置、顶部工具栏用于编辑、右侧用于用量统计，手机端通过底栏切换工作区。
               </p>
+            </div>
+          </div>
+
+          {/* SECTION 0: CREDITS & MEMBERSHIP */}
+          <div className="space-y-3">
+            <h3 className="font-bold text-slate-100 text-base flex items-center gap-2 text-amber-400 border-b border-slate-800 pb-2">
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              0. 积分与会员制度（先看这里）
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="bg-slate-800/60 p-4 rounded-xl border border-amber-500/30 space-y-2">
+                <div className="font-bold text-amber-300">积分怎么获得</div>
+                <p>登录后每天可签到领取约 40 积分（连续签到奖励会按周期变化）。创作者会员每周附赠 500 积分，商用会员每周附赠 1500 积分；充值购买的积分长期有效，签到和会员额度按页面规则过期。</p>
+                <p className="text-slate-400">新用户首次使用受保护操作时会先提示登录，游客不能保存、发布或下载受保护文件。</p>
+              </div>
+              <div className="bg-slate-800/60 p-4 rounded-xl border border-sky-500/30 space-y-2">
+                <div className="font-bold text-sky-300">积分怎么消耗</div>
+                <p>30×30（900 格）= 1 积分，其他尺寸按画板格子数换算；52×52 约 3.1 积分。上传、预览和本地编辑可先免费体验，点击“应用结果”、云端保存、发布社区或下载受保护的高清/无水印文件时，系统会显示报价并扣除积分。</p>
+                <p className="text-slate-400">背景移除目前免费，不消耗积分。积分不足时可缩小尺寸、取消高级选项或前往充值/兑换码页面。</p>
+              </div>
+            </div>
+            <div className="bg-purple-950/30 border border-purple-500/30 rounded-xl p-4 space-y-2">
+              <div className="font-bold text-purple-300">VIP 保留哪些权益</div>
+              <p>VIP 不是生成次数会员：核心生成、智能省豆、色卡、尺寸和背景移除都按上面的积分规则使用。VIP 主要解锁去平台水印、自定义水印、批量处理、商业授权和更大云端空间；会员周额度会优先抵扣积分消耗。</p>
+              <p className="text-slate-400">兑换码中的“7 天体验卡”代表 7 天会员权益，体验期结束后恢复普通积分账户，剩余充值积分不会被清除。</p>
             </div>
           </div>
 
@@ -202,7 +227,7 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                       <span className="text-amber-400">✦</span> 智能绿幕与背景一键抠除 (Chroma Key Background)
                     </strong>
                     <p className="text-slate-400 leading-relaxed">
-                      支持在预览区吸取背景色并调节容差。只会移除与画布边缘连通的候选背景，主体内部孔洞会保留；应用前请检查预览。
+                      支持在预览区吸取背景色并调节容差。只会移除与画布边缘连通的候选背景，主体内部孔洞会保留；背景移除目前免费，应用前请检查预览。
                     </p>
                   </div>
                   <div className="bg-slate-900/60 p-3 rounded-lg border border-slate-800 space-y-1">
@@ -216,14 +241,14 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                 </div>
               </div>
 
-              {/* Smart Bead Reducer - NEW! */}
+              {/* Smart Bead Reducer */}
               <div className="bg-gradient-to-r from-amber-950/30 via-slate-900/80 to-amber-950/30 border border-amber-500/30 rounded-xl p-4 space-y-3">
                 <div className="font-bold text-amber-300 flex items-center gap-2 text-sm border-b border-amber-500/20 pb-1.5">
                   <Sparkles className="w-4.5 h-4.5 text-amber-400 fill-current" />
-                  👑 VIP 专属：显著性智能省豆与精纯优化引擎 (Smart Bead Reducer)
+                  显著性智能省豆与精纯优化引擎 (Smart Bead Reducer)
                 </div>
                 <p className="text-slate-300 leading-relaxed">
-                  减粒按目标豆子面积缩放，并以区域占比、边缘和中心权重选择代表色。<strong>免费用户可体验 15%；VIP 可选 15% 或 25%；商家 VIP 另可选 40%</strong>。结果会因图纸内容不同而变化，请对照预览后应用：
+                  省豆功能对所有登录用户开放，按当前图纸尺寸和报价规则消耗积分。引擎会优先合并低频、孤立且不受保护的颜色，并保留五官、文字、细线和有意留白；结果会因图纸内容不同而变化，请对照预览后再应用：
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-slate-300 pt-1">
                   <div className="bg-slate-900/80 p-3 rounded-lg border border-slate-800 space-y-1">

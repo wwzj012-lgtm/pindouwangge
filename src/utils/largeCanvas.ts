@@ -136,7 +136,7 @@ export function getLargeCanvasModeSettings(mode: LargeCanvasConversionMode): Pic
   if (mode === 'logo') {
     return { pipelineOverride: 'logo', dither: 'none', ditherStrength: 0, sharpening: 55, outlineBoost: true };
   }
-  return { pipelineOverride: 'logo', dither: 'none', ditherStrength: 0, sharpening: 25, outlineBoost: true };
+  return { pipelineOverride: 'cartoon', dither: 'none', ditherStrength: 0, sharpening: 25, outlineBoost: true };
 }
 
 export function clampLargeCanvasFramePosition(

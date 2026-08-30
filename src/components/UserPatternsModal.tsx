@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -33,7 +33,12 @@ import {
   type EditablePatternProject,
 } from '../utils/patternHistory';
 import { renderPatternPreview } from '../utils/patternPreview';
-import { publishCommunityPost, uploadCommunityAsset } from '../utils/communityApi';
+import {
+  getCommunityPublishErrorCode,
+  publishCommunityPost,
+  uploadCommunityAsset,
+  type CommunityPostVisibility,
+} from '../utils/communityApi';
 import { formatChinaDate } from '../utils/dateUtils';
 
 interface UserPatternsModalProps {
@@ -43,6 +48,10 @@ interface UserPatternsModalProps {
   onOpenCommunity: () => void;
   onOpenAuthModal: () => void;
 }
+
+const COMMUNITY_TAG_OPTIONS = ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo'];
+const COMMUNITY_MAX_TAGS = 5;
+const COMMUNITY_MAX_TAG_LENGTH = 24;
 
 function PatternCover({ record, userId }: { record: ExportedPatternRecord; userId: string | null }): React.ReactElement {
   const [url, setUrl] = useState<string | null>(null);
@@ -93,6 +102,23 @@ function statusClass(status: ExportedPatternRecord['syncState']): string {
   return 'border-slate-600 bg-slate-800 text-slate-300';
 }
 
+type SavedCompletionStatus = 'DRAFT' | 'COMPLETED' | 'LEGACY';
+
+type CompletionAwareRecord = ExportedPatternRecord & {
+  completionStatus?: SavedCompletionStatus;
+  paidNonEmptyBeads?: number | null;
+};
+
+function isCompletionUnlocked(record: ExportedPatternRecord): boolean {
+  const completion = record as CompletionAwareRecord;
+  if (completion.completionStatus === 'LEGACY') return true;
+  if (completion.completionStatus !== 'COMPLETED') return false;
+  const paidNonEmptyBeads = completion.paidNonEmptyBeads;
+  return Number.isSafeInteger(paidNonEmptyBeads)
+    && paidNonEmptyBeads >= 0
+    && record.totalBeads <= paidNonEmptyBeads;
+}
+
 export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   isOpen,
   onClose,
@@ -112,7 +138,12 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [section, setSection] = useState<'private' | 'published'>('private');
   const [publishTarget, setPublishTarget] = useState<ExportedPatternRecord | null>(null);
   const [publishTitle, setPublishTitle] = useState('');
+  const [publishDescription, setPublishDescription] = useState('');
+  const [publishVisibility, setPublishVisibility] = useState<CommunityPostVisibility>('public');
+  const [publishTags, setPublishTags] = useState<string[]>([]);
+  const [publishTagDraft, setPublishTagDraft] = useState('');
   const [publishError, setPublishError] = useState<string | null>(null);
+  const publishRequestRef = useRef(false);
 
   const loadPatterns = async (): Promise<void> => {
     setLoading(true);
@@ -144,17 +175,32 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     }
   };
 
-  const handleSyncToCurrentAccount = async (record: ExportedPatternRecord): Promise<void> => {
+  const ensureCloudSaved = async (record: ExportedPatternRecord): Promise<ExportedPatternRecord | null> => {
+    if (!currentUser) {
+      setMessage(isEn ? 'Please sign in before saving to the cloud.' : '请先登录后再保存到云端。');
+      onOpenAuthModal();
+      return null;
+    }
+    if (record.hasCloudCopy && record.userId === currentUser.uid) {
+      return record;
+    }
     setBusyId(record.id);
     setMessage(null);
     try {
-      await retryPatternCloudSync(record.id, currentUser?.uid ?? null);
+      const syncedRecord = await retryPatternCloudSync(record.id, currentUser.uid);
       await loadPatterns();
+      setMessage(isEn ? 'Saved to your private cloud gallery.' : '已保存到云端私有图库。');
+      return syncedRecord;
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (isEn ? 'Cloud sync retry failed.' : '云端同步重试失败。'));
+      setMessage(error instanceof Error ? error.message : (isEn ? 'Cloud save failed.' : '云端保存失败。'));
+      return null;
     } finally {
       setBusyId(null);
     }
+  };
+
+  const handleSyncToCurrentAccount = async (record: ExportedPatternRecord): Promise<void> => {
+    await ensureCloudSaved(record);
   };
 
   const handleDeleteLocal = async (record: ExportedPatternRecord): Promise<void> => {
@@ -227,52 +273,128 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
 
   const openPublishDialog = (record: ExportedPatternRecord): void => {
     if (!currentUser) {
-      setMessage(isEn ? 'Sign in and save this pattern to cloud before publishing.' : '请先登录并保存到云端后再发布。');
+      setMessage(isEn ? 'Please sign in before publishing.' : '请先登录后再发布。');
       onOpenAuthModal();
       return;
     }
-    if (!record.hasCloudCopy || record.userId !== currentUser.uid) {
-      setMessage(isEn ? 'Save this pattern to your cloud gallery before publishing.' : '本地作品需先保存到当前账号的云端图库后才能发布。');
+    if ((record.status ?? 0) === 2) return;
+    if (!isCompletionUnlocked(record)) {
+      setMessage(isEn ? 'Complete the pattern to unlock publishing.' : '完成图纸后解锁发布。');
       return;
     }
-    if ((record.status ?? 0) === 2) return;
     setPublishTarget(record);
     setPublishTitle(record.title.trim().slice(0, 60));
+    setPublishDescription('');
+    setPublishVisibility('public');
+    setPublishTags([]);
+    setPublishTagDraft('');
     setPublishError(null);
   };
 
+  const addPublishTag = (value: string): void => {
+    const tag = value.trim();
+    if (!tag) return;
+    if (tag.length > COMMUNITY_MAX_TAG_LENGTH) {
+      setPublishError(isEn ? `Each tag must be within ${COMMUNITY_MAX_TAG_LENGTH} characters.` : `每个标签不能超过 ${COMMUNITY_MAX_TAG_LENGTH} 个字符。`);
+      return;
+    }
+    if (publishTags.some((item) => item === tag)) {
+      setPublishTagDraft('');
+      return;
+    }
+    if (publishTags.length >= COMMUNITY_MAX_TAGS) {
+      setPublishError(isEn ? `You can add up to ${COMMUNITY_MAX_TAGS} tags.` : `最多可添加 ${COMMUNITY_MAX_TAGS} 个标签。`);
+      return;
+    }
+    setPublishTags((current) => [...current, tag]);
+    setPublishTagDraft('');
+    setPublishError(null);
+  };
+
+  const togglePublishTag = (tag: string): void => {
+    if (publishTags.includes(tag)) {
+      setPublishTags((current) => current.filter((item) => item !== tag));
+      setPublishError(null);
+      return;
+    }
+    addPublishTag(tag);
+  };
+
+  const closePublishDialog = (): void => {
+    if (busyId) return;
+    setPublishTarget(null);
+    setPublishError(null);
+  };
+
+  const createCommunityPreviewFile = async (record: ExportedPatternRecord, userId: string): Promise<File> => {
+    let preview = record.previewBlob ?? null;
+    if (!preview && record.cloudRevision) {
+      preview = await getExportedPatternPreview(record.id, record.cloudRevision, userId);
+    }
+    if (!preview) preview = await renderPatternPreview(await getPatternProject(record.id, userId));
+    const contentType = ['image/png', 'image/webp', 'image/jpeg'].includes(preview.type) ? preview.type : 'image/png';
+    return new File([preview], `${record.title}.png`, { type: contentType });
+  };
+
   const handlePublish = async (): Promise<void> => {
-    if (!publishTarget || !currentUser || busyId) return;
+    if (!publishTarget || !currentUser || busyId || publishRequestRef.current) return;
     const title = publishTitle.trim();
+    const description = publishDescription.trim();
+    const tags: string[] = Array.from(new Set<string>(publishTags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
     if (title.length < 1 || title.length > 60) {
       setPublishError(isEn ? 'A work name must contain 1 to 60 characters.' : '作品名称需为 1 至 60 个字符。');
       return;
     }
+    if (description.length > 500) {
+      setPublishError(isEn ? 'Description must be within 500 characters.' : '作品简介不能超过 500 个字符。');
+      return;
+    }
+    if (tags.length > COMMUNITY_MAX_TAGS || tags.some((tag) => tag.length > COMMUNITY_MAX_TAG_LENGTH)) {
+      setPublishError(isEn ? 'Tags do not meet the publishing limits.' : '标签不符合发布限制。');
+      return;
+    }
     const record = publishTarget;
-    setBusyId(record.id);
+    if (!isCompletionUnlocked(record)) {
+      setPublishError(isEn ? 'Complete the pattern to unlock publishing.' : '完成图纸后解锁发布。');
+      return;
+    }
+    const publishRecord = await ensureCloudSaved(record);
+    if (!publishRecord) return;
+    publishRequestRef.current = true;
+    setBusyId(publishRecord.id);
     setMessage(null);
     setPublishError(null);
     try {
-      let preview = record.previewBlob ?? null;
-      if (!preview && record.cloudRevision) {
-        preview = await getExportedPatternPreview(record.id, record.cloudRevision, currentUser.uid);
+      const metadata = { title, description, visibility: publishVisibility, tags, workId: publishRecord.id };
+      let published = await publishCommunityPost(metadata);
+      if (!published.ok && getCommunityPublishErrorCode(published) === 'WORK_ASSET_REQUIRED') {
+        const upload = await uploadCommunityAsset(await createCommunityPreviewFile(publishRecord, currentUser.uid));
+        if (!upload.ok || !upload.data) throw new Error(upload.error ?? '社区图片上传失败');
+        published = await publishCommunityPost({ ...metadata, assetId: upload.data.asset.id });
       }
-      if (!preview) preview = await renderPatternPreview(await getPatternProject(record.id, currentUser.uid));
-      const contentType = ['image/png', 'image/webp', 'image/jpeg'].includes(preview.type) ? preview.type : 'image/png';
-      const file = new File([preview], `${record.title}.png`, { type: contentType });
-      const upload = await uploadCommunityAsset(file);
-      if (!upload.ok || !upload.data) throw new Error(upload.error ?? '社区图片上传失败');
-      const published = await publishCommunityPost(title, upload.data.asset.id, record.id);
       if (!published.ok) throw new Error(published.error ?? '作品发布失败');
-      await markExportedPatternPublished(record.id, currentUser.uid);
-      setRecords((current) => current.map((item) => item.id === record.id ? { ...item, status: 1, hasCloudCopy: true } : item));
+      await markExportedPatternPublished(publishRecord.id, currentUser.uid);
+      const publishedRecord: ExportedPatternRecord = { ...publishRecord, status: 1, hasCloudCopy: true };
+      setRecords((current) => {
+        const matchedSyncedRecord = current.some((item) => item.id === publishedRecord.id);
+        return current.map((item) => (
+          item.id === publishedRecord.id || (!matchedSyncedRecord && item.id === record.id)
+            ? publishedRecord
+            : item
+        ));
+      });
       setSection('published');
       setPublishTarget(null);
       setPublishTitle('');
-      setMessage(isEn ? 'Published to the community.' : '作品已发布到社区。');
+      setPublishDescription('');
+      setPublishTags([]);
+      setMessage(publishVisibility === 'public'
+        ? (isEn ? 'Published to the community. Open Community to view it.' : '作品已发布到社区，可前往社区查看。')
+        : (isEn ? 'Published privately. It will not appear in the public community list.' : '作品已私密发布，不会出现在公开社区列表。'));
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
     } finally {
+      publishRequestRef.current = false;
       setBusyId(null);
     }
   };
@@ -298,7 +420,15 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                 : '每条记录都保存完整网格和色板，可继续编辑和高清导出；预览图不参与图纸恢复。'}
             </p>
           </div>
-          <button onClick={onClose} className="p-2 text-slate-400 hover:text-white" title={isEn ? 'Close' : '关闭'}>
+          <button
+            type="button"
+            onClick={() => { if (!busyId) onClose(); }}
+            disabled={Boolean(busyId)}
+            aria-disabled={Boolean(busyId)}
+            className="p-2 text-slate-400 hover:text-white disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-slate-400"
+            title={isEn ? 'Close' : '关闭'}
+            aria-label={isEn ? 'Close gallery' : '关闭图库'}
+          >
             <X className="h-5 w-5" />
           </button>
         </header>
@@ -393,6 +523,9 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                         <span className="text-slate-600">|</span>
                         <span>{record.totalBeads} {isEn ? 'beads' : '颗'}</span>
                       </div>
+                      <div className="mx-3 mt-2 text-[10px] font-semibold text-emerald-300">
+                        {isEn ? 'Cloud save and sync are free.' : '云端保存与同步均不收费。'}
+                      </div>
                       <div className="mx-3 mt-2 text-[10px] text-slate-500">{formatChinaDate(record.updatedAt, true)}</div>
                       <div className={`mx-3 mt-2 text-[10px] font-bold ${(record.status ?? 0) === 1 ? 'text-emerald-300' : 'text-sky-300'}`}>
                         {(record.status ?? 0) === 1 ? (isEn ? 'Published' : '已发布') : (isEn ? 'Private' : '私有')}
@@ -424,7 +557,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                       {(record.status ?? 0) === 0 && (
                         <button
                           onClick={() => openPublishDialog(record)}
-                          disabled={busy}
+                          disabled={busy || !isCompletionUnlocked(record)}
+                          title={!isCompletionUnlocked(record) ? (isEn ? 'Complete the pattern to unlock.' : '完成图纸后解锁') : undefined}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20 disabled:opacity-50"
                         >
                           <Compass className="h-3.5 w-3.5" />
@@ -485,8 +619,11 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
               <div className="min-w-0">
                 <h4 id="publish-pattern-title" className="truncate text-base font-bold text-white">{isEn ? 'Publish work' : '发布作品'}</h4>
                 <p className="mt-1 truncate text-xs text-slate-400">{publishTarget.title}</p>
+                <p className="mt-1 text-[10px] text-emerald-300">
+                  {isEn ? 'Cloud sync and publishing are free.' : '云端同步与发布均不收费。'}
+                </p>
               </div>
-              <button type="button" onClick={() => { if (!busyId) { setPublishTarget(null); setPublishError(null); } }} disabled={Boolean(busyId)} className="grid h-10 w-10 shrink-0 place-items-center text-slate-400 hover:text-white disabled:opacity-50" title={isEn ? 'Close' : '关闭'} aria-label={isEn ? 'Close' : '关闭'}>
+              <button type="button" onClick={closePublishDialog} disabled={Boolean(busyId)} className="grid h-10 w-10 shrink-0 place-items-center text-slate-400 hover:text-white disabled:opacity-50" title={isEn ? 'Close' : '关闭'} aria-label={isEn ? 'Close' : '关闭'}>
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -504,9 +641,77 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
               />
             </label>
             <p id="publish-name-help" className="mt-2 text-[11px] text-slate-500">{isEn ? `${publishTitle.trim().length}/60 characters` : `${publishTitle.trim().length}/60 个字符`}</p>
+            <label className="mt-4 block text-xs font-bold text-slate-400">
+              {isEn ? 'Description' : '作品简介'}
+              <textarea
+                value={publishDescription}
+                onChange={(event) => { setPublishDescription(event.target.value); setPublishError(null); }}
+                maxLength={500}
+                disabled={Boolean(busyId)}
+                rows={3}
+                className="mt-2 w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm leading-5 text-white outline-none focus:border-sky-400 disabled:opacity-60"
+                aria-describedby="publish-description-help"
+              />
+            </label>
+            <p id="publish-description-help" className="mt-2 text-[11px] text-slate-500">{publishDescription.trim().length}/500</p>
+            <fieldset className="mt-4">
+              <legend className="text-xs font-bold text-slate-400">{isEn ? 'Visibility' : '可见范围'}</legend>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {(['public', 'private'] as const).map((visibility) => {
+                  const selected = publishVisibility === visibility;
+                  return (
+                    <button
+                      key={visibility}
+                      type="button"
+                      disabled={Boolean(busyId)}
+                      onClick={() => { setPublishVisibility(visibility); setPublishError(null); }}
+                      className={`min-h-11 rounded-md border px-2 text-xs font-bold transition-colors disabled:opacity-50 ${selected ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100' : 'border-slate-700 bg-slate-950 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}
+                    >
+                      {visibility === 'public' ? (isEn ? 'Public' : '公开') : (isEn ? 'Private' : '私密')}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <fieldset className="mt-4 min-w-0">
+              <legend className="text-xs font-bold text-slate-400">{isEn ? `Tags (${publishTags.length}/${COMMUNITY_MAX_TAGS})` : `标签（${publishTags.length}/${COMMUNITY_MAX_TAGS}）`}</legend>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {COMMUNITY_TAG_OPTIONS.map((tag) => {
+                  const selected = publishTags.includes(tag);
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      disabled={Boolean(busyId) || (!selected && publishTags.length >= COMMUNITY_MAX_TAGS)}
+                      onClick={() => togglePublishTag(tag)}
+                      className={`min-h-9 max-w-full rounded-md border px-2 text-xs font-bold transition-colors disabled:opacity-40 ${selected ? 'border-sky-400 bg-sky-500/20 text-sky-100' : 'border-slate-700 bg-slate-950 text-slate-400 hover:border-slate-500 hover:text-slate-200'}`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 flex min-w-0 gap-2">
+                <input
+                  value={publishTagDraft}
+                  onChange={(event) => { setPublishTagDraft(event.target.value); setPublishError(null); }}
+                  maxLength={COMMUNITY_MAX_TAG_LENGTH}
+                  disabled={Boolean(busyId) || publishTags.length >= COMMUNITY_MAX_TAGS}
+                  placeholder={isEn ? 'Custom tag' : '自定义标签'}
+                  className="min-w-0 flex-1 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-xs text-white outline-none focus:border-sky-400 disabled:opacity-60"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      addPublishTag(publishTagDraft);
+                    }
+                  }}
+                />
+                <button type="button" onClick={() => addPublishTag(publishTagDraft)} disabled={Boolean(busyId) || !publishTagDraft.trim() || publishTags.length >= COMMUNITY_MAX_TAGS} className="shrink-0 rounded-md border border-sky-500/50 px-3 text-xs font-bold text-sky-200 hover:bg-sky-500/10 disabled:opacity-50">{isEn ? 'Add' : '添加'}</button>
+              </div>
+            </fieldset>
             {publishError && <div role="alert" className="mt-3 flex items-start gap-2 rounded-md border border-rose-500/40 bg-rose-950/50 p-3 text-xs leading-5 text-rose-200"><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />{publishError}</div>}
             <div className="mt-5 grid grid-cols-2 gap-3">
-              <button type="button" onClick={() => { setPublishTarget(null); setPublishError(null); }} disabled={Boolean(busyId)} className="min-h-11 rounded-md border border-slate-700 text-sm font-bold text-slate-300 hover:text-white disabled:opacity-50">{isEn ? 'Cancel' : '取消'}</button>
+              <button type="button" onClick={closePublishDialog} disabled={Boolean(busyId)} className="min-h-11 rounded-md border border-slate-700 text-sm font-bold text-slate-300 hover:text-white disabled:opacity-50">{isEn ? 'Cancel' : '取消'}</button>
               <button type="button" onClick={() => void handlePublish()} disabled={Boolean(busyId)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:opacity-50">{busyId ? <Loader2 className="h-4 w-4 animate-spin" /> : <Compass className="h-4 w-4" />}{isEn ? 'Confirm publish' : '确认发布'}</button>
             </div>
           </section>

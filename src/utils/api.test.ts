@@ -11,6 +11,7 @@ import {
   setAdminSessionToken,
   setApiToken,
 } from './api';
+import { encodeGridOccupancy } from '../App';
 
 function successResponse<T>(data: T): Response {
   return new Response(JSON.stringify({ success: true, data }), {
@@ -42,6 +43,48 @@ function createStorage(): Storage {
     },
   };
 }
+
+describe('grid occupancy encoder', () => {
+  it('encodes a single occupied cell MSB-first with standard padding', () => {
+    expect(encodeGridOccupancy([['A']])).toEqual({
+      width: 1,
+      height: 1,
+      occupancyBase64: 'gA==',
+    });
+  });
+
+  it('encodes exactly eight cells in row-major bit order', () => {
+    expect(encodeGridOccupancy([['A', null, 'B', null, null, 'C', null, 'D']])).toEqual({
+      width: 8,
+      height: 1,
+      occupancyBase64: 'pQ==',
+    });
+  });
+
+  it('pads a nine-bit tail and treats missing irregular-row cells as empty', () => {
+    expect(encodeGridOccupancy([
+      ['A', 'B', 'C'],
+      ['D'],
+      ['E', 'F', 'G'],
+    ])).toEqual({
+      width: 3,
+      height: 3,
+      occupancyBase64: '84A=',
+    });
+  });
+
+  it('encodes a large grid without spread or btoa argument limits', () => {
+    const grid = Array.from({ length: 512 }, () => Array<string | null>(2_048).fill('A'));
+    const encoded = encodeGridOccupancy(grid);
+
+    expect(encoded.width).toBe(2_048);
+    expect(encoded.height).toBe(512);
+    expect(encoded.occupancyBase64).toHaveLength(174_764);
+    expect(encoded.occupancyBase64.startsWith('////////')).toBe(true);
+    expect(encoded.occupancyBase64.endsWith('=')).toBe(true);
+    expect(encoded.occupancyBase64.endsWith('==')).toBe(false);
+  });
+});
 
 describe('Worker API client', () => {
   const fetchMock = vi.fn();
@@ -135,6 +178,62 @@ describe('Worker API client', () => {
 
     expect(getApiToken()).toBeNull();
     expect(unauthorizedListener).toHaveBeenCalled();
+  });
+
+  it('preserves a structured 409 error code for callers that need to upload an asset first', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      message: '请先上传作品资源',
+      code: 'WORK_ASSET_REQUIRED',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(apiPost('/api/community/publish', {})).resolves.toMatchObject({
+      ok: false,
+      status: 409,
+      error: '请先上传作品资源',
+      code: 'WORK_ASSET_REQUIRED',
+    });
+  });
+
+  it('retains errorCode alongside code so callers can prefer errorCode when both are present', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      message: '重复发布',
+      code: 'LEGACY_DUPLICATE',
+      errorCode: 'WORK_ALREADY_PUBLISHED',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(apiPost('/api/community/publish', {})).resolves.toMatchObject({
+      ok: false,
+      status: 409,
+      error: '重复发布',
+      code: 'LEGACY_DUPLICATE',
+      errorCode: 'WORK_ALREADY_PUBLISHED',
+    });
+  });
+
+  it('ignores non-string structured error codes without rejecting a valid error response', async () => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({
+      success: false,
+      message: '参数无效',
+      code: { value: 'NOT_SAFE' },
+      errorCode: 422,
+    }), {
+      status: 422,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    const result = await apiPost('/api/community/publish', {});
+
+    expect(result).toMatchObject({ ok: false, status: 422, error: '参数无效' });
+    expect(result.code).toBeUndefined();
+    expect(result.errorCode).toBeUndefined();
   });
 
   it('stores remembered tokens in localStorage only', () => {

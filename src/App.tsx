@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { LayoutGrid, Sliders, BarChart3, Wand2, Download, Palette, Sparkles, Loader2, Save, X, Zap } from 'lucide-react';
+import { Loader2, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -27,12 +27,18 @@ import {
   gridsEqual,
   type GridSnapshot,
 } from './utils/historyTransactions';
+import {
+  consolidateStrayBeans,
+  type StrayBeanStrength,
+} from './utils/strayBeanConsolidation';
 
 import { Header } from './components/Header';
-import { Toolbar } from './components/Toolbar';
-import { GridCanvas } from './components/GridCanvas';
-import { SettingsPanel } from './components/SettingsPanel';
-import { StatsPanel } from './components/StatsPanel';
+import { MobileHeaderNav } from './components/mobile/MobileHeaderNav';
+import { MobileBottomNav } from './components/mobile/MobileBottomNav';
+import { DesktopWorkspace } from './components/desktop/DesktopWorkspace';
+import { PatternDetailsUnlockContext } from './components/StatsPanel';
+import { MobileWorkspace } from './components/mobile/MobileWorkspace';
+import { useIsDesktop } from './hooks/useIsDesktop';
 import { PaletteManagerModal } from './components/PaletteManagerModal';
 import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
@@ -43,18 +49,222 @@ import { VipPrivilegesModal } from './components/VipPrivilegesModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { AccountManagementModal } from './components/AccountManagementModal';
 import { HomeView, type HeroExample } from './components/HomeView';
-import type { LargeCanvasFrame } from './components/LargeCanvasView';
+import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
 import type { CommunityPattern } from './data/communityData';
-import { saveExportedPatternRecord, type EditablePatternProject } from './utils/patternHistory';
+import {
+  getPatternProject,
+  getUserExportedPatterns,
+  markLegacyByWorkKeys,
+  saveExportedPatternRecord,
+  type EditablePatternProject,
+} from './utils/patternHistory';
+import { toggleCompletedColorId } from './utils/completionHighlight';
+import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
 
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
+
+type PatternCompletionStatus = 'DRAFT' | 'QUOTING' | 'AWAITING_CONFIRMATION' | 'COMPLETING' | 'COMPLETED' | 'LEGACY';
+
+interface PatternCompletionInput {
+  workKey: string;
+  sourceHash: string;
+  width: number;
+  height: number;
+  occupancyBase64: string;
+  savingTarget: 15 | 25 | 40;
+}
+
+interface PatternCompletionQuote {
+  pricingVersion: string;
+  nonEmptyBeads: number;
+  baseUnits: number;
+  totalUnits: number;
+  /** Legacy Worker response field (credit units, not points). */
+  additionalUnits?: number;
+  /** Current Worker response fields. Values are already converted to points. */
+  currentTotalPoints?: number;
+  upgradeDuePoints?: number;
+  chargedPoints?: number;
+  paidPoints?: number;
+  paidUnits?: number;
+  beadSavingLevel?: number;
+  savingTarget?: number;
+  beadSavingMultiplierBps: number;
+  membershipDiscountBps: number;
+  entitlement?: {
+    status: string;
+    paidUnits: number;
+    paidNonEmptyBeads: number;
+    paidBeadSavingLevel: number;
+    gridHash: string;
+  };
+}
+
+interface CompletionQuoteState {
+  input: PatternCompletionInput;
+  quote: PatternCompletionQuote;
+  idempotencyKey: string;
+}
+
+function formatCreditPoints(value: number): string {
+  if (!Number.isFinite(value)) return '—';
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function getCompletionChargePoints(quote: PatternCompletionQuote): number | null {
+  // `upgradeDuePoints` is the authoritative amount for an existing
+  // entitlement; `currentTotalPoints` is the amount for a new pattern.
+  for (const value of [quote.upgradeDuePoints, quote.chargedPoints]) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  if (typeof quote.additionalUnits === 'number' && Number.isFinite(quote.additionalUnits)) {
+    return quote.additionalUnits / 10;
+  }
+  if (typeof quote.currentTotalPoints === 'number' && Number.isFinite(quote.currentTotalPoints)) {
+    return quote.currentTotalPoints;
+  }
+  return null;
+}
+
+function estimateCompletionPoints(nonEmptyBeads: number, savingTarget: 15 | 25 | 40): number {
+  // Informational fallback used before authentication. The Worker remains
+  // authoritative and re-quotes the exact amount before any debit.
+  const baseUnits = Math.max(1, Math.ceil(Math.max(0, nonEmptyBeads) / 90));
+  const multiplier = savingTarget === 40 ? 1.1 : savingTarget === 25 ? 1.08 : 1.05;
+  return Math.max(0.1, Math.ceil(baseUnits * multiplier) / 10);
+}
+
+function createSessionKey(prefix: string): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function createDraftId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function stableHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return `fnv1a-${(hash >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function bytesToStandardBase64(bytes: Uint8Array): string {
+  const chunks: string[] = [];
+  let chunk = '';
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const hasSecond = index + 1 < bytes.length;
+    const hasThird = index + 2 < bytes.length;
+    const second = hasSecond ? bytes[index + 1] : 0;
+    const third = hasThird ? bytes[index + 2] : 0;
+    const packed = (first << 16) | (second << 8) | third;
+    chunk += BASE64_ALPHABET[(packed >>> 18) & 63]
+      + BASE64_ALPHABET[(packed >>> 12) & 63]
+      + (hasSecond ? BASE64_ALPHABET[(packed >>> 6) & 63] : '=')
+      + (hasThird ? BASE64_ALPHABET[packed & 63] : '=');
+    if (chunk.length >= 32_768) {
+      chunks.push(chunk);
+      chunk = '';
+    }
+  }
+  if (chunk) chunks.push(chunk);
+  return chunks.join('');
+}
+
+export function encodeGridOccupancy(grid: ReadonlyArray<ReadonlyArray<string | null>>): {
+  width: number;
+  height: number;
+  occupancyBase64: string;
+} {
+  const height = grid.length;
+  const width = grid.reduce((maximum, row) => Math.max(maximum, row.length), 0);
+  const bitCount = width * height;
+  if (!Number.isSafeInteger(bitCount)) throw new RangeError('Grid dimensions are too large to encode safely.');
+
+  const bytes = new Uint8Array(Math.ceil(bitCount / 8));
+  for (let rowIndex = 0; rowIndex < height; rowIndex += 1) {
+    const row = grid[rowIndex];
+    for (let columnIndex = 0; columnIndex < width; columnIndex += 1) {
+      if (row[columnIndex] === null || row[columnIndex] === undefined) continue;
+      const bitIndex = rowIndex * width + columnIndex;
+      bytes[bitIndex >>> 3] |= 1 << (7 - (bitIndex & 7));
+    }
+  }
+
+  return { width, height, occupancyBase64: bytesToStandardBase64(bytes) };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function getApiStatus(value: unknown): number | null {
+  const record = asRecord(value);
+  if (!record) return null;
+  const status = record.status ?? record.statusCode;
+  if (typeof status === 'number') return status;
+  const response = asRecord(record.response);
+  return typeof response?.status === 'number' ? response.status : null;
+}
+
+function getApiMessage(value: unknown, fallback: string): string {
+  if (value instanceof Error && value.message) return value.message;
+  const record = asRecord(value);
+  if (!record) return fallback;
+  const direct = record.message ?? record.error;
+  if (typeof direct === 'string' && direct.trim()) return direct;
+  const data = asRecord(record.data);
+  const nested = data?.message ?? data?.error;
+  return typeof nested === 'string' && nested.trim() ? nested : fallback;
+}
+
+function getCreditBalance(summary: unknown): number | null {
+  const record = asRecord(summary);
+  if (!record) return null;
+  for (const key of ['availableUnits', 'balance', 'credits', 'units']) {
+    const value = record[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function parsePaletteHex(hex: string): { r: number; g: number; b: number } {
+  const normalized = hex.trim().replace(/^#/, '');
+  const expanded = normalized.length === 3
+    ? normalized.split('').map(channel => `${channel}${channel}`).join('')
+    : normalized;
+
+  const value = Number.parseInt(expanded, 16);
+  if (!Number.isFinite(value)) return { r: 0, g: 0, b: 0 };
+
+  return {
+    r: (value >> 16) & 0xff,
+    g: (value >> 8) & 0xff,
+    b: value & 0xff,
+  };
+}
+
 const AdminPage = lazy(() => import('./pages/AdminPage'));
 const CommunityView = lazy(() =>
   import('./components/CommunityView').then(({ CommunityView: Component }) => ({ default: Component })),
 );
 const LargeCanvasView = lazy(() =>
   import('./components/LargeCanvasView').then(({ LargeCanvasView: Component }) => ({ default: Component })),
+);
+const AssemblyWorkspace = lazy(() =>
+  import('./components/AssemblyWorkspace').then(({ AssemblyWorkspace: Component }) => ({ default: Component })),
 );
 const UserPatternsModal = lazy(() =>
   import('./components/UserPatternsModal').then(({ UserPatternsModal: Component }) => ({ default: Component })),
@@ -64,7 +274,7 @@ const SmartBeadReducerModal = lazy(() =>
 );
 
 function AdminPageLoading() {
-  return <main className="grid min-h-screen place-items-center bg-slate-950 p-4 text-slate-100"><div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-slate-800 bg-slate-900 px-4 text-sm text-slate-300"><Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-300" aria-hidden="true" /><span>正在加载管理后台...</span></div></main>;
+  return <main className="grid min-h-screen place-items-center bg-slate-100 p-4 text-slate-900"><div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 rounded-3xl border border-slate-200 bg-white px-5 text-sm text-slate-700 shadow-2xl"><Loader2 className="h-5 w-5 shrink-0 animate-spin text-indigo-600" aria-hidden="true" /><span>正在加载管理后台...</span></div></main>;
 }
 
 type DeferredFeatureSurface = 'page' | 'modal';
@@ -83,8 +293,8 @@ interface DeferredFeatureBoundaryState {
 function DeferredFeaturePageLoading({ label }: Pick<DeferredFeatureBoundaryProps, 'label'>) {
   return (
     <section role="status" className="grid min-h-[52dvh] place-items-center p-4 sm:p-6" aria-live="polite">
-      <div className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-sky-200 bg-white px-4 text-sm text-sky-950 shadow-sm">
-        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
+      <div className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 text-sm text-slate-800 shadow-xl">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-indigo-600" aria-hidden="true" />
         <span>正在加载{label}...</span>
       </div>
     </section>
@@ -93,9 +303,9 @@ function DeferredFeaturePageLoading({ label }: Pick<DeferredFeatureBoundaryProps
 
 function DeferredFeatureModalLoading({ label }: Pick<DeferredFeatureBoundaryProps, 'label'>) {
   return (
-    <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`正在加载${label}`}>
-      <div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 border border-sky-200 bg-white px-4 text-sm text-sky-950 shadow-xl" aria-live="polite">
-        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-sky-600" aria-hidden="true" />
+    <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/60 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label={`正在加载${label}`}>
+      <div role="status" className="flex min-h-24 w-full max-w-sm items-center justify-center gap-3 rounded-3xl border border-slate-200 bg-white px-5 text-sm text-slate-800 shadow-2xl" aria-live="polite">
+        <Loader2 className="h-5 w-5 shrink-0 animate-spin text-indigo-600" aria-hidden="true" />
         <span>正在加载{label}...</span>
       </div>
     </div>
@@ -103,17 +313,17 @@ function DeferredFeatureModalLoading({ label }: Pick<DeferredFeatureBoundaryProp
 }
 
 function DeferredFeatureLoadFailure({ label, surface, onDismiss }: Omit<DeferredFeatureBoundaryProps, 'children'>) {
-  const message = <div className="w-full max-w-sm border border-rose-200 bg-white p-5 text-center shadow-xl">
+  const message = <div className="w-full max-w-sm rounded-3xl border border-rose-200 bg-white p-6 text-center shadow-2xl">
     <h2 className="text-base font-bold text-rose-950">{label}加载失败</h2>
     <p className="mt-2 text-sm leading-6 text-rose-800">当前图纸和登录状态仍会保留。重新加载页面后可重新获取此功能。</p>
     <div className="mt-5 flex justify-center gap-2">
-      {onDismiss && <button type="button" onClick={onDismiss} className="border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">关闭</button>}
-      <button type="button" onClick={() => window.location.reload()} className="bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800">重新加载页面</button>
+      {onDismiss && <button type="button" onClick={onDismiss} className="min-h-11 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">关闭</button>}
+      <button type="button" onClick={() => window.location.reload()} className="min-h-11 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-700">重新加载页面</button>
     </div>
   </div>;
 
   return surface === 'modal'
-    ? <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/55 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label={`${label}加载失败`}>{message}</div>
+    ? <div className="fixed inset-0 z-60 grid place-items-center bg-slate-950/60 p-4 backdrop-blur-md" role="dialog" aria-modal="true" aria-label={`${label}加载失败`}>{message}</div>
     : <section className="grid min-h-[52dvh] place-items-center p-4 sm:p-6" role="alert">{message}</section>;
 }
 
@@ -134,8 +344,8 @@ class DeferredFeatureBoundary extends React.Component<DeferredFeatureBoundaryPro
   }
 }
 
-type StudioTab = 'home' | 'community' | 'studio' | 'largeCanvas';
-type PublicFeatureKey = 'public.community' | 'public.large_canvas' | 'public.smart_reducer';
+type StudioTab = 'home' | 'community' | 'studio' | 'largeCanvas' | 'assembly';
+type PublicFeatureKey = 'public.community' | 'public.large_canvas' | 'public.smart_reducer' | 'public.assembly';
 
 interface PublicAnnouncement {
   id: string;
@@ -149,7 +359,13 @@ const PUBLIC_FEATURE_DEFAULTS: Record<PublicFeatureKey, boolean> = {
   'public.community': true,
   'public.large_canvas': true,
   'public.smart_reducer': true,
+  // Assembly is an opt-in beta feature. Production remains closed until the
+  // server-side flag is explicitly enabled by an administrator.
+  'public.assembly': false,
 };
+
+const ASSEMBLY_DEV_MODE = import.meta.env.DEV || import.meta.env.VITE_ASSEMBLY_DEV_MODE === 'true';
+const ASSEMBLY_ADMIN_BYPASS = import.meta.env.VITE_ASSEMBLY_ADMIN_BYPASS === 'true';
 
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -175,7 +391,7 @@ function parsePublicAnnouncements(value: unknown): PublicAnnouncement[] {
 }
 
 function isPublicFeatureKey(value: unknown): value is PublicFeatureKey {
-  return value === 'public.community' || value === 'public.large_canvas' || value === 'public.smart_reducer';
+  return value === 'public.community' || value === 'public.large_canvas' || value === 'public.smart_reducer' || value === 'public.assembly';
 }
 
 function parsePublicFeatureFlags(value: unknown): Record<PublicFeatureKey, boolean> {
@@ -223,13 +439,18 @@ function imageElementToFile(image: HTMLImageElement, fileName: string): Promise<
   });
 }
 
-function StudioApp() {
+interface StudioAppProps {
+  initialTab?: StudioTab;
+}
+
+function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const { language } = useLanguage();
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, creditSummary, refreshCreditSummary } = useAuth();
+  const isDesktop = useIsDesktop();
   const isEn = language === 'en';
 
   // 1. Core State
-  const [currentTab, setCurrentTab] = useState<StudioTab>('home');
+  const [currentTab, setCurrentTab] = useState<StudioTab>(initialTab);
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
   const [activePatternId, setActivePatternId] = useState<string | null>(null);
   const [isSavingPattern, setIsSavingPattern] = useState(false);
@@ -242,6 +463,8 @@ function StudioApp() {
   const [publicAnnouncements, setPublicAnnouncements] = useState<PublicAnnouncement[]>([]);
   const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<Set<string>>(() => new Set());
   const [publicFeatureFlags, setPublicFeatureFlags] = useState<Record<PublicFeatureKey, boolean>>(() => ({ ...PUBLIC_FEATURE_DEFAULTS }));
+  const [publicFeatureFlagsLoaded, setPublicFeatureFlagsLoaded] = useState(false);
+  const canAccessAssembly = ASSEMBLY_DEV_MODE || publicFeatureFlags['public.assembly'] || (ASSEMBLY_ADMIN_BYPASS && userProfile?.role === 'admin');
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
   const [isConverting, setIsConverting] = useState<boolean>(false);
@@ -289,6 +512,8 @@ function StudioApp() {
     reject: (error: Error) => void;
   } | null>(null);
   const largeCanvasStudioRequestIdRef = useRef(0);
+  const largeCanvasViewRef = useRef<LargeCanvasViewHandle | null>(null);
+  const [largeCanvasCreditUsage, setLargeCanvasCreditUsage] = useState<LargeCanvasCreditUsage | null>(null);
 
   const beginImageRequest = useCallback(() => {
     return imageRequestGateRef.current.begin();
@@ -340,8 +565,27 @@ function StudioApp() {
   // Editing Tool State
   const [activeTool, setActiveTool] = useState<ToolType>('pencil');
   const [selectedColor, setSelectedColor] = useState<BeadColor | null>(BRAND_PALETTES.MARD[0]);
-  const [highlightColorId, setHighlightColorId] = useState<string | null>(null);
+  const [highlightColorIds, setHighlightColorIds] = useState<string[]>([]);
+  const [completedColorIds, setCompletedColorIds] = useState<string[]>([]);
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
+
+  const handleToggleHighlightColorId = useCallback((colorId: string) => {
+    setHighlightColorIds(prev =>
+      prev.includes(colorId) ? prev.filter(id => id !== colorId) : [...prev, colorId]
+    );
+  }, []);
+
+  const handleToggleCompletedColorId = useCallback((colorId: string) => {
+    setCompletedColorIds(prev => toggleCompletedColorId(prev, colorId));
+  }, []);
+
+  useEffect(() => {
+    const usedColorIds = new Set(grid.flatMap(row => row.filter((colorId): colorId is string => Boolean(colorId))));
+    setCompletedColorIds(prev => {
+      const next = prev.filter(colorId => usedColorIds.has(colorId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [grid]);
 
   // Display Mode & Backdrop Settings
   const [beadShape, setBeadShape] = useState<BeadShape>('square');
@@ -354,8 +598,7 @@ function StudioApp() {
   const [showOverlay, setShowOverlay] = useState(false);
   const [zoom, setZoom] = useState(1.0);
 
-  // Modals & Drawer State
-  const [mobileDrawer, setMobileDrawer] = useState<'none' | 'settings' | 'stats'>('none');
+  // Modal State
   const [isPaletteModalOpen, setIsPaletteModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
@@ -366,11 +609,84 @@ function StudioApp() {
   const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
   const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
+  const [draftSourceKey, setDraftSourceKey] = useState(createDraftId);
+  const [currentSavingTarget, setCurrentSavingTarget] = useState<15 | 25 | 40>(15);
+  const [completionStatus, setCompletionStatus] = useState<PatternCompletionStatus>('DRAFT');
+  const [completionQuote, setCompletionQuote] = useState<CompletionQuoteState | null>(null);
+  const [completionPreviewQuote, setCompletionPreviewQuote] = useState<PatternCompletionQuote | null>(null);
+  const [completionPreviewStatus, setCompletionPreviewStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [paidNonEmptyBeads, setPaidNonEmptyBeads] = useState<number | null>(null);
+  const completionSubmissionRef = useRef(false);
+  const legacyMigrationAttemptedUsersRef = useRef<Set<string>>(new Set());
   const [alignedPixels, setAlignedPixels] = useState<Uint8ClampedArray | undefined>(undefined);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 
   const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
+
+  useEffect(() => {
+    const userId = currentUser?.uid;
+    if (!hasFormalLogin || !userId || legacyMigrationAttemptedUsersRef.current.has(userId)) return;
+    // Mark the session attempt before touching storage/network. A transient
+    // failure leaves every record unchanged and does not nag or loop.
+    legacyMigrationAttemptedUsersRef.current.add(userId);
+    let cancelled = false;
+
+    void (async () => {
+      const records = await getUserExportedPatterns(userId);
+      const oldRecords = records
+        .filter(record => record.completionStatus === undefined)
+        .slice(0, 50);
+      const candidates = (await Promise.all(oldRecords.map(async record => {
+        try {
+          const project = await getPatternProject(record.id, userId);
+          // A summary from an older schema may omit the field while the full
+          // project already identifies a new draft. Never import that draft.
+          if (project.completionStatus !== undefined) return null;
+          const workKey = record.id;
+          const sourceHash = project.sourceHash || stableHash(workKey);
+          const gridHash = project.gridHash || stableHash(
+            project.grid.map(row => row.map(cell => cell ?? '').join('\u001f')).join('\u001e'),
+          );
+          const nonEmptyBeads = project.grid.reduce(
+            (total, row) => total + row.filter(cell => cell !== null).length,
+            0,
+          );
+          return { workKey, sourceHash, gridHash, nonEmptyBeads };
+        } catch {
+          return null;
+        }
+      }))).filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
+
+      if (cancelled || candidates.length === 0) return;
+      const response = await apiImportLegacyPatterns(candidates);
+      if (cancelled || !response.ok || !response.data) return;
+      const submitted = new Map(candidates.map(candidate => [candidate.workKey, candidate]));
+      const accepted = response.data.results.flatMap(result => {
+        if (result.status !== 'IMPORTED' && result.status !== 'ALREADY_REGISTERED') return [];
+        const candidate = submitted.get(result.workKey);
+        return candidate
+          ? [{ workKey: candidate.workKey, sourceHash: candidate.sourceHash, gridHash: candidate.gridHash }]
+          : [];
+      });
+      if (!cancelled && accepted.length > 0) {
+        await markLegacyByWorkKeys(userId, accepted);
+      }
+    })().catch(() => {
+      // Migration is best-effort and deliberately silent. Failure cannot
+      // change, delete, or repeatedly surface prompts for local patterns.
+    });
+
+    return () => { cancelled = true; };
+  }, [currentUser?.uid, hasFormalLogin]);
+
+  const beginNewCompletionDraft = useCallback(() => {
+    setDraftSourceKey(createDraftId());
+    setCurrentSavingTarget(15);
+    setCompletionStatus('DRAFT');
+    setCompletionQuote(null);
+    setPaidNonEmptyBeads(null);
+  }, []);
 
   const requireFormalLogin = useCallback((message: string): boolean => {
     if (hasFormalLogin) return true;
@@ -415,6 +731,8 @@ function StudioApp() {
       if (!active) return;
       if (announcements !== null) setPublicAnnouncements(parsePublicAnnouncements(announcements));
       if (flags !== null) setPublicFeatureFlags(parsePublicFeatureFlags(flags));
+    }).finally(() => {
+      if (active) setPublicFeatureFlagsLoaded(true);
     });
     return () => { active = false; };
   }, []);
@@ -438,12 +756,16 @@ function StudioApp() {
       : tab === 'largeCanvas'
         ? 'public.large_canvas'
         : null;
+    if (tab === 'assembly' && publicFeatureFlagsLoaded && !canAccessAssembly) {
+      showDisabledFeature(isEn ? '3D assembly' : '立体拼豆');
+      return;
+    }
     if (feature && !publicFeatureFlags[feature]) {
       showDisabledFeature(tab === 'community' ? '社区' : '大画板');
       return;
     }
     setCurrentTab(tab);
-  }, [currentTab, publicFeatureFlags, showDisabledFeature]);
+  }, [canAccessAssembly, currentTab, isEn, publicFeatureFlags, publicFeatureFlagsLoaded, showDisabledFeature]);
 
   const openSmartReduce = useCallback(() => {
     if (!publicFeatureFlags['public.smart_reducer']) {
@@ -466,12 +788,217 @@ function StudioApp() {
       setCurrentTab('home');
       showDisabledFeature('大画板');
     }
-  }, [currentTab, isSmartReduceModalOpen, publicFeatureFlags, showDisabledFeature]);
+  }, [canAccessAssembly, currentTab, isEn, isSmartReduceModalOpen, publicFeatureFlags, publicFeatureFlagsLoaded, showDisabledFeature]);
 
   // Palette Lookup Map
   const paletteMap = useMemo(() => {
     return new Map(activePalette.map(c => [c.id, c]));
   }, [activePalette]);
+
+  const gridNonEmptyBeads = useMemo(
+    () => grid.reduce((total, row) => total + row.filter(cell => cell !== null).length, 0),
+    [grid],
+  );
+  const gridHash = useMemo(
+    () => stableHash(grid.map(row => row.map(cell => cell ?? '').join('\u001f')).join('\u001e')),
+    [grid],
+  );
+  const gridOccupancy = useMemo(() => encodeGridOccupancy(grid), [grid]);
+  const stableWorkKey = currentTab === 'largeCanvas'
+    ? (largeCanvasCreditUsage?.workKey ?? 'large-canvas:workspace')
+    : activePatternId ?? `draft:${draftSourceKey}`;
+  const lastCompletionWorkKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const previousWorkKey = lastCompletionWorkKeyRef.current;
+    if (previousWorkKey !== null && previousWorkKey !== stableWorkKey) {
+      setCompletionStatus('DRAFT');
+      setCompletionQuote(null);
+      setCompletionPreviewQuote(null);
+      setCompletionPreviewStatus('idle');
+      setPaidNonEmptyBeads(null);
+    }
+    lastCompletionWorkKeyRef.current = stableWorkKey;
+  }, [stableWorkKey]);
+  const sourceHash = useMemo(() => stableHash(stableWorkKey), [stableWorkKey]);
+  const completionUsage = useMemo(
+    () => currentTab === 'largeCanvas'
+      ? (largeCanvasCreditUsage ?? { width: 0, height: 0, occupancyBase64: '', nonEmptyBeads: 0 })
+      : { ...gridOccupancy, nonEmptyBeads: gridNonEmptyBeads },
+    [currentTab, gridNonEmptyBeads, gridOccupancy, largeCanvasCreditUsage],
+  );
+  const nonEmptyBeads = completionUsage.nonEmptyBeads;
+  const patternCompletionInput = useMemo<PatternCompletionInput>(() => ({
+    workKey: stableWorkKey,
+    sourceHash,
+    width: completionUsage.width,
+    height: completionUsage.height,
+    occupancyBase64: completionUsage.occupancyBase64,
+    savingTarget: currentSavingTarget,
+  }), [completionUsage, currentSavingTarget, sourceHash, stableWorkKey]);
+  const needsCompletionSupplement = completionStatus === 'COMPLETED'
+    && paidNonEmptyBeads !== null
+    && nonEmptyBeads > paidNonEmptyBeads;
+  // VIP only changes export privileges. Detailed pattern data is available
+  // only once the pattern itself has been completed, paid up to date, or is a
+  // server-marked legacy pattern.
+  const isPatternUnlocked = (completionStatus === 'COMPLETED' && !needsCompletionSupplement)
+    || completionStatus === 'LEGACY';
+  const displayedCreditBalance = getCreditBalance(creditSummary);
+  const quotedCompletionPoints = completionQuote
+    ? getCompletionChargePoints(completionQuote.quote)
+    : completionPreviewQuote
+      ? getCompletionChargePoints(completionPreviewQuote)
+      : null;
+  const unauthenticatedEstimate = !hasFormalLogin && nonEmptyBeads > 0
+    ? estimateCompletionPoints(nonEmptyBeads, currentSavingTarget)
+    : null;
+
+  useEffect(() => {
+    setCompletionQuote(current => current
+      && current.input.width === patternCompletionInput.width
+      && current.input.height === patternCompletionInput.height
+      && current.input.occupancyBase64 === patternCompletionInput.occupancyBase64
+      && current.input.savingTarget === patternCompletionInput.savingTarget
+      ? current
+      : null);
+  }, [patternCompletionInput]);
+
+  const reportCompletionFailure = useCallback((error: unknown, action: 'quote' | 'complete') => {
+    const status = getApiStatus(error);
+    if (status === 401) {
+      setIsAuthModalOpen(true);
+      setSaveMessage(isEn ? 'Sign in to complete and unlock this pattern. Your draft is kept.' : '请登录后完成并解锁图纸，草稿已保留。');
+      return;
+    }
+    if (status === 402) {
+      setSaveMessage(isEn ? 'Not enough credits. Your draft is kept and can be completed after you earn more.' : '积分不足，草稿已保留；获得积分后可继续完成。');
+      return;
+    }
+    if (status === 409 || status === 422) {
+      setSaveMessage(isEn ? 'The quote is no longer valid. Please quote again; your draft is unchanged.' : '当前报价已失效，请重新核价；草稿未受影响。');
+      return;
+    }
+    setSaveMessage(getApiMessage(error, action === 'quote'
+      ? (isEn ? 'Unable to quote completion right now. Your draft is unchanged.' : '暂时无法核价，草稿未受影响。')
+      : (isEn ? 'Unable to complete this pattern right now. Your draft is unchanged.' : '暂时无法完成图纸，草稿未受影响。')));
+  }, [isEn]);
+
+  const getCompletionQuoteData = useCallback((result: unknown): PatternCompletionQuote => {
+    const data = asRecord(asRecord(result)?.data);
+    const additionalUnits = typeof data?.additionalUnits === 'number'
+      ? data.additionalUnits
+      : typeof data?.upgradeDueUnits === 'number'
+        ? data.upgradeDueUnits
+        : undefined;
+    const hasPoints = typeof data?.upgradeDuePoints === 'number'
+      || typeof data?.chargedPoints === 'number'
+      || typeof data?.currentTotalPoints === 'number'
+      || typeof additionalUnits === 'number';
+    if (!data || !hasPoints) {
+      const failure = new Error(getApiMessage(result, isEn ? 'Completion quote was unavailable.' : '完成图纸的报价不可用。'));
+      Object.assign(failure, { status: getApiStatus(result) });
+      throw failure;
+    }
+    return { ...data, ...(typeof additionalUnits === 'number' ? { additionalUnits } : {}) } as unknown as PatternCompletionQuote;
+  }, [isEn]);
+
+  // Keep the required amount visible while the user edits. This is a
+  // read-only quote and never creates a hold or charges credits.
+  useEffect(() => {
+    if (completionQuote || completionStatus === 'AWAITING_CONFIRMATION' || completionStatus === 'COMPLETING') return;
+    if (nonEmptyBeads === 0) {
+      setCompletionPreviewQuote(null);
+      setCompletionPreviewStatus('idle');
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (!hasFormalLogin) {
+        setCompletionPreviewQuote(null);
+        setCompletionPreviewStatus('idle');
+        return;
+      }
+      setCompletionPreviewStatus('loading');
+      void apiQuotePatternCompletion(patternCompletionInput)
+        .then(result => {
+          if (cancelled) return;
+          const quote = getCompletionQuoteData(result);
+          setCompletionPreviewQuote(quote);
+          setCompletionPreviewStatus('idle');
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setCompletionPreviewQuote(null);
+          setCompletionPreviewStatus('error');
+        });
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [completionQuote, completionStatus, getCompletionQuoteData, hasFormalLogin, nonEmptyBeads, patternCompletionInput]);
+
+  const handleQuotePatternCompletion = useCallback(async () => {
+    if (nonEmptyBeads === 0) {
+      setSaveMessage(isEn ? 'Add at least one bead before completing the pattern.' : '请先生成或添加至少一颗拼豆，再完成图纸。');
+      return;
+    }
+    if (!hasFormalLogin) {
+      setIsAuthModalOpen(true);
+      setSaveMessage(isEn ? 'Sign in to complete and unlock this pattern. Your draft is kept.' : '请登录后完成并解锁图纸，草稿已保留。');
+      return;
+    }
+
+    setCompletionStatus('QUOTING');
+    setCompletionQuote(null);
+    try {
+      const result = await apiQuotePatternCompletion(patternCompletionInput);
+      const quote = getCompletionQuoteData(result);
+      setCompletionQuote({
+        input: patternCompletionInput,
+        quote,
+        idempotencyKey: createSessionKey('completion'),
+      });
+      setCompletionStatus('AWAITING_CONFIRMATION');
+    } catch (error) {
+      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      reportCompletionFailure(error, 'quote');
+    }
+  }, [getCompletionQuoteData, hasFormalLogin, isEn, nonEmptyBeads, paidNonEmptyBeads, patternCompletionInput, reportCompletionFailure]);
+
+  const handleCompletePattern = useCallback(async () => {
+    if (completionSubmissionRef.current) return;
+    if (!completionQuote
+      || completionQuote.input.width !== patternCompletionInput.width
+      || completionQuote.input.height !== patternCompletionInput.height
+      || completionQuote.input.occupancyBase64 !== patternCompletionInput.occupancyBase64
+      || completionQuote.input.savingTarget !== patternCompletionInput.savingTarget) {
+      setCompletionQuote(null);
+      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      setSaveMessage(isEn ? 'The draft changed. Please quote the current pattern again.' : '图纸已修改，请重新核价当前图纸。');
+      return;
+    }
+
+    completionSubmissionRef.current = true;
+    setCompletionStatus('COMPLETING');
+    try {
+      const result = await apiCompletePattern(completionQuote.input, completionQuote.idempotencyKey);
+      const completedQuote = getCompletionQuoteData(result);
+      const completedPaidBeads = completedQuote.entitlement?.paidNonEmptyBeads ?? completedQuote.nonEmptyBeads;
+      setPaidNonEmptyBeads(completedPaidBeads);
+      setCompletionQuote(null);
+      setCompletionStatus('COMPLETED');
+      await refreshCreditSummary();
+      setSaveMessage(isEn ? 'Pattern completed and unlocked.' : '图纸已完成并解锁。');
+    } catch (error) {
+      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      reportCompletionFailure(error, 'complete');
+    } finally {
+      completionSubmissionRef.current = false;
+    }
+  }, [completionQuote, getCompletionQuoteData, isEn, paidNonEmptyBeads, patternCompletionInput, refreshCreditSummary, reportCompletionFailure]);
 
   const largeCanvasPaletteOptions = useMemo(
     () => (Object.keys(BRAND_PALETTES) as BrandKey[]).map(id => ({ id, label: BRAND_NAMES[id] ?? id })),
@@ -529,6 +1056,21 @@ function StudioApp() {
     commitGridHistory(currentGrid, nextGrid);
     return true;
   }, [commitGridHistory, invalidateImageRequest]);
+
+  /** Consolidate globally low-usage palette colours in the current in-memory grid only. */
+  const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard') => {
+    const currentGrid = gridRef.current;
+    const nextGrid = consolidateStrayBeans(currentGrid, {
+      isFilled: cell => cell !== null && paletteMap.has(cell),
+      getColorKey: cell => String(cell),
+      getColor: cell => parsePaletteHex(paletteMap.get(cell)?.hex ?? '#000000'),
+      replaceColor: (_noise, replacement) => replacement,
+    }, strength);
+
+    // Keep the source image and conversion settings untouched; this is an edit
+    // to the working pattern and is intentionally not auto-saved.
+    return applyGridChange(nextGrid, false);
+  }, [applyGridChange, paletteMap]);
 
   const beginHistoryTransaction = useCallback(() => {
     if (!historyTransactionRef.current) {
@@ -593,6 +1135,7 @@ function StudioApp() {
 
           if (isCurrentImageRequest(requestToken)) {
             applyGridChange(newGrid, false);
+            setCompletedColorIds([]);
             setConversionDiagnostics(conversion.diagnostics);
             setAlignedPixels(conversion.alignedSourcePixels);
           }
@@ -611,6 +1154,7 @@ function StudioApp() {
   // Re-convert on settings update if source image exists
   const handleReconvert = () => {
     if (sourceImage) {
+      beginNewCompletionDraft();
       const requestToken = beginImageRequest();
       convertImageToGrid(sourceImage, settings, activePalette, requestToken);
     }
@@ -618,6 +1162,12 @@ function StudioApp() {
 
   // Load Image File
   const handleImageUpload = (file: File) => {
+    if (currentTab === 'largeCanvas') {
+      largeCanvasViewRef.current?.uploadFile(file);
+      return;
+    }
+
+    beginNewCompletionDraft();
     const requestToken = beginImageRequest();
     setActivePatternId(null);
     setIsConverting(true);
@@ -651,6 +1201,7 @@ function StudioApp() {
 
   // Load Sample Preset Image
   const handleLoadSample = (sampleUrl: string, name = '安妮亚粉发眼镜示例拼豆') => {
+    beginNewCompletionDraft();
     const requestToken = beginImageRequest();
     setImageLoadMessage(null);
     setIsConverting(true);
@@ -800,6 +1351,7 @@ function StudioApp() {
   // Clear Canvas
   const handleClearCanvas = () => {
     setActivePatternId(null);
+    setCompletedColorIds([]);
     const emptyGrid = Array.from({ length: settings.height }, () =>
       Array(settings.width).fill(null)
     );
@@ -820,7 +1372,8 @@ function StudioApp() {
     setHistory(resetState.history);
     setHistoryIndex(resetState.historyIndex);
     setActivePatternId(null);
-    setHighlightColorId(null);
+    setHighlightColorIds([]);
+    setCompletedColorIds([]);
     setReplaceSourceColor(null);
     setErasedColorCoords(new Map());
   }, [invalidateImageRequest]);
@@ -1092,6 +1645,10 @@ function StudioApp() {
 
   // Export & Import Project JSON
   const handleExportJson = () => {
+    if (!isPatternUnlocked) {
+      setSaveMessage(isEn ? 'Complete the pattern to unlock codes, quantities, coordinates, and downloads.' : '完成后解锁色号、数量、坐标和导出。');
+      return;
+    }
     if (!requireFormalLogin(isEn ? 'Sign in before downloading project files.' : '请先登录，再下载工程文件。')) return;
     const project: ProjectData = {
       version: '1.0',
@@ -1118,8 +1675,10 @@ function StudioApp() {
     try {
       const project: ProjectData = JSON.parse(jsonStr);
       if (project.grid && Array.isArray(project.grid)) {
+        beginNewCompletionDraft();
         invalidateImageRequest();
         setActivePatternId(null);
+        setCompletedColorIds([]);
         setProjectName(project.name || '导入的拼豆项目');
         setBrand(project.brand || 'MARD');
         setSettings(s => ({
@@ -1136,7 +1695,23 @@ function StudioApp() {
   };
 
   const handleRestorePattern = (project: EditablePatternProject): void => {
+    beginNewCompletionDraft();
+    const savedCompletion = asRecord(project);
+    const savedCompletionStatus = savedCompletion?.completionStatus;
+    const savedPaidNonEmptyBeads = savedCompletion?.paidNonEmptyBeads;
+    // Legacy works remain entitled. Completed works require their stored paid
+    // bead cap so later edits can still trigger the normal supplement flow.
+    if (savedCompletionStatus === 'LEGACY') {
+      setCompletionStatus('LEGACY');
+    } else if (savedCompletionStatus === 'COMPLETED'
+      && typeof savedPaidNonEmptyBeads === 'number'
+      && Number.isSafeInteger(savedPaidNonEmptyBeads)
+      && savedPaidNonEmptyBeads >= 0) {
+      setCompletionStatus('COMPLETED');
+      setPaidNonEmptyBeads(savedPaidNonEmptyBeads);
+    }
     invalidateImageRequest();
+    setCompletedColorIds([]);
     setActivePatternId(project.workId);
     setProjectName(project.name);
     setBrand(project.brand);
@@ -1161,8 +1736,10 @@ function StudioApp() {
     setSaveMessage(null);
     const totalBeads = gridRef.current.reduce((total, row) => total + row.filter((cell) => cell !== null).length, 0);
     try {
-      const record = await saveExportedPatternRecord({
-        id: activePatternId ?? undefined,
+      const saveInput: Parameters<typeof saveExportedPatternRecord>[0] = {
+        // On the first save, promote the exact draft entitlement key into the
+        // persistent record ID. Subsequent saves continue using that same ID.
+        id: activePatternId ?? patternCompletionInput.workKey,
         userId: currentUser?.uid ?? null,
         title,
         width: settings.width,
@@ -1173,7 +1750,16 @@ function StudioApp() {
         settings,
         grid: gridRef.current,
         palette: activePalette,
-      });
+        completionStatus: completionStatus === 'LEGACY'
+          ? 'LEGACY'
+          : completionStatus === 'COMPLETED'
+            ? 'COMPLETED'
+            : 'DRAFT',
+        paidNonEmptyBeads: completionStatus === 'COMPLETED' ? paidNonEmptyBeads : null,
+        sourceHash,
+        gridHash,
+      };
+      const record = await saveExportedPatternRecord(saveInput);
       setActivePatternId(record.id);
       setSaveMessage(currentUser
         ? (record.syncState === 'synced' ? (isEn ? 'Saved to your private cloud gallery.' : '已保存到云端私有图库。') : (isEn ? 'Saved locally. Cloud sync can be retried from your gallery.' : '已保存到本地，云端同步可在图库重试。'))
@@ -1214,6 +1800,10 @@ function StudioApp() {
   };
 
   const openExportModal = (): void => {
+    if (!isPatternUnlocked) {
+      setSaveMessage(isEn ? 'Complete the pattern to unlock codes, quantities, coordinates, and downloads.' : '完成后解锁色号、数量、坐标和导出。');
+      return;
+    }
     if (!requireFormalLogin(isEn ? 'Sign in before downloading patterns.' : '请先登录，再导出图纸。')) return;
     setIsExportModalOpen(true);
   };
@@ -1274,28 +1864,47 @@ function StudioApp() {
   const activeAnnouncement = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(item.id)) ?? null;
 
   return (
-    <div className="flex flex-col h-screen bg-[#F5F0FD] font-sans text-purple-950 overflow-hidden">
-      {/* Top Main Navigation Header */}
-      <Header
-        projectName={projectName}
-        setProjectName={setProjectName}
-        onImageUpload={handleImageUpload}
-        onLoadSample={handleLoadSample}
-        onExportJson={handleExportJson}
-        onImportJson={handleImportJson}
-        onOpenExportModal={openExportModal}
-        onOpenGuideModal={() => setIsGuideModalOpen(true)}
-        onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
-        onOpenPatternsModal={openUserPatternsModal}
-        onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
-        onOpenAuthModal={() => setIsAuthModalOpen(true)}
-        onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
-        onOpenVipModal={() => setIsVipModalOpen(true)}
-        onClearCanvas={handleClearCanvas}
-        currentTab={currentTab}
-        setCurrentTab={guardedSetCurrentTab}
-        onImportPattern={handleImportPattern}
-      />
+    <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+      {isDesktop ? (
+        <Header
+          projectName={projectName}
+          setProjectName={setProjectName}
+          onImageUpload={handleImageUpload}
+          onLoadSample={handleLoadSample}
+          onExportJson={handleExportJson}
+          onImportJson={handleImportJson}
+          onOpenExportModal={openExportModal}
+          onOpenGuideModal={() => setIsGuideModalOpen(true)}
+          onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
+          onOpenPatternsModal={openUserPatternsModal}
+          onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
+          onOpenVipModal={() => setIsVipModalOpen(true)}
+          onClearCanvas={handleClearCanvas}
+          currentTab={currentTab}
+          setCurrentTab={guardedSetCurrentTab}
+          onImportPattern={handleImportPattern}
+        />
+      ) : (
+        <MobileHeaderNav
+          projectName={projectName}
+          setProjectName={setProjectName}
+          onImageUpload={handleImageUpload}
+          onExportJson={handleExportJson}
+          onImportJson={handleImportJson}
+          onOpenGuideModal={() => setIsGuideModalOpen(true)}
+          onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
+          onOpenPatternsModal={openUserPatternsModal}
+          onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
+          onOpenAuthModal={() => setIsAuthModalOpen(true)}
+          onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
+          onOpenVipModal={() => setIsVipModalOpen(true)}
+          onClearCanvas={handleClearCanvas}
+          currentTab={currentTab}
+          setCurrentTab={guardedSetCurrentTab}
+        />
+      )}
 
       {activeAnnouncement && (
         <aside role="status" className="mx-3 mt-2 flex min-w-0 shrink-0 items-start gap-2 border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950 sm:mx-5 sm:px-4" aria-label="系统公告">
@@ -1329,6 +1938,7 @@ function StudioApp() {
         <DeferredFeatureBoundary label="大画板" surface="page" onDismiss={() => setCurrentTab('home')}>
           <Suspense fallback={<DeferredFeaturePageLoading label="大画板" />}>
             <LargeCanvasView
+              ref={largeCanvasViewRef}
               paletteMap={paletteMap}
               brandName={BRAND_NAMES[brand]}
               paletteOptions={largeCanvasPaletteOptions}
@@ -1361,228 +1971,300 @@ function StudioApp() {
               onConvertImage={handleConvertLargeCanvasImage}
               onPrepareImage={prepareLargeCanvasImage}
               onOpenFrame={handleOpenLargeCanvasFrame}
+              onCreditUsageChange={setLargeCanvasCreditUsage}
             />
           </Suspense>
         </DeferredFeatureBoundary>
       )}
 
-      {currentTab === 'studio' && (
+      {currentTab === 'assembly' && canAccessAssembly && (
+        <DeferredFeatureBoundary label="立体拼豆" surface="page" onDismiss={() => setCurrentTab('home')}>
+          <Suspense fallback={<DeferredFeaturePageLoading label="立体拼豆" />}>
+            <AssemblyWorkspace
+              paletteMap={paletteMap}
+              brandName={BRAND_NAMES[brand]}
+            />
+          </Suspense>
+        </DeferredFeatureBoundary>
+      )}
+
+      {currentTab === 'assembly' && publicFeatureFlagsLoaded && !canAccessAssembly && (
+        <section className="grid min-h-[52dvh] place-items-center bg-slate-50 p-4 sm:p-6" role="status" aria-live="polite">
+          <div className="w-full max-w-md rounded-2xl border border-purple-100 bg-white p-6 text-center shadow-lg">
+            <h1 className="text-lg font-black text-purple-950">立体拼豆开发中</h1>
+            <p className="mt-2 text-sm leading-6 text-slate-600">该功能正在完善，暂未向普通用户开放。二维画板及其他功能不受影响。</p>
+            <button type="button" onClick={() => setCurrentTab('home')} className="mt-5 min-h-11 rounded-xl bg-purple-600 px-5 py-2 text-sm font-bold text-white hover:bg-purple-700">返回首页</button>
+          </div>
+        </section>
+      )}
+
+      {currentTab === 'assembly' && !publicFeatureFlagsLoaded && !ASSEMBLY_DEV_MODE && (
+        <DeferredFeaturePageLoading label="立体拼豆" />
+      )}
+
+      {(currentTab === 'studio' || currentTab === 'largeCanvas') && (
         <>
-      <Toolbar
-        activeTool={activeTool}
-        setActiveTool={setActiveTool}
-        selectedColor={selectedColor}
-        onOpenColorPicker={() => setIsPaletteModalOpen(true)}
-        canUndo={historyIndex > 0}
-        canRedo={historyIndex < history.length - 1}
-        onUndo={handleUndo}
-        onRedo={handleRedo}
-        zoom={zoom}
-        onZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
-        onZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
-        onResetZoom={() => setZoom(1.0)}
-        beadShape={beadShape}
-        setBeadShape={setBeadShape}
-        showSymbols={showSymbols}
-        setShowSymbols={setShowSymbols}
-        showGridLines={showGridLines}
-        setShowGridLines={setShowGridLines}
-        showCoordinates={showCoordinates}
-        setShowCoordinates={setShowCoordinates}
-        symmetryMode={symmetryMode}
-        setSymmetryMode={setSymmetryMode}
-        canvasBackdrop={canvasBackdrop}
-        setCanvasBackdrop={setCanvasBackdrop}
-        onClearOuterBackground={handleClearOuterBackground}
-        hasImage={sourceImage !== null}
-        showOverlay={showOverlay}
-        setShowOverlay={setShowOverlay}
-        onSavePattern={openSaveNameDialog}
-        isSavingPattern={isSavingPattern}
-        onOpenExport={openExportModal}
-        canExport={grid.some(row => row.some(colorId => colorId !== null))}
-      />
+          {currentTab === 'studio' && (
+            <PatternDetailsUnlockContext.Provider value={isPatternUnlocked}>
+            {isDesktop ? (
+            <DesktopWorkspace
+              grid={grid}
+              paletteMap={paletteMap}
+              settings={settings}
+              setSettings={setSettings}
+              conversionDiagnostics={conversionDiagnostics}
+              handleReconvert={handleReconvert}
+              sourceImage={sourceImage}
+              setIsStudioModalOpen={setIsStudioModalOpen}
+              activeTool={activeTool}
+              setActiveTool={setActiveTool}
+              selectedColor={selectedColor}
+              setSelectedColor={setSelectedColor}
+              canUndo={historyIndex > 0}
+              canRedo={historyIndex < history.length - 1}
+              handleUndo={handleUndo}
+              handleRedo={handleRedo}
+              zoom={zoom}
+              setZoom={setZoom}
+              handleZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
+              handleZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
+              handleResetZoom={() => setZoom(1.0)}
+              beadShape={beadShape}
+              setBeadShape={setBeadShape}
+              showSymbols={isPatternUnlocked && showSymbols}
+              setShowSymbols={setShowSymbols}
+              showGridLines={showGridLines}
+              setShowGridLines={setShowGridLines}
+              showCoordinates={isPatternUnlocked && showCoordinates}
+              setShowCoordinates={setShowCoordinates}
+              symmetryMode={symmetryMode}
+              setSymmetryMode={setSymmetryMode}
+              canvasBackdrop={canvasBackdrop}
+              setCanvasBackdrop={setCanvasBackdrop}
+              showOverlay={showOverlay}
+              setShowOverlay={setShowOverlay}
+              highlightColorIds={highlightColorIds}
+              setHighlightColorIds={setHighlightColorIds}
+              handleToggleHighlightColorId={handleToggleHighlightColorId}
+              completedColorIds={completedColorIds}
+              handleToggleCompletedColorId={handleToggleCompletedColorId}
+              setReplaceSourceColor={setReplaceSourceColor}
+              handleEraseColor={handleEraseColor}
+              handleRestoreColor={handleRestoreColor}
+              erasedColorCoords={erasedColorCoords}
+              handleCellClick={handleCellClick}
+              beginHistoryTransaction={beginHistoryTransaction}
+              finishHistoryTransaction={finishHistoryTransaction}
+              handleApplyShape={handleApplyShape}
+              handleReferenceImageUpload={handleReferenceImageUpload}
+              handleResetCurrentCanvas={handleResetCurrentCanvas}
+              handleClearOuterBackground={handleClearOuterBackground}
+              openColorManagerModal={() => setIsPaletteModalOpen(true)}
+              openSaveNameDialog={openSaveNameDialog}
+              isSavingPattern={isSavingPattern}
+              openExportModal={openExportModal}
+              isConverting={isConverting}
+              isEn={isEn}
+              onOpenPatternsModal={openUserPatternsModal}
+              onConsolidateStrayBeads={handleConsolidateStrayBeads}
+            />
+          ) : (
+            <MobileWorkspace
+              grid={grid}
+              paletteMap={paletteMap}
+              settings={settings}
+              setSettings={setSettings}
+              conversionDiagnostics={conversionDiagnostics}
+              handleReconvert={handleReconvert}
+              sourceImage={sourceImage}
+              setIsStudioModalOpen={setIsStudioModalOpen}
+              activeTool={activeTool}
+              setActiveTool={setActiveTool}
+              selectedColor={selectedColor}
+              setSelectedColor={setSelectedColor}
+              canUndo={historyIndex > 0}
+              canRedo={historyIndex < history.length - 1}
+              handleUndo={handleUndo}
+              handleRedo={handleRedo}
+              zoom={zoom}
+              setZoom={setZoom}
+              handleZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
+              handleZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
+              handleResetZoom={() => setZoom(1.0)}
+              beadShape={beadShape}
+              setBeadShape={setBeadShape}
+              showSymbols={isPatternUnlocked && showSymbols}
+              setShowSymbols={setShowSymbols}
+              showGridLines={showGridLines}
+              setShowGridLines={setShowGridLines}
+              showCoordinates={isPatternUnlocked && showCoordinates}
+              setShowCoordinates={setShowCoordinates}
+              symmetryMode={symmetryMode}
+              setSymmetryMode={setSymmetryMode}
+              canvasBackdrop={canvasBackdrop}
+              setCanvasBackdrop={setCanvasBackdrop}
+              showOverlay={showOverlay}
+              setShowOverlay={setShowOverlay}
+              highlightColorIds={highlightColorIds}
+              setHighlightColorIds={setHighlightColorIds}
+              handleToggleHighlightColorId={handleToggleHighlightColorId}
+              completedColorIds={completedColorIds}
+              handleToggleCompletedColorId={handleToggleCompletedColorId}
+              setReplaceSourceColor={setReplaceSourceColor}
+              handleEraseColor={handleEraseColor}
+              handleRestoreColor={handleRestoreColor}
+              erasedColorCoords={erasedColorCoords}
+              handleCellClick={handleCellClick}
+              beginHistoryTransaction={beginHistoryTransaction}
+              finishHistoryTransaction={finishHistoryTransaction}
+              handleApplyShape={handleApplyShape}
+              handleReferenceImageUpload={handleReferenceImageUpload}
+              handleResetCurrentCanvas={handleResetCurrentCanvas}
+              handleClearOuterBackground={handleClearOuterBackground}
+              openColorManagerModal={() => setIsPaletteModalOpen(true)}
+              openSaveNameDialog={openSaveNameDialog}
+              isSavingPattern={isSavingPattern}
+              openExportModal={openExportModal}
+              onExportJson={handleExportJson}
+              onImportJson={handleImportJson}
+              openSmartReduce={openSmartReduce}
+              isConverting={isConverting}
+              isEn={isEn}
+              onOpenPatternsModal={openUserPatternsModal}
+              onOpenGuideModal={() => setIsGuideModalOpen(true)}
+              onOpenVipModal={() => setIsVipModalOpen(true)}
+            />
+            )}
+            </PatternDetailsUnlockContext.Provider>
+          )}
 
-      {/* Main Workspace: Left Settings, Center Grid Canvas, Right Stats */}
-      <div className="flex-1 flex overflow-hidden relative">
-        {/* Mobile Backdrop Overlay for Side Drawers */}
-        {mobileDrawer !== 'none' && (
-          <div
-            className="fixed inset-0 bg-black/60 backdrop-blur-xs z-30 lg:hidden transition-opacity"
-            onClick={() => setMobileDrawer('none')}
-          />
-        )}
-
-        {/* Left Panel: Conversion Settings (Desktop sidebar + Mobile drawer) */}
-        <div
-          className={`h-full transition-transform duration-300 ease-in-out z-40 ${
-            mobileDrawer === 'settings'
-              ? 'fixed inset-y-0 left-0 max-w-[85vw] shadow-2xl block'
-              : 'hidden lg:block'
-          }`}
-        >
-          <SettingsPanel
-            settings={settings}
-            setSettings={setSettings}
-            conversionDiagnostics={conversionDiagnostics}
-            onReconvert={handleReconvert}
-            hasImage={sourceImage !== null}
-            onOpenImageStudio={() => {
-              setMobileDrawer('none');
-              setIsStudioModalOpen(true);
-            }}
-            onCloseMobile={() => setMobileDrawer('none')}
-          />
-        </div>
-
-        {/* Center Canvas Area */}
-        <div className="flex-1 h-full relative min-w-0">
-          <GridCanvas
-            grid={grid}
-            paletteMap={paletteMap}
-            width={settings.width}
-            height={settings.height}
-            boardSize={settings.boardSize}
-            activeTool={activeTool}
-            setActiveTool={setActiveTool}
-            selectedColor={selectedColor}
-            highlightColorId={highlightColorId}
-            beadShape={beadShape}
-            showSymbols={showSymbols}
-            showGridLines={showGridLines}
-            showCoordinates={showCoordinates}
-            canvasBackdrop={canvasBackdrop}
-            symmetryMode={symmetryMode}
-            sourceImage={sourceImage}
-            showOverlay={showOverlay}
-            zoom={zoom}
-            setZoom={setZoom}
-            onCellClick={handleCellClick}
-            onHistoryTransactionStart={beginHistoryTransaction}
-            onHistoryTransactionEnd={finishHistoryTransaction}
-            onApplyShape={handleApplyShape}
-            onEyedropColor={color => setSelectedColor(color)}
-            onReferenceImageUpload={handleReferenceImageUpload}
-            onResetCanvas={handleResetCurrentCanvas}
-          />
-
-          {/* Loading Animation Overlay */}
-          {isConverting && (
-            <div className="absolute inset-0 bg-purple-950/20 backdrop-blur-xs z-30 flex flex-col items-center justify-center gap-3 transition-opacity duration-200">
-              <div className="relative flex items-center justify-center">
-                <div className="w-14 h-14 rounded-full border-4 border-purple-600/20 border-t-purple-600 animate-spin" />
-                <div className="w-8 h-8 rounded-full border-2 border-purple-400/30 border-b-purple-400 animate-spin absolute" style={{ animationDirection: 'reverse', animationDuration: '0.8s' }} />
-                <Sparkles className="w-5 h-5 text-purple-600 absolute animate-pulse" />
+          <section
+            aria-label={isEn ? 'Pattern completion' : '图纸完成解锁'}
+            className="fixed bottom-20 left-3 right-3 z-40 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:w-[min(390px,calc(100vw-2rem))]"
+          >
+            <div className="flex min-w-0 items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-slate-900">
+                  {isPatternUnlocked
+                    ? (isEn ? 'Completed and unlocked' : '已完成并解锁')
+                    : needsCompletionSupplement
+                      ? (isEn ? 'Supplement needed' : '待补差价')
+                      : (isEn ? 'Draft pattern' : '草稿图纸')}
+                </p>
+                <p className="mt-0.5 truncate text-[11px] text-slate-500">
+                  {isPatternUnlocked && completionStatus === 'COMPLETED' && paidNonEmptyBeads !== null
+                    ? (isEn ? `Paid bead cap: ${paidNonEmptyBeads}` : `已付费豆子上限：${paidNonEmptyBeads} 颗`)
+                    : isPatternUnlocked
+                      ? (isEn ? 'Detailed pattern data unlocked' : '图纸明细已解锁')
+                      : (isEn ? 'Detailed pattern data is locked' : '图纸明细暂未解锁')}
+                  {displayedCreditBalance === null ? '' : (isEn ? ` · Balance ${displayedCreditBalance}` : ` · 当前积分 ${displayedCreditBalance}`)}
+                </p>
               </div>
-              <div className="text-xs font-extrabold text-purple-950 flex items-center gap-2 bg-white/95 border border-purple-200 px-4 py-2 rounded-full shadow-lg">
-                <span className="w-2 h-2 rounded-full bg-purple-600 animate-ping" />
-                <span>{isEn ? 'Quantizing beads & matching colors...' : '✨ 正在精准计算拼豆像素与色卡匹配...'}</span>
+              {isPatternUnlocked ? (
+                <span className="shrink-0 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
+                  {isEn ? 'Unlocked' : '已解锁'}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleQuotePatternCompletion()}
+                  disabled={completionStatus === 'QUOTING' || completionStatus === 'COMPLETING' || nonEmptyBeads === 0}
+                  className="min-h-11 shrink-0 rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {completionStatus === 'QUOTING'
+                    ? (isEn ? 'Quoting…' : '正在核价…')
+                    : needsCompletionSupplement
+                      ? (quotedCompletionPoints !== null
+                        ? (isEn ? `Supplement · ${formatCreditPoints(quotedCompletionPoints)} credits` : `补差价 · ${formatCreditPoints(quotedCompletionPoints)}积分`)
+                        : (isEn ? 'Quote supplement' : '补差价 · 核价'))
+                      : quotedCompletionPoints !== null
+                        ? (isEn ? `Complete & unlock · ${formatCreditPoints(quotedCompletionPoints)} credits` : `完成并解锁 · ${formatCreditPoints(quotedCompletionPoints)}积分`)
+                        : completionPreviewStatus === 'loading'
+                          ? (isEn ? 'Complete & unlock · calculating…' : '完成并解锁 · 计算中…')
+                          : (isEn ? 'Complete & unlock · Quote' : '完成并解锁 · 核价')}
+                </button>
+              )}
+            </div>
+
+            {!isPatternUnlocked && nonEmptyBeads > 0 && (
+              <p className="mt-1 text-right text-[11px] text-slate-500" role="status">
+                {quotedCompletionPoints !== null
+                  ? (isEn ? `Required now: ${formatCreditPoints(quotedCompletionPoints)} credits` : `当前所需积分：${formatCreditPoints(quotedCompletionPoints)} 积分`)
+                  : unauthenticatedEstimate !== null
+                    ? (isEn ? `Estimated ${formatCreditPoints(unauthenticatedEstimate)} credits · sign in for an exact quote` : `预计 ${formatCreditPoints(unauthenticatedEstimate)} 积分 · 登录后获取准确报价`)
+                    : completionPreviewStatus === 'error'
+                      ? (isEn ? 'Quote unavailable; try again before completing.' : '暂时无法获取报价，完成前请重试核价。')
+                      : (isEn ? 'Sign in to retrieve the exact server quote.' : '登录后获取服务端准确报价。')}
+              </p>
+            )}
+
+            {!isPatternUnlocked && (
+              <p className="mt-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] leading-4 text-slate-600" role="status">
+                {isEn
+                  ? 'Complete to unlock color codes, quantities, coordinates, and exports. Editing and cloud saving stay available.'
+                  : '完成后解锁色号、数量、坐标和导出；编辑与云端保存仍可使用。'}
+              </p>
+            )}
+
+            {completionQuote && completionStatus === 'AWAITING_CONFIRMATION' && (
+              <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-2.5">
+                <p className="text-[11px] leading-5 text-indigo-950">
+                  {isEn
+                    ? `Server quote: ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} credits. Confirm to complete this ${completionQuote.quote.nonEmptyBeads}-bead pattern.`
+                    : `服务器核价：需补 ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} 积分。确认后完成这张 ${completionQuote.quote.nonEmptyBeads} 颗豆子的图纸。`}
+                </p>
+                <div className="mt-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCompletionQuote(null);
+                      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+                    }}
+                    className="min-h-9 rounded-lg px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-white"
+                  >
+                    {isEn ? 'Cancel' : '取消'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCompletePattern()}
+                    disabled={completionStatus === 'COMPLETING'}
+                    className="min-h-9 rounded-lg bg-indigo-600 px-3 text-[11px] font-bold text-white hover:bg-indigo-700"
+                  >
+                    {isEn
+                      ? `Complete & unlock · ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} credits`
+                      : `完成并解锁 · ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)}积分`}
+                  </button>
+                </div>
               </div>
+            )}
+          </section>
+
+          {saveMessage && (
+            <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 shadow-lg">
+              {saveMessage}
             </div>
           )}
-        </div>
-
-        {/* Right Panel: Color Statistics (Desktop sidebar + Mobile drawer) */}
-        <div
-          className={`h-full transition-transform duration-300 ease-in-out z-40 ${
-            mobileDrawer === 'stats'
-              ? 'fixed inset-y-0 right-0 max-w-[85vw] shadow-2xl block'
-              : 'hidden lg:block'
-          }`}
-        >
-          <StatsPanel
-            grid={grid}
-            paletteMap={paletteMap}
-            width={settings.width}
-            height={settings.height}
-            boardSize={settings.boardSize}
-            highlightColorId={highlightColorId}
-            onSetHighlightColorId={setHighlightColorId}
-            onOpenReplaceModal={color => setReplaceSourceColor(color)}
-            onSelectColor={color => setSelectedColor(color)}
-            onEraseColor={handleEraseColor}
-            onRestoreColor={handleRestoreColor}
-            erasedColorCoords={erasedColorCoords}
-            onCloseMobile={() => setMobileDrawer('none')}
-          />
-        </div>
-      </div>
-
-      {/* Mobile Bottom Navigation Bar (< lg screens) */}
-      <nav className="lg:hidden bg-white/95 border-t border-purple-200/90 backdrop-blur-md px-1.5 py-1.5 flex items-center justify-around z-30 shrink-0 text-[10px]">
-        <button
-          onClick={() => setMobileDrawer('none')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-            mobileDrawer === 'none'
-              ? 'text-purple-900 font-bold bg-purple-100 border border-purple-300 shadow-2xs'
-              : 'text-purple-600 hover:text-purple-900'
-          }`}
-        >
-          <LayoutGrid className="w-3.5 h-3.5" />
-          <span>{isEn ? 'Canvas' : '画布'}</span>
-        </button>
-
-        <button
-          onClick={() => setMobileDrawer(mobileDrawer === 'settings' ? 'none' : 'settings')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-            mobileDrawer === 'settings'
-              ? 'text-purple-900 font-bold bg-purple-100 border border-purple-300 shadow-2xs'
-              : 'text-purple-600 hover:text-purple-900'
-          }`}
-        >
-          <Sliders className="w-3.5 h-3.5" />
-          <span>{isEn ? 'Settings' : '设置'}</span>
-        </button>
-
-        <button
-          onClick={() => setMobileDrawer(mobileDrawer === 'stats' ? 'none' : 'stats')}
-          className={`flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl transition-all cursor-pointer ${
-            mobileDrawer === 'stats'
-              ? 'text-emerald-900 font-bold bg-emerald-100 border border-emerald-300 shadow-2xs'
-              : 'text-purple-600 hover:text-purple-900'
-          }`}
-        >
-          <BarChart3 className="w-3.5 h-3.5" />
-          <span>{isEn ? 'Stats' : '用量'}</span>
-        </button>
-
-        <button
-          onClick={openSmartReduce}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl text-amber-800 hover:text-amber-950 font-bold transition-all cursor-pointer bg-amber-50 border border-amber-200"
-          title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
-        >
-          <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400 animate-pulse" />
-          <span>{isEn ? 'Save' : '省豆'}</span>
-        </button>
-
-        <button
-          onClick={openSaveNameDialog}
-          disabled={isSavingPattern}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-60 text-white font-bold transition-all cursor-pointer shadow-xs active:scale-95"
-        >
-          {isSavingPattern ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          <span>{isEn ? 'Save' : '保存'}</span>
-        </button>
-
-        <button
-          onClick={openExportModal}
-          className="flex flex-col items-center justify-center gap-0.5 min-h-12 min-w-12 py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span>{isEn ? 'Export' : '导出'}</span>
-        </button>
-      </nav>
-      {saveMessage && (
-        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-sky-300 bg-white px-3 py-2 text-xs font-medium text-sky-950 shadow-lg">
-          {saveMessage}
-        </div>
-      )}
-      {imageLoadMessage && (
-        <div role="status" className="fixed bottom-20 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 shadow-lg">
-          {imageLoadMessage}
-        </div>
-      )}
+          {imageLoadMessage && (
+            <div role="status" className="fixed bottom-20 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 shadow-lg">
+              {imageLoadMessage}
+            </div>
+          )}
       </>
+      )}
+
+      {!isDesktop && currentTab !== 'studio' && (
+        <MobileBottomNav
+          currentTab={currentTab}
+          setCurrentTab={guardedSetCurrentTab}
+          onOpenProfile={() => {
+            if (currentUser) {
+              setIsUserProfileModalOpen(true);
+            } else {
+              setIsAuthModalOpen(true);
+            }
+          }}
+          isEn={isEn}
+        />
       )}
 
       {/* Modals */}
@@ -1611,6 +2293,7 @@ function StudioApp() {
         settings={settings}
         onPatternArchived={setActivePatternId}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        unlocked={isPatternUnlocked}
       />
 
       <ColorReplaceModal
@@ -1627,11 +2310,11 @@ function StudioApp() {
       />
 
       {isSaveNameDialogOpen && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-sm rounded-2xl border border-purple-200 bg-white p-5 shadow-2xl">
-            <h2 className="text-base font-black text-purple-950">保存作品</h2>
-            <p className="mt-1 text-xs text-purple-600">为图纸命名后保存到你的图库。</p>
-            <label className="mt-4 block text-xs font-bold text-purple-900">
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h2 className="text-base font-black text-slate-900">保存作品</h2>
+            <p className="mt-1 text-xs text-slate-500">为图纸命名后保存到你的图库。</p>
+            <label className="mt-4 block text-xs font-bold text-slate-700">
               作品名称
               <input
                 autoFocus
@@ -1644,12 +2327,12 @@ function StudioApp() {
                 onKeyDown={event => {
                   if (event.key === 'Enter') confirmSaveCurrentPattern();
                 }}
-                className="mt-1.5 w-full rounded-xl border border-purple-200 px-3 py-2.5 text-sm outline-none focus:ring-2 focus:ring-purple-500/30"
+                className="mt-1.5 min-h-12 w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/30"
                 placeholder="例如：我的向日葵拼豆图"
                 disabled={isSavingPattern}
               />
             </label>
-            <div className="mt-1 flex justify-between text-[11px] text-purple-500">
+            <div className="mt-1 flex justify-between text-[11px] text-slate-500">
               <span>必填，1-60 个字符</span>
               <span>{saveNameInput.trim().length}/60</span>
             </div>
@@ -1659,7 +2342,7 @@ function StudioApp() {
                 type="button"
                 onClick={() => setIsSaveNameDialogOpen(false)}
                 disabled={isSavingPattern}
-                className="rounded-xl border border-purple-200 px-4 py-2.5 text-xs font-bold text-purple-800 transition-colors hover:bg-purple-50 disabled:opacity-60"
+                className="min-h-11 rounded-xl border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-60"
               >
                 取消
               </button>
@@ -1667,7 +2350,7 @@ function StudioApp() {
                 type="button"
                 onClick={confirmSaveCurrentPattern}
                 disabled={isSavingPattern}
-                className="rounded-xl bg-purple-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-60"
+                className="min-h-11 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
               >
                 确认保存
               </button>
@@ -1684,9 +2367,10 @@ function StudioApp() {
               onClose={() => setIsSmartReduceModalOpen(false)}
               grid={grid}
               palette={activePalette}
-              onApplyReducedGrid={(newGrid) => {
+              onApplyReducedGrid={(newGrid, savingTarget) => {
                 invalidateImageRequest();
                 applyGridChange(newGrid, false);
+                setCurrentSavingTarget(savingTarget);
                 setSettings(s => ({
                   ...s,
                   width: newGrid[0]?.length || s.width,
@@ -1784,5 +2468,5 @@ function StudioApp() {
 export default function App() {
   return /^\/admin(?:\/|$)/.test(window.location.pathname)
     ? <Suspense fallback={<AdminPageLoading />}><AdminPage /></Suspense>
-    : <StudioApp />;
+    : <StudioApp initialTab={/^\/assembly(?:\/|$)/.test(window.location.pathname) ? 'assembly' : 'home'} />;
 }

@@ -992,7 +992,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
             className="flex-1 sm:flex-initial px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 truncate"
           >
             <Check className="w-4 h-4 shrink-0" />
-            <span className="truncate">{isEn ? 'Apply Parameters & Generate Pattern' : '应用参数并生成图纸'}</span>
+            <span className="truncate">{isEn ? 'Generate Preview · Free' : '生成预览 · 免费'}</span>
           </button>
         </div>
       </div>

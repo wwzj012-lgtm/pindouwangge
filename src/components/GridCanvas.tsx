@@ -3,6 +3,7 @@ import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
+import { getColorDisplayState } from '../utils/completionHighlight';
 import {
   changeImagePreviewScale,
   createInitialImagePreviewView,
@@ -26,7 +27,9 @@ interface GridCanvasProps {
   activeTool: ToolType;
   setActiveTool?: (tool: ToolType) => void;
   selectedColor: BeadColor | null;
-  highlightColorId: string | null;
+  highlightColorId?: string | null;
+  highlightColorIds?: string[];
+  completedColorIds?: string[];
   beadShape: BeadShape;
   showSymbols: boolean;
   showGridLines: boolean;
@@ -46,6 +49,11 @@ interface GridCanvasProps {
   showOverlay?: boolean;
   onReferenceImageUpload?: (file: File) => void;
   onResetCanvas?: () => void;
+  /**
+   * Keeps the shared canvas business behavior intact while allowing each
+   * workspace shell to install only the interaction listeners it needs.
+   */
+  interactionProfile?: 'desktop' | 'touch' | 'hybrid';
 }
 
 // Bresenham's Line Algorithm
@@ -158,6 +166,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   setActiveTool,
   selectedColor,
   highlightColorId,
+  highlightColorIds,
+  completedColorIds = [],
   beadShape,
   showSymbols,
   showGridLines,
@@ -177,6 +187,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   showOverlay = false,
   onReferenceImageUpload,
   onResetCanvas,
+  interactionProfile = 'hybrid',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -587,6 +598,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Handle Touch Gestures (Pinch to zoom & two-finger / hand panning)
   useEffect(() => {
+    if (interactionProfile === 'desktop') return;
+
     const container = containerRef.current;
     if (!container) return;
 
@@ -615,7 +628,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         finishHistoryTransaction();
         setIsDrawing(false);
         setIsPanning(true);
-      } else if (e.touches.length === 1) {
+      } else if (interactionProfile === 'hybrid' && e.touches.length === 1) {
         const t = e.touches[0];
         if (activeToolRef.current === 'hand') {
           e.preventDefault();
@@ -655,7 +668,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
           scheduleTransformCommit(newZoom, { x: newPanX, y: newPanY });
         }
-      } else if (e.touches.length === 1 && state.isPanningSingle) {
+      } else if (interactionProfile === 'hybrid' && e.touches.length === 1 && state.isPanningSingle) {
         e.preventDefault();
         const t = e.touches[0];
         const dx = t.clientX - state.lastSingleTouchX;
@@ -663,10 +676,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         state.lastSingleTouchX = t.clientX;
         state.lastSingleTouchY = t.clientY;
 
-         scheduleTransformCommit(zoomRef.current, {
-           x: panRef.current.x + dx,
-           y: panRef.current.y + dy,
-         });
+        scheduleTransformCommit(zoomRef.current, {
+          x: panRef.current.x + dx,
+          y: panRef.current.y + dy,
+        });
       }
     };
 
@@ -674,7 +687,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       if (e.touches.length < 2) {
         touchStateRef.current.isPinch = false;
       }
-      if (e.touches.length === 0) {
+      if (interactionProfile === 'hybrid' && e.touches.length === 0) {
         touchStateRef.current.isPanningSingle = false;
         setIsPanning(false);
       }
@@ -691,15 +704,23 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [finishHistoryTransaction, scheduleTransformCommit]);
+  }, [finishHistoryTransaction, interactionProfile, scheduleTransformCommit]);
 
   // Handle mouse-wheel zoom around the current pointer position.
-  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    if (isCanvasInteractionIgnoredTarget(e.target) || e.deltaY === 0) return;
-    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.88;
-    e.preventDefault();
-    changeZoomAtClient(zoomRef.current * zoomFactor, e.clientX, e.clientY);
-  };
+  const handleWheel = useCallback((event: WheelEvent) => {
+    if (interactionProfile === 'touch') return;
+    if (isCanvasInteractionIgnoredTarget(event.target) || event.deltaY === 0) return;
+    const zoomFactor = event.deltaY < 0 ? 1.12 : 0.88;
+    event.preventDefault();
+    changeZoomAtClient(zoomRef.current * zoomFactor, event.clientX, event.clientY);
+  }, [changeZoomAtClient, interactionProfile]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [handleWheel]);
 
   // Expand points by Symmetry Mode
   const applySymmetryToPoints = useCallback(
@@ -833,6 +854,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     const previewSet = new Set(previewPoints.map(p => `${p.x},${p.y}`));
 
+    const activeHighlightIds = highlightColorIds ?? (highlightColorId ? [highlightColorId] : []);
+
     // 5. Render Bead Grid Cells
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
@@ -864,14 +887,43 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             ? (bead.code || bead.symbol)
             : null;
 
-          const isDimmed = highlightColorId !== null && colorId !== highlightColorId;
+          const displayState = getColorDisplayState(colorId, activeHighlightIds, completedColorIds);
+          const isDimmed = displayState === 'dimmed';
+          const isCompleted = displayState === 'completed';
 
           ctx.save();
           if (isDimmed) ctx.globalAlpha = 0.15;
+          if (isCompleted) {
+            ctx.globalAlpha = 0.72;
+            ctx.filter = 'saturate(0.35)';
+          }
 
           drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, symbolStr);
 
-          if (highlightColorId && colorId === highlightColorId) {
+          if (isCompleted) {
+            ctx.filter = 'none';
+            ctx.globalAlpha = 0.92;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(px, py, cellSize, cellSize);
+            ctx.clip();
+            ctx.strokeStyle = 'rgba(71, 85, 105, 0.62)';
+            ctx.lineWidth = Math.max(1, Math.min(2, cellSize * 0.08));
+            for (let offset = -cellSize; offset < cellSize * 2; offset += Math.max(4, cellSize * 0.24)) {
+              ctx.beginPath();
+              ctx.moveTo(px + offset, py + cellSize);
+              ctx.lineTo(px + offset + cellSize, py);
+              ctx.stroke();
+            }
+            ctx.restore();
+            ctx.setLineDash([3, 2]);
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = Math.max(1, Math.min(2, cellSize * 0.1));
+            ctx.strokeRect(px + 1, py + 1, Math.max(0, cellSize - 2), Math.max(0, cellSize - 2));
+            ctx.setLineDash([]);
+          }
+
+          if (displayState === 'focused') {
             ctx.strokeStyle = '#F43F5E';
             ctx.lineWidth = 2;
             ctx.strokeRect(px, py, cellSize, cellSize);
@@ -1002,6 +1054,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     showGridLines,
     showCoordinates,
     highlightColorId,
+    highlightColorIds,
+    completedColorIds,
     pan,
     cellSize,
     coordOffset,
@@ -1039,7 +1093,16 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   }, [renderCanvas]);
 
   // Pointer Handlers for Mouse & Single-Point interactions
+  const isPointerInputEnabled = useCallback((pointerType: string) => {
+    if (interactionProfile === 'desktop') return pointerType === 'mouse' || pointerType === '';
+    if (interactionProfile === 'touch') return pointerType === 'touch' || pointerType === 'pen';
+    return true;
+  }, [interactionProfile]);
+
   const handlePointerDown = (e: React.PointerEvent) => {
+    if (!isPointerInputEnabled(e.pointerType)) return;
+    if (interactionProfile === 'touch' && !e.isPrimary) return;
+
     // If pinch gesture active, ignore pointerdown
     if (touchStateRef.current.isPinch) return;
 
@@ -1088,6 +1151,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
+    if (!isPointerInputEnabled(e.pointerType)) return;
+    if (interactionProfile === 'touch' && (!e.isPrimary || touchStateRef.current.isPinch)) return;
+
     if (isPanning || spacePanPointerIdRef.current === e.pointerId) {
       if (spacePanPointerIdRef.current === e.pointerId) e.preventDefault();
       scheduleTransformCommit(zoomRef.current, {
@@ -1113,6 +1179,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   };
 
   const handlePointerUp = (e: React.PointerEvent, applyShape = true) => {
+    if (!isPointerInputEnabled(e.pointerType)) return;
+    if (interactionProfile === 'touch' && !e.isPrimary) return;
     if (activePointerIdRef.current !== e.pointerId) return;
     activePointerIdRef.current = null;
     const wasSpacePan = spacePanPointerIdRef.current === e.pointerId;
@@ -1157,6 +1225,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   }, [finishHistoryTransaction]);
 
   useEffect(() => {
+    if (interactionProfile === 'touch') return;
+
     const canUseCanvasShortcut = () => Boolean(
       containerRef.current
       && (canvasHoveredRef.current || document.activeElement === containerRef.current)
@@ -1197,7 +1267,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', handleWindowBlur);
     };
-  }, [changeZoomAtCanvasCenter, fitContentToView, stopSpacePan]);
+  }, [changeZoomAtCanvasCenter, fitContentToView, interactionProfile, stopSpacePan]);
 
   const hoveredBead = hoverCell && grid[hoverCell.y]?.[hoverCell.x]
     ? paletteMap.get(grid[hoverCell.y][hoverCell.x]!)
@@ -1223,7 +1293,6 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       }`}
       onPointerEnter={() => { canvasHoveredRef.current = true; }}
       onPointerLeave={() => { canvasHoveredRef.current = false; }}
-      onWheel={handleWheel}
       onContextMenu={e => e.preventDefault()}
     >
       {/* Fullscreen Pattern Preview Top Banner */}

@@ -36,6 +36,28 @@ export interface CommunityAsset {
   createdAt: number;
 }
 
+export type CommunityPostVisibility = 'public' | 'private';
+
+export interface CommunityPublishInput {
+  title: string;
+  description: string;
+  visibility: CommunityPostVisibility;
+  tags: string[];
+  workId: string;
+  assetId?: string;
+}
+
+export type CommunityPublishErrorCode = 'WORK_ASSET_REQUIRED' | (string & {});
+
+export type CommunityPublishResult = ApiResult<{
+  post: Pick<CommunityPost, 'id' | 'assetId' | 'title' | 'publishedAt'>;
+}>;
+
+export function getCommunityPublishErrorCode(result: CommunityPublishResult): CommunityPublishErrorCode | null {
+  if (result.ok) return null;
+  return result.errorCode ?? result.code ?? null;
+}
+
 function publicAssetUrl(assetId: string): string {
   return apiPublicUrl('/api/community/assets/public', { id: assetId });
 }
@@ -106,6 +128,30 @@ export function uploadCommunityAsset(file: File): Promise<ApiResult<{ asset: Com
   return apiPostBlob<{ asset: CommunityAsset }>('/api/community/assets', file, file.type);
 }
 
-export function publishCommunityPost(title: string, assetId: string, workId?: string): Promise<ApiResult<{ post: Pick<CommunityPost, 'id' | 'assetId' | 'title' | 'publishedAt'> }>> {
-  return apiPost('/api/community/posts', { title, assetId, ...(workId ? { workId } : {}) });
+export function publishCommunityPost(input: CommunityPublishInput): Promise<CommunityPublishResult>;
+/** @deprecated Use the structured input overload for gallery publishing. */
+export function publishCommunityPost(title: string, assetId: string, workId?: string): Promise<CommunityPublishResult>;
+export function publishCommunityPost(
+  inputOrTitle: CommunityPublishInput | string,
+  legacyAssetId?: string,
+  legacyWorkId?: string,
+): Promise<CommunityPublishResult> {
+  if (typeof inputOrTitle === 'string') {
+    return apiPost<CommunityPublishResult['data']>('/api/community/posts', {
+      title: inputOrTitle,
+      assetId: legacyAssetId ?? '',
+      ...(legacyWorkId ? { workId: legacyWorkId } : {}),
+    });
+  }
+  const input = inputOrTitle;
+  return apiPost<CommunityPublishResult['data']>('/api/community/posts', {
+    title: input.title,
+    ...{
+      description: input.description,
+      visibility: input.visibility,
+      tags: input.tags,
+    },
+    ...(input.workId ? { workId: input.workId } : {}),
+    ...(input.assetId ? { assetId: input.assetId } : {}),
+  });
 }

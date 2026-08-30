@@ -98,6 +98,30 @@ interface PixelMeta {
   tier: 1 | 2 | 3 | 4; // 1: Max Protect (Features/Contour), 2: High (Vibrant/Highlights), 3: Mid (Body), 4: Low (BG/Shadows)
 }
 
+interface GridStructure {
+  /** 4-neighbour opaque-component id from the immutable source grid. */
+  componentIds: number[][];
+  /** Cells that must survive all source-grid cleanup and recolouring passes. */
+  protectedMask: boolean[][];
+  /** Enclosed transparent source cells whose target-space counters must remain empty. */
+  holeMask: boolean[][];
+}
+
+interface DownsampleCandidate {
+  x: number;
+  y: number;
+  representative: string;
+  opaqueCoverage: number;
+  opaqueRatio: number;
+  score: number;
+  /** 0..1; higher means source colours are closer to the chosen representative. */
+  colourCoherence: number;
+  protectedWeight: number;
+  anchorCount: number;
+  holeCoverage: number;
+  componentIds: Set<number>;
+}
+
 export function smartReduceGrid(
   grid: (string | null)[][],
   palette: BeadColor[],
@@ -131,6 +155,13 @@ export function smartReduceGrid(
   // "Keep original grid" is a no-op in this modal. Controls that simplify,
   // crop, or remove pixels apply only to an actual reduction target.
   const shouldPreserveOriginal = options.downscaleRatio >= 0.999999;
+
+  // Analyse the original grid before any background pixel is discarded. All
+  // destructive passes below consult this immutable snapshot instead of the
+  // progressively recoloured work grid.
+  const rawMetaGrid = createPixelMetaGrid(grid, paletteMap);
+  calculateEdgeWeightsAndTiers(rawMetaGrid, origW, origH);
+  const structure = buildGridStructure(grid, rawMetaGrid, options);
 
   // -------------------------------------------------------------
   // Step 1: Detect Corner/Border Background Color & Background Flood Mask
@@ -191,6 +222,11 @@ export function smartReduceGrid(
       if (qx < 0 || qx >= origW || qy < 0 || qy >= origH || visited[qy][qx]) continue;
       visited[qy][qx] = true;
 
+      // A colour may be close to the sampled border colour while still being
+      // an outlined subject, a narrow bridge, or a small salient component.
+      // Never let a background flood cross a source-structure protection cell.
+      if (structure.protectedMask[qy][qx]) continue;
+
       const cid = grid[qy][qx];
       if (!cid) {
         isBgMask[qy][qx] = true;
@@ -209,84 +245,9 @@ export function smartReduceGrid(
   // -------------------------------------------------------------
   // Step 2: Pixel Metadata & Saliency / Gradient Feature Extraction
   // -------------------------------------------------------------
-  const metaGrid: (PixelMeta | null)[][] = Array.from({ length: origH }, () =>
-    Array(origW).fill(null)
+  const metaGrid: (PixelMeta | null)[][] = rawMetaGrid.map((row, y) =>
+    row.map((meta, x) => (isBgMask[y][x] ? null : meta))
   );
-
-  for (let y = 0; y < origH; y++) {
-    for (let x = 0; x < origW; x++) {
-      if (isBgMask[y][x]) continue; // Skip background
-
-      const cid = grid[y][x];
-      if (!cid) continue;
-
-      const color = paletteMap.get(cid);
-      let r = 255, g = 255, b = 255;
-      if (color) {
-        [r, g, b] = color.rgb;
-      } else {
-        const hex = cid.replace('#', '');
-        if (hex.length === 6) {
-          r = parseInt(hex.substring(0, 2), 16) || 255;
-          g = parseInt(hex.substring(2, 4), 16) || 255;
-          b = parseInt(hex.substring(4, 6), 16) || 255;
-        }
-      }
-
-      const [labL, labA, labBVal] = rgbToLab(r, g, b);
-      const chroma = Math.hypot(labA, labBVal);
-
-      metaGrid[y][x] = {
-        colorId: cid,
-        r, g, b,
-        l: labL,
-        a: labA,
-        labB: labBVal,
-        chroma,
-        edgeWeight: 0,
-        isCornerBackground: false,
-        tier: 3,
-      };
-    }
-  }
-
-  // Calculate Gradient & Sobel Edge Weight
-  for (let y = 0; y < origH; y++) {
-    for (let x = 0; x < origW; x++) {
-      const curr = metaGrid[y][x];
-      if (!curr) continue;
-
-      let maxDiff = 0;
-      const neighbors = [
-        [x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1],
-      ];
-
-      for (const [nx, ny] of neighbors) {
-        if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
-          const nb = metaGrid[ny][nx];
-          if (!nb) {
-            maxDiff = Math.max(maxDiff, 40); // Subject Boundary
-          } else {
-            const diff = Math.hypot(curr.l - nb.l, curr.a - nb.a, curr.labB - nb.labB);
-            maxDiff = Math.max(maxDiff, diff);
-          }
-        }
-      }
-
-      curr.edgeWeight = Math.min(1.0, maxDiff / 50);
-
-      // Classify Tiers dynamically without hardcoding color names
-      if (curr.edgeWeight > 0.30) {
-        curr.tier = 1; // Ultra High Protection: High Contrast Edge / Facial contours / Eyes
-      } else if (curr.chroma > 25 || curr.l > 82) {
-        curr.tier = 2; // High Protection: Vibrant focal colors & high highlights
-      } else if (curr.l < 30 && curr.edgeWeight < 0.15) {
-        curr.tier = 4; // Low Protection: Dark inner shadows
-      } else {
-        curr.tier = 3; // Mid Protection: Standard clothing/fill
-      }
-    }
-  }
 
   // Calculate bgBeadsSaved
   let bgBeadsSaved = 0;
@@ -310,13 +271,13 @@ export function smartReduceGrid(
   if (!shouldPreserveOriginal && options.removeIsolatedNoise) {
     const passes = options.intensity === 'strong' ? 3 : options.intensity === 'medium' ? 2 : 1;
     for (let pass = 0; pass < passes; pass++) {
+      const sourceGrid = workGrid;
+      const nextGrid = sourceGrid.map(row => [...row]);
       for (let y = 0; y < origH; y++) {
         for (let x = 0; x < origW; x++) {
-          const cid = workGrid[y][x];
+          const cid = sourceGrid[y][x];
           if (!cid) continue;
-
-          const meta = metaGrid[y][x];
-          if (meta && meta.tier === 1 && options.protectSaliencyAndContours) continue; // Face / Contour lock
+          if (isProtectedColorCell(structure, metaGrid, x, y, options)) continue;
 
           // Neighbor count check
           const neighborCounts = new Map<string, number>();
@@ -328,7 +289,7 @@ export function smartReduceGrid(
               const nx = x + dx;
               const ny = y + dy;
               if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
-                const ncid = workGrid[ny][nx];
+                const ncid = sourceGrid[ny][nx];
                 if (ncid) {
                   totalValid++;
                   neighborCounts.set(ncid, (neighborCounts.get(ncid) || 0) + 1);
@@ -350,12 +311,13 @@ export function smartReduceGrid(
               }
             });
             if (bestN !== cid) {
-              workGrid[y][x] = bestN;
+              nextGrid[y][x] = bestN;
               recoloredNoiseCount++;
             }
           }
         }
       }
+      workGrid = nextGrid;
     }
   }
 
@@ -365,19 +327,19 @@ export function smartReduceGrid(
   if (!shouldPreserveOriginal) {
     const colorMergeThreshold = options.intensity === 'strong' ? 20 : options.intensity === 'medium' ? 14 : 8;
     const boxRadius = options.intensity === 'strong' ? 2 : 1;
+    const sourceGrid = workGrid;
+    const nextGrid = sourceGrid.map(row => [...row]);
 
     for (let y = 0; y < origH; y++) {
       for (let x = 0; x < origW; x++) {
-        const cid = workGrid[y][x];
+        const cid = sourceGrid[y][x];
         if (!cid) continue;
 
         const meta = metaGrid[y][x];
         if (!meta) continue;
-
-        if (meta.tier === 1 && options.protectSaliencyAndContours) continue; // Lock facial & contour
+        if (isProtectedColorCell(structure, metaGrid, x, y, options)) continue;
 
         let tierThreshold = colorMergeThreshold;
-        if (meta.tier === 2 && options.protectVibrantColors) tierThreshold *= 0.6; // High protection gentle
         if (meta.tier === 4) tierThreshold *= 1.5; // Aggressive for low-weight shadows
 
         // Check surrounding window
@@ -387,7 +349,7 @@ export function smartReduceGrid(
             const nx = x + dx;
             const ny = y + dy;
             if (nx >= 0 && nx < origW && ny >= 0 && ny < origH) {
-              const ncid = workGrid[ny][nx];
+              const ncid = sourceGrid[ny][nx];
               if (ncid) {
                 neighborColors.set(ncid, (neighborColors.get(ncid) || 0) + 1);
               }
@@ -414,10 +376,11 @@ export function smartReduceGrid(
         });
 
         if (dominantColor !== cid) {
-          workGrid[y][x] = dominantColor;
+          nextGrid[y][x] = dominantColor;
         }
       }
     }
+    workGrid = nextGrid;
   }
 
   // -------------------------------------------------------------
@@ -435,47 +398,56 @@ export function smartReduceGrid(
     }
 
     const minorThreshold = options.intensity === 'strong' ? 8 : options.intensity === 'medium' ? 5 : 3;
-    const replacementMap = new Map<string, string>();
+    const sourceGrid = workGrid;
+    const nextGrid = sourceGrid.map(row => [...row]);
+    const visited: boolean[][] = Array.from({ length: origH }, () => Array(origW).fill(false));
+    const colorMergeThreshold = options.intensity === 'strong' ? 20 : options.intensity === 'medium' ? 14 : 8;
 
-    postCounts.forEach((count, cid) => {
-      if (count <= minorThreshold) {
-        const targetObj = paletteMap.get(cid);
-        if (!targetObj) return;
-        const targetLab = rgbToLab(...targetObj.rgb);
+    for (let y = 0; y < origH; y++) {
+      for (let x = 0; x < origW; x++) {
+        const cid = sourceGrid[y][x];
+        if (!cid || visited[y][x]) continue;
 
-        let bestReplacement = cid;
-        let minDist = Infinity;
+        const component = collectColorComponent(sourceGrid, x, y, cid, visited);
+        if ((postCounts.get(cid) ?? 0) > minorThreshold) continue;
+        if (component.some(([cx, cy]) => isProtectedColorCell(structure, metaGrid, cx, cy, options))) continue;
 
-        postCounts.forEach((dCount, dominantCid) => {
-          if (dCount > minorThreshold && dominantCid !== cid) {
-            const dObj = paletteMap.get(dominantCid);
-            if (dObj) {
-              const dLab = rgbToLab(...dObj.rgb);
-              const dist = deltaE2000(targetLab, dLab);
-              if (dist < minDist) {
-                minDist = dist;
-                bestReplacement = dominantCid;
-              }
+        const localCandidates = new Map<string, number>();
+        const sourceComponentId = structure.componentIds[y][x];
+        for (const [cx, cy] of component) {
+          for (const [nx, ny] of cardinalNeighbours(cx, cy, origW, origH)) {
+            const neighbourColor = sourceGrid[ny][nx];
+            if (
+              neighbourColor
+              && neighbourColor !== cid
+              && structure.componentIds[ny][nx] === sourceComponentId
+              && (postCounts.get(neighbourColor) ?? 0) > minorThreshold
+            ) {
+              localCandidates.set(neighbourColor, (localCandidates.get(neighbourColor) ?? 0) + 1);
             }
           }
-        });
-
-        if (bestReplacement !== cid) {
-          replacementMap.set(cid, bestReplacement);
         }
-      }
-    });
 
-    if (replacementMap.size > 0) {
-      for (let y = 0; y < origH; y++) {
-        for (let x = 0; x < origW; x++) {
-          const cid = workGrid[y][x];
-          if (cid && replacementMap.has(cid)) {
-            workGrid[y][x] = replacementMap.get(cid)!;
+        const sourceColor = paletteMap.get(cid);
+        if (!sourceColor) continue;
+        let replacement = cid;
+        let replacementCount = -1;
+        for (const [candidate, count] of localCandidates) {
+          const candidateColor = paletteMap.get(candidate);
+          if (!candidateColor) continue;
+          const distance = deltaE2000(rgbToLab(...sourceColor.rgb), rgbToLab(...candidateColor.rgb));
+          if (distance < colorMergeThreshold && count > replacementCount) {
+            replacement = candidate;
+            replacementCount = count;
           }
+        }
+
+        if (replacement !== cid) {
+          for (const [cx, cy] of component) nextGrid[cy][cx] = replacement;
         }
       }
     }
+    workGrid = nextGrid;
   }
 
   // -------------------------------------------------------------
@@ -493,14 +465,8 @@ export function smartReduceGrid(
     const scaleX = origW / targetW;
     const scaleY = origH / targetH;
 
-    const candidates: Array<{
-      x: number;
-      y: number;
-      representative: string;
-      opaqueCoverage: number;
-      opaqueRatio: number;
-      score: number;
-    }> = [];
+    const candidates: DownsampleCandidate[] = [];
+    const projectedProtectedHoleKeys = new Set<string>();
 
     for (let ty = 0; ty < targetH; ty++) {
       for (let tx = 0; tx < targetW; tx++) {
@@ -513,8 +479,11 @@ export function smartReduceGrid(
         // to replace the whole sample block. Repeated colors remain dominant while
         // contours, highlights and the block centre receive bounded extra weight.
         const colorScores = new Map<string, { score: number; count: number }>();
+        const componentIds = new Set<number>();
         const targetArea = (endX - startX) * (endY - startY);
         let opaqueCoverage = 0;
+        let protectedWeight = 0;
+        let holeCoverage = 0;
         const centreX = (startX + endX - 1) / 2;
         const centreY = (startY + endY - 1) / 2;
 
@@ -524,10 +493,16 @@ export function smartReduceGrid(
             const horizontalCoverage = Math.max(0, Math.min(sx + 1, endX) - Math.max(sx, startX));
             const coverage = horizontalCoverage * verticalCoverage;
             if (coverage === 0) continue;
+            if (structure.holeMask[sy][sx]) holeCoverage += coverage;
             const cid = workGrid[sy][sx];
             if (cid) {
               opaqueCoverage += coverage;
               const meta = metaGrid[sy][sx];
+              const componentId = structure.componentIds[sy][sx];
+              if (componentId >= 0) componentIds.add(componentId);
+              if (structure.protectedMask[sy][sx]) {
+                protectedWeight += coverage * (1 + (meta?.edgeWeight ?? 0));
+              }
               const distance = Math.hypot(sx - centreX, sy - centreY);
               const centreWeight = Math.max(0, 0.25 - distance * 0.08);
               const edgeWeight = options.protectSaliencyAndContours ? Math.min(0.35, (meta?.edgeWeight ?? 0) * 0.35) : 0;
@@ -554,6 +529,19 @@ export function smartReduceGrid(
             representative = cid;
           }
         });
+        let colourCoherence = 0;
+        const representativeColor = representative ? paletteMap.get(representative) : undefined;
+        if (representativeColor && bestScore > 0) {
+          let weightedDeltaE = 0;
+          colorScores.forEach(({ score }, colorId) => {
+            const color = paletteMap.get(colorId);
+            if (color) {
+              weightedDeltaE += deltaE2000(rgbToLab(...representativeColor.rgb), rgbToLab(...color.rgb)) * score;
+            }
+          });
+          colourCoherence = Math.max(0, 1 - weightedDeltaE / bestScore / 35);
+        }
+        if (holeCoverage > 0) projectedProtectedHoleKeys.add(candidateKey(tx, ty));
         if (representative && opaqueCoverage > 0 && targetArea > 0) {
           candidates.push({
             x: tx,
@@ -562,6 +550,11 @@ export function smartReduceGrid(
             opaqueCoverage,
             opaqueRatio: opaqueCoverage / targetArea,
             score: bestScore,
+            colourCoherence,
+            protectedWeight,
+            anchorCount: 0,
+            holeCoverage,
+            componentIds,
           });
         }
       }
@@ -572,20 +565,14 @@ export function smartReduceGrid(
     // than its area warrants after downscaling, even when it crosses boundaries.
     const targetAreaRatio = (targetW * targetH) / (origW * origH);
     const maxOpaqueCells = Math.min(targetW * targetH, Math.ceil(originalTotalBeads * targetAreaRatio));
-    const sortedCandidates = candidates
-      .sort((left, right) => (
-        right.opaqueRatio - left.opaqueRatio
-        || right.opaqueCoverage - left.opaqueCoverage
-        || right.score - left.score
-        || left.y - right.y
-        || left.x - right.x
-      ));
-    // Fully/mostly covered target cells form a compact subject. Do not use
-    // fractional boundary fragments to fill a global quota, because that
-    // produces isolated islands around otherwise solid components.
-    const denseCandidates = sortedCandidates.filter(({ opaqueRatio }) => opaqueRatio >= 0.5);
-    const selectedCandidates = (denseCandidates.length > 0 ? denseCandidates : sortedCandidates)
-      .slice(0, maxOpaqueCells);
+    projectComponentAnchors(candidates, workGrid, metaGrid, structure, scaleX, scaleY, targetW, targetH);
+    const selectedCandidates = selectConstrainedCandidates(
+      candidates,
+      maxOpaqueCells,
+      targetW,
+      targetH,
+      projectedProtectedHoleKeys,
+    );
     selectedCandidates.forEach(({ x, y, representative }) => {
       scaledGrid[y][x] = representative;
     });
@@ -703,6 +690,626 @@ export function smartReduceGrid(
     colorPacksSavedRMB,
     estimatedMoneySavedRMB,
   };
+}
+
+function projectComponentAnchors(
+  candidates: DownsampleCandidate[],
+  grid: (string | null)[][],
+  metaGrid: (PixelMeta | null)[][],
+  structure: GridStructure,
+  scaleX: number,
+  scaleY: number,
+  targetWidth: number,
+  targetHeight: number,
+): void {
+  const anchors = new Map<number, { x: number; y: number; priority: number }>();
+  for (let y = 0; y < grid.length; y++) {
+    for (let x = 0; x < grid[y].length; x++) {
+      if (!grid[y][x]) continue;
+      const componentId = structure.componentIds[y][x];
+      if (componentId < 0) continue;
+      const priority = (structure.protectedMask[y][x] ? 10 : 0)
+        + (metaGrid[y][x]?.edgeWeight ?? 0)
+        + (metaGrid[y][x]?.chroma ?? 0) / 1000;
+      const current = anchors.get(componentId);
+      if (
+        !current
+        || priority > current.priority
+        || (priority === current.priority && (y < current.y || (y === current.y && x < current.x)))
+      ) {
+        anchors.set(componentId, { x, y, priority });
+      }
+    }
+  }
+
+  const byKey = new Map(candidates.map(candidate => [candidateKey(candidate.x, candidate.y), candidate]));
+  for (const anchor of anchors.values()) {
+    const x = Math.min(targetWidth - 1, Math.max(0, Math.floor(anchor.x / scaleX)));
+    const y = Math.min(targetHeight - 1, Math.max(0, Math.floor(anchor.y / scaleY)));
+    const candidate = byKey.get(candidateKey(x, y));
+    if (candidate && !isHoleBlocked(candidate)) {
+      candidate.anchorCount++;
+    }
+  }
+}
+
+function selectConstrainedCandidates(
+  candidates: DownsampleCandidate[],
+  maxOpaqueCells: number,
+  targetWidth: number,
+  targetHeight: number,
+  projectedProtectedHoleKeys: Set<string>,
+): DownsampleCandidate[] {
+  const byKey = new Map(candidates.map(candidate => [candidateKey(candidate.x, candidate.y), candidate]));
+  const selected = new Set<string>();
+  const add = (candidate: DownsampleCandidate) => {
+    selected.add(candidateKey(candidate.x, candidate.y));
+  };
+  const eligibleCandidates = candidates.filter(candidate => !isHoleBlocked(candidate));
+
+  // Projected structural seeds have priority over raw density. This preserves
+  // anchors, bridges, contours, and small salient pieces when a sparse subject
+  // would otherwise lose them to the global material budget.
+  for (const candidate of eligibleCandidates
+    .filter(isStructuralSeed)
+    .sort(compareCandidatePriority)) {
+    if (selected.size >= maxOpaqueCells) break;
+    add(candidate);
+  }
+
+  const hasDenseCandidate = eligibleCandidates.some(candidate => candidate.opaqueRatio >= 0.5);
+  for (const candidate of eligibleCandidates
+    .filter(candidate => !hasDenseCandidate || candidate.opaqueRatio >= 0.5 || isStructuralSeed(candidate))
+    .sort(compareCandidatePriority)) {
+    if (selected.size >= maxOpaqueCells) break;
+    add(candidate);
+  }
+
+  repairSelectionTopology(
+    selected,
+    byKey,
+    maxOpaqueCells,
+    targetWidth,
+    targetHeight,
+    projectedProtectedHoleKeys,
+  );
+  return [...selected]
+    .map(key => byKey.get(key))
+    .filter((candidate): candidate is DownsampleCandidate => candidate !== undefined);
+}
+
+function repairSelectionTopology(
+  selected: Set<string>,
+  candidates: Map<string, DownsampleCandidate>,
+  maxOpaqueCells: number,
+  targetWidth: number,
+  targetHeight: number,
+  projectedProtectedHoleKeys: Set<string>,
+): void {
+  const componentIds = new Set<number>();
+  for (const key of selected) {
+    candidates.get(key)?.componentIds.forEach(componentId => componentIds.add(componentId));
+  }
+
+  for (const componentId of componentIds) {
+    let groups = selectedGroupsForComponent(selected, candidates, componentId, targetWidth, targetHeight);
+    while (groups.length > 1) {
+      const path = findComponentPath(groups[0], groups[1], candidates, componentId, targetWidth, targetHeight);
+      if (!path) break;
+      path.forEach(key => selected.add(key));
+      groups = selectedGroupsForComponent(selected, candidates, componentId, targetWidth, targetHeight);
+    }
+  }
+
+  enforceNoNewInteriorHoles(
+    selected,
+    candidates,
+    targetWidth,
+    targetHeight,
+    projectedProtectedHoleKeys,
+  );
+
+  while (selected.size > maxOpaqueCells) {
+    const exteriorBoundaryKeys = findExteriorBoundaryKeys(selected, targetWidth, targetHeight);
+    const removable = [...selected]
+      .map(key => candidates.get(key))
+      .filter((candidate): candidate is DownsampleCandidate => (
+        candidate !== undefined
+        && !isStructuralSeed(candidate)
+        && exteriorBoundaryKeys.has(candidateKey(candidate.x, candidate.y))
+        && !projectedProtectedHoleKeys.has(candidateKey(candidate.x, candidate.y))
+      ))
+      .sort((left, right) => compareCandidatePriority(right, left));
+
+    let removed = false;
+    for (const candidate of removable) {
+      const key = candidateKey(candidate.x, candidate.y);
+      selected.delete(key);
+      if (selectionIsTopologySafe(
+        selected,
+        candidates,
+        targetWidth,
+        targetHeight,
+        projectedProtectedHoleKeys,
+      )) {
+        removed = true;
+        break;
+      }
+      selected.add(key);
+    }
+    if (!removed) break;
+  }
+
+  // A recovered boundary cell must never reintroduce a new counter. This is a
+  // final hard gate; protected source holes remain excluded from filling.
+  enforceNoNewInteriorHoles(
+    selected,
+    candidates,
+    targetWidth,
+    targetHeight,
+    projectedProtectedHoleKeys,
+  );
+}
+
+function selectionIsTopologySafe(
+  selected: Set<string>,
+  candidates: Map<string, DownsampleCandidate>,
+  targetWidth: number,
+  targetHeight: number,
+  projectedProtectedHoleKeys: Set<string>,
+): boolean {
+  const componentIds = new Set<number>();
+  for (const key of selected) {
+    candidates.get(key)?.componentIds.forEach(componentId => componentIds.add(componentId));
+  }
+  for (const componentId of componentIds) {
+    if (selectedGroupsForComponent(selected, candidates, componentId, targetWidth, targetHeight).length > 1) {
+      return false;
+    }
+  }
+  return findUnprotectedInteriorHoleCandidates(
+    selected,
+    candidates,
+    targetWidth,
+    targetHeight,
+    projectedProtectedHoleKeys,
+  ).length === 0;
+}
+
+function selectedGroupsForComponent(
+  selected: Set<string>,
+  candidates: Map<string, DownsampleCandidate>,
+  componentId: number,
+  targetWidth: number,
+  targetHeight: number,
+): string[][] {
+  const remaining = new Set(
+    [...selected].filter(key => candidates.get(key)?.componentIds.has(componentId)),
+  );
+  const groups: string[][] = [];
+  while (remaining.size > 0) {
+    const start = remaining.values().next().value as string;
+    const group: string[] = [];
+    const queue = [start];
+    remaining.delete(start);
+    while (queue.length > 0) {
+      const key = queue.pop()!;
+      group.push(key);
+      const candidate = candidates.get(key)!;
+      for (const neighbourKey of targetNeighbourKeys(candidate.x, candidate.y, targetWidth, targetHeight)) {
+        if (remaining.has(neighbourKey) && candidates.get(neighbourKey)?.componentIds.has(componentId)) {
+          remaining.delete(neighbourKey);
+          queue.push(neighbourKey);
+        }
+      }
+    }
+    groups.push(group);
+  }
+  return groups;
+}
+
+function findComponentPath(
+  startGroup: string[],
+  targetGroup: string[],
+  candidates: Map<string, DownsampleCandidate>,
+  componentId: number,
+  targetWidth: number,
+  targetHeight: number,
+): string[] | null {
+  const targetKeys = new Set(targetGroup);
+  const queue = [...startGroup];
+  const previous = new Map<string, string | null>();
+  startGroup.forEach(key => previous.set(key, null));
+  let queueIndex = 0;
+
+  while (queueIndex < queue.length) {
+    const key = queue[queueIndex++];
+    if (targetKeys.has(key)) {
+      const path: string[] = [];
+      let cursor: string | null = key;
+      while (cursor) {
+        path.push(cursor);
+        cursor = previous.get(cursor) ?? null;
+      }
+      return path;
+    }
+
+    const candidate = candidates.get(key)!;
+    for (const neighbourKey of targetNeighbourKeys(candidate.x, candidate.y, targetWidth, targetHeight)) {
+      const neighbour = candidates.get(neighbourKey);
+      if (
+        neighbour
+        && !isHoleBlocked(neighbour)
+        && neighbour.componentIds.has(componentId)
+        && !previous.has(neighbourKey)
+      ) {
+        previous.set(neighbourKey, key);
+        queue.push(neighbourKey);
+      }
+    }
+  }
+  return null;
+}
+
+function enforceNoNewInteriorHoles(
+  selected: Set<string>,
+  candidates: Map<string, DownsampleCandidate>,
+  targetWidth: number,
+  targetHeight: number,
+  projectedProtectedHoleKeys: Set<string>,
+): void {
+  // Fill only target cells backed by real source foreground. The precomputed
+  // representative is local to that sampling region, which prevents a nearby
+  // background colour from being invented to close a new interior counter.
+  for (const key of findUnprotectedInteriorHoleCandidates(
+    selected,
+    candidates,
+    targetWidth,
+    targetHeight,
+    projectedProtectedHoleKeys,
+  )) {
+    selected.add(key);
+  }
+}
+
+function findUnprotectedInteriorHoleCandidates(
+  selected: Set<string>,
+  candidates: Map<string, DownsampleCandidate>,
+  targetWidth: number,
+  targetHeight: number,
+  projectedProtectedHoleKeys: Set<string>,
+): string[] {
+  const exterior = findExteriorTransparentCells(selected, targetWidth, targetHeight);
+  const gaps: string[] = [];
+  for (let y = 0; y < targetHeight; y++) {
+    for (let x = 0; x < targetWidth; x++) {
+      const key = candidateKey(x, y);
+      const candidate = candidates.get(key);
+      if (
+        !selected.has(key)
+        && !exterior[y][x]
+        && !projectedProtectedHoleKeys.has(key)
+        && candidate
+        && !isHoleBlocked(candidate)
+      ) {
+        gaps.push(key);
+      }
+    }
+  }
+  return gaps;
+}
+
+function findExteriorBoundaryKeys(
+  selected: Set<string>,
+  targetWidth: number,
+  targetHeight: number,
+): Set<string> {
+  const exterior = findExteriorTransparentCells(selected, targetWidth, targetHeight);
+  const boundary = new Set<string>();
+  for (const key of selected) {
+    const [x, y] = parseCandidateKey(key);
+    if (x === 0 || y === 0 || x === targetWidth - 1 || y === targetHeight - 1) {
+      boundary.add(key);
+      continue;
+    }
+    if (cardinalNeighbours(x, y, targetWidth, targetHeight).some(([nx, ny]) => exterior[ny][nx])) {
+      boundary.add(key);
+    }
+  }
+  return boundary;
+}
+
+function findExteriorTransparentCells(
+  selected: Set<string>,
+  targetWidth: number,
+  targetHeight: number,
+): boolean[][] {
+  const exterior = Array.from({ length: targetHeight }, () => Array(targetWidth).fill(false));
+  const queue: [number, number][] = [];
+  for (let x = 0; x < targetWidth; x++) {
+    queue.push([x, 0]);
+    if (targetHeight > 1) queue.push([x, targetHeight - 1]);
+  }
+  for (let y = 1; y < targetHeight - 1; y++) {
+    queue.push([0, y]);
+    if (targetWidth > 1) queue.push([targetWidth - 1, y]);
+  }
+
+  while (queue.length > 0) {
+    const [x, y] = queue.pop()!;
+    if (exterior[y][x] || selected.has(candidateKey(x, y))) continue;
+    exterior[y][x] = true;
+    for (const [nx, ny] of cardinalNeighbours(x, y, targetWidth, targetHeight)) {
+      if (!exterior[ny][nx] && !selected.has(candidateKey(nx, ny))) queue.push([nx, ny]);
+    }
+  }
+  return exterior;
+}
+
+function isStructuralSeed(candidate: DownsampleCandidate): boolean {
+  return candidate.protectedWeight > 0 || candidate.anchorCount > 0;
+}
+
+function isHoleBlocked(candidate: DownsampleCandidate): boolean {
+  return candidate.holeCoverage > 0 && candidate.holeCoverage >= candidate.opaqueCoverage;
+}
+
+function compareCandidatePriority(left: DownsampleCandidate, right: DownsampleCandidate): number {
+  const leftPriority = candidatePriority(left);
+  const rightPriority = candidatePriority(right);
+  return rightPriority - leftPriority || left.y - right.y || left.x - right.x;
+}
+
+function candidatePriority(candidate: DownsampleCandidate): number {
+  return candidate.anchorCount * 1_000_000
+    + Math.min(100, candidate.protectedWeight) * 10_000
+    + candidate.opaqueRatio * 1_000
+    + candidate.colourCoherence * 100
+    + candidate.opaqueCoverage * 10
+    + candidate.score;
+}
+
+function candidateKey(x: number, y: number): string {
+  return `${x},${y}`;
+}
+
+function parseCandidateKey(key: string): [number, number] {
+  const [x, y] = key.split(',').map(Number);
+  return [x, y];
+}
+
+function targetNeighbourKeys(x: number, y: number, width: number, height: number): string[] {
+  return cardinalNeighbours(x, y, width, height).map(([nx, ny]) => candidateKey(nx, ny));
+}
+
+function createPixelMetaGrid(
+  grid: (string | null)[][],
+  paletteMap: Map<string, BeadColor>,
+): (PixelMeta | null)[][] {
+  return grid.map(row => row.map(cid => {
+    if (!cid) return null;
+
+    const color = paletteMap.get(cid);
+    let r = 255;
+    let g = 255;
+    let b = 255;
+    if (color) {
+      [r, g, b] = color.rgb;
+    } else {
+      const hex = cid.replace('#', '');
+      if (hex.length === 6) {
+        r = parseInt(hex.substring(0, 2), 16) || 255;
+        g = parseInt(hex.substring(2, 4), 16) || 255;
+        b = parseInt(hex.substring(4, 6), 16) || 255;
+      }
+    }
+
+    const [l, a, labB] = rgbToLab(r, g, b);
+    return {
+      colorId: cid,
+      r,
+      g,
+      b,
+      l,
+      a,
+      labB,
+      chroma: Math.hypot(a, labB),
+      edgeWeight: 0,
+      isCornerBackground: false,
+      tier: 3,
+    };
+  }));
+}
+
+function calculateEdgeWeightsAndTiers(
+  metaGrid: (PixelMeta | null)[][],
+  width: number,
+  height: number,
+): void {
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const curr = metaGrid[y][x];
+      if (!curr) continue;
+
+      let maxDiff = 0;
+      for (const [nx, ny] of cardinalNeighbours(x, y, width, height)) {
+        const neighbour = metaGrid[ny][nx];
+        if (!neighbour) {
+          maxDiff = Math.max(maxDiff, 40); // Subject boundary
+        } else {
+          const diff = Math.hypot(curr.l - neighbour.l, curr.a - neighbour.a, curr.labB - neighbour.labB);
+          maxDiff = Math.max(maxDiff, diff);
+        }
+      }
+
+      curr.edgeWeight = Math.min(1, maxDiff / 50);
+      if (curr.edgeWeight > 0.30) {
+        curr.tier = 1;
+      } else if (curr.chroma > 25 || curr.l > 82) {
+        curr.tier = 2;
+      } else if (curr.l < 30 && curr.edgeWeight < 0.15) {
+        curr.tier = 4;
+      } else {
+        curr.tier = 3;
+      }
+    }
+  }
+}
+
+function buildGridStructure(
+  grid: (string | null)[][],
+  metaGrid: (PixelMeta | null)[][],
+  options: ReductionOptions,
+): GridStructure {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  const componentIds = Array.from({ length: height }, () => Array(width).fill(-1));
+  const protectedMask = Array.from({ length: height }, () => Array(width).fill(false));
+  const holeMask = Array.from({ length: height }, () => Array(width).fill(false));
+  let componentId = 0;
+  let opaqueCount = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (!grid[y][x]) continue;
+      opaqueCount++;
+      if (componentIds[y][x] !== -1) continue;
+
+      const queue: [number, number][] = [[x, y]];
+      componentIds[y][x] = componentId;
+      while (queue.length > 0) {
+        const [cx, cy] = queue.pop()!;
+        for (const [nx, ny] of cardinalNeighbours(cx, cy, width, height)) {
+          if (grid[ny][nx] && componentIds[ny][nx] === -1) {
+            componentIds[ny][nx] = componentId;
+            queue.push([nx, ny]);
+          }
+        }
+      }
+      componentId++;
+    }
+  }
+
+  if (options.protectSaliencyAndContours) {
+    // High-contrast contours are structural, even when the colour itself is a
+    // globally rare one. Mark both sides before any recolouring occurs.
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        if (metaGrid[y][x]?.edgeWeight > 0.30) protectedMask[y][x] = true;
+      }
+    }
+
+    // Same-colour components expose thin strokes, endpoints, and small salient
+    // features that a raw opaque foreground mask cannot see on a fully filled
+    // pixel-art canvas.
+    const visited = Array.from({ length: height }, () => Array(width).fill(false));
+    const smallComponentLimit = Math.max(2, Math.min(12, Math.ceil(opaqueCount * 0.01)));
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const colorId = grid[y][x];
+        if (!colorId || visited[y][x]) continue;
+
+        const cells = collectColorComponent(grid, x, y, colorId, visited);
+        const averageEdgeWeight = cells.reduce((sum, [cx, cy]) => (
+          sum + (metaGrid[cy][cx]?.edgeWeight ?? 0)
+        ), 0) / cells.length;
+        const isSmallSalientComponent = cells.length <= smallComponentLimit && averageEdgeWeight >= 0.18;
+
+        for (const [cx, cy] of cells) {
+          const sameColourNeighbours = cardinalNeighbours(cx, cy, width, height)
+            .filter(([nx, ny]) => grid[ny][nx] === colorId)
+            .length;
+          const isEndpointOrNarrowBridge = cells.length > 1
+            && sameColourNeighbours >= 1
+            && sameColourNeighbours <= 2;
+          if (isSmallSalientComponent || isEndpointOrNarrowBridge) {
+            protectedMask[cy][cx] = true;
+          }
+        }
+      }
+    }
+  }
+
+  // Protect the occupied rim of every enclosed transparent hole. This prevents
+  // cleanup from opening or filling a ring/letter counter before resampling.
+  const exteriorEmpty = Array.from({ length: height }, () => Array(width).fill(false));
+  const emptyQueue: [number, number][] = [];
+  for (let x = 0; x < width; x++) {
+    if (!grid[0]?.[x]) emptyQueue.push([x, 0]);
+    if (height > 1 && !grid[height - 1]?.[x]) emptyQueue.push([x, height - 1]);
+  }
+  for (let y = 1; y < height - 1; y++) {
+    if (!grid[y][0]) emptyQueue.push([0, y]);
+    if (width > 1 && !grid[y][width - 1]) emptyQueue.push([width - 1, y]);
+  }
+
+  while (emptyQueue.length > 0) {
+    const [x, y] = emptyQueue.pop()!;
+    if (exteriorEmpty[y][x] || grid[y][x]) continue;
+    exteriorEmpty[y][x] = true;
+    for (const [nx, ny] of cardinalNeighbours(x, y, width, height)) {
+      if (!exteriorEmpty[ny][nx] && !grid[ny][nx]) emptyQueue.push([nx, ny]);
+    }
+  }
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      if (grid[y][x] || exteriorEmpty[y][x]) continue;
+      holeMask[y][x] = true;
+      for (const [nx, ny] of cardinalNeighbours(x, y, width, height)) {
+        if (grid[ny][nx] && options.protectSaliencyAndContours) protectedMask[ny][nx] = true;
+      }
+    }
+  }
+
+  return { componentIds, protectedMask, holeMask };
+}
+
+function isProtectedColorCell(
+  structure: GridStructure,
+  metaGrid: (PixelMeta | null)[][],
+  x: number,
+  y: number,
+  options: ReductionOptions,
+): boolean {
+  return structure.protectedMask[y][x]
+    || (options.protectVibrantColors && metaGrid[y][x]?.tier === 2);
+}
+
+function collectColorComponent(
+  grid: (string | null)[][],
+  startX: number,
+  startY: number,
+  colorId: string,
+  visited: boolean[][],
+): [number, number][] {
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  const cells: [number, number][] = [];
+  const queue: [number, number][] = [[startX, startY]];
+  visited[startY][startX] = true;
+
+  while (queue.length > 0) {
+    const [x, y] = queue.pop()!;
+    cells.push([x, y]);
+    for (const [nx, ny] of cardinalNeighbours(x, y, width, height)) {
+      if (!visited[ny][nx] && grid[ny][nx] === colorId) {
+        visited[ny][nx] = true;
+        queue.push([nx, ny]);
+      }
+    }
+  }
+
+  return cells;
+}
+
+function cardinalNeighbours(x: number, y: number, width: number, height: number): [number, number][] {
+  const neighbours: [number, number][] = [];
+  if (x > 0) neighbours.push([x - 1, y]);
+  if (x + 1 < width) neighbours.push([x + 1, y]);
+  if (y > 0) neighbours.push([x, y - 1]);
+  if (y + 1 < height) neighbours.push([x, y + 1]);
+  return neighbours;
 }
 
 function createEmptyReport(grid: (string | null)[][]): ReductionReport {

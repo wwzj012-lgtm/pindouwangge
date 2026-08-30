@@ -19,6 +19,8 @@ import {
   Palette,
   LayoutGrid,
   Search,
+  Coins,
+  Gift,
 } from 'lucide-react';
 import { BRAND_NAMES } from '../data/palettes';
 import { SAMPLE_IMAGES } from '../data/samples';
@@ -42,8 +44,8 @@ interface HeaderProps {
   onOpenUserProfileModal?: () => void;
   onOpenVipModal?: () => void;
   onClearCanvas: () => void;
-  currentTab?: 'home' | 'community' | 'studio' | 'largeCanvas';
-  setCurrentTab?: (tab: 'home' | 'community' | 'studio' | 'largeCanvas') => void;
+  currentTab?: 'home' | 'community' | 'studio' | 'largeCanvas' | 'assembly';
+  setCurrentTab?: (tab: 'home' | 'community' | 'studio' | 'largeCanvas' | 'assembly') => void;
   onImportPattern?: () => void;
 }
 
@@ -119,11 +121,22 @@ export const Header: React.FC<HeaderProps> = ({
   setCurrentTab,
   onImportPattern,
 }) => {
-  const { currentUser, userProfile, loading: authLoading, isVip, isPro } = useAuth();
+  const {
+    currentUser,
+    userProfile,
+    loading: authLoading,
+    isVip,
+    isPro,
+    creditSummary,
+    refreshCreditSummary,
+    checkinCredits,
+  } = useAuth();
   const { language, setLanguage, t } = useLanguage();
   const isEn = language === 'en';
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [headerSearchQuery, setHeaderSearchQuery] = useState('');
+  const [checkinPending, setCheckinPending] = useState(false);
+  const [checkinMessage, setCheckinMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const jsonInputRef = useRef<HTMLInputElement>(null);
 
@@ -142,6 +155,55 @@ export const Header: React.FC<HeaderProps> = ({
         }
       };
       reader.readAsText(file);
+    }
+  };
+
+  const availableCreditUnits = creditSummary
+    ? Math.max(0, creditSummary.balanceUnits - creditSummary.heldUnits)
+    : 0;
+  const availablePoints = (availableCreditUnits / 10).toFixed(1);
+  const checkinPoints = creditSummary ? (Number(creditSummary.nextCheckinUnits ?? 0) / 10).toFixed(1) : '0.0';
+  const checkinAvailable = Boolean(creditSummary?.checkinAvailable);
+
+  const handleCheckin = async (): Promise<void> => {
+    if (!currentUser) {
+      onOpenAuthModal?.();
+      return;
+    }
+    if (checkinPending) {
+      return;
+    }
+    if (!creditSummary) {
+      setCheckinMessage('积分信息加载中');
+      void refreshCreditSummary();
+      window.setTimeout(() => setCheckinMessage(null), 2400);
+      return;
+    }
+    if (!checkinAvailable) {
+      setCheckinMessage('今日已签到');
+      return;
+    }
+    setCheckinPending(true);
+    setCheckinMessage(null);
+    try {
+      const result = await checkinCredits();
+      if (result.success) {
+        const granted = typeof result.grantedUnits === 'number'
+          ? ` +${(result.grantedUnits / 10).toFixed(1)} 积分`
+          : '';
+        setCheckinMessage(`签到成功${granted}`);
+      } else if (result.alreadyCheckedIn) {
+        setCheckinMessage('今日已签到');
+      } else {
+        const message = result.message || '签到失败，请稍后重试';
+        setCheckinMessage(message);
+        if (message.includes('登录')) onOpenAuthModal?.();
+      }
+    } catch {
+      setCheckinMessage('签到失败，请检查网络');
+    } finally {
+      setCheckinPending(false);
+      window.setTimeout(() => setCheckinMessage(null), 3200);
     }
   };
 
@@ -230,6 +292,18 @@ export const Header: React.FC<HeaderProps> = ({
               大画板
               {currentTab === 'largeCanvas' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
             </button>
+
+            <button
+              onClick={() => window.location.assign('/assembly')}
+              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+                currentTab === 'assembly'
+                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
+                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
+              }`}
+            >
+              立体拼豆
+              {currentTab === 'assembly' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
+            </button>
           </nav>
         </div>
 
@@ -295,6 +369,54 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
 
           {/* Account entry */}
+          {currentUser ? (
+            <div className="relative flex min-w-0 items-center gap-1">
+              <div
+                className="flex min-h-8 items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 text-[11px] font-extrabold text-purple-900 sm:px-2.5"
+                title={`可用积分 ${availablePoints}`}
+                aria-label={`可用积分 ${availablePoints}`}
+              >
+                <Coins className="h-3.5 w-3.5 shrink-0 text-purple-600" />
+                <span className="tabular-nums">{availablePoints}</span>
+                <span className="hidden sm:inline">积分</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCheckin}
+                disabled={checkinPending || !creditSummary}
+                className={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-extrabold transition-colors sm:px-2.5 ${
+                  checkinAvailable
+                    ? 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                    : 'cursor-default border-purple-200 bg-white text-purple-400'
+                }`}
+                title={!creditSummary ? '正在加载积分信息' : checkinAvailable ? `每日签到 +${checkinPoints} 积分` : '今日已签到'}
+                aria-label={!creditSummary ? '正在加载积分信息' : checkinAvailable ? `每日签到，领取 ${checkinPoints} 积分` : '今日已签到'}
+              >
+                {checkinPending || !creditSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Gift className="h-3.5 w-3.5 shrink-0" />}
+                <span className="hidden sm:inline">{!creditSummary ? '加载中' : checkinAvailable ? '签到' : '已签到'}</span>
+              </button>
+              {checkinMessage && (
+                <span
+                  role="status"
+                  aria-live="polite"
+                  className="absolute right-0 top-full z-40 mt-1 max-w-[180px] truncate rounded-lg border border-purple-200 bg-white px-2 py-1 text-[10px] font-bold text-purple-800 shadow-lg"
+                >
+                  {checkinMessage}
+                </span>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleCheckin}
+              className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 text-[11px] font-extrabold text-amber-900 transition-colors hover:bg-amber-100 sm:px-2.5"
+              title="登录后每日签到领取积分"
+              aria-label="登录后每日签到领取积分"
+            >
+              <Gift className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">登录签到</span>
+            </button>
+          )}
           <div className="min-w-0 shrink-0">
             <HeaderAccountTrigger
               isAuthenticated={Boolean(currentUser)}

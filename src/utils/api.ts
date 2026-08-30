@@ -2,6 +2,8 @@ export interface ApiResp<T> {
   success: boolean;
   data?: T;
   message?: string;
+  code?: string;
+  errorCode?: string;
 }
 
 export interface ApiResult<T> {
@@ -9,13 +11,19 @@ export interface ApiResult<T> {
   status: number;
   data?: T;
   error?: string;
+  code?: string;
+  errorCode?: string;
   isNetworkError?: boolean;
+  /** Stable classification for callers that need to branch on an HTTP error. */
+  errorKind?: 'unauthorized' | 'insufficient_credits' | 'conflict' | 'validation' | 'http' | 'network';
 }
 
 export interface ApiRequestOptions {
   timeoutMs?: number;
   networkRetries?: number;
   retryDelayMs?: number;
+  /** Optional idempotency key for mutation requests. Existing callers are unaffected. */
+  idempotencyKey?: string;
 }
 
 type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -142,7 +150,22 @@ export const WORKER_API_DEFAULT_URL = 'https://stellabean-api.wwzj012.workers.de
 
 function apiBaseUrl(): string {
   const value = import.meta.env.VITE_WORKER_API_URL?.trim();
-  const base = value || WORKER_API_DEFAULT_URL;
+  // Production Pages deployments expose a same-origin `/api` proxy backed by
+  // the Worker service binding.  Prefer it so browsers (especially on
+  // networks that cannot reliably reach `workers.dev`) never need to make a
+  // cross-origin request for authentication or health checks.  An explicitly
+  // configured non-Workers URL still wins for self-hosted deployments.
+  const configured = value || '';
+  const browserOrigin = typeof window !== 'undefined' ? window.location?.origin : '';
+  const browserHostname = typeof window !== 'undefined' ? window.location?.hostname : '';
+  const isPagesHost = Boolean(
+    browserHostname
+      && (browserHostname === 'pages.dev' || browserHostname.endsWith('.pages.dev')),
+  );
+  const configuredIsWorkerOrigin = /^https:\/\/stellabean-api\.[^/]+\.workers\.dev\/?$/i.test(configured);
+  const base = isPagesHost && browserOrigin && (!configured || configuredIsWorkerOrigin)
+    ? browserOrigin
+    : (configured || WORKER_API_DEFAULT_URL);
   return base.endsWith('/') ? base : `${base}/`;
 }
 
@@ -155,13 +178,25 @@ function apiUrl(path: string, params?: Record<string, string>): URL {
   return url;
 }
 
-function isApiResp<T>(value: unknown): value is ApiResp<T> {
+type UntrustedApiResp<T> = Omit<ApiResp<T>, 'code' | 'errorCode'> & {
+  code?: unknown;
+  errorCode?: unknown;
+};
+
+function isApiResp<T>(value: unknown): value is UntrustedApiResp<T> {
   return Boolean(
     value
       && typeof value === 'object'
       && 'success' in value
       && typeof (value as { success?: unknown }).success === 'boolean',
   );
+}
+
+function apiErrorCodes(payload: UntrustedApiResp<unknown>): Pick<ApiResult<never>, 'code' | 'errorCode'> {
+  const result: Pick<ApiResult<never>, 'code' | 'errorCode'> = {};
+  if (typeof payload.code === 'string') result.code = payload.code;
+  if (typeof payload.errorCode === 'string') result.errorCode = payload.errorCode;
+  return result;
 }
 
 function isAbortError(error: unknown): boolean {
@@ -199,6 +234,14 @@ function waitForRetry(delayMs: number): Promise<void> {
   return new Promise((resolve) => globalThis.setTimeout(resolve, Math.max(0, delayMs)));
 }
 
+function classifyCreditError(status: number): ApiResult<never>['errorKind'] {
+  if (status === 401) return 'unauthorized';
+  if (status === 402) return 'insufficient_credits';
+  if (status === 409) return 'conflict';
+  if (status === 422) return 'validation';
+  return 'http';
+}
+
 async function apiRequestOnce<T>(
   method: ApiMethod,
   path: string,
@@ -206,6 +249,7 @@ async function apiRequestOnce<T>(
   params: Record<string, string> | undefined,
   timeoutMs: number,
   adminUnlockSecret?: string,
+  idempotencyKey?: string,
 ): Promise<ApiResult<T>> {
   let url: URL;
   try {
@@ -233,6 +277,7 @@ async function apiRequestOnce<T>(
       const adminSession = getAdminSessionToken();
       if (adminSession) headers.set('X-Admin-Session', adminSession);
     }
+    if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
     if (method === 'POST' || method === 'PUT') headers.set('Content-Type', 'application/json');
 
     const response = await fetch(url, {
@@ -256,17 +301,37 @@ async function apiRequestOnce<T>(
     }
     const contentType = response.headers.get('Content-Type') ?? '';
     if (!contentType.toLowerCase().includes('application/json')) {
-      return { ok: false, status: response.status, error: `后端返回了非 JSON 响应 (${response.status})` };
+      return {
+        ok: false,
+        status: response.status,
+        error: `后端返回了非 JSON 响应 (${response.status})`,
+        errorKind: classifyCreditError(response.status),
+      };
     }
 
     const payload: unknown = await response.json();
     if (!isApiResp<T>(payload)) {
-      return { ok: false, status: response.status, error: '后端响应格式不正确' };
+      return { ok: false, status: response.status, error: '后端响应格式不正确', errorKind: classifyCreditError(response.status) };
     }
     if (!response.ok || !payload.success) {
-      return { ok: false, status: response.status, error: payload.message ?? `HTTP ${response.status}` };
+      return {
+        ok: false,
+        status: response.status,
+        error: payload.message ?? `HTTP ${response.status}`,
+        errorKind: classifyCreditError(response.status),
+        ...apiErrorCodes(payload),
+      };
     }
-    return { ok: true, status: response.status, data: payload.data };
+    // The credits quote endpoint has existed in two compatible response
+    // shapes during rollout: `{ success, data: { ...quote } }` and
+    // `{ success, units, points, ... }`. Normalize the latter here so UI
+    // callers can use the same typed result without a second request.
+    const responseData = payload.data !== undefined
+      ? payload.data
+      : path === '/api/credits/quote'
+        ? payload
+        : undefined;
+    return { ok: true, status: response.status, data: responseData as T | undefined };
   } catch (error: unknown) {
     const networkError = isAbortError(error) || isFetchNetworkError(error);
     return {
@@ -274,6 +339,7 @@ async function apiRequestOnce<T>(
       status: 0,
       error: networkError ? networkErrorMessage(error) : '网络请求失败，请检查网络后重试',
       isNetworkError: networkError,
+      errorKind: networkError ? 'network' : 'http',
     };
   } finally {
     globalThis.clearTimeout(timeoutId);
@@ -293,7 +359,7 @@ async function apiRequest<T>(
   const retryDelayMs = Math.max(0, Math.floor(options.retryDelayMs ?? 300));
 
   for (let attempt = 0; attempt <= networkRetries; attempt += 1) {
-    const result = await apiRequestOnce<T>(method, path, body, params, timeoutMs, adminUnlockSecret);
+    const result = await apiRequestOnce<T>(method, path, body, params, timeoutMs, adminUnlockSecret, options.idempotencyKey);
     if (!result.isNetworkError || result.status !== 0 || attempt === networkRetries) return result;
     await waitForRetry(retryDelayMs);
   }
@@ -425,6 +491,221 @@ export async function apiGetBlob(path: string, params?: Record<string, string>, 
     globalThis.clearTimeout(timeoutId);
   }
 }
+
+/**
+ * Credit/economy response models. Unknown fields are retained by the Worker so
+ * callers can roll out optional accounting details without a client release.
+ */
+export interface CreditSummary {
+  balanceUnits: number;
+  availableUnits?: number;
+  heldUnits?: number;
+  expiringUnits?: number;
+  purchasedUnits?: number;
+  checkinUnits?: number;
+  membershipUnits?: number;
+  nextExpiryAt?: number | null;
+  checkin?: {
+    eligible: boolean;
+    rewardUnits?: number;
+    streakDay?: number;
+    checkedInAt?: number | null;
+    nextAvailableAt?: number | null;
+  };
+  [key: string]: unknown;
+}
+
+export interface CreditQuoteInput {
+  width: number;
+  height: number;
+  quality?: 'standard' | 'hd';
+  hd?: boolean;
+  smartSaving?: boolean;
+  operation?: string;
+  [key: string]: unknown;
+}
+
+export interface CreditQuote {
+  units?: number;
+  points?: number;
+  quoteHash?: string;
+  expiresAt?: number;
+  totalUnits: number;
+  totalPoints?: number;
+  baseUnits?: number;
+  multiplier?: number;
+  free?: boolean;
+  [key: string]: unknown;
+}
+
+export interface CreditCheckinResult {
+  grantedUnits: number;
+  balanceUnits?: number;
+  streakDay?: number;
+  nextAvailableAt?: number | null;
+  alreadyClaimed?: boolean;
+  [key: string]: unknown;
+}
+
+/**
+ * Stable identity supplied when a pattern is quoted or marked complete.
+ * Pricing is deliberately absent: the Worker is the sole source of all
+ * monetary values and entitlement decisions.
+ */
+export interface PatternCompletionInput {
+  workKey: string;
+  sourceHash: string;
+  width: number;
+  height: number;
+  /** Canonical padded Base64; cells are packed MSB-first, one occupancy bit per cell. */
+  occupancyBase64: string;
+  savingTarget: 0 | 15 | 25 | 40;
+}
+
+export type PatternCompletionEntitlementStatus =
+  | 'unpaid'
+  | 'paid'
+  | 'pending_top_up'
+  | (string & {});
+
+/** Server-owned record of the completion entitlement for this work identity. */
+export interface PatternCompletionEntitlement {
+  status: PatternCompletionEntitlementStatus;
+  paidNonEmptyBeads?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * A Worker-calculated completion price. Values may be fractional; clients
+ * must render these fields as returned and must not recompute totals.
+ */
+export interface PatternCompletionQuote {
+  base: number;
+  multiplier: number;
+  discount: number;
+  paid: number;
+  additional: number;
+  total: number;
+  entitlement: PatternCompletionEntitlement;
+  [key: string]: unknown;
+}
+
+/** Stable identity for one pre-entitlement local pattern. */
+export interface LegacyPatternImportItem {
+  workKey: string;
+  sourceHash: string;
+  gridHash: string;
+  nonEmptyBeads: number;
+}
+
+export interface LegacyPatternImportResultItem {
+  workKey: string;
+  sourceHash: string;
+  gridHash: string;
+  entitlementId?: string;
+  status: 'IMPORTED' | 'ALREADY_REGISTERED';
+}
+
+export interface LegacyPatternImportResult {
+  batchId: string;
+  requestedCount: number;
+  importedCount: number;
+  cumulativeImportedCount: number;
+  remainingImports: number;
+  eligibleUntil: number;
+  results: LegacyPatternImportResultItem[];
+}
+
+function newIdempotencyKey(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // Fall through to a non-cryptographic, collision-resistant browser key.
+  }
+  return `credit-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function creditRequestOptions(options?: ApiRequestOptions): ApiRequestOptions {
+  return {
+    ...options,
+    idempotencyKey: options?.idempotencyKey?.trim() || newIdempotencyKey(),
+  };
+}
+
+/** Fetches the authenticated user's current credit balance and expiry details. */
+export function apiGetCreditsSummary(options?: ApiRequestOptions): Promise<ApiResult<CreditSummary>> {
+  return apiGet<CreditSummary>('/api/credits/summary', undefined, creditRequestOptions(options));
+}
+
+/** Requests a server-calculated quote before applying, saving, or exporting work. */
+export function apiQuoteCredits(
+  input: CreditQuoteInput,
+  options?: ApiRequestOptions,
+): Promise<ApiResult<CreditQuote>> {
+  return apiPost<CreditQuote>('/api/credits/quote', input, creditRequestOptions(options));
+}
+
+/** Claims the daily credit check-in reward (idempotent on retries/double clicks). */
+export function apiCheckinCredits(options?: ApiRequestOptions): Promise<ApiResult<CreditCheckinResult>> {
+  return apiPost<CreditCheckinResult>('/api/credits/checkin', {}, creditRequestOptions(options));
+}
+
+/**
+ * Gets the authoritative price and entitlement state for completing a pattern.
+ * This request never derives prices from bead counts on the client.
+ */
+export function apiQuotePatternCompletion(
+  input: PatternCompletionInput,
+  options?: ApiRequestOptions,
+): Promise<ApiResult<PatternCompletionQuote>> {
+  return apiPost<PatternCompletionQuote>('/api/credits/completion/quote', input, options);
+}
+
+/**
+ * Applies the completion charge or top-up and refreshes its entitlement.
+ * Every call carries an Idempotency-Key, including callers that do not supply
+ * one explicitly, so a retry cannot create an additional debit.
+ */
+export function apiCompletePattern(
+  input: PatternCompletionInput,
+  options?: ApiRequestOptions,
+): Promise<ApiResult<PatternCompletionQuote>> {
+  return apiPost<PatternCompletionQuote>(
+    '/api/credits/completion/complete',
+    input,
+    creditRequestOptions(options),
+  );
+}
+
+/**
+ * Offers a bounded batch of old local patterns to the Worker for legacy
+ * entitlement. Account age and migration eligibility remain server-owned.
+ */
+export function apiImportLegacyPatterns(
+  items: readonly LegacyPatternImportItem[],
+  options?: ApiRequestOptions,
+): Promise<ApiResult<LegacyPatternImportResult>> {
+  if (items.length === 0 || items.length > 50) {
+    return Promise.resolve({
+      ok: false,
+      status: 422,
+      error: '旧作品迁移每次必须包含 1 到 50 项',
+      errorKind: 'validation',
+    });
+  }
+  return apiPost<LegacyPatternImportResult>(
+    '/api/credits/completion/legacy-import',
+    { items: [...items] },
+    creditRequestOptions(options),
+  );
+}
+
+// Descriptive aliases for UI/account integrations.
+export const getCreditSummary = apiGetCreditsSummary;
+export const quoteCredits = apiQuoteCredits;
+export const checkinCredits = apiCheckinCredits;
 
 export async function checkApiHealth(): Promise<boolean> {
   const result = await apiGet<{ status: string }>('/api/health', undefined, HEALTH_REQUEST_OPTIONS);

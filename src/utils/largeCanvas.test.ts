@@ -16,6 +16,7 @@ import {
   LARGE_CANVAS_MAX_SIDES,
   LARGE_CANVAS_MODES,
   snapLargeCanvasGridRect,
+  type LargeCanvasConversionMode,
   type LargeCanvasMaxSide,
   type LargeCanvasGridRect,
 } from './largeCanvas';
@@ -25,10 +26,38 @@ describe('large canvas modes', () => {
     expect(LARGE_CANVAS_MODES.map(mode => mode.id)).toEqual(['cartoon', 'photo', 'logo']);
   });
 
-  it('forces clean sampling for cartoon and logo while enabling photo dithering', () => {
-    expect(getLargeCanvasModeSettings('cartoon')).toMatchObject({ pipelineOverride: 'logo', dither: 'none', outlineBoost: true });
-    expect(getLargeCanvasModeSettings('logo')).toMatchObject({ pipelineOverride: 'logo', dither: 'none', outlineBoost: true });
-    expect(getLargeCanvasModeSettings('photo')).toMatchObject({ pipelineOverride: 'photo', dither: 'floyd', ditherStrength: 0.65 });
+  it('maps each mode to its pipeline and preserves its tuning parameters', () => {
+    expect(getLargeCanvasModeSettings('cartoon')).toEqual({
+      pipelineOverride: 'cartoon',
+      dither: 'none',
+      ditherStrength: 0,
+      sharpening: 25,
+      outlineBoost: true,
+    });
+    expect(getLargeCanvasModeSettings('photo')).toEqual({
+      pipelineOverride: 'photo',
+      dither: 'floyd',
+      ditherStrength: 0.65,
+      sharpening: 15,
+      outlineBoost: false,
+    });
+    expect(getLargeCanvasModeSettings('logo')).toEqual({
+      pipelineOverride: 'logo',
+      dither: 'none',
+      ditherStrength: 0,
+      sharpening: 55,
+      outlineBoost: true,
+    });
+  });
+
+  it('falls back to cartoon settings for invalid runtime mode values', () => {
+    expect(getLargeCanvasModeSettings('invalid' as LargeCanvasConversionMode)).toEqual({
+      pipelineOverride: 'cartoon',
+      dither: 'none',
+      ditherStrength: 0,
+      sharpening: 25,
+      outlineBoost: true,
+    });
   });
 
   it('keeps dragged frames inside the large board', () => {

@@ -90,9 +90,25 @@ interface LargeCanvasViewProps {
   ) => Promise<LargeCanvasConversionResult>;
   onPrepareImage?: (file: File) => Promise<File>;
   onOpenFrame: (frame: LargeCanvasFrame) => void;
+  /** Reports the current non-empty board occupancy to the host credit flow. */
+  onCreditUsageChange?: (usage: LargeCanvasCreditUsage) => void;
+}
+
+export interface LargeCanvasViewHandle {
+  uploadFile: (file: File) => void;
+}
+
+export interface LargeCanvasCreditUsage {
+  /** Persistent identity for this large-canvas workspace. */
+  workKey: string;
+  width: number;
+  height: number;
+  occupancyBase64: string;
+  nonEmptyBeads: number;
 }
 
 const IMAGE_PREPROCESSING_CANCELLED = '图片预处理已取消';
+const INVALID_SOURCE_IMAGE_DATA_URL = '图框源图数据无效，无法处理。';
 
 function isGuestAccount(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false;
@@ -105,6 +121,29 @@ const LARGE_CANVAS_VIEW_SCALE_KEY = 'beadgrid.large-canvas.view-scale';
 const GRID_CELL_SIZE = 10;
 const BOARD_GRID_WIDTH = 320;
 const BOARD_GRID_HEIGHT = 220;
+
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+function encodeBoardOccupancy(cells: ReadonlySet<string>): string {
+  const bytes = new Uint8Array(Math.ceil((BOARD_GRID_WIDTH * BOARD_GRID_HEIGHT) / 8));
+  cells.forEach(key => {
+    const [x, y] = key.split(',').map(Number);
+    if (!Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0 || x >= BOARD_GRID_WIDTH || y >= BOARD_GRID_HEIGHT) return;
+    const bitIndex = y * BOARD_GRID_WIDTH + x;
+    bytes[bitIndex >>> 3] |= 1 << (7 - (bitIndex & 7));
+  });
+  let output = '';
+  for (let index = 0; index < bytes.length; index += 3) {
+    const first = bytes[index];
+    const hasSecond = index + 1 < bytes.length;
+    const hasThird = index + 2 < bytes.length;
+    const packed = (first << 16) | ((hasSecond ? bytes[index + 1] : 0) << 8) | (hasThird ? bytes[index + 2] : 0);
+    output += BASE64_ALPHABET[(packed >>> 18) & 63] + BASE64_ALPHABET[(packed >>> 12) & 63]
+      + (hasSecond ? BASE64_ALPHABET[(packed >>> 6) & 63] : '=')
+      + (hasThird ? BASE64_ALPHABET[packed & 63] : '=');
+  }
+  return output;
+}
 const DEFAULT_MAX_SIDE: LargeCanvasMaxSide = 50;
 const MIN_VIEW_SCALE = 0.1;
 const MAX_VIEW_SCALE = 1.2;
@@ -414,12 +453,16 @@ function readManualEntries(value: unknown): ManualEntry[] {
   return serializeManualCells(cells);
 }
 
-function restorePersistedFrames(): { frames: LargeCanvasFrame[]; selectedId: string | null; manualEntries: ManualEntry[]; restoreNotice: string | null } {
-  if (typeof window === 'undefined') return { frames: [], selectedId: null, manualEntries: [], restoreNotice: null };
+function restorePersistedFrames(): { frames: LargeCanvasFrame[]; selectedId: string | null; manualEntries: ManualEntry[]; restoreNotice: string | null; workspaceId: string } {
+  const fallbackWorkspaceId = createId('large-workspace');
+  if (typeof window === 'undefined') return { frames: [], selectedId: null, manualEntries: [], restoreNotice: null, workspaceId: fallbackWorkspaceId };
   try {
     const raw = window.localStorage.getItem(LARGE_CANVAS_STORAGE_KEY);
-    if (!raw) return { frames: [], selectedId: null, manualEntries: [], restoreNotice: null };
+    if (!raw) return { frames: [], selectedId: null, manualEntries: [], restoreNotice: null, workspaceId: fallbackWorkspaceId };
     const parsed: unknown = JSON.parse(raw);
+    const workspaceId = isRecord(parsed) && typeof parsed.workspaceId === 'string' && parsed.workspaceId.trim().length <= 160
+      ? parsed.workspaceId.trim()
+      : fallbackWorkspaceId;
     const source = Array.isArray(parsed) ? parsed : isRecord(parsed) && Array.isArray(parsed.frames) ? parsed.frames : [];
     const frames: LargeCanvasFrame[] = [];
     const ids = new Set<string>();
@@ -480,14 +523,30 @@ function restorePersistedFrames(): { frames: LargeCanvasFrame[]; selectedId: str
       skippedFrames ? `已跳过 ${skippedFrames} 个损坏图框。` : '',
       droppedLegacySources ? '旧版源图未恢复；需要重新上传图片后才能重新生成。' : '',
     ].filter(Boolean);
-    return { frames, selectedId, manualEntries, restoreNotice: notices.join(' ') || null };
+    return { frames, selectedId, manualEntries, restoreNotice: notices.join(' ') || null, workspaceId };
   } catch {
-    return { frames: [], selectedId: null, manualEntries: [], restoreNotice: '本地大画板记录损坏，已忽略该记录。' };
+    return { frames: [], selectedId: null, manualEntries: [], restoreNotice: '本地大画板记录损坏，已忽略该记录。', workspaceId: fallbackWorkspaceId };
   }
 }
 
-function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
-  return fetch(dataUrl).then(response => response.blob()).then(blob => new File([blob], name, { type: blob.type || 'image/png' }));
+async function dataUrlToFile(dataUrl: string, name: string): Promise<File> {
+  const separatorIndex = dataUrl.indexOf(',');
+  const metadata = separatorIndex > 0 ? dataUrl.slice(0, separatorIndex) : '';
+  if (!/^data:image\/[a-z0-9.+-]+(?:;[a-z0-9!#$&^_.+-]+(?:=[^;,]+)?)*$/i.test(metadata)) {
+    throw new Error(INVALID_SOURCE_IMAGE_DATA_URL);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(dataUrl);
+  } catch {
+    throw new Error(INVALID_SOURCE_IMAGE_DATA_URL);
+  }
+  if (!response.ok) throw new Error(INVALID_SOURCE_IMAGE_DATA_URL);
+
+  const blob = await response.blob();
+  if (!blob.size || !blob.type.startsWith('image/')) throw new Error(INVALID_SOURCE_IMAGE_DATA_URL);
+  return new File([blob], name, { type: blob.type || 'image/png' });
 }
 
 function getImageNaturalSize(file: File): Promise<{ width: number; height: number }> {
@@ -750,7 +809,7 @@ function findAvailableRect(width: number, height: number, frames: readonly Large
   return null;
 }
 
-export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
+export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanvasViewProps>(({
   paletteMap,
   brandName,
   paletteOptions,
@@ -770,11 +829,13 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   onConvertImage,
   onPrepareImage,
   onOpenFrame,
-}) => {
+  onCreditUsageChange,
+}, ref) => {
   const { currentUser, userProfile } = useAuth();
-  const initialState = useRef<{ frames: LargeCanvasFrame[]; selectedId: string | null; manualEntries: ManualEntry[]; restoreNotice: string | null } | null>(null);
+  const initialState = useRef<{ frames: LargeCanvasFrame[]; selectedId: string | null; manualEntries: ManualEntry[]; restoreNotice: string | null; workspaceId: string } | null>(null);
   if (!initialState.current) initialState.current = restorePersistedFrames();
   const [frames, setFrames] = useState<LargeCanvasFrame[]>(() => initialState.current?.frames ?? []);
+  const [workspaceId] = useState(() => initialState.current?.workspaceId ?? createId('large-workspace'));
   const [selectedId, setSelectedId] = useState<string | null>(() => initialState.current?.selectedId ?? null);
   const [manualCells, setManualCells] = useState<ManualCells>(() => new Map((initialState.current?.manualEntries ?? []).map(([x, y, colorId]) => [manualCellKey(x, y), colorId])));
   const [popupTab, setPopupTab] = useState<'basic' | 'params'>('basic');
@@ -823,6 +884,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   const boardRef = useRef<HTMLDivElement>(null);
   const inputRefs = useRef(new Map<string, HTMLInputElement>());
   const requestVersions = useRef(new Map<string, number>());
+
 
   const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
 
@@ -884,17 +946,38 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   }, [manualCells]);
 
   useEffect(() => {
+    if (!onCreditUsageChange) return;
+    const occupied = new Set<string>();
+    frames.forEach(frame => {
+      if (!frame.beanResult) return;
+      frame.beanResult.forEach((row, y) => row.forEach((colorId, x) => {
+        if (colorId) occupied.add(`${frame.rect.x + x},${frame.rect.y + y}`);
+      }));
+    });
+    manualCells.forEach((colorId, key) => {
+      if (colorId) occupied.add(key);
+    });
+    onCreditUsageChange({
+      workKey: `large-canvas:${workspaceId}`,
+      width: BOARD_GRID_WIDTH,
+      height: BOARD_GRID_HEIGHT,
+      occupancyBase64: encodeBoardOccupancy(occupied),
+      nonEmptyBeads: occupied.size,
+    });
+  }, [frames, manualCells, onCreditUsageChange, workspaceId]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
       try {
         const persistedFrames = frames.map(({ sourceImageDataUrl: _sourceImageDataUrl, loading: _loading, error: _error, ...frame }) => frame);
-        window.localStorage.setItem(LARGE_CANVAS_STORAGE_KEY, JSON.stringify({ frames: persistedFrames, selectedId, manualEntries: serializeManualCells(manualCells) }));
+        window.localStorage.setItem(LARGE_CANVAS_STORAGE_KEY, JSON.stringify({ workspaceId, frames: persistedFrames, selectedId, manualEntries: serializeManualCells(manualCells) }));
         setStorageMessage(null);
       } catch {
         setStorageMessage('本地保存空间不足，当前工作区仍可继续使用。');
       }
     }, 350);
     return () => window.clearTimeout(timeout);
-  }, [frames, manualCells, selectedId]);
+  }, [frames, manualCells, selectedId, workspaceId]);
 
   useEffect(() => {
     viewScaleRef.current = viewScale;
@@ -923,13 +1006,13 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
       history.past = [...history.past, cloneGrid(previous)].slice(-MAX_FRAME_HISTORY);
       history.future = [];
       frameHistoryRef.current.set(frameId, history);
-      return { ...frame, beanResult: cloneGrid(nextGrid), sourceImageDataUrl: null, error: null };
+      return { ...frame, beanResult: cloneGrid(nextGrid), error: null };
     }));
     setHistoryVersion(value => value + 1);
   };
 
   const replaceFrameGrid = (frameId: string, nextGrid: GridSnapshot): void => {
-    setFrames(current => current.map(frame => frame.id === frameId ? { ...frame, beanResult: cloneGrid(nextGrid), sourceImageDataUrl: null, error: null } : frame));
+    setFrames(current => current.map(frame => frame.id === frameId ? { ...frame, beanResult: cloneGrid(nextGrid), error: null } : frame));
   };
 
   const undoFrame = (frameId: string): void => {
@@ -1182,13 +1265,50 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
     convertFrame(frame, dataUrlToFile(frame.sourceImageDataUrl, `${frame.title}.png`), frame.mode, maxSide, frame.title);
   };
 
+  const prepareFrameImage = (frame: LargeCanvasFrame) => {
+    if (frame.loading || !frame.sourceImageDataUrl || !onPrepareImage) return;
+
+    const version = nextRequestVersion(frame.id);
+    const previousError = frame.error;
+    updateFrame(frame.id, { loading: true, error: null });
+    void dataUrlToFile(frame.sourceImageDataUrl, `${frame.title}.png`)
+      .then(file => {
+        if (requestVersions.current.get(frame.id) !== version) return null;
+        return onPrepareImage(file);
+      })
+      .then(file => {
+        if (!file || requestVersions.current.get(frame.id) !== version) return;
+        convertFrame(frame, file, frame.mode, frame.maxSide, frame.title);
+      })
+      .catch(error => {
+        if (requestVersions.current.get(frame.id) !== version) return;
+        const errorMessage = error instanceof Error ? error.message : '图片预处理失败';
+        updateFrame(frame.id, {
+          loading: false,
+          error: errorMessage === IMAGE_PREPROCESSING_CANCELLED ? previousError : errorMessage,
+        });
+      });
+  };
+
   const loadFile = (frame: LargeCanvasFrame, file: File | undefined) => {
     if (!file || !file.type.startsWith('image/')) {
       setMessage('请选择图片文件。');
       return;
     }
-    convertFrame(frame, onPrepareImage ? onPrepareImage(file) : file, frame.mode, frame.maxSide, file.name.replace(/\.[^/.]+$/, '') || frame.title);
+    convertFrame(frame, file, frame.mode, frame.maxSide, file.name.replace(/\.[^/.]+$/, '') || frame.title);
   };
+
+  const uploadFile = useCallback((file: File) => {
+    const targetFrame = (selectedId ? frames.find(frame => frame.id === selectedId) : undefined)
+      ?? (frames.length === 1 ? frames[0] : undefined);
+    if (!targetFrame) {
+      setMessage('请先选择一个图框，再上传图片。');
+      return;
+    }
+    loadFile(targetFrame, file);
+  }, [frames, selectedId]);
+
+  React.useImperativeHandle(ref, () => ({ uploadFile }), [uploadFile]);
 
   const getGridPoint = (event: React.PointerEvent): GridPoint | null => {
     const board = boardRef.current;
@@ -1321,7 +1441,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const changeViewScale = (value: number, anchor?: { clientX: number; clientY: number }): boolean => {
+  const changeViewScale = useCallback((value: number, anchor?: { clientX: number; clientY: number }): boolean => {
     const previous = viewScaleRef.current;
     const next = normalizeViewScale(value);
     if (next === previous) return false;
@@ -1346,15 +1466,22 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
       });
     }
     return true;
-  };
+  }, []);
 
-  const handleViewWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+  const handleViewWheel = useCallback((event: WheelEvent) => {
     if (isViewScaleIgnoredTarget(event.target) || event.deltaY === 0) return;
     const next = viewScaleRef.current + (event.deltaY < 0 ? VIEW_SCALE_STEP : -VIEW_SCALE_STEP);
     changeViewScale(next, { clientX: event.clientX, clientY: event.clientY });
     // Keep canvas wheel zoom local, including Ctrl/Meta wheel which would otherwise zoom the browser.
     event.preventDefault();
-  };
+  }, [changeViewScale]);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    container.addEventListener('wheel', handleViewWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleViewWheel);
+  }, [handleViewWheel]);
 
   const stopCanvasPan = (pointerId?: number) => {
     const pan = panInteractionRef.current;
@@ -1596,10 +1723,6 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
   const startDrawing = (event: React.PointerEvent, frame: LargeCanvasFrame) => {
     if (event.button !== 0 || pinchStateRef.current.active) return;
     event.stopPropagation();
-    if (selectedId !== frame.id) {
-      setSelectedId(frame.id);
-      return;
-    }
     setSelectedId(frame.id);
     ensureEditableGrid(frame);
     const point = getGridPoint(event);
@@ -1820,6 +1943,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
         return counts;
       }, new Map<string, number>()).entries()].sort((a, b) => b[1] - a[1])
     : [];
+
   const scaledCellSize = GRID_CELL_SIZE * viewScale;
   const scaledMajorGridSize = GRID_CELL_SIZE * 5 * viewScale;
   const scaledMinorGridSize = GRID_CELL_SIZE * viewScale;
@@ -1979,7 +2103,6 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
           onPointerMoveCapture={moveCanvasPan}
           onPointerUpCapture={finishCanvasPan}
           onPointerCancelCapture={finishCanvasPan}
-          onWheel={handleViewWheel}
           className={`relative min-h-0 flex-1 overflow-auto p-4 sm:p-6 outline-none ${isPanning ? 'cursor-grabbing select-none' : 'cursor-default'}`}
         >
           <div
@@ -2012,7 +2135,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
                   <FrameBeanGrid frame={frame} paletteMap={paletteMap} rect={renderRect} beadShape={beadShape} showCodeLabels={showCodeLabels && (viewScale >= 0.8 || isSelected)} />
                   {shapePreview?.frameId === frame.id && <div className="pointer-events-none absolute inset-0"><div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${renderRect.width}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${renderRect.height}, minmax(0, 1fr))` }}>{shapePreview.points.map(point => <span key={`${point.x}-${point.y}`} className={`z-10 m-0.5 rounded-sm ${shapePreview.selection ? 'bg-rose-600/75' : 'bg-purple-700/75'}`} style={{ gridColumn: point.x - renderRect.x + 1, gridRow: point.y - renderRect.y + 1 }} />)}</div></div>}
                   {frame.loading && <div className="absolute inset-0 flex items-center justify-center bg-white/70"><Loader2 className="h-5 w-5 animate-spin text-purple-600" /></div>}
-                  {frame.error && <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-rose-600/90 px-1 py-0.5 text-[9px] font-bold text-white"><AlertTriangle className="h-3 w-3 shrink-0" />转换失败</div>}
+                  {frame.error && <div title={frame.error} className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-rose-600/90 px-1 py-0.5 text-[9px] font-bold text-white"><AlertTriangle className="h-3 w-3 shrink-0" /><span className="truncate">{frame.error}</span></div>}
                   <input ref={input => { if (input) inputRefs.current.set(frame.id, input); }} type="file" accept="image/*" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.currentTarget.value = ''; loadFile(frame, file); }} />
                   {showPopup && (
                     <div data-view-scale-ignore className="absolute left-0 z-50 rounded-md border border-slate-200 bg-white p-1.5 shadow-lg" style={{ top: renderRect.y === 0 ? renderRect.height * scaledCellSize + 6 : -50, width: 'min(220px, calc(100vw - 1.5rem))' }} onPointerDown={event => { event.stopPropagation(); setSelectedId(frame.id); }} onPointerMove={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
@@ -2024,7 +2147,7 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
                       </div>
                       {popupTab === 'basic' ? (
                         <>
-                          <div className="mt-1.5 grid grid-cols-5 gap-0.5"><button type="button" title="上传图片" onClick={() => inputRefs.current.get(frame.id)?.click()} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 bg-purple-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-purple-700"><Upload className="h-2.5 w-2.5" />上传</button><button type="button" title="绘制图框" onClick={() => { setSelectedId(frame.id); chooseDrawColor(drawColorId ?? Array.from(paletteMap.keys())[0] ?? null); }} className="inline-flex items-center justify-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100"><Paintbrush className="h-2.5 w-2.5" />绘制</button><button type="button" title="导出图框" disabled={!frame.beanResult && !hasManualCellsInRect(manualCells, frame.rect)} onClick={() => exportFrame(frame)} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 px-1 py-0.5 text-[9px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-2.5 w-2.5" />导出</button><button type="button" title="打开图框" disabled={!frame.beanResult} onClick={() => onOpenFrame(frame)} className="inline-flex items-center justify-center rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">打开</button><button type="button" title="删除图框" onClick={() => deleteFrame(frame.id)} className="inline-flex items-center justify-center gap-0.5 rounded border border-rose-200 px-1 py-0.5 text-[9px] font-bold text-rose-700 hover:bg-rose-50"><Trash2 className="h-2.5 w-2.5" />删</button></div>
+                          <div className="mt-1.5 grid grid-cols-3 gap-0.5"><button type="button" title="上传图片" onClick={() => inputRefs.current.get(frame.id)?.click()} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 bg-purple-600 px-1 py-0.5 text-[9px] font-bold text-white hover:bg-purple-700"><Upload className="h-2.5 w-2.5" />上传</button><button type="button" title="绘制图框" onClick={() => { setSelectedId(frame.id); chooseDrawColor(drawColorId ?? Array.from(paletteMap.keys())[0] ?? null); }} className="inline-flex items-center justify-center gap-0.5 rounded border border-emerald-200 bg-emerald-50 px-1 py-0.5 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100"><Paintbrush className="h-2.5 w-2.5" />绘制</button><button type="button" title="导出图框" disabled={!frame.beanResult && !hasManualCellsInRect(manualCells, frame.rect)} onClick={() => exportFrame(frame)} className="inline-flex items-center justify-center gap-0.5 rounded border border-purple-200 px-1 py-0.5 text-[9px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-2.5 w-2.5" />导出</button><button type="button" title="打开图框" disabled={!frame.beanResult} onClick={() => onOpenFrame(frame)} className="inline-flex items-center justify-center rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40">打开</button>{isSelected && frame.sourceImageDataUrl && onPrepareImage && <button type="button" title="图像增强" disabled={frame.loading} onClick={() => prepareFrameImage(frame)} className="inline-flex items-center justify-center gap-0.5 rounded border border-slate-200 px-1 py-0.5 text-[9px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"><Paintbrush className="h-2.5 w-2.5" />图像增强</button>}<button type="button" title="删除图框" onClick={() => deleteFrame(frame.id)} className="inline-flex items-center justify-center gap-0.5 rounded border border-rose-200 px-1 py-0.5 text-[9px] font-bold text-rose-700 hover:bg-rose-50"><Trash2 className="h-2.5 w-2.5" />删</button></div>
                           <div className="mt-1 grid grid-cols-3 gap-0.5" role="group" aria-label="图框尺寸档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" disabled={frame.loading} onClick={() => changeMaxSide(frame, side)} className={`rounded px-1 py-0.5 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${frame.maxSide === side ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}>{side}格</button>)}</div>
                           <div className="mt-1 grid grid-cols-3 gap-0.5" role="group" aria-label="当前图框转换模式">{LARGE_CANVAS_MODES.map(({ id: mode, label }) => <button key={mode} type="button" disabled={frame.loading} onClick={() => changeMode(frame, mode)} className={`rounded px-1 py-0.5 text-[9px] font-bold disabled:cursor-not-allowed disabled:opacity-40 ${frame.mode === mode ? 'bg-purple-600 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'}`}>{label}</button>)}</div>
                         </>
@@ -2070,4 +2193,4 @@ export const LargeCanvasView: React.FC<LargeCanvasViewProps> = ({
       </div>
     </main>
   );
-};
+});

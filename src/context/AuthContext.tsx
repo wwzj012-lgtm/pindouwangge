@@ -3,7 +3,17 @@ import {
   type AuthSession,
   type UserProfile,
 } from '../lib/accountApi';
-import { apiGet, apiPost, clearAdminSession, clearApiToken, setApiToken } from '../utils/api';
+import {
+  apiGet,
+  apiGetCreditsSummary,
+  apiCheckinCredits,
+  apiPost,
+  clearAdminSession,
+  clearApiToken,
+  getApiToken,
+  setApiToken,
+  type CreditSummary,
+} from '../utils/api';
 
 interface SessionUser {
   uid: string;
@@ -24,7 +34,16 @@ interface AuthContextType {
   isAdmin: boolean;
   memberExpire: number | null;
   hasFreeTrial: boolean;
+  creditSummary: CreditSummary | null;
   refreshProfile: () => Promise<void>;
+  refreshCreditSummary: () => Promise<void>;
+  checkinCredits: () => Promise<{
+    success: boolean;
+    message?: string;
+    alreadyCheckedIn?: boolean;
+    grantedUnits?: number;
+    streakDays?: number;
+  }>;
   updateUserProfile: (updates: { displayName?: string; photoURL?: string; password?: string }) => Promise<{ success: boolean; message: string }>;
   redeemVipCode: (code: string) => Promise<{ success: boolean; message: string; newType?: 1 | 2 }>;
   consumeFreeTrial: () => Promise<boolean>;
@@ -93,7 +112,10 @@ const AuthContext = createContext<AuthContextType>({
   isAdmin: false,
   memberExpire: null,
   hasFreeTrial: false,
+  creditSummary: null,
   refreshProfile: async () => undefined,
+  refreshCreditSummary: async () => undefined,
+  checkinCredits: async () => ({ success: false, message: '' }),
   updateUserProfile: async () => ({ success: false, message: '' }),
   redeemVipCode: async () => ({ success: false, message: '' }),
   consumeFreeTrial: async () => false,
@@ -116,6 +138,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<SessionUser | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [creditSummary, setCreditSummary] = useState<CreditSummary | null>(null);
   const sessionPersistenceRef = useRef<AuthSessionPersistence | null>(null);
 
   const applySession = (session: AuthSession, persistence: AuthSessionPersistence): void => {
@@ -134,6 +157,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       sessionPersistenceRef.current = null;
       setCurrentUser(null);
       setUserProfile(null);
+      setCreditSummary(null);
     };
 
     if (typeof window !== 'undefined') {
@@ -155,6 +179,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (saved) {
           applySession(saved.session, saved.persistence);
           await refreshProfileFromServer(saved.session.profile);
+          // Keep session restoration responsive when an older Worker has not
+          // deployed the credits endpoint yet.
+          void refreshCreditSummaryFromServer();
         }
       } catch (error) {
         console.error('Authentication initialization failed:', error);
@@ -164,6 +191,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         sessionPersistenceRef.current = null;
         setCurrentUser(null);
         setUserProfile(null);
+        setCreditSummary(null);
       } finally {
         setLoading(false);
       }
@@ -190,11 +218,68 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (currentUser) await refreshProfileFromServer();
   };
 
+  const refreshCreditSummaryFromServer = async (): Promise<void> => {
+    if (!getApiToken()) {
+      setCreditSummary(null);
+      return;
+    }
+    const result = await apiGetCreditsSummary();
+    if (!result.ok || !result.data) {
+      // apiRequest already handles 401 by clearing the auth token and emitting
+      // the shared unauthorized event. Keep the last successful summary for
+      // transient failures so the account panel does not flicker.
+      if (result.status === 401) setCreditSummary(null);
+      return;
+    }
+    setCreditSummary(result.data);
+  };
+
+  const refreshCreditSummary = async (): Promise<void> => {
+    if (!currentUser) {
+      setCreditSummary(null);
+      return;
+    }
+    await refreshCreditSummaryFromServer();
+  };
+
+  const checkinCredits = async (): Promise<{
+    success: boolean;
+    message?: string;
+    alreadyCheckedIn?: boolean;
+    grantedUnits?: number;
+    streakDays?: number;
+  }> => {
+    if (!currentUser) return { success: false, message: '请先登录账号' };
+    try {
+      const response = await apiCheckinCredits();
+      if (!response.ok || !response.data) {
+        if (response.status === 401) return { success: false, message: '请先登录账号' };
+        return { success: false, message: response.error ?? '签到失败，请稍后重试' };
+      }
+      const payload = response.data as unknown as Record<string, unknown>;
+      const result = {
+        success: payload.success === true,
+        message: typeof payload.message === 'string' ? payload.message : undefined,
+        alreadyCheckedIn: payload.alreadyCheckedIn === true,
+        grantedUnits: typeof payload.grantedUnits === 'number' ? payload.grantedUnits : undefined,
+        streakDays: typeof payload.streakDays === 'number' ? payload.streakDays : undefined,
+      };
+      if (result.success || result.alreadyCheckedIn) {
+        await refreshCreditSummaryFromServer();
+      }
+      return result;
+    } catch (error) {
+      console.error('Credit check-in failed:', error);
+      return { success: false, message: '签到失败，请检查网络后重试' };
+    }
+  };
+
   const setLocalCustomUser = async (
     session: AuthSession,
     persistence: AuthSessionPersistence = 'persistent',
   ): Promise<void> => {
     applySession(session, persistence);
+    void refreshCreditSummaryFromServer();
   };
 
   const logoutUser = async (): Promise<void> => {
@@ -204,6 +289,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     sessionPersistenceRef.current = null;
     setCurrentUser(null);
     setUserProfile(null);
+    setCreditSummary(null);
   };
 
   const consumeFreeTrial = async (): Promise<boolean> => {
@@ -263,7 +349,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isAdmin: userProfile?.role === 'admin',
       memberExpire,
       hasFreeTrial: Boolean(currentUser && !active && !userProfile?.freeTrialUsed),
+      creditSummary,
       refreshProfile,
+      refreshCreditSummary,
+      checkinCredits,
       updateUserProfile,
       redeemVipCode,
       consumeFreeTrial,

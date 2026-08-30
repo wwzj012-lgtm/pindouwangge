@@ -167,22 +167,69 @@ export function drawBeadOnCanvas(
     ctx.lineWidth = Math.max(0.5, size * 0.03);
     ctx.stroke();
   } else if (shape === 'ironed') {
-    // Fused beads fill more of each cell with softened joints and a subtle, shrunken center recess.
-    const inset = Math.max(0.2, size * 0.015);
+    // Ironed beads are nearly fused into one surface: only a 2.5% total cell gap
+    // remains so adjacent colors stay readable without resembling separate beads.
+    const inset = size * 0.0125;
     const fusedSize = size - inset * 2;
+    const radius = Math.round(size * 0.085 * 100) / 100;
+    const seamInset = size * 0.018;
+    const edgeWidth = Math.max(0.35, size * 0.012);
+    const textureLineWidth = Math.max(0.25, size * 0.006);
+    const textureLineCount = Math.min(4, Math.max(1, Math.floor(size / 18)));
+
     ctx.beginPath();
-    ctx.roundRect(x + inset, y + inset, fusedSize, fusedSize, Math.max(1, size * 0.2));
+    ctx.roundRect(x + inset, y + inset, fusedSize, fusedSize, radius);
     ctx.fillStyle = colorHex;
     ctx.fill();
-    ctx.strokeStyle = '#ffffff26';
-    ctx.lineWidth = Math.max(0.4, size * 0.018);
+
+    // A restrained perimeter keeps white and near-white areas readable on the board.
+    ctx.beginPath();
+    ctx.roundRect(x + inset, y + inset, fusedSize, fusedSize, radius);
+    ctx.strokeStyle = '#00000028';
+    ctx.lineWidth = edgeWidth;
+    ctx.stroke();
+
+    // Short, low-contrast seams read as a flattened join, not a raised 3D rim.
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x + inset, y + inset, fusedSize, fusedSize, radius);
+    ctx.clip();
+
+    ctx.beginPath();
+    ctx.moveTo(x + seamInset + radius, y + seamInset);
+    ctx.lineTo(x + size - seamInset - radius, y + seamInset);
+    ctx.moveTo(x + seamInset, y + seamInset + radius);
+    ctx.lineTo(x + seamInset, y + size - seamInset - radius);
+    ctx.strokeStyle = '#ffffff20';
+    ctx.lineWidth = edgeWidth;
     ctx.stroke();
 
     ctx.beginPath();
-    ctx.arc(x + size / 2, y + size / 2, Math.max(0.6, size * 0.075), 0, Math.PI * 2);
-    ctx.fillStyle = '#ffffff1f';
-    ctx.fill();
-  } else {
+    ctx.moveTo(x + seamInset + radius, y + size - seamInset);
+    ctx.lineTo(x + size - seamInset - radius, y + size - seamInset);
+    ctx.moveTo(x + size - seamInset, y + seamInset + radius);
+    ctx.lineTo(x + size - seamInset, y + size - seamInset - radius);
+    ctx.strokeStyle = '#00000019';
+    ctx.lineWidth = edgeWidth;
+    ctx.stroke();
+
+    // Deterministic, size-controlled paper texture avoids noisy pixel grain.
+    const texturePadding = Math.max(radius, size * 0.11);
+    const textureStartX = x + inset + texturePadding;
+    const textureEndX = x + inset + fusedSize - texturePadding;
+    ctx.strokeStyle = '#ffffff12';
+    ctx.lineWidth = textureLineWidth;
+    for (let lineIndex = 0; lineIndex < textureLineCount; lineIndex++) {
+      const progress = (lineIndex + 1) / (textureLineCount + 1);
+      const textureY = y + inset + fusedSize * progress;
+      const offset = lineIndex % 2 === 0 ? size * 0.01 : -size * 0.01;
+      ctx.beginPath();
+      ctx.moveTo(textureStartX + offset, textureY);
+      ctx.lineTo(textureEndX - offset, textureY + (lineIndex % 2 === 0 ? -size * 0.004 : size * 0.004));
+      ctx.stroke();
+    }
+    ctx.restore();
+  } else if (shape === 'fuse_3d') {
     // 'fuse_3d' Realistic fuse bead with center peg hole
     const cx = x + size / 2;
     const cy = y + size / 2;
@@ -207,6 +254,13 @@ export function drawBeadOnCanvas(
     ctx.strokeStyle = '#00000022';
     ctx.lineWidth = Math.max(0.5, size * 0.02);
     ctx.stroke();
+  } else {
+    // Runtime-safe fallback for unknown shape values: keep the preview flat.
+    ctx.fillStyle = colorHex;
+    ctx.fillRect(x, y, size, size);
+    ctx.strokeStyle = '#00000022';
+    ctx.lineWidth = Math.max(0.5, size * 0.02);
+    ctx.strokeRect(x, y, size, size);
   }
 
   // Symbol or short color code text inside cell (ultra-clean, sharp & thin font)

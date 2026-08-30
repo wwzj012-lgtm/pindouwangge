@@ -2,6 +2,10 @@
 
 interface ImportMetaEnv {
   readonly VITE_WORKER_API_URL: string;
+  /** Enables the 3D assembly beta in a non-production/dev deployment. */
+  readonly VITE_ASSEMBLY_DEV_MODE?: string;
+  /** Allows authenticated admin accounts to bypass the public assembly flag. */
+  readonly VITE_ASSEMBLY_ADMIN_BYPASS?: string;
 }
 
 interface ImportMeta {

@@ -29,6 +29,8 @@ interface SettingsPanelProps {
   hasImage: boolean;
   onOpenImageStudio: () => void;
   onCloseMobile?: () => void;
+  variant?: 'sidebar' | 'sheet';
+  showDiagnostics?: boolean;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -39,12 +41,17 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   hasImage,
   onOpenImageStudio,
   onCloseMobile,
+  variant = 'sidebar',
+  showDiagnostics = true,
 }) => {
   const { isVip, isPro } = useAuth();
   const { language } = useLanguage();
   const isEn = language === 'en';
   const brandOptions = getBrandOptions(isEn);
   const clarityEnabled = settings.sharpening > 0 || settings.outlineBoost;
+  const containerClassName = variant === 'sheet'
+    ? 'w-full max-w-none bg-transparent text-purple-950 px-0 py-0 flex flex-col h-auto overflow-visible space-y-5 text-xs select-none shadow-none'
+    : 'w-80 max-w-[85vw] bg-white/90 backdrop-blur-md border-r border-purple-200/90 text-purple-950 p-4 flex flex-col h-full overflow-y-auto space-y-5 text-xs select-none shrink-0 shadow-sm';
 
   // Tier max canvas limits
   const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 100;
@@ -75,7 +82,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   };
 
   return (
-    <div className="w-80 max-w-[85vw] bg-white/90 backdrop-blur-md border-r border-purple-200/90 text-purple-950 p-4 flex flex-col h-full overflow-y-auto space-y-5 text-xs select-none shrink-0 shadow-sm">
+    <div className={containerClassName}>
       <div className="flex items-center justify-between border-b border-purple-200/80 pb-3">
         <div className="flex items-center gap-2 text-purple-800 font-extrabold text-sm">
           <Sliders className="w-4 h-4 text-purple-600" />
@@ -95,6 +102,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
               onClick={onCloseMobile}
               className="lg:hidden p-1 text-purple-500 hover:text-purple-900 rounded-lg hover:bg-purple-100 cursor-pointer"
               title={isEn ? 'Close' : '关闭'}
+              aria-label={isEn ? 'Close settings' : '关闭设置'}
             >
               <X className="w-5 h-5" />
             </button>
@@ -116,7 +124,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </button>
       )}
 
-      {conversionDiagnostics && (
+      {showDiagnostics && conversionDiagnostics && (
         <div className="-mt-3 text-[10px] font-mono text-purple-500 flex flex-wrap gap-x-2 gap-y-0.5" title="Latest conversion diagnostics">
           <span>V2 {conversionDiagnostics.pipeline.toUpperCase()}</span>
           <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
@@ -148,8 +156,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 }}
                 className={`p-2 rounded-xl border text-left transition-all cursor-pointer ${
                   settings.width === p.width && settings.height === p.height
-                    ? 'bg-purple-600 border-purple-600 text-white font-bold shadow-xs'
-                    : 'bg-purple-50/80 border-purple-200/90 text-purple-900 hover:bg-purple-100/80'
+                    ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
+                    : 'bg-purple-50/80 border-purple-200 text-purple-700 hover:bg-purple-100'
                 }`}
               >
                 <div className="text-[11px] font-bold">{p.width} × {p.height}</div>
@@ -200,9 +208,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             className={`mt-4 p-2 rounded-xl border cursor-pointer transition-all ${
               settings.keepAspectRatio
                 ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
-                : 'bg-purple-50 border-purple-200 text-purple-400'
+                : 'bg-purple-50/80 border-purple-200 text-purple-700 hover:bg-purple-100'
             }`}
             title={settings.keepAspectRatio ? (isEn ? 'Keep aspect ratio ON' : '保持原图长宽比已开启') : (isEn ? 'Custom aspect ratio' : '自由设置宽高')}
+            aria-label={settings.keepAspectRatio ? (isEn ? 'Keep aspect ratio on' : '保持原图长宽比已开启') : (isEn ? 'Custom aspect ratio' : '自由设置宽高')}
           >
             {settings.keepAspectRatio ? <Link2 className="w-4 h-4" /> : <Unlink2 className="w-4 h-4" />}
           </button>

@@ -8,7 +8,6 @@ import {
   Crown,
   Sparkles,
   Lock,
-  CheckCircle2,
   HelpCircle,
   Palette,
   RotateCw,
@@ -32,6 +31,7 @@ import {
 
 interface ExportModalProps {
   isOpen: boolean;
+  unlocked: boolean;
   onClose: () => void;
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -50,6 +50,7 @@ interface ExportModalProps {
 
 export const ExportModal: React.FC<ExportModalProps> = ({
   isOpen,
+  unlocked,
   onClose,
   grid,
   paletteMap,
@@ -103,6 +104,10 @@ export const ExportModal: React.FC<ExportModalProps> = ({
   const boardsX = Math.ceil(width / boardSize);
   const boardsY = Math.ceil(height / boardSize);
   const totalBoards = boardsX * boardsY;
+
+  // Completion settles pattern credits. Local PNG exports are free afterwards;
+  // VIP only controls export privileges such as watermark removal and 4K.
+  const cleanExport = isVip && watermarkType === 'none';
 
   // Enforce Hard Permission Rules for Non-VIP users
   useEffect(() => {
@@ -189,7 +194,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   }, []);
 
-  if (!isOpen) return null;
+  // App controls the entry point, while this required prop prevents a stale
+  // modal state or future caller from bypassing the draft lock.
+  if (!isOpen || !unlocked) return null;
 
   const setDownloadFeedback = (
     state: 'idle' | 'generating' | 'downloading' | 'success' | 'error',
@@ -346,7 +353,7 @@ export const ExportModal: React.FC<ExportModalProps> = ({
     }
   };
 
-  // Download Trigger Handler with VIP check
+  // Completion has already settled pricing; VIP only changes output options.
   const handleDownloadClick = (type: 'single' | 'all') => {
     if (downloadState === 'generating' || downloadState === 'downloading') return;
     if (!isVip) {
@@ -749,6 +756,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
         <div className="p-2 sm:p-3 border-t border-slate-800 bg-slate-900 flex flex-col sm:flex-row items-center justify-between gap-2">
           <div className={`min-h-4 text-[10px] sm:text-[11px] text-center sm:text-left ${downloadState === 'error' ? 'text-rose-300' : downloadState === 'success' ? 'text-emerald-300' : 'text-slate-400'}`} aria-live="polite" role="status">
             {downloadMessage ?? (isEn ? `Export Mode: ${watermarkType === 'none' ? '✨ Clean Pattern' : '🛡️ Watermark Protected'} (${width}x${height} beads)` : `当前导出模式: ${watermarkType === 'none' ? '✨ 纯净无水印矢量图纸' : '🛡️ 防盗水印加固图纸'} (${width}x${height} 豆)`) }
+            <div className="mt-1 font-semibold text-emerald-300">
+              {isEn ? 'Completed-pattern PNG export: Free' : '已完成图纸 PNG 导出：免费'}
+            </div>
           </div>
 
           <div className="flex flex-row items-center gap-2 w-full sm:w-auto">
@@ -759,7 +769,9 @@ export const ExportModal: React.FC<ExportModalProps> = ({
                 className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 disabled:cursor-wait disabled:opacity-60 text-slate-200 border border-slate-700 font-bold px-2.5 py-2 rounded-xl flex items-center justify-center gap-1 cursor-pointer transition-colors text-xs"
               >
                 <Download className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                <span className="truncate">{isEn ? `Download All (${totalBoards + 1})` : `批量全部分板 (${totalBoards + 1}张)`}</span>
+                <span className="truncate">{isEn
+                  ? `Download All (${totalBoards + 1}) · Free`
+                  : `批量全部分板（${totalBoards + 1}张）· 免费`}</span>
               </button>
             )}
 
@@ -771,7 +783,11 @@ export const ExportModal: React.FC<ExportModalProps> = ({
               {downloadState === 'generating' || downloadState === 'downloading'
                 ? <RotateCw className="w-3.5 h-3.5 shrink-0 animate-spin" />
                 : <Download className="w-3.5 h-3.5 shrink-0" />}
-              <span>{downloadState === 'generating' || downloadState === 'downloading' ? (isEn ? 'Generating…' : '生成中…') : (isEn ? 'Download PNG' : '下载高清 PNG 图纸')}</span>
+              <span>{downloadState === 'generating' || downloadState === 'downloading'
+                ? (isEn ? 'Generating…' : '生成中…')
+                : cleanExport
+                  ? (isEn ? 'Download clean PNG · Free' : '下载无水印 PNG · 免费')
+                  : (isEn ? 'Download PNG · Free' : '下载高清 PNG · 免费（带水印）')}</span>
             </button>
           </div>
         </div>

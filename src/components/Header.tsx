@@ -158,12 +158,19 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  // The Worker returns the spendable balance as `availableUnits` (with
+  // `heldUnits` reported separately). Keep the legacy fields as a fallback so
+  // an older deployment does not make a signed-in account appear empty.
   const availableCreditUnits = creditSummary
-    ? Math.max(0, creditSummary.balanceUnits - creditSummary.heldUnits)
+    ? Number.isFinite(creditSummary.availableUnits)
+      ? Math.max(0, Number(creditSummary.availableUnits))
+      : Math.max(0, Number(creditSummary.balanceUnits ?? 0) - Number(creditSummary.heldUnits ?? 0))
     : 0;
   const availablePoints = (availableCreditUnits / 10).toFixed(1);
-  const checkinPoints = creditSummary ? (Number(creditSummary.nextCheckinUnits ?? 0) / 10).toFixed(1) : '0.0';
-  const checkinAvailable = Boolean(creditSummary?.checkinAvailable);
+  const checkin = creditSummary?.checkin;
+  const nextRewardUnits = Number(checkin?.nextRewardUnits ?? creditSummary?.nextCheckinUnits ?? 0);
+  const checkinPoints = creditSummary ? (Number.isFinite(nextRewardUnits) ? (nextRewardUnits / 10).toFixed(1) : '0.0') : '0.0';
+  const checkinAvailable = Boolean(creditSummary && (checkin?.eligible ?? checkin?.completed !== true));
 
   const handleCheckin = async (): Promise<void> => {
     if (!currentUser) {
@@ -294,7 +301,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => window.location.assign('/assembly')}
+              onClick={() => setCurrentTab?.('assembly')}
               className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
                 currentTab === 'assembly'
                   ? 'text-purple-900 bg-purple-100/80 shadow-2xs'

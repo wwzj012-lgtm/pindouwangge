@@ -611,3 +611,35 @@ describe('image adjustment and lightness regression', () => {
     expect(result.diagnostics.meanDeltaE).toBeCloseTo(0, 6);
   });
 });
+
+describe('conservative interior-hole protection', () => {
+  it('repairs a tiny semi-transparent gap enclosed by a solid subject', () => {
+    const data = makePixels(3, 3, [0, 0, 0]);
+    // The centre represents a partially sampled subject cell after resize;
+    // it is not transparent enough to be treated as a background hole.
+    setPixel(data, 3, 1, 1, [0, 0, 0, 64]);
+    const result = convertImageDataToGrid(data, 3, 3, {
+      ...baseSettings,
+      width: 3,
+      height: 3,
+      dither: 'none',
+      pipelineOverride: 'logo',
+    }, palette);
+
+    expect(result.grid[1][1]).toBe('black');
+  });
+
+  it('does not fill an enclosed transparent counter used by a cut-out', () => {
+    const data = makePixels(3, 3, [0, 0, 0]);
+    setPixel(data, 3, 1, 1, [255, 255, 255, 0]);
+    const result = convertImageDataToGrid(data, 3, 3, {
+      ...baseSettings,
+      width: 3,
+      height: 3,
+      dither: 'none',
+      pipelineOverride: 'logo',
+    }, palette);
+
+    expect(result.grid[1][1]).toBeNull();
+  });
+});

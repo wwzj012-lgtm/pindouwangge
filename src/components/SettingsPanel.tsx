@@ -74,7 +74,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       outlineBoost: false,
       chromaKeyColor: null,
       backgroundRemovalEnabled: false,
-      pipelineOverride: 'cartoon',
+      pipelineOverride: 'auto',
       ditherStrength: 0.65,
       kmeansClustering: true,
       quantizationStrength: 28,
@@ -264,18 +264,18 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
           <span>{isEn ? 'Conversion Mode' : '转换模式'}</span>
         </label>
-        <div className="grid grid-cols-3 gap-1">
-          {(['cartoon', 'photo', 'logo'] as const).map((pipeline) => (
+        <div className="grid grid-cols-4 gap-1">
+          {(['auto', 'cartoon', 'photo', 'logo'] as const).map((pipeline) => (
             <button
               key={pipeline}
               onClick={() => updateSetting('pipelineOverride', pipeline)}
               className={`py-1.5 px-2 rounded-xl border text-center transition-all cursor-pointer text-[11px] ${
-                (settings.pipelineOverride ?? 'cartoon') === pipeline
+                (settings.pipelineOverride ?? 'auto') === pipeline
                   ? 'bg-purple-600 border-purple-600 text-white font-extrabold shadow-2xs'
                   : 'bg-purple-50/80 border-purple-200 text-purple-700 hover:bg-purple-100'
               }`}
             >
-              {pipeline === 'cartoon' ? (isEn ? 'Cartoon' : '卡通') : pipeline === 'logo' ? (isEn ? 'Logo text' : 'Logo文字') : (isEn ? 'Photo' : '照片')}
+              {pipeline === 'auto' ? (isEn ? 'Auto' : '自动') : pipeline === 'cartoon' ? (isEn ? 'Cartoon' : '卡通') : pipeline === 'logo' ? (isEn ? 'Logo text' : 'Logo文字') : (isEn ? 'Photo' : '照片')}
             </button>
           ))}
         </div>

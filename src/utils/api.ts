@@ -507,7 +507,10 @@ export interface CreditSummary {
   nextExpiryAt?: number | null;
   checkin?: {
     eligible: boolean;
+    completed?: boolean;
     rewardUnits?: number;
+    nextRewardUnits?: number;
+    nextRewardPoints?: number;
     streakDay?: number;
     checkedInAt?: number | null;
     nextAvailableAt?: number | null;

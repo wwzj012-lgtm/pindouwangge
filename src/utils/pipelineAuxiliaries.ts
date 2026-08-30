@@ -1,5 +1,5 @@
 import type { BeadColor } from '../types';
-import { rgbToLab, deltaE2000, type Lab } from './imagePipeline';
+import { rgbToLab, labToRgb, deltaE2000, type Lab } from './imagePipeline';
 
 export type Rgb = [number, number, number];
 export type PreprocessQuantizationMode = 'none' | 'cartoon' | 'photo' | 'logo';
@@ -59,11 +59,13 @@ function quantizationProfile(mode: Exclude<PreprocessQuantizationMode, 'none'>):
     };
   }
   return {
-    clusters: 12,
-    centroidDetailWeight: 0.55,
-    mergeBase: 0.82,
-    detailProtection: 0.67,
-    strengthScale: 1.8181818,
+    // Landscapes contain gradual hue/lightness changes. Keep more perceptual
+    // centroids and blend gently so skies and foliage are not colour-cast.
+    clusters: 24,
+    centroidDetailWeight: 0.3,
+    mergeBase: 0.46,
+    detailProtection: 0.9,
+    strengthScale: 1.05,
   };
 }
 
@@ -243,21 +245,22 @@ function resizeRgbaArea(
   return resized;
 }
 
-interface KMeansCentroid {
-  r: number;
-  g: number;
-  b: number;
+interface KMeansCentroid { lab: Lab; }
+
+/** Squared Euclidean distance in Lab; used inside the hot K-Means loop. */
+function labDistanceSquared(first: Lab, second: Lab): number {
+  const dl = first[0] - second[0];
+  const da = first[1] - second[1];
+  const db = first[2] - second[2];
+  return dl * dl + da * da + db * db;
 }
 
-function nearestCentroidIndex(r: number, g: number, b: number, centroids: KMeansCentroid[]): number {
+function nearestCentroidIndex(lab: Lab, centroids: KMeansCentroid[]): number {
   let nearest = 0;
   let nearestDistance = Number.POSITIVE_INFINITY;
   for (let index = 0; index < centroids.length; index += 1) {
     const centroid = centroids[index];
-    const red = r - centroid.r;
-    const green = g - centroid.g;
-    const blue = b - centroid.b;
-    const distance = red * red * 0.30 + green * green * 0.59 + blue * blue * 0.11;
+    const distance = labDistanceSquared(lab, centroid.lab);
     if (distance < nearestDistance) {
       nearestDistance = distance;
       nearest = index;
@@ -290,9 +293,19 @@ function quantizeBuffer(
   if (normalizedStrength === 0) return quantized;
   const profile = quantizationProfile(mode);
   const mergeScale = normalizedStrength * profile.strengthScale;
+  // 4-bit/channel cache keeps the hot K-Means and raster passes lightweight;
+  // exact RGB values are still used for the final Lab→RGB reconstruction.
+  const labCache: QuantizedLabCache = {
+    values: new Float32Array(4096 * 3),
+    ready: new Uint8Array(4096),
+  };
+  const cachedLab = (r: number, g: number, b: number): Lab => {
+    const offset = ensureQuantizedLab(labCache, r, g, b);
+    return [labCache.values[offset], labCache.values[offset + 1], labCache.values[offset + 2]];
+  };
 
   const stride = Math.max(1, Math.ceil(Math.sqrt(total / MAX_KMEANS_SAMPLES)));
-  const samples: Array<{ r: number; g: number; b: number; detail: number }> = [];
+  const samples: Array<{ lab: Lab; detail: number }> = [];
   for (let y = 0; y < height; y += stride) {
     for (let x = 0; x < width; x += stride) {
       const offset = (y * width + x) * 4;
@@ -300,9 +313,7 @@ function quantizeBuffer(
       const detailX = Math.min(detailWidth - 1, Math.floor((x + 0.5) * detailWidth / width));
       const detailY = Math.min(detailHeight - 1, Math.floor((y + 0.5) * detailHeight / height));
       samples.push({
-        r: data[offset],
-        g: data[offset + 1],
-        b: data[offset + 2],
+        lab: cachedLab(data[offset], data[offset + 1], data[offset + 2]),
         detail: detailMask[detailY * detailWidth + detailX] ?? 0,
       });
     }
@@ -313,20 +324,20 @@ function quantizeBuffer(
   const centroids: KMeansCentroid[] = [];
   for (let index = 0; index < clusterCount; index += 1) {
     const sample = samples[Math.floor(index * samples.length / clusterCount)];
-    centroids.push({ r: sample.r, g: sample.g, b: sample.b });
+    centroids.push({ lab: [...sample.lab] as Lab });
   }
 
   for (let iteration = 0; iteration < PHOTO_KMEANS_ITERATIONS; iteration += 1) {
-    const sums = centroids.map(() => ({ r: 0, g: 0, b: 0, weight: 0 }));
+    const sums = centroids.map(() => ({ l: 0, a: 0, b: 0, weight: 0 }));
     for (const sample of samples) {
-      const index = nearestCentroidIndex(sample.r, sample.g, sample.b, centroids);
+      const index = nearestCentroidIndex(sample.lab, centroids);
       // Smooth regions contribute more to shared centroids. Cartoon and logo
       // profiles use stronger detail protection than the photographic path.
       const weight = 1 - Math.min(1, Math.max(0, sample.detail)) * profile.centroidDetailWeight;
       const sum = sums[index];
-      sum.r += sample.r * weight;
-      sum.g += sample.g * weight;
-      sum.b += sample.b * weight;
+      sum.l += sample.lab[0] * weight;
+      sum.a += sample.lab[1] * weight;
+      sum.b += sample.lab[2] * weight;
       sum.weight += weight;
     }
     let maximumShift = 0;
@@ -334,13 +345,11 @@ function quantizeBuffer(
       const sum = sums[index];
       if (sum.weight <= 0) continue;
       const next = {
-        r: sum.r / sum.weight,
-        g: sum.g / sum.weight,
-        b: sum.b / sum.weight,
+        lab: [sum.l / sum.weight, sum.a / sum.weight, sum.b / sum.weight] as Lab,
       };
       maximumShift = Math.max(
         maximumShift,
-        Math.hypot(next.r - centroids[index].r, next.g - centroids[index].g, next.b - centroids[index].b),
+        Math.sqrt(labDistanceSquared(next.lab, centroids[index].lab)),
       );
       centroids[index] = next;
     }
@@ -354,11 +363,18 @@ function quantizeBuffer(
       const detailX = Math.min(detailWidth - 1, Math.floor((x + 0.5) * detailWidth / width));
       const detailY = Math.min(detailHeight - 1, Math.floor((y + 0.5) * detailHeight / height));
       const detail = Math.min(1, Math.max(0, detailMask[detailY * detailWidth + detailX] ?? 0));
-      const centroid = centroids[nearestCentroidIndex(data[offset], data[offset + 1], data[offset + 2], centroids)];
+      const sourceLab = cachedLab(data[offset], data[offset + 1], data[offset + 2]);
+      const centroid = centroids[nearestCentroidIndex(sourceLab, centroids)];
       const merge = Math.min(1, (profile.mergeBase - detail * profile.detailProtection) * mergeScale);
-      quantized[offset] = Math.round(data[offset] * (1 - merge) + centroid.r * merge);
-      quantized[offset + 1] = Math.round(data[offset + 1] * (1 - merge) + centroid.g * merge);
-      quantized[offset + 2] = Math.round(data[offset + 2] * (1 - merge) + centroid.b * merge);
+      const blendedLab: Lab = [
+        sourceLab[0] * (1 - merge) + centroid.lab[0] * merge,
+        sourceLab[1] * (1 - merge) + centroid.lab[1] * merge,
+        sourceLab[2] * (1 - merge) + centroid.lab[2] * merge,
+      ];
+      const blendedRgb = labToRgb(blendedLab);
+      quantized[offset] = Math.round(blendedRgb[0]);
+      quantized[offset + 1] = Math.round(blendedRgb[1]);
+      quantized[offset + 2] = Math.round(blendedRgb[2]);
     }
   }
   return quantized;

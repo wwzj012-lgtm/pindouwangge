@@ -158,8 +158,7 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
           <button
             type="button"
             onClick={() => {
-              if (currentTab === 'assembly') setCurrentTab('home');
-              else window.location.assign('/assembly');
+              setCurrentTab(currentTab === 'assembly' ? 'home' : 'assembly');
             }}
             className={`flex items-center gap-1 rounded-xl border px-2 py-1 text-[10px] font-black transition-all active:scale-95 ${currentTab === 'assembly' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-200 bg-purple-50 text-purple-900 hover:bg-purple-100'}`}
             title={isEn ? '3D Fuse Bead' : '立体拼豆'}

@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { apiPost as apiPostWithBearer } from '../../utils/api';
+import { apiPost as apiPostWithBearer, getApiToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
 import { AdminLogsCodes } from './AdminLogsCodes';
 import { AdminAnnouncementsConfig } from './AdminAnnouncementsConfig';
@@ -118,6 +118,12 @@ export function AdminConsole() {
   const adminRequest = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<AdminApiResult<T>> => {
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/json');
+    // The Worker accepts the normal user JWT for admin-session exchange and
+    // for RBAC-protected endpoints. Keep credentials:include for the
+    // short-lived admin cookie, while also sending the bearer token so the
+    // flow works when a Pages proxy does not persist Set-Cookie.
+    const apiToken = getApiToken();
+    if (apiToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${apiToken}`);
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     const response = await fetch(path, { ...init, credentials: 'include', headers });
     const payload: unknown = await response.json().catch(() => null);

@@ -148,7 +148,7 @@ export function rgbToLab([r, g, b]: Rgb): Lab {
   return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
 }
 
-function labToRgb([lightness, a, b]: Lab): Rgb {
+export function labToRgb([lightness, a, b]: Lab): Rgb {
   let y = (lightness + 16) / 116;
   let x = a / 500 + y;
   let z = y - b / 200;
@@ -740,6 +740,130 @@ function summarizeMatches(
   };
 }
 
+/**
+ * Keep diagnostics in lock-step with the final grid after structural cleanup.
+ * The cleanup passes intentionally work on the grid (rather than the matching
+ * pass) so they can repair one-cell edge breaks and false dither excursions.
+ * Refresh only cells whose id changed to avoid another full palette search.
+ */
+function synchronizeGridDiagnostics(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  matches: (ColorMatchDiagnostic | null)[][],
+  palette: PaletteEntry[],
+  width: number,
+  height: number,
+  algorithm: 'cie76' | 'ciede2000',
+): void {
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const id = grid[y][x];
+      const previous = matches[y][x];
+      if (!id) {
+        matches[y][x] = null;
+        continue;
+      }
+      if (previous?.matchedColorId === id) continue;
+      const sourceLab = sourceLabs[index];
+      const replacement = paletteById.get(id);
+      if (sourceLab && replacement) {
+        matches[y][x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
+      }
+    }
+  }
+}
+
+/**
+ * Fills only small, enclosed holes that were introduced by downsampling. A
+ * hole is rejected when any cell is backed by transparency/background removal,
+ * touches the grid edge, or has a mixed boundary. This keeps transparent
+ * backgrounds, eye/letter counters, and logo cut-outs intact while restoring
+ * tiny gaps inside a solid subject silhouette.
+ */
+function repairInternalGridHoles(
+  grid: (string | null)[][],
+  protectedEmpty: Uint8Array,
+  width: number,
+  height: number,
+): number {
+  const total = width * height;
+  if (total === 0) return 0;
+  const visited = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  const maxHoleSize = Math.max(1, Math.min(64, Math.floor(total * 0.35)));
+  let repaired = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || grid[y][x] !== null) continue;
+      let length = 0;
+      let cursor = 0;
+      let touchesEdge = false;
+      let hasProtectedCell = false;
+      const boundary = new Map<string, number>();
+      queue[length++] = start;
+      visited[start] = 1;
+
+      while (cursor < length) {
+        const index = queue[cursor++];
+        const cx = index % width;
+        const cy = Math.floor(index / width);
+        if (cx === 0 || cy === 0 || cx === width - 1 || cy === height - 1) touchesEdge = true;
+        if (protectedEmpty[index]) hasProtectedCell = true;
+        const neighbours: Array<[number, number]> = [[cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]];
+        for (const [nx, ny] of neighbours) {
+          if (nx < 0 || nx >= width || ny < 0 || ny >= height) {
+            touchesEdge = true;
+            continue;
+          }
+          const nextIndex = ny * width + nx;
+          const colour = grid[ny][nx];
+          if (colour === null) {
+            if (!visited[nextIndex]) {
+              visited[nextIndex] = 1;
+              queue[length++] = nextIndex;
+            }
+          } else {
+            boundary.set(colour, (boundary.get(colour) ?? 0) + 1);
+          }
+        }
+      }
+
+      if (touchesEdge || hasProtectedCell || length > maxHoleSize || boundary.size === 0) continue;
+      const ranked = [...boundary.entries()].sort((first, second) => second[1] - first[1]);
+      const [replacement, support] = ranked[0];
+      const boundaryTotal = ranked.reduce((sum, [, count]) => sum + count, 0);
+      // Mixed boundaries usually indicate intentional eye/letter counters or
+      // a true transparent cut-out. Require a strongly uniform enclosure.
+      if (support < Math.max(3, Math.ceil(boundaryTotal * 0.75))) continue;
+      for (let index = 0; index < length; index += 1) {
+        const holeIndex = queue[index];
+        grid[Math.floor(holeIndex / width)][holeIndex % width] = replacement;
+        repaired += 1;
+      }
+    }
+  }
+  return repaired;
+}
+
+/** Cheap, conservative gap repair for a single downsampled subject cell. */
+function repairSingleCellGaps(grid: (string | null)[][], protectedEmpty: Uint8Array, width: number, height: number): void {
+  for (let y = 1; y + 1 < height; y += 1) {
+    for (let x = 1; x + 1 < width; x += 1) {
+      const index = y * width + x;
+      if (protectedEmpty[index] || grid[y][x] !== null) continue;
+      const up = grid[y - 1][x];
+      const down = grid[y + 1][x];
+      const left = grid[y][x - 1];
+      const right = grid[y][x + 1];
+      if (up && up === down && up === left && up === right) grid[y][x] = up;
+    }
+  }
+}
+
 function emptyResult(): ConversionResult {
   return {
     grid: [],
@@ -806,6 +930,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     )
     : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
   const targetPixels: GridPixel[] = [];
+  const protectedEmpty = new Uint8Array(settings.width * settings.height);
   const scaleX = sourceWidth / settings.width;
   const scaleY = sourceHeight / settings.height;
   for (let gridY = 0; gridY < settings.height; gridY += 1) {
@@ -820,6 +945,8 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       let linearG = 0;
       let linearB = 0;
       let weightedValid = 0;
+      let backgroundWeight = 0;
+      let opaqueWeight = 0;
       const dominant = new Map<number, { weight: number; rgb: Rgb; maxDetail: number }>();
       for (let y = Math.floor(startY); y < Math.min(sourceHeight, Math.ceil(endY)); y += 1) {
         const verticalWeight = Math.max(0, Math.min(y + 1, endY) - Math.max(y, startY));
@@ -829,7 +956,12 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           total += weight;
           const sourceIndex = y * sourceWidth + x;
           const offset = sourceIndex * 4;
-          if (backgroundResult.mask[sourceIndex] || data[offset + 3] < alphaCutoff) continue;
+          if (backgroundResult.mask[sourceIndex]) {
+            backgroundWeight += weight;
+            continue;
+          }
+          if (data[offset + 3] < alphaCutoff) continue;
+          opaqueWeight += weight;
           const alphaWeight = weight * data[offset + 3] / 255;
           valid += alphaWeight;
           const sampleX = Math.min(sampleWidth - 1, Math.floor((x + 0.5) * sampleScaleX));
@@ -865,6 +997,8 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
         }
       }
       if (valid / Math.max(total, 0.00001) < 0.35) {
+        const targetIndex = gridY * settings.width + gridX;
+        if (backgroundWeight > 0 || opaqueWeight / Math.max(total, 0.00001) < 0.2) protectedEmpty[targetIndex] = 1;
         targetPixels.push({ r: 0, g: 0, b: 0, alpha: 0 });
         continue;
       }
@@ -981,6 +1115,9 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       },
     );
   }
+
+  repairSingleCellGaps(grid, protectedEmpty, settings.width, settings.height);
+
   const summary = summarizeMatches(matches, mappingPalette);
   return {
     grid,

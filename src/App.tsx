@@ -490,7 +490,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     colorMatchAlgo: 'ciede2000',
     kmeansClustering: true,
     quantizationStrength: 28,
-    pipelineOverride: 'cartoon',
+    // Let the classifier select photo/cartoon/logo until the user explicitly
+    // chooses a mode. This prevents landscape photos from taking the cartoon
+    // colour-block profile by default.
+    pipelineOverride: 'auto',
   });
 
   // Quantization is a required preprocessing step for every conversion mode.
@@ -660,7 +663,23 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
       if (cancelled || candidates.length === 0) return;
       const response = await apiImportLegacyPatterns(candidates);
-      if (cancelled || !response.ok || !response.data) return;
+      if (cancelled || !response.ok || !response.data) {
+        // Legacy migration is best-effort. A 409 is not a successful import:
+        // keep the records untouched, but explain only the known idempotency
+        // / already-registered cases instead of silently masking a quota or
+        // authorization error.
+        if (!cancelled && response.status === 409) {
+          const message = response.error ?? '';
+          if (/相同历史作品导入请求仍在处理|幂等记录无效|Idempotency-Key/i.test(message)) {
+            setSaveMessage('历史作品导入正在处理，请稍后刷新图库。');
+          } else if (/最多导入/.test(message)) {
+            setSaveMessage('历史作品迁移名额已用完，未重复导入。');
+          } else if (/资格或登记状态已变化|登记状态无效/.test(message)) {
+            setSaveMessage('历史作品已登记或状态已变化，无需重复导入。');
+          }
+        }
+        return;
+      }
       const submitted = new Map(candidates.map(candidate => [candidate.workKey, candidate]));
       const accepted = response.data.results.flatMap(result => {
         if (result.status !== 'IMPORTED' && result.status !== 'ALREADY_REGISTERED') return [];
@@ -2468,5 +2487,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 export default function App() {
   return /^\/admin(?:\/|$)/.test(window.location.pathname)
     ? <Suspense fallback={<AdminPageLoading />}><AdminPage /></Suspense>
-    : <StudioApp initialTab={/^\/assembly(?:\/|$)/.test(window.location.pathname) ? 'assembly' : 'home'} />;
+    // The public entry point always starts at the home page. Feature tabs are
+    // in-app state; this prevents a stale `/assembly` URL from trapping users
+    // in the beta screen after a refresh or a shared link.
+    : <StudioApp initialTab="home" />;
 }

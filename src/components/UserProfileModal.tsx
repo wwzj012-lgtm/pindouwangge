@@ -58,6 +58,7 @@ interface UserProfileModalProps {
   onOpenVipModal?: () => void;
   onSelectPattern?: (pattern: CommunityPattern) => void;
   onContinueEditing?: (project: EditablePatternProject) => void;
+  onPublishPattern?: (record: ExportedPatternRecord) => void;
 }
 
 // Helper thumbnail preview for saved pattern records
@@ -129,6 +130,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onOpenVipModal,
   onSelectPattern,
   onContinueEditing,
+  onPublishPattern,
 }) => {
   const { userProfile, isVip, isPro, currentUser } = useAuth();
   const openLoginModal = useCallback(() => {
@@ -736,8 +738,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Action Buttons: [编辑], [删除] */}
-                          <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-1.5 text-[11px] font-bold">
+                          {/* Action Buttons: [编辑], [发布], [删除] */}
+                          <div className={`pt-2 border-t border-slate-800/80 grid ${activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
                             {/* 编辑 */}
                             <button
                               disabled={isBusy}
@@ -748,6 +750,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               <Pencil className="w-3 h-3 text-purple-300" />
                               <span>编辑</span>
                             </button>
+
+                            {activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern && (
+                              <button
+                                disabled={isBusy}
+                                onClick={() => onPublishPattern(record)}
+                                className="py-1.5 px-2 rounded-xl bg-emerald-900/60 hover:bg-emerald-600 text-emerald-200 hover:text-white border border-emerald-700/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                                title="发布到社区"
+                              >
+                                <Sparkles className="w-3 h-3 text-emerald-300" />
+                                <span>发布</span>
+                              </button>
+                            )}
 
                             {/* 删除 */}
                             <button

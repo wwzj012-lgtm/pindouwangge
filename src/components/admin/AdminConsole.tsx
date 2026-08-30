@@ -22,7 +22,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { apiPost as apiPostWithBearer, getApiToken } from '../../utils/api';
+import { apiPost as apiPostWithBearer, clearAdminSession, getAdminSessionToken, getApiToken, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
 import { AdminLogsCodes } from './AdminLogsCodes';
 import { AdminAnnouncementsConfig } from './AdminAnnouncementsConfig';
@@ -118,12 +118,18 @@ export function AdminConsole() {
   const adminRequest = useCallback(async <T,>(path: string, init: RequestInit = {}): Promise<AdminApiResult<T>> => {
     const headers = new Headers(init.headers);
     headers.set('Accept', 'application/json');
-    // The Worker accepts the normal user JWT for admin-session exchange and
-    // for RBAC-protected endpoints. Keep credentials:include for the
-    // short-lived admin cookie, while also sending the bearer token so the
-    // flow works when a Pages proxy does not persist Set-Cookie.
+    // The Worker accepts the normal user JWT for admin-session exchange.
+    // Keep credentials:include for the HttpOnly admin cookie, while also
+    // sending the bearer token so the flow works through a Pages proxy.
     const apiToken = getApiToken();
     if (apiToken && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${apiToken}`);
+    // Admin routes require the short-lived server session in addition to the
+    // regular user JWT.  Keep the HttpOnly cookie path as a fallback, but send
+    // the token explicitly so this also works through a Pages proxy.
+    if (path.startsWith('/api/admin/') && path !== '/api/admin/session') {
+      const adminSession = getAdminSessionToken();
+      if (adminSession && !headers.has('X-Admin-Session')) headers.set('X-Admin-Session', adminSession);
+    }
     if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
     const response = await fetch(path, { ...init, credentials: 'include', headers });
     const payload: unknown = await response.json().catch(() => null);
@@ -131,17 +137,28 @@ export function AdminConsole() {
     return { ok: response.ok && envelope?.success !== false, status: response.status, data: (envelope && 'data' in envelope ? envelope.data : payload) as T | undefined, error: typeof envelope?.message === 'string' ? envelope.message : undefined };
   }, []);
 
-  const loadDashboard = useCallback(async () => {
+  const loadDashboard = useCallback(async (): Promise<number> => {
     const result = await adminRequest<DashboardData>('/api/admin/dashboard');
-    if (result.ok && result.data) { setDashboard(result.data); setDashboardError(''); return; }
+    if (result.ok && result.data) { setDashboard(result.data); setDashboardError(''); return result.status; }
     setDashboard(null);
     setDashboardError(result.status === 403 ? '当前角色没有查看仪表盘的权限。可从侧栏进入其他已授权模块。' : result.error ?? '仪表盘暂时无法加载，请稍后刷新。');
+    return result.status;
   }, [adminRequest]);
 
   const verifySession = useCallback(async () => {
     setAccess('checking'); setAccessError('');
     const result = await adminRequest<{ authenticated: boolean }>('/api/admin/session');
-    if (result.ok) { setAccess('ready'); await loadDashboard(); return; }
+    if (result.ok) {
+      const dashboardStatus = await loadDashboard();
+      if (dashboardStatus === 401) {
+        clearAdminSession();
+        setAccess('session-required');
+        setAccessError('后台会话已过期，请重新进入后台。');
+        return;
+      }
+      setAccess('ready');
+      return;
+    }
     if (result.status === 403) { setAccess('forbidden'); setAccessError('当前账号没有后台访问权限。'); return; }
     if (result.status >= 500) { setAccess('unavailable'); setAccessError('后台服务或数据库暂不可用，请稍后重试。'); return; }
     setAccess(currentUser ? 'session-required' : 'signed-out');
@@ -153,20 +170,21 @@ export function AdminConsole() {
     if (!currentUser) { setAccess('signed-out'); return; }
     setRefreshing(true); setAccess('checking'); setAccessError('');
     try {
-      const result = await apiPostWithBearer<{ authenticated: boolean }>('/api/admin/session', { trustedDevice });
+      const result = await apiPostWithBearer<{ authenticated: boolean; token?: string; tokenExpiresAt?: number }>('/api/admin/session', { trustedDevice });
       if (!result.ok) {
         if (result.status === 403) { setAccess('forbidden'); setAccessError('当前账号没有后台访问权限。'); }
         else if (result.status >= 500) { setAccess('unavailable'); setAccessError('后台服务或数据库暂不可用，请稍后重试。'); }
         else { setAccess('session-required'); setAccessError(result.error ?? '后台会话创建失败，请重新登录后重试。'); }
         return;
       }
+      if (result.data?.token) setAdminSessionToken(result.data.token);
       await verifySession();
     } catch (error) { setAccess('unavailable'); setAccessError(error instanceof Error ? error.message : '无法连接后台服务。'); }
     finally { setRefreshing(false); }
   };
 
   const refresh = async () => { setRefreshing(true); try { await verifySession(); } finally { setRefreshing(false); } };
-  const logout = async () => { await adminRequest('/api/admin/session/logout', { method: 'POST', body: JSON.stringify({}) }); setDashboard(null); setDashboardError(''); setAccess(currentUser ? 'session-required' : 'signed-out'); };
+  const logout = async () => { await adminRequest('/api/admin/session/logout', { method: 'POST', body: JSON.stringify({}) }); clearAdminSession(); setDashboard(null); setDashboardError(''); setAccess(currentUser ? 'session-required' : 'signed-out'); };
   const navigate = (id: SectionId) => { setActiveSection(id); setMobileNavigation(false); };
   const returnToApp = () => window.location.assign('/');
 

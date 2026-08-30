@@ -47,6 +47,8 @@ interface UserPatternsModalProps {
   onContinueEditing: (project: EditablePatternProject) => void;
   onOpenCommunity: () => void;
   onOpenAuthModal: () => void;
+  /** Optional record selected from the profile gallery for immediate publishing. */
+  initialPublishRecord?: ExportedPatternRecord | null;
 }
 
 const COMMUNITY_TAG_OPTIONS = ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo'];
@@ -112,6 +114,10 @@ type CompletionAwareRecord = ExportedPatternRecord & {
 function isCompletionUnlocked(record: ExportedPatternRecord): boolean {
   const completion = record as CompletionAwareRecord;
   if (completion.completionStatus === 'LEGACY') return true;
+  // Records created before completion entitlements were introduced have no
+  // status field. Treat them as legacy so existing gallery works remain
+  // publishable instead of silently hiding the publish dialog.
+  if (completion.completionStatus === undefined) return true;
   if (completion.completionStatus !== 'COMPLETED') return false;
   const paidNonEmptyBeads = completion.paidNonEmptyBeads;
   return Number.isSafeInteger(paidNonEmptyBeads)
@@ -125,6 +131,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   onContinueEditing,
   onOpenCommunity,
   onOpenAuthModal,
+  initialPublishRecord = null,
 }) => {
   const { currentUser } = useAuth();
   const { language } = useLanguage();
@@ -291,6 +298,11 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     setPublishError(null);
   };
 
+  useEffect(() => {
+    if (!isOpen || !initialPublishRecord) return;
+    openPublishDialog(initialPublishRecord);
+  }, [isOpen, initialPublishRecord]);
+
   const addPublishTag = (value: string): void => {
     const tag = value.trim();
     if (!tag) return;
@@ -358,9 +370,30 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setPublishError(isEn ? 'Complete the pattern to unlock publishing.' : '完成图纸后解锁发布。');
       return;
     }
-    const publishRecord = await ensureCloudSaved(record);
-    if (!publishRecord) return;
+    // Lock the dialog before any asynchronous cloud sync so double clicks are
+    // ignored immediately. Cloud-backed records can continue synchronously;
+    // local-only records still await the explicit sync step below.
     publishRequestRef.current = true;
+    setBusyId(record.id);
+    const publishRecord = record.hasCloudCopy && record.userId === currentUser.uid
+      ? record
+      : await ensureCloudSaved(record);
+    if (!publishRecord) {
+      publishRequestRef.current = false;
+      setBusyId(null);
+      return;
+    }
+    if (!record.hasCloudCopy && publishRecord.id !== record.id) {
+      // Warm the synced project cache so the cloud record is fully hydrated
+      // before publishing (and provide a deterministic fallback for asset
+      // generation if the Worker requests one).
+      try {
+        await getPatternProject(publishRecord.id, currentUser.uid);
+      } catch {
+        // The publish endpoint remains authoritative; a missing local cache
+        // must not block a metadata-only cloud publish.
+      }
+    }
     setBusyId(publishRecord.id);
     setMessage(null);
     setPublishError(null);

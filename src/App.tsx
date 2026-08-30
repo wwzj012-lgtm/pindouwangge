@@ -58,6 +58,7 @@ import {
   markLegacyByWorkKeys,
   saveExportedPatternRecord,
   type EditablePatternProject,
+  type ExportedPatternRecord,
 } from './utils/patternHistory';
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
@@ -611,6 +612,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
   const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
   const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
+  const [initialPublishRecord, setInitialPublishRecord] = useState<ExportedPatternRecord | null>(null);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
   const [draftSourceKey, setDraftSourceKey] = useState(createDraftId);
   const [currentSavingTarget, setCurrentSavingTarget] = useState<15 | 25 | 40>(15);
@@ -716,6 +718,13 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   const openUserPatternsModal = useCallback(() => {
     if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
+    setIsUserPatternsModalOpen(true);
+  }, [isEn, requireFormalLogin]);
+
+  const openPublishFromProfile = useCallback((record: ExportedPatternRecord) => {
+    if (!requireFormalLogin(isEn ? 'Sign in before publishing.' : '请先登录后再发布作品。')) return;
+    setIsUserProfileModalOpen(false);
+    setInitialPublishRecord(record);
     setIsUserPatternsModalOpen(true);
   }, [isEn, requireFormalLogin]);
 
@@ -2416,6 +2425,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onSelectPattern={handleRemixPattern}
         onContinueEditing={handleRestorePattern}
+        onPublishPattern={openPublishFromProfile}
       />
 
       <AccountManagementModal
@@ -2425,11 +2435,11 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       />
 
       {isUserPatternsModalOpen && hasFormalLogin && (
-        <DeferredFeatureBoundary label="我的图库" surface="modal" onDismiss={() => setIsUserPatternsModalOpen(false)}>
+        <DeferredFeatureBoundary label="我的图库" surface="modal" onDismiss={() => { setIsUserPatternsModalOpen(false); setInitialPublishRecord(null); }}>
           <Suspense fallback={<DeferredFeatureModalLoading label="我的图库" />}>
             <UserPatternsModal
               isOpen={isUserPatternsModalOpen}
-              onClose={() => setIsUserPatternsModalOpen(false)}
+              onClose={() => { setIsUserPatternsModalOpen(false); setInitialPublishRecord(null); }}
               onContinueEditing={handleRestorePattern}
               onOpenCommunity={() => {
                 if (!publicFeatureFlags['public.community']) {
@@ -2440,6 +2450,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
                 setCurrentTab('community');
               }}
               onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              initialPublishRecord={initialPublishRecord}
             />
           </Suspense>
         </DeferredFeatureBoundary>

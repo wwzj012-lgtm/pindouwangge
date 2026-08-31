@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Sparkles,
   Image as ImageIcon,
@@ -9,6 +9,9 @@ import {
   Zap,
   ChevronRight,
   Grid2X2,
+  Code2,
+  Wand2,
+  CheckCircle2,
 } from 'lucide-react';
 import { consumeSelectedImageFile } from '../utils/imageFileSelection';
 
@@ -24,6 +27,12 @@ export const HERO_EXAMPLES: readonly HeroExample[] = [
   { id: 'spiderman', name: '蜘蛛侠', url: '/images/spiderman.webp' },
   { id: 'chibi-character', name: 'Q版人物', url: '/images/chibi-character.jpg' },
 ];
+
+const VIBE_PROMPTS = [
+  { label: '像素角色', prompt: '把灵感变成一只会发光的像素角色', color: 'from-fuchsia-500 to-violet-600' },
+  { label: '配色实验', prompt: '试试一组适合拼豆的糖果色配色', color: 'from-cyan-500 to-blue-600' },
+  { label: '场景拼豆', prompt: '为你的下一张风景图加一点星格氛围', color: 'from-amber-400 to-orange-600' },
+] as const;
 
 export function createHeroExampleActivation(
   example: HeroExample,
@@ -46,7 +55,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onImportPattern,
 }) => {
   const photoInputRef = useRef<HTMLInputElement>(null);
+  const [vibeIndex, setVibeIndex] = useState(0);
+  const [isVibeLoading, setIsVibeLoading] = useState(false);
   const choosePhoto = () => photoInputRef.current?.click();
+  const vibe = VIBE_PROMPTS[vibeIndex];
+  const inspire = () => {
+    if (isVibeLoading) return;
+    setIsVibeLoading(true);
+    window.setTimeout(() => {
+      setVibeIndex(index => (index + 1) % VIBE_PROMPTS.length);
+      setIsVibeLoading(false);
+    }, 520);
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#F5F0FD] min-h-screen text-purple-950 pb-20 select-none">

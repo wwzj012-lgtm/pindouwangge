@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 export type Language = 'zh' | 'en';
 
@@ -29,6 +29,7 @@ const translations: Record<Language, Record<string, string>> = {
     vipMember: 'VIP 会员',
     proMember: '商家 VIP',
     personalCenter: '个人中心',
+    home: '首页', community: '豆社', studio: '画板', largeCanvas: '大画板', assembly: '立体拼豆', guideAction: '使用指南', vip: '会员', points: '积分', checkin: '签到', checkedIn: '已签到', loading: '加载中', loginCheckin: '登录签到', searchPlaceholder: '搜索作品、图纸、豆色...',
 
     // Smart Reducer
     reducerTitle: '特征保真智能省豆',
@@ -112,6 +113,7 @@ const translations: Record<Language, Record<string, string>> = {
     vipMember: 'VIP Member',
     proMember: 'Merchant VIP',
     personalCenter: 'Account',
+    home: 'Home', community: 'Community', studio: 'Studio', largeCanvas: 'Large canvas', assembly: '3D beads', guideAction: 'Guide', vip: 'VIP', points: 'points', checkin: 'Check in', checkedIn: 'Checked in', loading: 'Loading', loginCheckin: 'Sign in to check in', searchPlaceholder: 'Search works, patterns, colors...',
 
     // Smart Reducer
     reducerTitle: 'Feature-preserving smart bead saver',
@@ -216,6 +218,11 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const isEn = language === 'en';
+
+  useEffect(() => {
+    document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN';
+    document.documentElement.dataset.language = language;
+  }, [language]);
 
   return (
     <LanguageContext.Provider value={{ language, setLanguage, t, formatPrice, isEn }}>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useLanguage } from '../context/LanguageContext';
 import {
   X,
   BookOpen,
@@ -32,6 +33,8 @@ interface UserGuideModalProps {
 }
 
 export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose }) => {
+  const { language } = useLanguage();
+  const isEn = language === 'en';
   if (!isOpen) return null;
 
   return (
@@ -45,13 +48,13 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h2 className="text-base sm:text-lg font-black text-white">豆织星格 · 简体中文版使用指南</h2>
+                <h2 className="text-base sm:text-lg font-black text-white">{isEn ? 'BeadGrid · User Guide' : '豆织星格 · 简体中文版使用指南'}</h2>
                 <span className="bg-purple-950 text-purple-300 border border-purple-800/60 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                  v3.0 积分制度说明
+                  {isEn ? 'v3.0 Credits' : 'v3.0 积分制度说明'}
                 </span>
               </div>
               <p className="text-xs text-slate-400">
-                拼豆图纸网格编辑器 & 图像转像素工作台 · 积分与会员权益指南
+                {isEn ? 'Bead pattern editor & image pixel workspace · Credits and membership guide' : '拼豆图纸网格编辑器 & 图像转像素工作台 · 积分与会员权益指南'}
               </p>
             </div>
           </div>
@@ -70,10 +73,10 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
             <Sparkles className="w-6 h-6 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <h3 className="font-bold text-white text-sm sm:text-base">
-                欢迎体验【豆织星格】拼豆专业级像素创意工作台
+                {isEn ? 'Welcome to BeadGrid professional pixel workspace' : '欢迎体验【豆织星格】拼豆专业级像素创意工作台'}
               </h3>
               <p className="text-slate-300 text-xs mt-1 leading-relaxed">
-                【豆织星格】面向拼豆爱好者与像素创作者，提供图像转换、网格编辑、色卡管理、物料统计和图纸导出。核心创作使用积分，VIP 仅提供少量水印、批量、商用与云空间权益；桌面端左侧用于转换设置、顶部工具栏用于编辑、右侧用于用量统计，手机端通过底栏切换工作区。
+                {isEn ? 'BeadGrid provides image conversion, grid editing, palette management, material statistics and pattern export. Core creation uses credits; VIP adds watermark, batch, commercial and cloud benefits. On desktop use the left conversion panel, top editing toolbar and right material summary; on mobile switch workspaces from the bottom bar.' : '【豆织星格】面向拼豆爱好者与像素创作者，提供图像转换、网格编辑、色卡管理、物料统计和图纸导出。核心创作使用积分，VIP 仅提供少量水印、批量、商用与云空间权益；桌面端左侧用于转换设置、顶部工具栏用于编辑、右侧用于用量统计，手机端通过底栏切换工作区。'}
               </p>
             </div>
           </div>
@@ -82,24 +85,24 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
           <div className="space-y-3">
             <h3 className="font-bold text-slate-100 text-base flex items-center gap-2 text-amber-400 border-b border-slate-800 pb-2">
               <Sparkles className="w-4 h-4 text-amber-400" />
-              0. 积分与会员制度（先看这里）
+              {isEn ? '0. Credits and membership (start here)' : '0. 积分与会员制度（先看这里）'}
             </h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="bg-slate-800/60 p-4 rounded-xl border border-amber-500/30 space-y-2">
-                <div className="font-bold text-amber-300">积分怎么获得</div>
-                <p>登录后每天可签到领取约 40 积分（连续签到奖励会按周期变化）。创作者会员每周附赠 500 积分，商用会员每周附赠 1500 积分；充值购买的积分长期有效，签到和会员额度按页面规则过期。</p>
-                <p className="text-slate-400">新用户首次使用受保护操作时会先提示登录，游客不能保存、发布或下载受保护文件。</p>
+                <div className="font-bold text-amber-300">{isEn ? 'How to earn credits' : '积分怎么获得'}</div>
+                <p>{isEn ? 'Sign in daily to claim about 40 credits (streak rewards vary by cycle). Creator members receive 500 credits weekly; commercial members receive 1,500. Purchased credits remain valid; check-in and membership allowances expire according to the rules.' : '登录后每天可签到领取约 40 积分（连续签到奖励会按周期变化）。创作者会员每周附赠 500 积分，商用会员每周附赠 1500 积分；充值购买的积分长期有效，签到和会员额度按页面规则过期。'}</p>
+                <p className="text-slate-400">{isEn ? 'Protected actions prompt new users to sign in. Guests cannot save, publish or download protected files.' : '新用户首次使用受保护操作时会先提示登录，游客不能保存、发布或下载受保护文件。'}</p>
               </div>
               <div className="bg-slate-800/60 p-4 rounded-xl border border-sky-500/30 space-y-2">
-                <div className="font-bold text-sky-300">积分怎么消耗</div>
-                <p>30×30（900 格）= 1 积分，其他尺寸按画板格子数换算；52×52 约 3.1 积分。上传、预览和本地编辑可先免费体验，点击“应用结果”、云端保存、发布社区或下载受保护的高清/无水印文件时，系统会显示报价并扣除积分。</p>
-                <p className="text-slate-400">背景移除目前免费，不消耗积分。积分不足时可缩小尺寸、取消高级选项或前往充值/兑换码页面。</p>
+                <div className="font-bold text-sky-300">{isEn ? 'How credits are spent' : '积分怎么消耗'}</div>
+                <p>{isEn ? '30×30 (900 cells) = 1 credit; other sizes scale by grid area, and 52×52 is about 3.1 credits. Upload, preview and local editing are free. Credits are quoted and charged when applying results, cloud saving, publishing or downloading protected high-resolution/watermark-free files.' : '30×30（900 格）= 1 积分，其他尺寸按画板格子数换算；52×52 约 3.1 积分。上传、预览和本地编辑可先免费体验，点击“应用结果”、云端保存、发布社区或下载受保护的高清/无水印文件时，系统会显示报价并扣除积分。'}</p>
+                <p className="text-slate-400">{isEn ? 'Background removal is currently free. If credits are insufficient, reduce the size, disable advanced options, or open the top-up/redeem page.' : '背景移除目前免费，不消耗积分。积分不足时可缩小尺寸、取消高级选项或前往充值/兑换码页面。'}</p>
               </div>
             </div>
             <div className="bg-purple-950/30 border border-purple-500/30 rounded-xl p-4 space-y-2">
-              <div className="font-bold text-purple-300">VIP 保留哪些权益</div>
-              <p>VIP 不是生成次数会员：核心生成、智能省豆、色卡、尺寸和背景移除都按上面的积分规则使用。VIP 主要解锁去平台水印、自定义水印、批量处理、商业授权和更大云端空间；会员周额度会优先抵扣积分消耗。</p>
-              <p className="text-slate-400">兑换码中的“7 天体验卡”代表 7 天会员权益，体验期结束后恢复普通积分账户，剩余充值积分不会被清除。</p>
+              <div className="font-bold text-purple-300">{isEn ? 'What VIP keeps exclusive' : 'VIP 保留哪些权益'}</div>
+              <p>{isEn ? 'VIP is not a generation-count membership: core generation, bead saving, palettes, sizes and background removal follow the credit rules above. VIP mainly unlocks watermark-free export, custom watermark, batch processing, commercial authorization and larger cloud storage; weekly membership credits are used first.' : 'VIP 不是生成次数会员：核心生成、智能省豆、色卡、尺寸和背景移除都按上面的积分规则使用。VIP 主要解锁去平台水印、自定义水印、批量处理、商业授权和更大云端空间；会员周额度会优先抵扣积分消耗。'}</p>
+              <p className="text-slate-400">{isEn ? 'A “7-day trial card” grants membership benefits for 7 days. After it ends, the account returns to the standard credit plan and purchased credits remain.' : '兑换码中的“7 天体验卡”代表 7 天会员权益，体验期结束后恢复普通积分账户，剩余充值积分不会被清除。'}</p>
             </div>
           </div>
 

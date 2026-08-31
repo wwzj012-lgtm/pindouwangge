@@ -261,16 +261,16 @@ export const VipPrivilegesModal: React.FC<VipPrivilegesModalProps> = ({
                     <span>{isEn ? 'What VIP unlocks' : 'VIP 仅解锁这些权益'}</span>
                   </h4>
                   <p className="text-xs text-slate-300 mt-1 leading-relaxed">
-                    核心生成、尺寸、色卡、省豆和背景移除均可使用积分完成；VIP 只保留水印、批量、商用和云空间权益。
+                    {isEn ? 'Core generation, sizes, palettes, bead saving and background removal use credits; VIP keeps watermark-free, batch, commercial and cloud benefits.' : '核心生成、尺寸、色卡、省豆和背景移除均可使用积分完成；VIP 只保留水印、批量、商用和云空间权益。'}
                   </p>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">30×30</b><span className="block text-slate-300">1 积分</span></div>
-                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">52×52</b><span className="block text-slate-300">约 3.1 积分</span></div>
-                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2.5"><b className="text-emerald-300">每日签到</b><span className="block text-slate-300">约 40 积分</span></div>
-                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5"><b className="text-amber-300">背景移除</b><span className="block text-slate-300">免费</span></div>
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">30×30</b><span className="block text-slate-300">{isEn ? '1 credit' : '1 积分'}</span></div>
+                <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-2.5"><b className="text-sky-300">52×52</b><span className="block text-slate-300">{isEn ? '≈ 3.1 credits' : '约 3.1 积分'}</span></div>
+                <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2.5"><b className="text-emerald-300">{isEn ? 'Daily check-in' : '每日签到'}</b><span className="block text-slate-300">{isEn ? '≈ 40 credits' : '约 40 积分'}</span></div>
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-2.5"><b className="text-amber-300">{isEn ? 'Background removal' : '背景移除'}</b><span className="block text-slate-300">{isEn ? 'Free' : '免费'}</span></div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

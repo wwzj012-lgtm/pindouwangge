@@ -254,7 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
               }`}
             >
-              首页
+              {t('home')}
               {currentTab === 'home' && (
                 <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
               )}
@@ -268,7 +268,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
               }`}
             >
-              豆社
+              {t('community')}
               {currentTab === 'community' && (
                 <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
               )}
@@ -282,7 +282,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
               }`}
             >
-              画板
+              {t('studio')}
               {currentTab === 'studio' && (
                 <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />
               )}
@@ -296,7 +296,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
               }`}
             >
-              大画板
+              {t('largeCanvas')}
               {currentTab === 'largeCanvas' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
             </button>
 
@@ -308,7 +308,7 @@ export const Header: React.FC<HeaderProps> = ({
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
               }`}
             >
-              立体拼豆
+              {t('assembly')}
               {currentTab === 'assembly' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
             </button>
           </nav>
@@ -327,7 +327,7 @@ export const Header: React.FC<HeaderProps> = ({
                   setCurrentTab?.('community');
                 }
               }}
-              placeholder="搜索作品、图纸、豆色..."
+              placeholder={t('searchPlaceholder')}
               className="w-full pl-8 pr-3 py-1.5 rounded-full bg-purple-50/80 border border-purple-200/80 text-purple-950 placeholder-purple-400 font-medium text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
             />
             <Search className="w-3.5 h-3.5 absolute left-2.5 text-purple-500 pointer-events-none" />
@@ -351,7 +351,7 @@ export const Header: React.FC<HeaderProps> = ({
             title="拼豆新手指导与功能说明"
           >
             <BookOpen className="w-3.5 h-3.5 text-purple-600" />
-            <span>使用指南</span>
+            <span>{t('guideAction')}</span>
           </button>
 
           {/* VIP Perks */}
@@ -361,13 +361,15 @@ export const Header: React.FC<HeaderProps> = ({
               className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer"
             >
               <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
-              <span>会员</span>
+              <span>{t('vip')}</span>
             </button>
           )}
 
           {/* Language Toggle Button */}
           <button
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
+            aria-label={language === 'zh' ? '切换为英文' : 'Switch to Chinese'}
+            aria-pressed={language === 'en'}
             className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80 transition-all cursor-pointer shrink-0"
             title={language === 'zh' ? 'Switch to English' : '切换为中文'}
           >
@@ -385,7 +387,7 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Coins className="h-3.5 w-3.5 shrink-0 text-purple-600" />
                 <span className="tabular-nums">{availablePoints}</span>
-                <span className="hidden sm:inline">积分</span>
+                <span className="hidden sm:inline">{t('points')}</span>
               </div>
               <button
                 type="button"
@@ -400,7 +402,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-label={!creditSummary ? '正在加载积分信息' : checkinAvailable ? `每日签到，领取 ${checkinPoints} 积分` : '今日已签到'}
               >
                 {checkinPending || !creditSummary ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Gift className="h-3.5 w-3.5 shrink-0" />}
-                <span className="hidden sm:inline">{!creditSummary ? '加载中' : checkinAvailable ? '签到' : '已签到'}</span>
+                <span className="hidden sm:inline">{!creditSummary ? t('loading') : checkinAvailable ? t('checkin') : t('checkedIn')}</span>
               </button>
               {checkinMessage && (
                 <span
@@ -421,7 +423,7 @@ export const Header: React.FC<HeaderProps> = ({
               aria-label="登录后每日签到领取积分"
             >
               <Gift className="h-3.5 w-3.5 shrink-0" />
-              <span className="hidden sm:inline">登录签到</span>
+              <span className="hidden sm:inline">{t('loginCheckin')}</span>
             </button>
           )}
           <div className="min-w-0 shrink-0">

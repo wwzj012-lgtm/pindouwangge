@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Loader2, X } from 'lucide-react';
+import { Bell, Loader2, RefreshCw, X } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -49,6 +49,12 @@ import { VipPrivilegesModal } from './components/VipPrivilegesModal';
 import { UserProfileModal } from './components/UserProfileModal';
 import { AccountManagementModal } from './components/AccountManagementModal';
 import { HomeView, type HeroExample } from './components/HomeView';
+import { LandingView } from './components/LandingView';
+import {
+  PublicAnnouncementModal,
+  type AnnouncementLoadState,
+  type PublicAnnouncementItem,
+} from './components/PublicAnnouncementModal';
 import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
 import type { CommunityPattern } from './data/communityData';
@@ -62,6 +68,7 @@ import {
 } from './utils/patternHistory';
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
+import { persistAnnouncementIds, readAnnouncementIds } from './utils/announcementState';
 
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
 
@@ -354,6 +361,8 @@ interface PublicAnnouncement {
   content: string;
   pinned: boolean;
   publishAt: number;
+  actionLabel?: string;
+  actionUrl?: string;
 }
 
 const PUBLIC_FEATURE_DEFAULTS: Record<PublicFeatureKey, boolean> = {
@@ -387,8 +396,16 @@ function parsePublicAnnouncements(value: unknown): PublicAnnouncement[] {
     const content = typeof item?.content === 'string' ? item.content.trim().slice(0, 10_000) : '';
     const publishAt = typeof item?.publishAt === 'number' && Number.isSafeInteger(item.publishAt) ? item.publishAt : 0;
     if (!id || !title || !content || publishAt <= 0 || typeof item?.pinned !== 'boolean') return [];
-    return [{ id, title, content, pinned: item.pinned, publishAt }];
+    const actionLabel = typeof item?.actionLabel === 'string' ? item.actionLabel.trim().slice(0, 40) : undefined;
+    const actionUrl = typeof item?.actionUrl === 'string' ? item.actionUrl.trim().slice(0, 500) : undefined;
+    return [{ id, title, content, pinned: item.pinned, publishAt, actionLabel, actionUrl }];
   });
+}
+
+function announcementReadKey(item: PublicAnnouncement): string {
+  // Include content in the key so an edited/re-published announcement is shown
+  // once again without requiring users to clear browser storage.
+  return `${item.id}:${stableHash(`${item.publishAt}:${item.title}:${item.content}`)}`;
 }
 
 function isPublicFeatureKey(value: unknown): value is PublicFeatureKey {
@@ -462,7 +479,11 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [saveNameError, setSaveNameError] = useState<string | null>(null);
   const [imageLoadMessage, setImageLoadMessage] = useState<string | null>(null);
   const [publicAnnouncements, setPublicAnnouncements] = useState<PublicAnnouncement[]>([]);
-  const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<Set<string>>(() => new Set());
+  const [announcementLoadState, setAnnouncementLoadState] = useState<AnnouncementLoadState>('loading');
+  const [announcementError, setAnnouncementError] = useState<string | null>(null);
+  const [dismissedAnnouncementIds, setDismissedAnnouncementIds] = useState<Set<string>>(() => readAnnouncementIds());
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false);
+  const promptedAnnouncementIdsRef = useRef<Set<string>>(new Set());
   const [publicFeatureFlags, setPublicFeatureFlags] = useState<Record<PublicFeatureKey, boolean>>(() => ({ ...PUBLIC_FEATURE_DEFAULTS }));
   const [publicFeatureFlagsLoaded, setPublicFeatureFlagsLoaded] = useState(false);
   const canAccessAssembly = ASSEMBLY_DEV_MODE || publicFeatureFlags['public.assembly'] || (ASSEMBLY_ADMIN_BYPASS && userProfile?.role === 'admin');
@@ -741,28 +762,59 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return () => window.removeEventListener('unauthorized', handleUnauthorized);
   }, []);
 
-  useEffect(() => {
-    let active = true;
+  const loadPublicData = useCallback(async (signal?: AbortSignal): Promise<void> => {
     const readPublic = async (path: string): Promise<unknown> => {
-      try {
-        const response = await fetch(path, { headers: { Accept: 'application/json' }, credentials: 'omit' });
-        if (!response.ok) return null;
-        return publicData(await response.json());
-      } catch {
-        return null;
-      }
+      const response = await fetch(path, { headers: { Accept: 'application/json' }, credentials: 'omit', signal });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return publicData(await response.json());
     };
-    void Promise.all([
-      readPublic('/api/public/announcements'),
-      readPublic('/api/public/feature-flags'),
-    ]).then(([announcements, flags]) => {
-      if (!active) return;
-      if (announcements !== null) setPublicAnnouncements(parsePublicAnnouncements(announcements));
-      if (flags !== null) setPublicFeatureFlags(parsePublicFeatureFlags(flags));
-    }).finally(() => {
-      if (active) setPublicFeatureFlagsLoaded(true);
+    try {
+      const [announcementsResult, flagsResult] = await Promise.allSettled([
+        readPublic('/api/public/announcements'),
+        readPublic('/api/public/feature-flags'),
+      ]);
+      if (announcementsResult.status === 'fulfilled') {
+        setPublicAnnouncements(parsePublicAnnouncements(announcementsResult.value));
+        setAnnouncementError(null);
+        setAnnouncementLoadState('ready');
+      } else {
+        setAnnouncementError('公告服务暂时不可用，请稍后重试。');
+        setAnnouncementLoadState('error');
+      }
+      if (flagsResult.status === 'fulfilled') setPublicFeatureFlags(parsePublicFeatureFlags(flagsResult.value));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      setAnnouncementError('公告服务暂时不可用，请稍后重试。');
+      setAnnouncementLoadState('error');
+      setPublicFeatureFlagsLoaded(true);
+    } finally {
+      setPublicFeatureFlagsLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadPublicData(controller.signal);
+    return () => controller.abort();
+  }, [loadPublicData]);
+
+  useEffect(() => {
+    if (announcementLoadState !== 'ready') return;
+    const next = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(announcementReadKey(item))) ?? null;
+    if (!next || promptedAnnouncementIdsRef.current.has(next.id)) return;
+    promptedAnnouncementIdsRef.current.add(next.id);
+    setIsAnnouncementModalOpen(true);
+  }, [announcementLoadState, dismissedAnnouncementIds, publicAnnouncements]);
+
+  const dismissAnnouncement = useCallback((announcement?: PublicAnnouncement) => {
+    setIsAnnouncementModalOpen(false);
+    if (!announcement) return;
+    setDismissedAnnouncementIds(current => {
+      const next = new Set<string>(current);
+      next.add(announcementReadKey(announcement));
+      persistAnnouncementIds(next);
+      return next;
     });
-    return () => { active = false; };
   }, []);
 
   const showDisabledFeature = useCallback((label: string) => {
@@ -1889,7 +1941,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     }
   }, [handleLoadSample]);
 
-  const activeAnnouncement = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(item.id)) ?? null;
+  const activeAnnouncement = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(announcementReadKey(item))) ?? null;
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
@@ -1935,11 +1987,27 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       )}
 
       {activeAnnouncement && (
-        <aside role="status" className="mx-3 mt-2 flex min-w-0 shrink-0 items-start gap-2 border border-sky-200 bg-sky-50 px-3 py-2 text-sky-950 sm:mx-5 sm:px-4" aria-label="系统公告">
-          <div className="min-w-0 flex-1"><p className="truncate text-xs font-bold">{activeAnnouncement.pinned ? '置顶公告 · ' : '公告 · '}{activeAnnouncement.title}</p><p className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-sky-800">{activeAnnouncement.content}</p></div>
-          <button type="button" title="关闭公告" aria-label="关闭公告" onClick={() => setDismissedAnnouncementIds(current => new Set([...current, activeAnnouncement.id]))} className="grid h-8 w-8 shrink-0 place-items-center text-sky-700 hover:bg-sky-100 hover:text-sky-950"><X className="h-4 w-4" /></button>
+        <aside role="status" className="mx-3 mt-2 flex min-w-0 shrink-0 items-center gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 px-3 py-2 text-violet-950 shadow-sm sm:mx-5 sm:px-4" aria-label="系统公告">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-600 text-white"><Bell className="h-4 w-4" /></div>
+          <button type="button" onClick={() => setIsAnnouncementModalOpen(true)} className="min-w-0 flex-1 text-left"><p className="truncate text-xs font-bold">{activeAnnouncement.pinned ? '置顶公告 · ' : '公告 · '}{activeAnnouncement.title}</p><p className="mt-0.5 line-clamp-1 break-words text-xs leading-5 text-violet-800">{activeAnnouncement.content}</p></button>
+          <button type="button" title="关闭公告" aria-label="关闭公告" onClick={() => dismissAnnouncement(activeAnnouncement)} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl text-violet-700 hover:bg-violet-100 hover:text-violet-950"><X className="h-4 w-4" /></button>
         </aside>
       )}
+      {announcementLoadState === 'error' && (
+        <div role="status" className="mx-3 mt-2 flex items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:mx-5 sm:px-4">
+          <span>公告暂时无法加载。</span>
+          <button type="button" onClick={() => void loadPublicData()} className="inline-flex min-h-8 items-center gap-1 rounded-lg px-2 font-bold text-amber-700 hover:bg-amber-100"><RefreshCw className="h-3.5 w-3.5" />重试</button>
+        </div>
+      )}
+
+      <PublicAnnouncementModal
+        open={isAnnouncementModalOpen}
+        state={announcementLoadState}
+        announcement={activeAnnouncement as PublicAnnouncementItem | null}
+        error={announcementError}
+        onRetry={() => void loadPublicData()}
+        onClose={() => dismissAnnouncement(activeAnnouncement ?? undefined)}
+      />
 
       {currentTab === 'home' && (
         <HomeView
@@ -2495,11 +2563,42 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   );
 }
 
+type PublicRouteTab = Extract<StudioTab, 'home' | 'community' | 'studio' | 'largeCanvas' | 'assembly'>;
+
+function resolveWorkspaceTab(): PublicRouteTab {
+  const requested = new URLSearchParams(window.location.search).get('tab');
+  if (requested === 'community' || requested === 'studio' || requested === 'largeCanvas' || requested === 'assembly') return requested;
+  if (/^\/assembly(?:\/|$)/.test(window.location.pathname)) return 'assembly';
+  if (/^\/large-canvas(?:\/|$)/.test(window.location.pathname)) return 'largeCanvas';
+  return 'home';
+}
+
+function navigatePublic(path: string): void {
+  window.history.pushState({}, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
+function PublicAppRoute() {
+  const [locationKey, setLocationKey] = useState(() => `${window.location.pathname}${window.location.search}`);
+
+  useEffect(() => {
+    const handlePopState = () => setLocationKey(`${window.location.pathname}${window.location.search}`);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  // Read the location after the state update so SPA navigation and browser
+  // back/forward transitions both render the right surface.
+  void locationKey;
+  const pathname = window.location.pathname;
+  const isWorkspaceRoute = /^\/(?:workspace|app|assembly|large-canvas)(?:\/|$)/.test(pathname);
+  if (isWorkspaceRoute) return <StudioApp initialTab={resolveWorkspaceTab()} />;
+
+  return <LandingView onEnterWorkspace={() => navigatePublic('/workspace')} onExploreCommunity={() => navigatePublic('/workspace?tab=community')} />;
+}
+
 export default function App() {
   return /^\/admin(?:\/|$)/.test(window.location.pathname)
     ? <Suspense fallback={<AdminPageLoading />}><AdminPage /></Suspense>
-    // The public entry point always starts at the home page. Feature tabs are
-    // in-app state; this prevents a stale `/assembly` URL from trapping users
-    // in the beta screen after a refresh or a shared link.
-    : <StudioApp initialTab="home" />;
+    : <PublicAppRoute />;
 }

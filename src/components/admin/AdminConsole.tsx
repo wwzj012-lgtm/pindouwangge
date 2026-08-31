@@ -60,6 +60,34 @@ const number = (value: number) => numberFormatter.format(Number.isFinite(value) 
 const milliseconds = (value: number) => `${number(Math.max(0, Math.round(value)))} ms`;
 const currentMenu = (id: SectionId) => MENU_ITEMS.find((item) => item.id === id) ?? MENU_ITEMS[0]!;
 
+/** Shared light admin skin. Child admin panels still use their existing
+ * utility classes, so scoping overrides here keeps the visual language
+ * consistent without changing their layout or permission logic. */
+function AdminThemeStyles() {
+  return <style>{`
+    .admin-light { --admin-ink:#17243a; --admin-muted:#66758b; --admin-border:#d9e2ef; --admin-surface:#ffffff; --admin-bg:#f4f7fb; background:var(--admin-bg); color:var(--admin-ink); }
+    .admin-light [class*="bg-slate-950"] { background-color:var(--admin-surface) !important; }
+    .admin-light [class*="bg-slate-900"] { background-color:var(--admin-surface) !important; }
+    .admin-light [class*="bg-slate-800"] { background-color:#eef3f8 !important; }
+    .admin-light [class*="bg-slate-700"] { background-color:#e5ecf4 !important; }
+    .admin-light [class*="border-slate-800"], .admin-light [class*="border-slate-700"] { border-color:var(--admin-border) !important; }
+    .admin-light [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]) { border-color:var(--admin-border) !important; }
+    .admin-light [class*="text-white"] { color:var(--admin-ink) !important; }
+    .admin-light [class*="text-slate-100"], .admin-light [class*="text-slate-200"] { color:#2b3b52 !important; }
+    .admin-light [class*="text-slate-300"], .admin-light [class*="text-slate-400"] { color:#586a82 !important; }
+    .admin-light [class*="text-slate-500"], .admin-light [class*="text-slate-600"] { color:#7b8ba0 !important; }
+    .admin-light header { background-color:rgba(255,255,255,.94) !important; box-shadow:0 1px 8px rgba(31,55,87,.08); }
+    .admin-light article, .admin-light section.border, .admin-light section[class*="border-slate"], .admin-light form[class*="border-slate"], .admin-light table { border-radius:14px; }
+    .admin-light article, .admin-light section[class*="border-slate"], .admin-light form[class*="border-slate"] { box-shadow:0 4px 18px rgba(31,55,87,.06); }
+    .admin-light button { transition:background-color .16s ease,color .16s ease,border-color .16s ease,box-shadow .16s ease,transform .16s ease; }
+    .admin-light button:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 4px 12px rgba(62,108,164,.14); }
+    .admin-light button:disabled { cursor:not-allowed; }
+    .admin-light input, .admin-light select { border-radius:10px; background-color:#fff !important; color:var(--admin-ink) !important; border-color:var(--admin-border) !important; }
+    .admin-light input::placeholder { color:#9aa8b8 !important; }
+    .admin-light table thead { background:#eef3f8 !important; }
+  `}</style>;
+}
+
 function pathForTrend(points: TrendPoint[]): string {
   if (points.length === 0) return '';
   const maximum = Math.max(1, ...points.map((point) => point.count));
@@ -190,12 +218,13 @@ export function AdminConsole() {
 
   if (access !== 'ready') {
     const enter = access === 'session-required';
-    return <main className="grid min-h-screen place-items-center bg-slate-950 px-4 py-8 text-slate-100"><section className="w-full max-w-md border border-slate-800 bg-slate-900 p-6 shadow-2xl"><div className="flex items-start gap-3"><span className="grid h-11 w-11 place-items-center rounded-md bg-sky-400 text-slate-950"><ShieldCheck className="h-6 w-6" /></span><div><h1 className="text-lg font-semibold text-white">后台控制台</h1><p className="mt-1 text-sm text-slate-400">{access === 'checking' && '正在验证后台会话...'}{access === 'session-required' && '使用当前正式登录账号进入后台。'}{access === 'forbidden' && '此账号没有后台访问权限。'}{access === 'signed-out' && '请先登录正式账号。'}{access === 'unavailable' && '后台服务暂不可用。'}</p></div></div>{accessError && <p role="alert" className="mt-5 flex items-start gap-2 border border-rose-400/30 bg-rose-500/10 px-3 py-3 text-sm leading-5 text-rose-200"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />{accessError}</p>}{enter && <div className="mt-5 space-y-3"><label className="flex min-h-11 cursor-pointer items-center gap-3 border border-slate-700 bg-slate-950 px-3 text-sm text-slate-300"><input type="checkbox" checked={trustedDevice} onChange={(event) => setTrustedDevice(event.target.checked)} className="h-4 w-4 accent-sky-400" />信任此设备 30 天</label><button type="button" onClick={() => void createSession()} disabled={refreshing} className="flex min-h-11 w-full items-center justify-center gap-2 bg-sky-400 px-4 text-sm font-semibold text-slate-950 hover:bg-sky-300 disabled:cursor-not-allowed disabled:opacity-60">{refreshing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}进入后台</button></div>}<button type="button" onClick={returnToApp} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 border border-slate-700 px-4 text-sm text-slate-300 hover:bg-slate-800"><ArrowLeft className="h-4 w-4" />返回前台</button></section></main>;
+    return <main className="admin-light grid min-h-screen place-items-center px-4 py-8" aria-busy={access === 'checking'}><AdminThemeStyles /><section className="w-full max-w-md border border-slate-200 bg-white p-6 shadow-xl"><div className="flex items-start gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-sky-500 text-white"><ShieldCheck className="h-6 w-6" /></span><div><h1 className="text-lg font-semibold">后台控制台</h1><p className="mt-1 text-sm text-slate-500">{access === 'checking' && '正在验证后台会话...'}{access === 'session-required' && '使用当前正式登录账号进入后台。'}{access === 'forbidden' && '此账号没有后台访问权限。'}{access === 'signed-out' && '请先登录正式账号。'}{access === 'unavailable' && '后台服务暂不可用。'}</p></div></div>{access === 'checking' && <div className="mt-5 flex items-center gap-2 rounded-lg bg-sky-50 px-3 py-3 text-sm text-sky-700"><RefreshCw className="h-4 w-4 animate-spin" />正在连接后台服务</div>}{accessError && <p role="alert" className="mt-5 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-sm leading-5 text-rose-700"><CircleAlert className="mt-0.5 h-4 w-4 shrink-0" />{accessError}</p>}{enter && <div className="mt-5 space-y-3"><label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600"><input type="checkbox" checked={trustedDevice} onChange={(event) => setTrustedDevice(event.target.checked)} className="h-4 w-4 accent-sky-500" />信任此设备 30 天</label><button type="button" onClick={() => void createSession()} disabled={refreshing} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-sky-500 px-4 text-sm font-semibold text-white hover:bg-sky-600 disabled:cursor-not-allowed disabled:opacity-60">{refreshing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}进入后台</button></div>}<button type="button" onClick={returnToApp} className="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm text-slate-600 hover:bg-slate-50"><ArrowLeft className="h-4 w-4" />返回前台</button></section></main>;
   }
 
   const overview = dashboard?.overview;
   const telemetry = dashboard?.telemetry;
-  return <div className="min-h-screen overflow-x-hidden bg-slate-950 text-slate-100">
+  return <div className="admin-light min-h-screen overflow-x-hidden bg-slate-50 text-slate-900">
+    <AdminThemeStyles />
     <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-slate-800 bg-slate-900 lg:flex"><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></aside>
     {mobileNavigation && <div className="fixed inset-0 z-40 lg:hidden"><button type="button" aria-label="关闭菜单" className="absolute inset-0 bg-slate-950/75" onClick={() => setMobileNavigation(false)} /><aside className="relative flex h-full w-[min(19rem,85vw)] flex-col border-r border-slate-800 bg-slate-900 shadow-2xl"><div className="absolute right-2 top-2 z-10"><button type="button" title="关闭菜单" aria-label="关闭菜单" onClick={() => setMobileNavigation(false)} className="grid h-11 w-11 place-items-center text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button></div><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></aside></div>}
     <div className="min-h-screen lg:pl-64"><header className="sticky top-0 z-20 border-b border-slate-800 bg-slate-950/95 backdrop-blur"><div className="flex min-h-16 items-center gap-2 px-3 sm:px-5 lg:px-7"><button type="button" title="打开菜单" aria-label="打开菜单" onClick={() => setMobileNavigation(true)} className="grid h-11 w-11 shrink-0 place-items-center text-slate-300 hover:bg-slate-800 lg:hidden"><Menu className="h-5 w-5" /></button><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-white">{section.label}</p><p className="hidden truncate text-xs text-slate-500 sm:block">{section.description}</p></div><div className="hidden min-w-0 text-right sm:block"><p className="max-w-40 truncate text-sm text-slate-200">{administrator}</p><p className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-emerald-400"><CheckCircle2 className="h-3 w-3" />会话有效</p></div><button type="button" title="刷新数据" aria-label="刷新数据" onClick={() => void refresh()} disabled={refreshing} className="grid h-11 w-11 shrink-0 place-items-center text-slate-300 hover:bg-slate-800 disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /></button><button type="button" title="退出后台会话" aria-label="退出后台会话" onClick={() => void logout()} className="grid h-11 w-11 shrink-0 place-items-center text-slate-300 hover:bg-slate-800 hover:text-rose-300"><LogOut className="h-4 w-4" /></button><button type="button" onClick={returnToApp} className="hidden min-h-11 items-center gap-2 border-l border-slate-800 pl-4 text-sm text-slate-300 hover:text-white md:flex"><ArrowLeft className="h-4 w-4" />返回前台</button></div></header>

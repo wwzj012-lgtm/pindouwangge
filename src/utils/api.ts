@@ -162,14 +162,18 @@ function apiBaseUrl(): string {
     browserHostname
       && (browserHostname === 'pages.dev' || browserHostname.endsWith('.pages.dev')),
   );
+  const isProjectPreviewHost = /^[-a-z0-9]+\.stellabean\.pages\.dev$/i.test(browserHostname)
+    && browserHostname.toLowerCase() !== 'stellabean.pages.dev';
   const configuredIsWorkerOrigin = /^https:\/\/stellabean-api\.[^/]+\.workers\.dev\/?$/i.test(configured);
   // `.env.local` is intentionally used for local development and may contain
   // 127.0.0.1:8787. Vite also loads it during production builds, so never let
   // that development endpoint leak into a deployed Pages bundle.
   const configuredIsLocalDevOrigin = /^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?\/?$/i.test(configured);
-  const base = isPagesHost && browserOrigin && (!configured || configuredIsWorkerOrigin || configuredIsLocalDevOrigin)
-    ? browserOrigin
-    : (configured || WORKER_API_DEFAULT_URL);
+  const base = isProjectPreviewHost
+    ? WORKER_API_DEFAULT_URL
+    : isPagesHost && browserOrigin && (!configured || configuredIsWorkerOrigin || configuredIsLocalDevOrigin)
+      ? browserOrigin
+      : (configured || WORKER_API_DEFAULT_URL);
   return base.endsWith('/') ? base : `${base}/`;
 }
 

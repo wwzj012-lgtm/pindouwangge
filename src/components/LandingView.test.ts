@@ -18,7 +18,8 @@ describe('landing page entry', () => {
     const source = readFileSync(new URL('./LandingView.tsx', import.meta.url), 'utf8');
     const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
     expect(source).toContain('onEnterWorkspace');
-    expect(source).toContain('disabled={isEntering}');
+    expect(source).toContain("onClick={() => navigateTab('studio')}");
+    expect(source).not.toContain('disabled={isEntering}');
     expect(source).toContain('aria-label="精选作品预览"');
     expect(css).toContain('@media (prefers-reduced-motion: reduce)');
     expect(css).toContain('.landing-shell');

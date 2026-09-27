@@ -1798,12 +1798,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setActivePalette(project.palette);
     setSettings((current) => ({
       ...current,
+      ...project.settings,
       width: project.width,
       height: project.height,
       boardSize: project.boardSize,
       brand: project.brand,
     }));
-    setSettings({ ...project.settings });
     const restoredGrid = project.grid.map((row) => [...row]);
     applyGridChange(restoredGrid, false);
   };

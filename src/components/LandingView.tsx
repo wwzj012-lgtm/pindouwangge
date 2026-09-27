@@ -76,8 +76,6 @@ export interface LandingViewProps {
 }
 
 export type HomeViewProps = LandingViewProps;
-// The primary action uses the same disabled={isEntering} guard in the
-// standalone variant when a loading state is enabled.
 
 // Preset Pixel Bead Art Patterns for the Interactive Live Canvas
 type PresetKey = 'cat' | 'rocket' | 'heart' | 'star' | 'sword';
@@ -295,6 +293,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
   onStartPhotoToBead,
   onLoadHeroExample,
   onImportPattern,
+  onEnterWorkspace,
   onOpenAuthModal,
   onOpenUserProfileModal,
 }) => {
@@ -430,14 +429,21 @@ export const LandingView: React.FC<LandingViewProps> = ({
   };
 
   const scrollToFeatures = () => {
-    const el = document.getElementById('features-section');
+    const el = document.getElementById('capabilities');
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   };
 
   const scrollToProcess = () => {
-    const el = document.getElementById('process-section');
+    const el = document.getElementById('workflow');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const scrollToShowcase = () => {
+    const el = document.getElementById('showcase');
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -526,7 +532,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => navigateTab('community')}
+              onClick={scrollToShowcase}
               className="hover:text-purple-700 transition-colors cursor-pointer"
             >
               作品
@@ -545,13 +551,6 @@ export const LandingView: React.FC<LandingViewProps> = ({
             >
               <Sparkles className="w-3.5 h-3.5 text-purple-600" />
               <span>LIVE 画板</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => navigateTab('largeCanvas')}
-              className="hover:text-purple-700 transition-colors cursor-pointer"
-            >
-              大画板
             </button>
           </nav>
 
@@ -1134,7 +1133,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         </section>
 
         {/* 3. PRODUCT CORE CAPABILITIES SECTION ("为什么选择豆织星格" `#features-section`) */}
-        <section id="features-section" className="space-y-6 pt-4">
+        <section className="space-y-6 pt-4 landing-anchor-target" id="capabilities" aria-label="核心能力">
           <div className="text-center space-y-2 max-w-2xl mx-auto">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-100 text-purple-800 text-xs font-black uppercase tracking-wider">
               <Sparkles className="w-3.5 h-3.5 text-purple-600" />
@@ -1206,7 +1205,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         </section>
 
         {/* 4. VISUAL Core Workflow STEPS */}
-        <section id="process-section" className="bg-white/80 rounded-3xl border border-purple-200 p-6 sm:p-10 shadow-lg space-y-8">
+        <section className="bg-white/80 rounded-3xl border border-purple-200 p-6 sm:p-10 shadow-lg space-y-8 landing-anchor-target" id="workflow" aria-label="创作流程">
           <div className="text-center space-y-2">
             <h2 className="text-2xl sm:text-3xl font-black text-purple-950 tracking-tight">
               轻松四步，完成你的拼豆作品
@@ -1260,7 +1259,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
         </section>
 
         {/* 5. FEATURED GALLERY EXAMPLES */}
-        <section className="space-y-6">
+        <section className="space-y-6 landing-anchor-target" id="showcase" aria-label="精选作品预览">
           <div className="flex items-center justify-between border-b border-purple-200/60 pb-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-black text-purple-950 tracking-tight">

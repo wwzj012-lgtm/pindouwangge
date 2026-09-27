@@ -294,6 +294,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
   onLoadHeroExample,
   onImportPattern,
   onEnterWorkspace,
+  onExploreCommunity,
   onOpenAuthModal,
   onOpenUserProfileModal,
 }) => {
@@ -306,6 +307,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
     window.history.pushState({}, '', route);
     window.dispatchEvent(new PopStateEvent('popstate'));
   });
+  const enterWorkspace = onEnterWorkspace ?? (() => navigateTab('studio'));
+  const exploreCommunity = onExploreCommunity ?? (() => navigateTab('community'));
   const startPhotoToBead = onStartPhotoToBead ?? (() => undefined);
   const loadHeroExample = onLoadHeroExample ?? (() => undefined);
   const importPattern = onImportPattern ?? (() => undefined);
@@ -569,7 +572,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
             <button
               type="button"
-              onClick={() => navigateTab('studio')}
+              onClick={enterWorkspace}
               className="px-4 py-2 sm:px-5 sm:py-2.5 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 hover:brightness-110 text-white font-black text-xs sm:text-sm shadow-md shadow-purple-500/20 transition-all flex items-center gap-2 cursor-pointer"
             >
               <Wand2 className="w-4 h-4 text-amber-300" />
@@ -618,7 +621,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => navigateTab('studio')}
+                  onClick={enterWorkspace}
                   className="px-6 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 hover:brightness-110 text-white font-black text-sm shadow-lg shadow-purple-500/25 transition-all flex items-center gap-2.5 cursor-pointer"
                 >
                   <Wand2 className="w-5 h-5 text-amber-300 fill-amber-300" />
@@ -638,7 +641,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => navigateTab('community')}
+                  onClick={exploreCommunity}
                   className="px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl bg-white border border-purple-200 hover:bg-purple-50 text-purple-900 font-extrabold text-sm shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
                 >
                   <Compass className="w-4 h-4 text-purple-600" />
@@ -1272,7 +1275,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
             <button
               type="button"
-              onClick={() => navigateTab('community')}
+              onClick={exploreCommunity}
               className="text-xs font-black text-purple-700 hover:text-purple-900 flex items-center gap-1 cursor-pointer"
             >
               <span>查看全部 500+ 图纸</span>
@@ -1317,7 +1320,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
             <div className="pt-2">
               <button
                 type="button"
-                onClick={() => navigateTab('studio')}
+                onClick={enterWorkspace}
                 className="px-8 py-4 rounded-2xl bg-gradient-to-r from-amber-400 to-amber-500 hover:brightness-110 text-purple-950 font-black text-base shadow-xl transition-all cursor-pointer inline-flex items-center gap-2"
               >
                 <Wand2 className="w-5 h-5 text-purple-950 fill-purple-950" />

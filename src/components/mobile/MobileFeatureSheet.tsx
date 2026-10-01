@@ -65,6 +65,8 @@ export interface MobileFeatureSheetProps {
   setCanvasBackdrop: (backdrop: CanvasBackdrop) => void;
   showOverlay: boolean;
   setShowOverlay: (show: boolean) => void;
+  overlayOpacity: number;
+  setOverlayOpacity: (opacity: number) => void;
   hasSourceImage: boolean;
 
   isEn: boolean;
@@ -102,6 +104,8 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
   setCanvasBackdrop,
   showOverlay,
   setShowOverlay,
+  overlayOpacity,
+  setOverlayOpacity,
   hasSourceImage,
   isEn,
 }) => {
@@ -294,6 +298,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
             </button>
 
             {hasSourceImage && (
+              <div className="space-y-2">
               <button
                 onClick={() => setShowOverlay(!showOverlay)}
                 className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
@@ -314,6 +319,14 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                   {showOverlay && <span className="text-[9px]">✓</span>}
                 </div>
               </button>
+              {showOverlay && (
+                <label className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-900">
+                  <span className="shrink-0">{isEn ? 'Opacity' : '叠底透明度'}</span>
+                  <input type="range" min="10" max="70" step="5" value={Math.round(overlayOpacity * 100)} onChange={event => setOverlayOpacity(Number(event.target.value) / 100)} className="min-w-0 flex-1 accent-amber-500" aria-label={isEn ? 'Overlay opacity' : '原图叠底透明度'} />
+                  <span className="w-9 text-right">{Math.round(overlayOpacity * 100)}%</span>
+                </label>
+              )}
+              </div>
             )}
           </div>
         </div>

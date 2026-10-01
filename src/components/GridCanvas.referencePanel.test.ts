@@ -17,7 +17,7 @@ describe('original image reference panel header contract', () => {
     expect(headerStart).toBeGreaterThanOrEqual(0);
     expect(controlsStart).toBeGreaterThan(headerStart);
     expect(imageBodyStart).toBeGreaterThan(controlsStart);
-    expect(panel.match(/h-7 min-w-0 cursor-pointer/g)).toHaveLength(3);
+    expect(panel.match(/h-8 min-w-0 cursor-pointer/g)).toHaveLength(3);
     expect(panel).not.toContain('grid grid-cols-3 gap-1.5 p-2');
   });
 
@@ -29,8 +29,8 @@ describe('original image reference panel header contract', () => {
     expect(panel).toContain("aria-label={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}");
   });
 
-  it('uses low-saturation semantic colors and preserves the 300px mobile-safe panel width', () => {
-    expect(panel).toContain('w-[min(300px,calc(100vw-16px))] sm:w-[300px]');
+  it('uses low-saturation semantic colors and keeps the reference panel compact on mobile', () => {
+    expect(panel).toContain('w-[min(220px,calc(100vw-16px))] sm:w-[300px]');
     expect(panel).toContain('border-emerald-300 bg-emerald-50');
     expect(panel).toContain('border-rose-300 bg-rose-50');
     expect(panel).toContain('border-purple-300 bg-purple-100');
@@ -39,19 +39,19 @@ describe('original image reference panel header contract', () => {
   });
 
   it('keeps the reduced type, icon, and spacing scale without shrinking the upload hit area', () => {
-    expect(panel).toContain('h-3.5 w-3.5 shrink-0 text-purple-600');
-    expect(panel).toContain('text-[13px] font-extrabold">原图参考');
-    expect(panel.match(/h-\[13px\] w-\[13px\] shrink-0/g)).toHaveLength(4);
-    expect(panel.match(/h-7 min-w-0 cursor-pointer/g)).toHaveLength(3);
-    expect(panel.match(/px-0\.5 text-\[11px\] font-bold/g)).toHaveLength(3);
-    expect(panel).toContain('min-h-28 w-full');
+    expect(panel.match(/h-3 w-3 shrink-0 sm:h-3\.5 sm:w-3\.5/g)).toHaveLength(4);
+    expect(panel.match(/h-8 min-w-0 cursor-pointer/g)).toHaveLength(3);
+    expect(panel.match(/px-0\.5 text-\[10px\] font-bold/g)).toHaveLength(3);
+    expect(panel).toContain('min-h-24 w-full');
     expect(panel).toContain('mb-0.5 h-5 w-5 text-purple-600');
     expect(panel).toContain('text-[13px] font-extrabold text-purple-950">上传原图');
     expect(panel).toContain('text-[11px] font-medium text-purple-500">对照原图手动绘制');
+    expect(panel).toContain('max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px]');
+    expect(panel).toContain('flex min-h-24 w-full flex-col');
   });
 
   it('routes both reset entry points through the shared confirmation and canvas callback', () => {
-    expect(source.match(/onClick=\{\(\) => setIsCanvasResetDialogOpen\(true\)\}/g)).toHaveLength(2);
+    expect(source.match(/onClick=\{\(\) => setIsCanvasResetDialogOpen\(true\)\}/g)).toHaveLength(3);
     expect(source.match(/role="alertdialog"/g)).toHaveLength(1);
     expect(source.match(/onClick=\{confirmCanvasReset\}/g)).toHaveLength(1);
     expect(source).toContain('onResetCanvas?.();');

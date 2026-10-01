@@ -162,7 +162,7 @@ describe('Worker API client', () => {
     expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://stellabean-api.wwzj012.workers.dev/api/health'));
   });
 
-  it('uses the direct Worker API from a Pages preview deployment', async () => {
+  it('uses the same-origin Pages API from a Pages preview deployment', async () => {
     vi.stubEnv('VITE_WORKER_API_URL', 'https://stellabean.pages.dev');
     vi.stubGlobal('window', {
       location: {
@@ -174,7 +174,7 @@ describe('Worker API client', () => {
 
     await apiGet('/api/health');
 
-    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://stellabean-api.wwzj012.workers.dev/api/health'));
+    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://ff02bb0e.stellabean.pages.dev/api/health'));
   });
 
   it('clears token and dispatches unauthorized event on HTTP 401', async () => {

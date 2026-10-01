@@ -317,7 +317,59 @@ export function classifyImageColors(data: Uint8ClampedArray, width: number, heig
   const effectiveColorCount = significant.length;
   const boundaryGap = Math.abs(effectiveColorCount - 5.5);
   const coverage = significant.reduce((sum, cluster) => sum + cluster.count, 0) / Math.max(1, sampled);
+
+  // A cartoon/illustration is not necessarily a low-colour logo. It usually
+  // has large flat fills plus a relatively small number of high-contrast
+  // contour transitions. The old colour-count-only classifier sent these
+  // images down the photo path, where averaging and dithering create the
+  // blurred double edges visible in character artwork.
+  let flatSamples = 0;
+  let strongEdgeSamples = 0;
+  let darkOutlineSamples = 0;
+  let analysedSamples = 0;
+  if (width >= 12 && height >= 12) {
+    for (let y = 0; y < height; y += stride) {
+      for (let x = 0; x < width; x += stride) {
+        const index = y * width + x;
+        const offset = index * 4;
+        if (data[offset + 3] < normalizedAlphaCutoff) continue;
+        const lab = rgbToLab([data[offset], data[offset + 1], data[offset + 2]]);
+        let neighbours = 0;
+        let maximumDifference = 0;
+        let maximumLightnessDifference = 0;
+        for (const [nextX, nextY] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+          if (nextX < 0 || nextX >= width || nextY < 0 || nextY >= height) continue;
+          const nextOffset = (nextY * width + nextX) * 4;
+          if (data[nextOffset + 3] < normalizedAlphaCutoff) continue;
+          const nextLab = rgbToLab([data[nextOffset], data[nextOffset + 1], data[nextOffset + 2]]);
+          neighbours += 1;
+          maximumDifference = Math.max(maximumDifference, deltaE76(lab, nextLab));
+          maximumLightnessDifference = Math.max(maximumLightnessDifference, Math.abs(lab[0] - nextLab[0]));
+        }
+        if (neighbours === 0) continue;
+        analysedSamples += 1;
+        if (maximumDifference <= 8) flatSamples += 1;
+        if (maximumDifference >= 22) strongEdgeSamples += 1;
+        if (lab[0] <= 30 && maximumLightnessDifference >= 28 && maximumDifference >= 24) darkOutlineSamples += 1;
+      }
+    }
+  }
+  const flatRatio = flatSamples / Math.max(1, analysedSamples);
+  const strongEdgeRatio = strongEdgeSamples / Math.max(1, analysedSamples);
+  const darkOutlineRatio = darkOutlineSamples / Math.max(1, analysedSamples);
+  const cartoonDetected = analysedSamples > 80
+    && effectiveColorCount > 5
+    && flatRatio >= 0.78
+    && strongEdgeRatio >= 0.025
+    && darkOutlineRatio >= 0.006;
   const confidence = Math.min(1, 0.5 + Math.min(0.4, boundaryGap * 0.12) + Math.min(0.1, coverage * 0.1));
+  if (cartoonDetected) {
+    return {
+      pipeline: 'cartoon',
+      effectiveColorCount,
+      confidence: Math.min(1, confidence + 0.08),
+    };
+  }
   return { pipeline: effectiveColorCount <= 5 ? 'logo' : 'photo', effectiveColorCount, confidence };
 }
 
@@ -864,6 +916,357 @@ function repairSingleCellGaps(grid: (string | null)[][], protectedEmpty: Uint8Ar
   }
 }
 
+function cleanCartoonGrid(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  width: number,
+  palette: PaletteEntry[],
+  matches: (ColorMatchDiagnostic | null)[][],
+  regionMasks: RegionMasks,
+  algorithm: 'cie76' | 'ciede2000',
+): void {
+  const height = grid.length;
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  const isDarkOutline = (id: string | null): boolean => {
+    if (!id) return false;
+    const entry = paletteById.get(id);
+    return Boolean(entry && entry.lab[0] <= 34);
+  };
+  const offsets: ReadonlyArray<readonly [number, number]> = [
+    [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1],
+  ];
+  const replace = (x: number, y: number, replacementId: string): void => {
+    if (grid[y][x] === replacementId) return;
+    grid[y][x] = replacementId;
+    const sourceLab = sourceLabs[y * width + x];
+    const replacement = paletteById.get(replacementId);
+    if (sourceLab && replacement) {
+      matches[y][x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
+    }
+  };
+
+  // Two majority passes flatten large smooth fills without crossing strong
+  // source edges. Dark cells are never candidates here, so a black contour
+  // remains intact even when it is only one bead wide.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const updates: Array<{ x: number; y: number; replacementId: string }> = [];
+    for (let y = 1; y + 1 < height; y += 1) {
+      for (let x = 1; x + 1 < width; x += 1) {
+        const index = y * width + x;
+        const currentId = grid[y][x];
+        const currentEntry = currentId ? paletteById.get(currentId) : null;
+        const sourceLab = sourceLabs[index];
+        if (!currentId || !currentEntry || !sourceLab || regionMasks.regionType[index] !== 0 || isDarkOutline(currentId)) continue;
+
+        const counts = new Map<string, number>();
+        for (const [ox, oy] of offsets) {
+          const nx = x + ox;
+          const ny = y + oy;
+          const neighbourIndex = ny * width + nx;
+          const neighbourId = grid[ny][nx];
+          if (!neighbourId || isDarkOutline(neighbourId) || regionMasks.regionType[neighbourIndex] === 2) continue;
+          counts.set(neighbourId, (counts.get(neighbourId) ?? 0) + 1);
+        }
+        const dominant = [...counts.entries()].sort((first, second) => second[1] - first[1])[0];
+        if (!dominant || dominant[0] === currentId || dominant[1] < 5) continue;
+        const dominantEntry = paletteById.get(dominant[0]);
+        if (!dominantEntry || deltaE2000(sourceLab, dominantEntry.lab) > 30) continue;
+        updates.push({ x, y, replacementId: dominant[0] });
+      }
+    }
+    for (const update of updates) replace(update.x, update.y, update.replacementId);
+  }
+
+  // Remove small connected islands of a non-outline colour when their border
+  // is overwhelmingly one smooth fill. This catches 1–3 cell colour specks
+  // that a single majority pass cannot remove, while leaving facial features
+  // and black linework protected by regionType === 2 / dark-outline checks.
+  const visited = new Uint8Array(width * height);
+  const queue: number[] = [];
+  for (let y = 1; y + 1 < height; y += 1) {
+    for (let x = 1; x + 1 < width; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || !grid[y][x] || regionMasks.regionType[start] !== 0 || isDarkOutline(grid[y][x])) continue;
+      const colorId = grid[y][x]!;
+      const component: number[] = [];
+      const boundary = new Map<string, number>();
+      queue.length = 0;
+      queue.push(start);
+      visited[start] = 1;
+      for (let cursor = 0; cursor < queue.length; cursor += 1) {
+        const index = queue[cursor];
+        component.push(index);
+        const cx = index % width;
+        const cy = Math.floor(index / width);
+        for (const [ox, oy] of offsets) {
+          const nx = cx + ox;
+          const ny = cy + oy;
+          if (nx <= 0 || nx + 1 >= width || ny <= 0 || ny + 1 >= height) continue;
+          const nextIndex = ny * width + nx;
+          const nextId = grid[ny][nx];
+          if (nextId === colorId && !visited[nextIndex] && regionMasks.regionType[nextIndex] === 0) {
+            visited[nextIndex] = 1;
+            queue.push(nextIndex);
+          } else if (nextId && nextId !== colorId && !isDarkOutline(nextId) && regionMasks.regionType[nextIndex] === 0) {
+            boundary.set(nextId, (boundary.get(nextId) ?? 0) + 1);
+          }
+        }
+      }
+      if (component.length > 3 || boundary.size === 0) continue;
+      const dominant = [...boundary.entries()].sort((first, second) => second[1] - first[1])[0];
+      const dominantEntry = dominant ? paletteById.get(dominant[0]) : null;
+      const sourceClose = component.every((index) => {
+        const sourceLab = sourceLabs[index];
+        return Boolean(sourceLab && dominantEntry && deltaE2000(sourceLab, dominantEntry.lab) <= 32);
+      });
+      const boundaryTotal = [...boundary.values()].reduce((sum, count) => sum + count, 0);
+      if (!dominant || !dominantEntry || !sourceClose || dominant[1] < Math.ceil(boundaryTotal * 0.6)) continue;
+      for (const index of component) replace(index % width, Math.floor(index / width), dominant[0]);
+    }
+  }
+
+  // A dark pixel inside a smooth light fill is a false speck only when its
+  // source sample is not actually dark. This final guard removes such specks
+  // but cannot delete a genuine black outline or facial feature.
+  for (let y = 1; y + 1 < height; y += 1) {
+    for (let x = 1; x + 1 < width; x += 1) {
+      const index = y * width + x;
+      const currentId = grid[y][x];
+      const sourceLab = sourceLabs[index];
+      if (!currentId || !sourceLab || !isDarkOutline(currentId) || sourceLab[0] <= 42 || regionMasks.regionType[index] !== 0) continue;
+      const surrounding = new Map<string, number>();
+      for (const [ox, oy] of offsets) {
+        const neighbourId = grid[y + oy][x + ox];
+        if (neighbourId && !isDarkOutline(neighbourId)) surrounding.set(neighbourId, (surrounding.get(neighbourId) ?? 0) + 1);
+      }
+      const dominant = [...surrounding.entries()].sort((first, second) => second[1] - first[1])[0];
+      const dominantEntry = dominant ? paletteById.get(dominant[0]) : null;
+      if (dominant && dominant[1] >= 5 && dominantEntry && deltaE2000(sourceLab, dominantEntry.lab) <= 32) replace(x, y, dominant[0]);
+    }
+  }
+}
+
+function normalizeCartoonOuterOutline(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  protectedEmpty: Uint8Array,
+  width: number,
+  palette: PaletteEntry[],
+  matches: (ColorMatchDiagnostic | null)[][],
+  algorithm: 'cie76' | 'ciede2000',
+): void {
+  const height = grid.length;
+  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
+  const dark = (id: string | null): boolean => {
+    const entry = id ? paletteById.get(id) : null;
+    return Boolean(entry && entry.lab[0] <= 34);
+  };
+  const offsets: ReadonlyArray<readonly [number, number]> = [
+    [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1],
+  ];
+  const boundaryDark = new Uint8Array(width * height);
+  const outerConnected = new Uint8Array(width * height);
+  const queue: number[] = [];
+
+  const touchesRemovedBackground = (x: number, y: number): boolean => {
+    for (const [ox, oy] of offsets) {
+      const nx = x + ox;
+      const ny = y + oy;
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) return true;
+      const index = ny * width + nx;
+      if (grid[ny][nx] === null && protectedEmpty[index]) return true;
+    }
+    return false;
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (dark(grid[y][x]) && touchesRemovedBackground(x, y)) boundaryDark[index] = 1;
+    }
+  }
+
+  // Trace only the dark component that actually belongs to the subject's
+  // outside boundary. Internal eyes/mouth lines are not removed unless they
+  // are mistakenly fused into a thick outer contour.
+  for (let start = 0; start < boundaryDark.length; start += 1) {
+    if (!boundaryDark[start] || outerConnected[start]) continue;
+    queue.length = 0;
+    queue.push(start);
+    outerConnected[start] = 1;
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      const index = queue[cursor];
+      const x = index % width;
+      const y = Math.floor(index / width);
+      for (const [ox, oy] of offsets) {
+        const nx = x + ox;
+        const ny = y + oy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        const next = ny * width + nx;
+        if (dark(grid[ny][nx]) && !outerConnected[next]) {
+          outerConnected[next] = 1;
+          queue.push(next);
+        }
+      }
+    }
+  }
+
+  const fillPalette = palette.filter((entry) => entry.lab[0] > 34);
+  const replaceWithSourceColour = (index: number): void => {
+    const sourceLab = sourceLabs[index];
+    if (!sourceLab || fillPalette.length === 0) return;
+    const ranked = rankPaletteMatches(sourceLab, fillPalette, algorithm);
+    const replacement = ranked[0]?.entry;
+    if (!replacement) return;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    grid[y][x] = replacement.color.id;
+    matches[y][x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
+  };
+
+  // Thin only dense interior layers. Boundary-touching pixels are retained;
+  // interior pixels in a 2x2/3x3 dark block are removed when the source cell
+  // itself is not dark. This collapses generated double lines while retaining
+  // genuine black source pixels and internal facial strokes.
+  for (let pass = 0; pass < 2; pass += 1) {
+    const remove: number[] = [];
+    for (let index = 0; index < outerConnected.length; index += 1) {
+      if (!outerConnected[index] || boundaryDark[index] || !dark(grid[Math.floor(index / width)][index % width])) continue;
+      const x = index % width;
+      const y = Math.floor(index / width);
+      const sourceLab = sourceLabs[index];
+      let darkNeighbours = 0;
+      let boundaryNeighbours = 0;
+      for (const [ox, oy] of offsets) {
+        const nx = x + ox;
+        const ny = y + oy;
+        if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+        const next = ny * width + nx;
+        if (dark(grid[ny][nx])) darkNeighbours += 1;
+        if (boundaryDark[next]) boundaryNeighbours += 1;
+      }
+      if (sourceLab && sourceLab[0] > 42 && darkNeighbours >= 3 && boundaryNeighbours >= 1) remove.push(index);
+    }
+    for (const index of remove) replaceWithSourceColour(index);
+  }
+}
+
+/**
+ * Add a connected, palette-backed outline to artwork when the user opts in. The outline
+ * is built from the darker side of a strong boundary, then gaps of one cell
+ * are bridged only when they are supported by the same local edge. This avoids
+ * the dotted black specks produced by independently recolouring every light
+ * cell beside a contrast change.
+ */
+function applyOutlineProtection(
+  grid: (string | null)[][],
+  sourceLabs: Array<Lab | null>,
+  protectedEmpty: Uint8Array,
+  width: number,
+  height: number,
+  palette: PaletteEntry[],
+  matches: (ColorMatchDiagnostic | null)[][],
+  algorithm: 'cie76' | 'ciede2000',
+): void {
+  if (width === 0 || height === 0 || palette.length === 0) return;
+  const outline = [...palette].sort((first, second) => (first.lab[0] - second.lab[0])
+    || (first.chroma - second.chroma))[0];
+  if (!outline) return;
+
+  const candidate = new Uint8Array(width * height);
+  const edgeSignal = new Uint8Array(width * height);
+  const edgeEvidence = new Uint8Array(width * height);
+  const neighbours = (x: number, y: number): Array<[number, number]> => {
+    const result: Array<[number, number]> = [];
+    if (x > 0) result.push([x - 1, y]);
+    if (x + 1 < width) result.push([x + 1, y]);
+    if (y > 0) result.push([x, y - 1]);
+    if (y + 1 < height) result.push([x, y + 1]);
+    return result;
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      const currentLab = sourceLabs[index];
+      if (!grid[y][x] || !currentLab || protectedEmpty[index] || currentLab[0] <= 32) continue;
+
+      let boundaryScore = 0;
+      let touchesSubjectEdge = false;
+      for (const [nx, ny] of neighbours(x, y)) {
+        const neighbourIndex = ny * width + nx;
+        const neighbourLab = sourceLabs[neighbourIndex];
+        if (!grid[ny][nx]) {
+          if (protectedEmpty[neighbourIndex]) touchesSubjectEdge = true;
+          continue;
+        }
+        if (!neighbourLab) continue;
+        const difference = deltaE2000(currentLab, neighbourLab);
+        const darkerSide = currentLab[0] <= neighbourLab[0] - 8;
+        const stronglyDifferent = difference >= 20 && (darkerSide || currentLab[0] <= 48);
+        if (difference >= 20) {
+          edgeEvidence[index] = 1;
+          edgeEvidence[neighbourIndex] = 1;
+        }
+        if (stronglyDifferent) boundaryScore = Math.max(boundaryScore, difference);
+      }
+
+      // Prefer the darker side of an internal boundary. It produces one
+      // readable contour instead of blackening both sides of a colour change.
+      if (touchesSubjectEdge) edgeEvidence[index] = 1;
+      if (boundaryScore >= 20 || touchesSubjectEdge) {
+        candidate[index] = 1;
+        edgeSignal[index] = 1;
+      }
+    }
+  }
+
+  // Remove isolated detections and bridge a single missing cell between two
+  // aligned detections. These two small topology passes are what make the
+  // result read as a continuous line rather than scattered dots.
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (!candidate[index]) continue;
+      let nearby = 0;
+      for (let oy = -1; oy <= 1; oy += 1) {
+        for (let ox = -1; ox <= 1; ox += 1) {
+          if (ox === 0 && oy === 0) continue;
+          const nx = x + ox;
+          const ny = y + oy;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height && candidate[ny * width + nx]) nearby += 1;
+        }
+      }
+      if (nearby === 0) candidate[index] = 0;
+    }
+  }
+
+  const bridge = new Uint8Array(candidate);
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (candidate[index] || edgeSignal[index] || !edgeEvidence[index] || protectedEmpty[index] || !grid[y][x]) continue;
+      const horizontal = x > 0 && x + 1 < width && candidate[index - 1] && candidate[index + 1];
+      const vertical = y > 0 && y + 1 < height && candidate[index - width] && candidate[index + width];
+      const diagonal = x > 0 && x + 1 < width && y > 0 && y + 1 < height
+        && ((candidate[index - width - 1] && candidate[index + width + 1])
+          || (candidate[index - width + 1] && candidate[index + width - 1]));
+      if (horizontal || vertical || diagonal) bridge[index] = 1;
+    }
+  }
+
+  const replacement = outline.color.id;
+  for (let index = 0; index < bridge.length; index += 1) {
+    if (!bridge[index]) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (grid[y][x] === replacement) continue;
+    grid[y][x] = replacement;
+    const sourceLab = sourceLabs[index];
+    if (sourceLab) matches[y][x] = diagnosticForReplacement(sourceLab, outline, palette, algorithm);
+  }
+}
+
 function emptyResult(): ConversionResult {
   return {
     grid: [],
@@ -1009,27 +1412,13 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       const dominantCandidates = eligibleDominant.length > 0 ? eligibleDominant : dominantEntries;
       const logoEntry = dominantCandidates
         .sort((first, second) => second.weight - first.weight)[0];
-      const rgb: Rgb = pipeline === 'logo'
+      // Cartoon cells use their dominant source colour instead of averaging
+      // adjacent fills. Averaging is appropriate for photographs, but it
+      // creates muddy intermediate colours and halo-like double contours in
+      // flat character art.
+      const rgb: Rgb = pipeline === 'logo' || pipeline === 'cartoon'
         ? logoEntry?.rgb ?? [0, 0, 0]
-        : pipeline === 'cartoon'
-          ? (() => {
-            let cartoonWeight = 0;
-            let cartoonR = 0;
-            let cartoonG = 0;
-            let cartoonB = 0;
-            for (const entry of dominantCandidates) {
-              cartoonWeight += entry.weight;
-              cartoonR += srgbToLinear(entry.rgb[0]) * entry.weight;
-              cartoonG += srgbToLinear(entry.rgb[1]) * entry.weight;
-              cartoonB += srgbToLinear(entry.rgb[2]) * entry.weight;
-            }
-            return [
-              linearToSrgb(cartoonR / Math.max(cartoonWeight, 0.00001)),
-              linearToSrgb(cartoonG / Math.max(cartoonWeight, 0.00001)),
-              linearToSrgb(cartoonB / Math.max(cartoonWeight, 0.00001)),
-            ];
-          })()
-          : [
+        : [
           linearToSrgb(linearR / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearG / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearB / Math.max(weightedValid, 0.00001)),
@@ -1043,7 +1432,16 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
 
   const matchAlgorithm: 'cie76' | 'ciede2000' = pipeline === 'logo' ? 'cie76' : 'ciede2000';
   const selectedPalette = selectPalette(targetPixels, activePalette, settings.colorLimit, matchAlgorithm);
-  const mappingPalette = selectedPalette.length > 0 ? selectedPalette : activePalette;
+  const mappingPalette = selectedPalette.length > 0 ? [...selectedPalette] : [...activePalette];
+  // Outline protection needs a dark bead even when the source image contains
+  // no black pixels. Keep the normal palette-limit behaviour when a limit is
+  // explicitly requested; the unrestricted default reserves the darkest
+  // enabled bead for the opt-in outline pass.
+  if (settings.outlineBoost && normalizeColorLimit(settings.colorLimit) === 0) {
+    const darkest = [...activePalette].sort((first, second) => (first.lab[0] - second.lab[0])
+      || (first.chroma - second.chroma))[0];
+    if (darkest && !mappingPalette.some((entry) => entry.color.id === darkest.color.id)) mappingPalette.push(darkest);
+  }
   // targetPixels remains immutable so diagnostics always represent the source grid sample.
   const sourceLabs = targetPixels.map((pixel) => pixel.alpha === 0 ? null : rgbToLab([pixel.r, pixel.g, pixel.b]));
   const gridRegions = classifyGridRegions(sourceLabs, settings.width, settings.height);
@@ -1116,7 +1514,45 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     );
   }
 
+  if (pipeline === 'cartoon') {
+    cleanCartoonGrid(
+      grid,
+      sourceLabs,
+      settings.width,
+      mappingPalette,
+      matches,
+      gridRegions,
+      matchAlgorithm,
+    );
+  }
+
+  if (settings.outlineBoost) {
+    applyOutlineProtection(
+      grid,
+      sourceLabs,
+      protectedEmpty,
+      settings.width,
+      settings.height,
+      mappingPalette,
+      matches,
+      matchAlgorithm,
+    );
+  }
+
+  if (pipeline === 'cartoon' && settings.outlineBoost) {
+    normalizeCartoonOuterOutline(
+      grid,
+      sourceLabs,
+      protectedEmpty,
+      settings.width,
+      mappingPalette,
+      matches,
+      matchAlgorithm,
+    );
+  }
+
   repairSingleCellGaps(grid, protectedEmpty, settings.width, settings.height);
+  synchronizeGridDiagnostics(grid, sourceLabs, matches, mappingPalette, settings.width, settings.height, matchAlgorithm);
 
   const summary = summarizeMatches(matches, mappingPalette);
   return {

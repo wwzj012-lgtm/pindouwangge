@@ -42,13 +42,14 @@ import { MobileFeatureSheet } from './MobileFeatureSheet';
 import { MobileBottomNav } from './MobileBottomNav';
 
 export interface MobileWorkspaceProps {
+  completionSummary?: React.ReactNode;
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
   conversionDiagnostics: any;
   handleReconvert: () => void;
-  sourceImage: string | null;
+  sourceImage: HTMLImageElement | null;
   setIsStudioModalOpen: (open: boolean) => void;
 
   activeTool: ToolType;
@@ -79,6 +80,8 @@ export interface MobileWorkspaceProps {
   setCanvasBackdrop: (backdrop: CanvasBackdrop) => void;
   showOverlay: boolean;
   setShowOverlay: (show: boolean) => void;
+  overlayOpacity: number;
+  setOverlayOpacity: (opacity: number) => void;
 
   highlightColorIds: string[];
   setHighlightColorIds: (ids: string[]) => void;
@@ -119,6 +122,7 @@ export interface MobileWorkspaceProps {
 export type MobileTab = 'canvas' | 'settings' | 'stats';
 
 export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
+  completionSummary,
   grid,
   paletteMap,
   settings,
@@ -154,6 +158,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   setCanvasBackdrop,
   showOverlay,
   setShowOverlay,
+  overlayOpacity,
+  setOverlayOpacity,
   highlightColorIds,
   setHighlightColorIds,
   handleToggleHighlightColorId,
@@ -282,7 +288,9 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             canvasBackdrop={canvasBackdrop}
             symmetryMode={symmetryMode}
             sourceImage={sourceImage}
+            keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
+            overlayOpacity={overlayOpacity}
             zoom={zoom}
             setZoom={setZoom}
             onCellClick={handleCellClick}
@@ -369,6 +377,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             </button>
           </div>
           <div className="p-3 pb-24">
+            {completionSummary}
             <StatsPanel
               grid={grid}
               paletteMap={paletteMap}
@@ -646,6 +655,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         setCanvasBackdrop={setCanvasBackdrop}
         showOverlay={showOverlay}
         setShowOverlay={setShowOverlay}
+        overlayOpacity={overlayOpacity}
+        setOverlayOpacity={setOverlayOpacity}
         hasSourceImage={sourceImage !== null}
         isEn={isEn}
       />

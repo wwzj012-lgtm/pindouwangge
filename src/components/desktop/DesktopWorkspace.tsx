@@ -8,6 +8,7 @@ import type { ConversionDiagnostics } from '../../utils/imagePipeline';
 import { FolderOpen, Sparkles } from 'lucide-react';
 
 export interface DesktopWorkspaceProps {
+  completionSummary?: React.ReactNode;
   // Canvas & Grid State
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -15,7 +16,7 @@ export interface DesktopWorkspaceProps {
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
   conversionDiagnostics: any;
   handleReconvert: () => void;
-  sourceImage: string | null;
+  sourceImage: HTMLImageElement | null;
   setIsStudioModalOpen: (open: boolean) => void;
 
   // Tools & Interaction
@@ -48,6 +49,8 @@ export interface DesktopWorkspaceProps {
   setCanvasBackdrop: (backdrop: CanvasBackdrop) => void;
   showOverlay: boolean;
   setShowOverlay: (show: boolean) => void;
+  overlayOpacity: number;
+  setOverlayOpacity: (opacity: number) => void;
 
   // Highlighting & Stats
   highlightColorIds: string[];
@@ -79,6 +82,7 @@ export interface DesktopWorkspaceProps {
 }
 
 export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
+  completionSummary,
   grid,
   paletteMap,
   settings,
@@ -114,6 +118,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   setCanvasBackdrop,
   showOverlay,
   setShowOverlay,
+  overlayOpacity,
+  setOverlayOpacity,
   highlightColorIds,
   setHighlightColorIds,
   handleToggleHighlightColorId,
@@ -173,7 +179,9 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
           onClearOuterBackground={handleClearOuterBackground}
           hasImage={sourceImage !== null}
           showOverlay={showOverlay}
+          overlayOpacity={overlayOpacity}
           setShowOverlay={setShowOverlay}
+          setOverlayOpacity={setOverlayOpacity}
           onSavePattern={openSaveNameDialog}
           isSavingPattern={isSavingPattern}
           onOpenExport={openExportModal}
@@ -226,7 +234,9 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             canvasBackdrop={canvasBackdrop}
             symmetryMode={symmetryMode}
             sourceImage={sourceImage}
+            keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
+            overlayOpacity={overlayOpacity}
             zoom={zoom}
             setZoom={setZoom}
             onCellClick={handleCellClick}
@@ -259,6 +269,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
 
         {/* Right Sidebar: Color Palette & Quantity Statistics */}
         <aside className="h-full z-20 shrink-0 border-l border-purple-200/80 bg-white/90 shadow-sm flex flex-col">
+          {completionSummary}
           <StatsPanel
             grid={grid}
             paletteMap={paletteMap}

@@ -42,11 +42,13 @@ interface QuantizationProfile {
 function quantizationProfile(mode: Exclude<PreprocessQuantizationMode, 'none'>): QuantizationProfile {
   if (mode === 'cartoon') {
     return {
-      clusters: 10,
-      centroidDetailWeight: 0.7,
-      mergeBase: 0.76,
-      detailProtection: 0.7,
-      strengthScale: 1.27,
+      // Keep broad fills stable, but retain contour colours and small facial
+      // features instead of blending them into a second muddy edge.
+      clusters: 16,
+      centroidDetailWeight: 0.92,
+      mergeBase: 0.48,
+      detailProtection: 1.0,
+      strengthScale: 0.78,
     };
   }
   if (mode === 'logo') {

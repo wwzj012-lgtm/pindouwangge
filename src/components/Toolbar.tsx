@@ -61,6 +61,8 @@ interface ToolbarProps {
   hasImage: boolean;
   showOverlay: boolean;
   setShowOverlay: (show: boolean) => void;
+  overlayOpacity: number;
+  setOverlayOpacity: (opacity: number) => void;
   onSavePattern: () => void;
   isSavingPattern: boolean;
   onOpenExport: () => void;
@@ -96,6 +98,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   hasImage,
   showOverlay,
   setShowOverlay,
+  overlayOpacity,
+  setOverlayOpacity,
   onSavePattern,
   isSavingPattern,
   onOpenExport,
@@ -392,6 +396,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Overlays: Symbols & Overlay photo */}
         <div className="flex items-center gap-1">
           {hasImage && (
+            <div className="flex items-center gap-1">
             <button
               onClick={() => setShowOverlay(!showOverlay)}
               className={`px-2 py-1.5 rounded-xl border transition-all flex items-center gap-1 cursor-pointer font-bold text-[11px] ${
@@ -404,6 +409,13 @@ export const Toolbar: React.FC<ToolbarProps> = ({
               <Eye className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">{isEn ? 'Overlay' : '原图叠影'}</span>
             </button>
+            {showOverlay && (
+              <label className="hidden md:flex items-center gap-1 text-[10px] text-purple-700" title={isEn ? 'Overlay opacity' : '原图叠底透明度'}>
+                <span>{isEn ? 'Opacity' : '透明度'}</span>
+                <input type="range" min="10" max="70" step="5" value={Math.round(overlayOpacity * 100)} onChange={event => setOverlayOpacity(Number(event.target.value) / 100)} className="w-16 accent-amber-500" aria-label={isEn ? 'Overlay opacity' : '原图叠底透明度'} />
+              </label>
+            )}
+            </div>
           )}
 
           <button

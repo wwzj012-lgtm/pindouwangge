@@ -85,6 +85,86 @@ describe('pipeline classification and palette matching', () => {
     expect(classifyImageColors(six, 6, 1).pipeline).toBe('photo');
   });
 
+  it('recognizes a large flat-color illustration with dark contours as cartoon', () => {
+    const data = makePixels(64, 64, [245, 164, 72]);
+    const fills: Array<[number, number, number]> = [[242, 242, 242], [210, 55, 70], [70, 140, 220], [240, 205, 60], [70, 175, 110], [180, 90, 190]];
+    for (let y = 8; y < 56; y += 1) {
+      for (let x = 8; x < 56; x += 1) {
+        const outline = x === 8 || x === 55 || y === 8 || y === 55;
+        const accent = y >= 24 && y < 28 && x >= 14 && x < 50;
+        const fill = accent ? fills[Math.floor((x - 14) / 6) % fills.length] : fills[0];
+        setPixel(data, 64, x, y, outline ? [12, 12, 16, 255] : [...fill, 255]);
+      }
+    }
+    expect(classifyImageColors(data, 64, 64).pipeline).toBe('cartoon');
+  });
+
+  it('flattens a small cartoon colour island without touching the explicit photo path', () => {
+    const flatPalette: BeadColor[] = [
+      { id: 'outline', code: 'K', name: 'Outline', hex: '#111111', rgb: [17, 17, 17], brand: 'MARD' },
+      { id: 'skin', code: 'S', name: 'Skin', hex: '#DC3C46', rgb: [220, 60, 70], brand: 'MARD' },
+      { id: 'skin-light', code: 'SL', name: 'Skin light', hex: '#E64A54', rgb: [230, 74, 84], brand: 'MARD' },
+      { id: 'white-fill', code: 'W', name: 'White', hex: '#FFFFFF', rgb: [255, 255, 255], brand: 'MARD' },
+    ];
+    const data = makePixels(9, 9, [220, 60, 70]);
+    setPixel(data, 9, 4, 4, [230, 74, 84, 255]);
+    const result = convertImageDataToGrid(data, 9, 9, {
+      ...baseSettings,
+      width: 9,
+      height: 9,
+      pipelineOverride: 'cartoon',
+      dither: 'floyd',
+      kmeansClustering: false,
+      quantizationStrength: 0,
+      outlineBoost: false,
+    }, flatPalette);
+
+    expect(new Set(result.grid.flat())).toEqual(new Set(['skin']));
+  });
+
+  it('never applies Floyd-Steinberg dithering to cartoon mode', () => {
+    const data = makePixels(8, 8, [220, 60, 70]);
+    for (let y = 2; y < 6; y += 1) {
+      for (let x = 2; x < 6; x += 1) setPixel(data, 8, x, y, [245, 245, 245, 255]);
+    }
+    const shared = {
+      ...baseSettings,
+      width: 8,
+      height: 8,
+      pipelineOverride: 'cartoon' as const,
+      kmeansClustering: false,
+      quantizationStrength: 0,
+    };
+    const clean = convertImageDataToGrid(data, 8, 8, { ...shared, dither: 'none' }, palette);
+    const requestedDither = convertImageDataToGrid(data, 8, 8, { ...shared, dither: 'floyd', ditherStrength: 1 }, palette);
+    expect(requestedDither.grid).toEqual(clean.grid);
+  });
+
+  it('keeps a cartoon outer contour single-layer when background is transparent', () => {
+    const data = makePixels(9, 9, [0, 0, 0]);
+    for (let index = 0; index < 81; index += 1) data[index * 4 + 3] = 0;
+    for (let y = 2; y <= 6; y += 1) {
+      for (let x = 2; x <= 6; x += 1) {
+        const isContour = x === 2 || x === 6 || y === 2 || y === 6;
+        setPixel(data, 9, x, y, isContour ? [0, 0, 0, 255] : [220, 60, 70, 255]);
+      }
+    }
+    const result = convertImageDataToGrid(data, 9, 9, {
+      ...baseSettings,
+      width: 9,
+      height: 9,
+      pipelineOverride: 'cartoon',
+      outlineBoost: true,
+      backgroundRemovalEnabled: false,
+      kmeansClustering: false,
+      quantizationStrength: 0,
+    }, palette);
+
+    expect(result.grid[2][2]).toBe('black');
+    expect(result.grid[3][3]).toBe('red');
+    expect(result.grid[1][1]).toBeNull();
+  });
+
   it('maps each palette RGB back to its own bead id', () => {
     for (const color of palette) {
       const data = makePixels(1, 1, color.rgb);
@@ -590,6 +670,56 @@ describe('image adjustment and lightness regression', () => {
 
     expect(protectedResult.diagnostics.matches[1][1]?.sourceLab[0]).toBeCloseTo(normal.diagnostics.matches[1][1]?.sourceLab[0] ?? 0, 6);
     expect(protectedResult.diagnostics.matches[1][3]?.sourceLab[0]).toBeLessThan(normal.diagnostics.matches[1][3]?.sourceLab[0] ?? 0);
+  });
+
+  it('can generate a dark silhouette border around a transparent subject when enabled', () => {
+    const data = makePixels(5, 5, [255, 255, 255]);
+    for (let y = 0; y < 5; y += 1) {
+      for (let x = 0; x < 5; x += 1) {
+        if (x === 0 || y === 0 || x === 4 || y === 4) setPixel(data, 5, x, y, [255, 255, 255, 0]);
+        else setPixel(data, 5, x, y, [240, 50, 50, 255]);
+      }
+    }
+
+    const normal = convertImageDataToGrid(data, 5, 5, {
+      ...noBackgroundSettings,
+      width: 5,
+      height: 5,
+      pipelineOverride: 'logo',
+      outlineBoost: false,
+    }, palette);
+    const protectedResult = convertImageDataToGrid(data, 5, 5, {
+      ...noBackgroundSettings,
+      width: 5,
+      height: 5,
+      pipelineOverride: 'logo',
+      outlineBoost: true,
+    }, palette);
+
+    expect(normal.grid[0][0]).toBeNull();
+    expect(normal.grid[1][1]).toBe('red');
+    expect(protectedResult.grid[1][1]).toBe('black');
+    expect(protectedResult.grid[2][2]).toBe('red');
+    expect(protectedResult.grid[1][2]).toBe('black');
+  });
+
+  it('protects a strong internal colour join on the lighter side', () => {
+    const data = makePixels(6, 3, [255, 255, 255]);
+    for (let y = 0; y < 3; y += 1) {
+      for (let x = 0; x < 3; x += 1) setPixel(data, 6, x, y, [220, 40, 40, 255]);
+    }
+
+    const result = convertImageDataToGrid(data, 6, 3, {
+      ...noBackgroundSettings,
+      width: 6,
+      height: 3,
+      pipelineOverride: 'logo',
+      outlineBoost: true,
+    }, palette);
+
+    expect(result.grid[1][2]).toBe('black');
+    expect(result.grid[1][3]).toBe('white');
+    expect(result.grid[1][4]).toBe('white');
   });
 
   it('does not significantly darken a bright photo mapped to an exact available palette', () => {

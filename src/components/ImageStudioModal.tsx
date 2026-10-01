@@ -190,16 +190,15 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
         if (cellId) {
           const bead = paletteMap.get(cellId);
+          // The conversion preview is a pixel-art sheet, not a physical
+          // beadboard preview: every grid cell must remain a connected square
+          // block so outlines and continuous lines can be judged correctly.
           ctx.fillStyle = bead ? bead.hex : '#CCCCCC';
-          if (cellSize >= 4) {
-            ctx.beginPath();
-            ctx.arc(px + cellSize / 2, py + cellSize / 2, (cellSize / 2) * 0.9, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#00000033';
+          ctx.fillRect(px, py, cellSize, cellSize);
+          if (cellSize >= 5) {
+            ctx.strokeStyle = '#0F172A33';
             ctx.lineWidth = 0.5;
-            ctx.stroke();
-          } else {
-            ctx.fillRect(px, py, cellSize, cellSize);
+            ctx.strokeRect(px + 0.25, py + 0.25, cellSize - 0.5, cellSize - 0.5);
           }
         } else {
           // Transparent checker pattern
@@ -347,7 +346,6 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         ...s,
         pipelineOverride: 'auto',
         sharpening: 40,
-        outlineBoost: true,
         contrast: 10,
         saturation: 15,
         dither: 'none',
@@ -357,7 +355,6 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         ...s,
         pipelineOverride: 'logo',
         sharpening: 25,
-        outlineBoost: true,
         contrast: 4,
         saturation: 10,
         dither: 'none',
@@ -378,7 +375,6 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         ...s,
         pipelineOverride: 'logo',
         sharpening: 90,
-        outlineBoost: true,
         contrast: 30,
         dither: 'none',
       }));
@@ -389,7 +385,6 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         contrast: 0,
         saturation: 0,
         sharpening: 0,
-        outlineBoost: false,
         chromaKeyColor: null,
         backgroundRemovalEnabled: false,
         pipelineOverride: 'auto',
@@ -430,7 +425,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 backdrop-blur-sm p-0 sm:p-3 animate-fadeIn">
-      <div className="bg-slate-50 border border-slate-200 w-[min(96vw,1280px)] h-[min(92vh,900px)] max-sm:w-full max-sm:h-full rounded-none sm:rounded-lg shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-slate-50 border border-slate-200 w-[min(96vw,1280px)] h-[min(82vh,760px)] max-sm:w-full max-sm:h-full rounded-none sm:rounded-lg shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-3.5 sm:px-5 py-2.5 border-b border-slate-200 flex items-center justify-between bg-white shrink-0">
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -487,7 +482,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
         <div className="flex-1 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] overflow-hidden min-h-0">
           {/* Left Preview Section: Original Image + Converted Grid Side-by-Side */}
           <div
-            className={`p-3 sm:p-4 flex-col gap-3 overflow-y-auto xl:overflow-hidden bg-slate-100 min-w-0 min-h-0 ${
+            className={`p-2.5 sm:p-3 flex-col gap-2.5 overflow-y-auto xl:overflow-hidden bg-slate-100 min-w-0 min-h-0 ${
               activeMobileTab === 'preview' ? 'flex' : 'hidden xl:flex'
             }`}
           >
@@ -827,9 +822,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   className="w-4 h-4 accent-teal-600 rounded cursor-pointer"
                 />
                 <div>
-                  <span className="font-bold text-slate-800">{isEn ? 'Dark / Black Outline Protection' : '暗色/黑色描边强保护'}</span>
+                  <span className="font-bold text-slate-800">{isEn ? 'Generate dark character outlines' : '生成深色人物边缘保护'}</span>
                   <p className="text-[10px] text-slate-500">
-                    {isEn ? 'Prevents dark character outlines from fading when downscaling.' : '防止卡通/游戏主图的角色黑边在缩小时丢失'}
+                    {isEn ? 'Adds a restrained dark bead border to strong silhouettes and joins.' : '为人物外轮廓、手臂/身体和头部/身体等强分界增加深色描边'}
                   </p>
                 </div>
               </label>

@@ -4,6 +4,7 @@ import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '..
 import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
 import { getColorDisplayState } from '../utils/completionHighlight';
+import { getGridImageFitRect } from '../utils/gridImageFit';
 import {
   changeImagePreviewScale,
   createInitialImagePreviewView,
@@ -47,8 +48,10 @@ interface GridCanvasProps {
   sourceImage?: HTMLImageElement | null;
   overlayImage?: HTMLImageElement | null;
   showOverlay?: boolean;
+  overlayOpacity?: number;
   onReferenceImageUpload?: (file: File) => void;
   onResetCanvas?: () => void;
+  keepImageAspectRatio?: boolean;
   /**
    * Keeps the shared canvas business behavior intact while allowing each
    * workspace shell to install only the interaction listeners it needs.
@@ -146,7 +149,7 @@ function getCirclePoints(x0: number, y0: number, x1: number, y1: number): { x: n
 
 function isCanvasInteractionIgnoredTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
-  return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], [data-canvas-interaction-ignore], [role="dialog"], [aria-modal="true"]'));
+  return Boolean(target.closest('button, input, textarea, select, [contenteditable="true"], [role="dialog"], [aria-modal="true"]'));
 }
 
 function getCanvasDpr(): number {
@@ -185,8 +188,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   sourceImage = null,
   overlayImage = null,
   showOverlay = false,
+  overlayOpacity = 0.35,
   onReferenceImageUpload,
   onResetCanvas,
+  keepImageAspectRatio = true,
   interactionProfile = 'hybrid',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -205,12 +210,35 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Original image reference preview state
   const effectiveImage = sourceImage || overlayImage;
+  const [overlayReady, setOverlayReady] = useState(false);
+  const overlayImageRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    overlayImageRef.current = null;
+    setOverlayReady(false);
+    if (!effectiveImage) return;
+    if (effectiveImage.complete && effectiveImage.naturalWidth > 0) {
+      overlayImageRef.current = effectiveImage;
+      setOverlayReady(true);
+      return;
+    }
+    const handleLoad = () => {
+      overlayImageRef.current = effectiveImage;
+      setOverlayReady(true);
+    };
+    effectiveImage.addEventListener('load', handleLoad);
+    return () => effectiveImage.removeEventListener('load', handleLoad);
+  }, [effectiveImage]);
   const [isEnlargedModalOpen, setIsEnlargedModalOpen] = useState(false);
   const [modalImageView, setModalImageView] = useState(createInitialImagePreviewView);
-  const [isThumbnailMinimized, setIsThumbnailMinimized] = useState(false);
+  // Keep the drawing surface clear on phones initially; the reference stays one tap away.
+  const [isThumbnailMinimized, setIsThumbnailMinimized] = useState(() => (
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+  ));
   const modalImageDragRef = useRef<{ pointerId: number; clientX: number; clientY: number } | null>(null);
   const [referencePanelPosition, setReferencePanelPosition] = useState<ReferencePanelPosition>({ x: 8, y: 8 });
   const referencePanelDragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startPosition: ReferencePanelPosition } | null>(null);
+  const [isReferenceSheetOpen, setIsReferenceSheetOpen] = useState(false);
   const referencePanelInitializedRef = useRef(false);
   const [isCanvasResetDialogOpen, setIsCanvasResetDialogOpen] = useState(false);
   const confirmCanvasResetRef = useRef<HTMLButtonElement>(null);
@@ -241,6 +269,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   }, []);
 
   useLayoutEffect(() => {
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches) return;
     const container = containerRef.current;
     const panel = referencePanelRef.current;
     if (!container || !panel) return;
@@ -525,7 +554,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const totalGridW = width * baseCellSize + coordOffset;
     const totalGridH = height * baseCellSize + coordOffset;
 
-    const padding = clientWidth < 640 ? 20 : 36;
+    const padding = clientWidth < 640 ? 12 : 36;
     const availW = Math.max(100, clientWidth - padding * 2);
     const availH = Math.max(100, clientHeight - padding * 2);
 
@@ -832,10 +861,22 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     ctx.fillRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
     // 3. Render Source Image Semi-transparent Overlay if enabled
-    if (showOverlay && effectiveImage) {
+    const drawableOverlay = overlayImageRef.current || effectiveImage;
+    if (showOverlay && drawableOverlay && overlayReady) {
       ctx.save();
-      ctx.globalAlpha = 0.35;
-      ctx.drawImage(effectiveImage, startX, startY, gridPixelWidth, gridPixelHeight);
+      ctx.globalAlpha = Math.max(0.05, Math.min(0.8, overlayOpacity));
+      ctx.globalCompositeOperation = 'multiply';
+      ctx.beginPath();
+      ctx.rect(startX, startY, gridPixelWidth, gridPixelHeight);
+      ctx.clip();
+      const fit = getGridImageFitRect(
+        drawableOverlay.naturalWidth || drawableOverlay.width,
+        drawableOverlay.naturalHeight || drawableOverlay.height,
+        gridPixelWidth,
+        gridPixelHeight,
+        keepImageAspectRatio,
+      );
+      if (fit) ctx.drawImage(drawableOverlay, startX + fit.x, startY + fit.y, fit.width, fit.height);
       ctx.restore();
     }
 
@@ -932,13 +973,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           ctx.restore();
         } else {
           // Empty peg styling based on backdrop
-          ctx.fillStyle =
-            canvasBackdrop === 'wood' ? '#FAF0E6' : '#FFFFFF';
+          ctx.fillStyle = showOverlay
+            ? (canvasBackdrop === 'wood' ? 'rgba(250, 240, 230, 0.18)' : 'rgba(255, 255, 255, 0.12)')
+            : (canvasBackdrop === 'wood' ? '#FAF0E6' : '#FFFFFF');
           ctx.fillRect(px, py, cellSize, cellSize);
 
           if (showGridLines) {
-            ctx.strokeStyle =
-              canvasBackdrop === 'wood' ? '#FCD34D' : '#E9D5FF';
+            ctx.strokeStyle = showOverlay
+              ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.6)' : 'rgba(124, 58, 237, 0.42)')
+              : (canvasBackdrop === 'wood' ? '#FCD34D' : '#E9D5FF');
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, cellSize, cellSize);
           }
@@ -946,8 +989,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           // Peg dot center
           ctx.beginPath();
           ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
-          ctx.fillStyle =
-            canvasBackdrop === 'wood' ? '#D97706' : '#C4B5FD';
+          ctx.fillStyle = showOverlay
+            ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.65)' : 'rgba(124, 58, 237, 0.45)')
+            : (canvasBackdrop === 'wood' ? '#D97706' : '#C4B5FD');
           ctx.fill();
         }
       }
@@ -1064,6 +1108,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     canvasBackdrop,
     overlayImage,
     showOverlay,
+    overlayOpacity,
+    effectiveImage,
+    overlayReady,
+    keepImageAspectRatio,
     isDrawing,
     shapeStartCell,
     hoverCell,
@@ -1344,7 +1392,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-900 text-[9px] sm:text-[11px] px-2.5 py-1.5 rounded-2xl backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-180px)] sm:max-w-none z-10 font-bold">
+      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-900 text-[9px] sm:text-[11px] px-2.5 py-1.5 rounded-2xl backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-220px)] sm:max-w-none z-10 font-bold">
         <span><strong className="text-purple-950 font-black">{width} × {height}</strong> 豆</span>
         <span><strong className="text-purple-700 font-black">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
@@ -1360,14 +1408,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {setActiveTool && (
           <button
             onClick={toggleHandTool}
-            className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+            className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
               activeTool === 'hand'
                 ? 'bg-purple-600 text-white font-bold shadow-xs'
                 : 'bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80'
             }`}
             title={activeTool === 'hand' ? '切换回画笔模式' : '平移/拖拽画布模式'}
           >
-            {activeTool === 'hand' ? <Pencil className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Hand className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-600" />}
+            {activeTool === 'hand' ? <Pencil className="w-4 h-4" /> : <Hand className="w-4 h-4 text-purple-600" />}
           </button>
         )}
 
@@ -1376,23 +1424,23 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Focus / Auto-Fit View Button */}
         <button
           onClick={fitToView}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="居中适应屏幕"
         >
-          <Focus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <Focus className="w-4 h-4" />
         </button>
 
         {/* Fullscreen Full Pattern Preview Button */}
         <button
           onClick={toggleFullscreenPreview}
-          className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
+          className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
             isFullscreenPreview
               ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
               : 'bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 border-purple-200/80'
           }`}
           title={isFullscreenPreview ? '退出全屏预览' : '全屏全图预览'}
         >
-          {isFullscreenPreview ? <Minimize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" /> : <Maximize2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-purple-700" />}
+          {isFullscreenPreview ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-purple-700" />}
         </button>
 
         <span className="text-[9px] sm:text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
@@ -1402,19 +1450,19 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Zoom Out */}
         <button
           onClick={() => setZoom(Math.max(0.1, zoom * 0.8))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="缩小"
         >
-          <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <ZoomOut className="w-4 h-4" />
         </button>
 
         {/* Zoom In */}
         <button
           onClick={() => setZoom(Math.min(4.5, zoom * 1.25))}
-          className="w-7 h-7 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="放大"
         >
-          <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          <ZoomIn className="w-4 h-4" />
         </button>
       </div>
 
@@ -1422,7 +1470,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       <div
         ref={referencePanelRef}
         data-canvas-interaction-ignore
-        className="absolute z-20 w-[min(300px,calc(100vw-16px))] sm:w-[300px] pointer-events-auto"
+        className="absolute z-20 w-[min(220px,calc(100vw-16px))] sm:w-[300px] pointer-events-auto"
         style={{ left: referencePanelPosition.x, top: referencePanelPosition.y }}
       >
         <input
@@ -1435,64 +1483,78 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           accept="image/*"
           className="hidden"
         />
-        <div className="overflow-hidden rounded-2xl border border-purple-200/90 bg-white/95 shadow-lg backdrop-blur-md">
+        <div className="hidden sm:block overflow-hidden rounded-2xl border border-purple-200/90 bg-white/95 shadow-lg backdrop-blur-md">
           <div
             onPointerDown={handleReferencePanelPointerDown}
             onPointerMove={handleReferencePanelPointerMove}
             onPointerUp={stopReferencePanelDrag}
             onPointerCancel={stopReferencePanelDrag}
             onLostPointerCapture={stopReferencePanelDrag}
-            className="flex cursor-grab touch-none items-center gap-1.5 border-b border-purple-200/80 bg-purple-50/80 px-1.5 py-1.5 text-purple-950 active:cursor-grabbing"
+            className="flex min-h-10 cursor-grab touch-none items-center gap-1 border-b border-purple-200/80 bg-purple-50/80 px-1 py-1 text-purple-950 active:cursor-grabbing sm:min-h-12 sm:gap-1.5 sm:px-1.5 sm:py-1.5"
             title="拖动原图参考位置"
             aria-label="拖动原图参考位置"
           >
-            <div className="flex shrink-0 items-center gap-0.5">
-              <ImageIcon className="h-3.5 w-3.5 shrink-0 text-purple-600" />
-              <span className="whitespace-nowrap text-[13px] font-extrabold">原图参考</span>
-            </div>
             <div
-              className="ml-auto grid min-w-0 flex-1 grid-cols-3 gap-0.5"
+              className="grid min-h-8 min-w-0 flex-1 grid-cols-[28px_repeat(3,minmax(0,1fr))] gap-0.5 sm:min-h-9 sm:grid-cols-[42px_repeat(3,minmax(0,1fr))] sm:gap-1"
               onPointerDown={event => event.stopPropagation()}
               data-reference-panel-controls
             >
+              <div className="flex items-center justify-center rounded-md border border-purple-200 bg-purple-50 text-purple-700" aria-hidden="true">
+                <ImageIcon className="h-3.5 w-3.5" />
+              </div>
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 disabled={!onReferenceImageUpload}
-                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-0.5 text-[11px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-0.5 text-[10px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
                 title="上传原图作为画板参考"
                 aria-label="上传原图"
               >
-                <Upload className="h-[13px] w-[13px] shrink-0" />
+                <Upload className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
                 <span>上传</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsCanvasResetDialogOpen(true)}
                 disabled={!onResetCanvas}
-                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-0.5 text-[11px] font-bold text-rose-800 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-0.5 text-[10px] font-bold text-rose-800 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
                 title="清空当前画板"
                 aria-label="重置当前画板"
               >
-                <RotateCcw className="h-[13px] w-[13px] shrink-0" />
+                <RotateCcw className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
                 <span>重置</span>
               </button>
               <button
                 type="button"
                 onClick={() => setIsThumbnailMinimized(value => !value)}
-                className="inline-flex h-7 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-purple-300 bg-purple-100 px-0.5 text-[11px] font-bold text-purple-900 transition-colors hover:bg-purple-200"
+                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-purple-300 bg-purple-100 px-0.5 text-[10px] font-bold text-purple-900 transition-colors hover:bg-purple-200 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
                 title={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
                 aria-label={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
                 aria-expanded={!isThumbnailMinimized}
               >
-                {isThumbnailMinimized ? <ChevronDown className="h-[13px] w-[13px] shrink-0" /> : <ChevronUp className="h-[13px] w-[13px] shrink-0" />}
+                {isThumbnailMinimized ? <ChevronDown className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" /> : <ChevronUp className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />}
                 <span>{isThumbnailMinimized ? '展开' : '收起'}</span>
               </button>
             </div>
+            <div
+              className="h-8 min-w-[12px] flex-1 cursor-grab rounded-md border border-transparent bg-transparent active:cursor-grabbing sm:h-9"
+              aria-hidden="true"
+            />
           </div>
 
+          <div
+            onPointerDown={handleReferencePanelPointerDown}
+            onPointerMove={handleReferencePanelPointerMove}
+            onPointerUp={stopReferencePanelDrag}
+            onPointerCancel={stopReferencePanelDrag}
+            onLostPointerCapture={stopReferencePanelDrag}
+            className="hidden h-1 cursor-grab bg-purple-50/60 active:cursor-grabbing sm:block"
+            title="拖动原图参考窗口"
+            aria-label="拖动原图参考窗口"
+          />
+
           {!isThumbnailMinimized && (
-            <div className="p-2">
+            <div className="p-1.5 sm:p-2">
               {effectiveImage ? (
                 <button
                   type="button"
@@ -1504,7 +1566,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   <img
                     src={effectiveImage.src}
                     alt="原图参考"
-                    className="max-h-[150px] w-auto max-w-full object-contain sm:max-h-[180px]"
+                    className="max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px]"
                   />
                   <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-purple-950/70 p-2 text-[11px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                     <ZoomIn className="h-5 w-5 text-purple-200" />
@@ -1515,7 +1577,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex min-h-28 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300/90 bg-purple-50/70 p-3 text-center transition-colors hover:border-purple-500 hover:bg-purple-100/70"
+                  className="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300/90 bg-purple-50/70 p-2 text-center transition-colors hover:border-purple-500 hover:bg-purple-100/70 sm:min-h-28 sm:p-3"
                   title="点击上传图片做原图对照手动绘制"
                   aria-label="上传原图"
                 >
@@ -1528,6 +1590,44 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           )}
         </div>
       </div>
+
+      <div className="sm:hidden absolute top-2 right-2 z-20" data-canvas-interaction-ignore>
+        <button
+          type="button"
+          onClick={() => setIsReferenceSheetOpen(true)}
+          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-purple-200 bg-white/95 text-purple-700 shadow-lg backdrop-blur-md active:scale-95"
+          aria-label="打开原图参考"
+          title="打开原图参考"
+        >
+          <ImageIcon className="h-5 w-5" />
+        </button>
+      </div>
+
+      {isReferenceSheetOpen && (
+        <div className="sm:hidden fixed inset-0 z-[55] flex items-end bg-slate-950/35" data-canvas-interaction-ignore onClick={() => setIsReferenceSheetOpen(false)}>
+          <section className="w-full rounded-t-3xl border-t border-purple-200 bg-white p-4 pb-6 shadow-2xl" onClick={event => event.stopPropagation()}>
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-purple-200" />
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-extrabold text-purple-950">原图参考</span>
+              <button type="button" onClick={() => setIsReferenceSheetOpen(false)} className="rounded-lg px-3 py-1 text-xs font-bold text-purple-700 hover:bg-purple-50">关闭</button>
+            </div>
+            {effectiveImage ? (
+              <button type="button" onClick={openEnlargedImagePreview} className="mb-3 flex max-h-56 w-full items-center justify-center overflow-hidden rounded-2xl border border-purple-200 bg-purple-50 p-2">
+                <img src={effectiveImage.src} alt="原图参考" className="max-h-52 max-w-full object-contain" />
+              </button>
+            ) : (
+              <button type="button" onClick={() => fileInputRef.current?.click()} className="mb-3 flex min-h-28 w-full flex-col items-center justify-center rounded-2xl border-2 border-dashed border-purple-300 bg-purple-50/70 text-purple-700">
+                <Upload className="mb-1 h-6 w-6" />
+                <span className="text-sm font-extrabold">上传原图</span>
+              </button>
+            )}
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={!onReferenceImageUpload} className="h-11 rounded-xl border border-emerald-300 bg-emerald-50 text-sm font-bold text-emerald-800 disabled:opacity-40"><Upload className="mr-1 inline h-4 w-4" />上传</button>
+              <button type="button" onClick={() => setIsCanvasResetDialogOpen(true)} disabled={!onResetCanvas} className="h-11 rounded-xl border border-rose-300 bg-rose-50 text-sm font-bold text-rose-800 disabled:opacity-40"><RotateCcw className="mr-1 inline h-4 w-4" />重置画板</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       {isCanvasResetDialogOpen && (
         <div

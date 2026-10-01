@@ -64,7 +64,9 @@ export const PublicAnnouncementModal: React.FC<PublicAnnouncementModalProps> = (
         role="dialog"
         aria-modal="true"
         aria-labelledby="public-announcement-title"
-        className="w-full max-w-lg overflow-hidden rounded-3xl border border-violet-200 bg-white shadow-[0_24px_80px_rgba(76,29,149,0.25)]"
+        aria-describedby="public-announcement-body"
+        tabIndex={-1}
+        className="flex max-h-[min(36rem,calc(100dvh-2rem))] w-full max-w-lg flex-col overflow-hidden rounded-3xl border border-violet-200 bg-white shadow-[0_24px_80px_rgba(76,29,149,0.25)]"
       >
         <header className="flex items-center justify-between gap-3 border-b border-violet-100 bg-gradient-to-r from-violet-50 via-white to-fuchsia-50 px-5 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -82,14 +84,14 @@ export const PublicAnnouncementModal: React.FC<PublicAnnouncementModalProps> = (
         </header>
 
         {state === 'loading' && (
-          <div className="grid min-h-48 place-items-center gap-3 px-6 py-10 text-center text-slate-500">
+          <div id="public-announcement-body" className="grid min-h-48 place-items-center gap-3 px-5 py-10 text-center text-slate-500 sm:px-6">
             <Loader2 className="h-7 w-7 animate-spin text-violet-500" aria-hidden="true" />
             <p className="text-sm font-medium">正在加载最新公告…</p>
           </div>
         )}
 
         {state === 'error' && (
-          <div className="space-y-4 px-6 py-10 text-center">
+          <div id="public-announcement-body" className="space-y-4 overflow-y-auto px-5 py-10 text-center sm:px-6">
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-rose-50 text-rose-500"><Bell className="h-6 w-6" /></div>
             <div><p className="font-bold text-slate-900">公告暂时无法加载</p><p className="mt-1 text-sm leading-6 text-slate-500">{error || '请检查网络后重试。'}</p></div>
             <button type="button" onClick={onRetry} className="mx-auto inline-flex min-h-11 items-center gap-2 rounded-xl bg-violet-600 px-5 text-sm font-bold text-white transition hover:bg-violet-700 active:scale-[0.98]"><RefreshCw className="h-4 w-4" />重新加载</button>
@@ -97,17 +99,17 @@ export const PublicAnnouncementModal: React.FC<PublicAnnouncementModalProps> = (
         )}
 
         {state === 'ready' && !announcement && (
-          <div className="px-6 py-12 text-center text-sm text-slate-500">暂时没有新的公告。</div>
+          <div id="public-announcement-body" className="px-5 py-12 text-center text-sm text-slate-500 sm:px-6">暂时没有新的公告。</div>
         )}
 
         {state === 'ready' && announcement && (
-          <div className="space-y-5 px-5 py-5 sm:px-6 sm:py-6">
+          <div id="public-announcement-body" className="space-y-5 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
             <div className="flex items-start gap-3">
               <span className={`mt-1 shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${announcement.pinned ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>{announcement.pinned ? '置顶' : '公告'}</span>
               <h3 className="min-w-0 flex-1 text-xl font-black leading-tight text-slate-900">{announcement.title}</h3>
             </div>
             <div className={`whitespace-pre-wrap break-words text-sm leading-7 text-slate-600 ${expanded ? '' : 'line-clamp-5'}`}>{announcement.content}</div>
-            {announcement.content.length > 240 && <button type="button" onClick={() => setExpanded(value => !value)} className="text-xs font-bold text-violet-600 hover:text-violet-800">{expanded ? '收起内容' : '查看详情'}</button>}
+            {announcement.content.length > 240 && <button type="button" onClick={() => setExpanded(value => !value)} className="min-h-9 text-left text-xs font-bold text-violet-600 hover:text-violet-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500">{expanded ? '收起内容' : '查看详情'}</button>}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <button type="button" onClick={onClose} className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-600 transition hover:border-violet-200 hover:bg-violet-50">知道了</button>
               {actionUrl && <button type="button" onClick={() => { window.location.assign(actionUrl); onClose(); }} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 text-sm font-bold text-white transition hover:bg-violet-700 active:scale-[0.98]">{announcement.actionLabel || '立即查看'}<ExternalLink className="h-4 w-4" /></button>}

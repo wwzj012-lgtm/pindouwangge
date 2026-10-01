@@ -6,7 +6,7 @@ const source = readFileSync(new URL('./ImageStudioModal.tsx', import.meta.url), 
 describe('ImageStudioModal responsive layout', () => {
   it('uses the bounded desktop workspace and independently scrolling settings rail', () => {
     expect(source).toContain('w-[min(96vw,1280px)]');
-    expect(source).toContain('h-[min(92vh,900px)]');
+    expect(source).toContain('h-[min(82vh,760px)]');
     expect(source).toContain('xl:grid-cols-[minmax(0,1fr)_360px]');
     expect(source).toMatch(/bg-white border-t xl:border-t-0 xl:border-l border-slate-200[^`]+overflow-y-auto/);
   });

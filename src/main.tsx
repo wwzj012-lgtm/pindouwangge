@@ -6,12 +6,8 @@ import { AuthProvider } from './context/AuthContext.tsx';
 import { LanguageProvider } from './context/LanguageContext.tsx';
 import { checkApiHealth } from './utils/api.ts';
 
-const healthCheck = import.meta.env.DEV
-  ? () => fetch('/api/health').then((response) => response.ok)
-  : checkApiHealth;
-
 void Promise.resolve()
-  .then(healthCheck)
+  .then(checkApiHealth)
   .then((healthy) => {
     if (!healthy) console.warn('Worker API health check failed');
   })

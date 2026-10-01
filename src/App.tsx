@@ -43,6 +43,7 @@ import { PaletteManagerModal } from './components/PaletteManagerModal';
 import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
 import { ImageStudioModal } from './components/ImageStudioModal';
+import { CompletionSummary } from './components/CompletionSummary';
 import { UserGuideModal } from './components/UserGuideModal';
 import { AuthModal } from './components/AuthModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
@@ -506,7 +507,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     transparentCutoff: 128,
     boardSize: 29,
     sharpening: 30,
-    outlineBoost: true,
+    outlineBoost: false,
     chromaKeyColor: null,
     chromaKeyTolerance: 20,
     colorMatchAlgo: 'ciede2000',
@@ -621,6 +622,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [showLargeCodeLabels, setShowLargeCodeLabels] = useState(false);
   const [showLargeDataPreview, setShowLargeDataPreview] = useState(false);
   const [showOverlay, setShowOverlay] = useState(false);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.35);
   const [zoom, setZoom] = useState(1.0);
 
   // Modal State
@@ -1943,6 +1945,27 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   const activeAnnouncement = publicAnnouncements.find(item => !dismissedAnnouncementIds.has(announcementReadKey(item))) ?? null;
 
+  const completionSummary = (
+    <CompletionSummary
+      isEn={isEn}
+      isUnlocked={isPatternUnlocked}
+      needsSupplement={needsCompletionSupplement}
+      nonEmptyBeads={nonEmptyBeads}
+      quotedPoints={quotedCompletionPoints}
+      estimatedPoints={unauthenticatedEstimate}
+      quoteStatus={completionPreviewStatus}
+      completionStatus={completionStatus}
+      onQuote={() => void handleQuotePatternCompletion()}
+      quote={completionQuote?.quote ?? null}
+      onCancelQuote={() => {
+        setCompletionQuote(null);
+        setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      }}
+      onComplete={() => void handleCompletePattern()}
+      balance={displayedCreditBalance}
+    />
+  );
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
       {isDesktop ? (
@@ -2104,6 +2127,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             <PatternDetailsUnlockContext.Provider value={isPatternUnlocked}>
             {isDesktop ? (
             <DesktopWorkspace
+              completionSummary={completionSummary}
               grid={grid}
               paletteMap={paletteMap}
               settings={settings}
@@ -2137,8 +2161,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               setSymmetryMode={setSymmetryMode}
               canvasBackdrop={canvasBackdrop}
               setCanvasBackdrop={setCanvasBackdrop}
-              showOverlay={showOverlay}
-              setShowOverlay={setShowOverlay}
+                showOverlay={showOverlay}
+                setShowOverlay={setShowOverlay}
+                overlayOpacity={overlayOpacity}
+                setOverlayOpacity={setOverlayOpacity}
               highlightColorIds={highlightColorIds}
               setHighlightColorIds={setHighlightColorIds}
               handleToggleHighlightColorId={handleToggleHighlightColorId}
@@ -2166,6 +2192,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             />
           ) : (
             <MobileWorkspace
+              completionSummary={completionSummary}
               grid={grid}
               paletteMap={paletteMap}
               settings={settings}
@@ -2199,8 +2226,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               setSymmetryMode={setSymmetryMode}
               canvasBackdrop={canvasBackdrop}
               setCanvasBackdrop={setCanvasBackdrop}
-              showOverlay={showOverlay}
-              setShowOverlay={setShowOverlay}
+                showOverlay={showOverlay}
+                setShowOverlay={setShowOverlay}
+                overlayOpacity={overlayOpacity}
+                setOverlayOpacity={setOverlayOpacity}
               highlightColorIds={highlightColorIds}
               setHighlightColorIds={setHighlightColorIds}
               handleToggleHighlightColorId={handleToggleHighlightColorId}
@@ -2233,107 +2262,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             )}
             </PatternDetailsUnlockContext.Provider>
           )}
-
-          <section
-            aria-label={isEn ? 'Pattern completion' : '图纸完成解锁'}
-            className="fixed bottom-20 left-3 right-3 z-40 rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur sm:bottom-4 sm:left-auto sm:right-4 sm:w-[min(390px,calc(100vw-2rem))]"
-          >
-            <div className="flex min-w-0 items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-slate-900">
-                  {isPatternUnlocked
-                    ? (isEn ? 'Completed and unlocked' : '已完成并解锁')
-                    : needsCompletionSupplement
-                      ? (isEn ? 'Supplement needed' : '待补差价')
-                      : (isEn ? 'Draft pattern' : '草稿图纸')}
-                </p>
-                <p className="mt-0.5 truncate text-[11px] text-slate-500">
-                  {isPatternUnlocked && completionStatus === 'COMPLETED' && paidNonEmptyBeads !== null
-                    ? (isEn ? `Paid bead cap: ${paidNonEmptyBeads}` : `已付费豆子上限：${paidNonEmptyBeads} 颗`)
-                    : isPatternUnlocked
-                      ? (isEn ? 'Detailed pattern data unlocked' : '图纸明细已解锁')
-                      : (isEn ? 'Detailed pattern data is locked' : '图纸明细暂未解锁')}
-                  {displayedCreditBalance === null ? '' : (isEn ? ` · Balance ${displayedCreditBalance}` : ` · 当前积分 ${displayedCreditBalance}`)}
-                </p>
-              </div>
-              {isPatternUnlocked ? (
-                <span className="shrink-0 rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">
-                  {isEn ? 'Unlocked' : '已解锁'}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void handleQuotePatternCompletion()}
-                  disabled={completionStatus === 'QUOTING' || completionStatus === 'COMPLETING' || nonEmptyBeads === 0}
-                  className="min-h-11 shrink-0 rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {completionStatus === 'QUOTING'
-                    ? (isEn ? 'Quoting…' : '正在核价…')
-                    : needsCompletionSupplement
-                      ? (quotedCompletionPoints !== null
-                        ? (isEn ? `Supplement · ${formatCreditPoints(quotedCompletionPoints)} credits` : `补差价 · ${formatCreditPoints(quotedCompletionPoints)}积分`)
-                        : (isEn ? 'Quote supplement' : '补差价 · 核价'))
-                      : quotedCompletionPoints !== null
-                        ? (isEn ? `Complete & unlock · ${formatCreditPoints(quotedCompletionPoints)} credits` : `完成并解锁 · ${formatCreditPoints(quotedCompletionPoints)}积分`)
-                        : completionPreviewStatus === 'loading'
-                          ? (isEn ? 'Complete & unlock · calculating…' : '完成并解锁 · 计算中…')
-                          : (isEn ? 'Complete & unlock · Quote' : '完成并解锁 · 核价')}
-                </button>
-              )}
-            </div>
-
-            {!isPatternUnlocked && nonEmptyBeads > 0 && (
-              <p className="mt-1 text-right text-[11px] text-slate-500" role="status">
-                {quotedCompletionPoints !== null
-                  ? (isEn ? `Required now: ${formatCreditPoints(quotedCompletionPoints)} credits` : `当前所需积分：${formatCreditPoints(quotedCompletionPoints)} 积分`)
-                  : unauthenticatedEstimate !== null
-                    ? (isEn ? `Estimated ${formatCreditPoints(unauthenticatedEstimate)} credits · sign in for an exact quote` : `预计 ${formatCreditPoints(unauthenticatedEstimate)} 积分 · 登录后获取准确报价`)
-                    : completionPreviewStatus === 'error'
-                      ? (isEn ? 'Quote unavailable; try again before completing.' : '暂时无法获取报价，完成前请重试核价。')
-                      : (isEn ? 'Sign in to retrieve the exact server quote.' : '登录后获取服务端准确报价。')}
-              </p>
-            )}
-
-            {!isPatternUnlocked && (
-              <p className="mt-2 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] leading-4 text-slate-600" role="status">
-                {isEn
-                  ? 'Complete to unlock color codes, quantities, coordinates, and exports. Editing and cloud saving stay available.'
-                  : '完成后解锁色号、数量、坐标和导出；编辑与云端保存仍可使用。'}
-              </p>
-            )}
-
-            {completionQuote && completionStatus === 'AWAITING_CONFIRMATION' && (
-              <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-2.5">
-                <p className="text-[11px] leading-5 text-indigo-950">
-                  {isEn
-                    ? `Server quote: ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} credits. Confirm to complete this ${completionQuote.quote.nonEmptyBeads}-bead pattern.`
-                    : `服务器核价：需补 ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} 积分。确认后完成这张 ${completionQuote.quote.nonEmptyBeads} 颗豆子的图纸。`}
-                </p>
-                <div className="mt-2 flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCompletionQuote(null);
-                      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
-                    }}
-                    className="min-h-9 rounded-lg px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-white"
-                  >
-                    {isEn ? 'Cancel' : '取消'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleCompletePattern()}
-                    disabled={completionStatus === 'COMPLETING'}
-                    className="min-h-9 rounded-lg bg-indigo-600 px-3 text-[11px] font-bold text-white hover:bg-indigo-700"
-                  >
-                    {isEn
-                      ? `Complete & unlock · ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)} credits`
-                      : `完成并解锁 · ${formatCreditPoints(getCompletionChargePoints(completionQuote.quote) ?? 0)}积分`}
-                  </button>
-                </div>
-              </div>
-            )}
-          </section>
 
           {saveMessage && (
             <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 shadow-lg">

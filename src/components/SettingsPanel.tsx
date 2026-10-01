@@ -48,7 +48,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { language } = useLanguage();
   const isEn = language === 'en';
   const brandOptions = getBrandOptions(isEn);
-  const clarityEnabled = settings.sharpening > 0 || settings.outlineBoost;
+  const clarityEnabled = settings.sharpening > 0;
   const containerClassName = variant === 'sheet'
     ? 'w-full max-w-none bg-transparent text-purple-950 px-0 py-0 flex flex-col h-auto overflow-visible space-y-5 text-xs select-none shadow-none'
     : 'w-80 max-w-[85vw] bg-white/90 backdrop-blur-md border-r border-purple-200/90 text-purple-950 p-4 flex flex-col h-full overflow-y-auto space-y-5 text-xs select-none shrink-0 shadow-sm';
@@ -331,13 +331,25 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onChange={e => setSettings(prev => ({
               ...prev,
               sharpening: e.target.checked ? Math.max(40, prev.sharpening) : 0,
-              outlineBoost: e.target.checked,
             }))}
             className="w-4 h-4 accent-amber-600 rounded cursor-pointer"
           />
           <div>
             <span className="font-bold text-purple-950 text-[11px]">{isEn ? 'Clarity optimization' : '清晰优化'}</span>
-            <p className="text-[10px] text-purple-500 leading-none mt-0.5">{isEn ? 'Reuse edge sharpening and subject-outline protection.' : '复用边缘锐化与主体描边保护配置。'}</p>
+            <p className="text-[10px] text-purple-500 leading-none mt-0.5">{isEn ? 'Reuse edge sharpening to keep small details clear.' : '复用边缘锐化，让缩小后的细节更加清晰。'}</p>
+          </div>
+        </label>
+
+        <label className="flex items-center gap-2 bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 cursor-pointer hover:bg-purple-100/80 transition-colors">
+          <input
+            type="checkbox"
+            checked={settings.outlineBoost}
+            onChange={e => updateSetting('outlineBoost', e.target.checked)}
+            className="w-4 h-4 accent-purple-600 rounded cursor-pointer"
+          />
+          <div>
+            <span className="font-bold text-purple-950 text-[11px]">{isEn ? 'Connected outline protection' : '连续边缘保护'}</span>
+            <p className="text-[10px] text-purple-500 leading-none mt-0.5">{isEn ? 'Optional: connect dark outline cells around silhouettes and strong joins.' : '可选：将人物外轮廓、头身和手臂连接处生成连续深色描边。'}</p>
           </div>
         </label>
       </div>

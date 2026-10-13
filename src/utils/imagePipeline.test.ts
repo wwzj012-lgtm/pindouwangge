@@ -222,6 +222,31 @@ describe('topology-preserving background removal', () => {
     expect(manual.grid[2][2]).toBe('black');
   });
 
+  it('preserves a dark subject and its internal high-contrast detail beside a near-colour background', () => {
+    const data = makePixels(9, 9, [42, 42, 42]);
+    for (let y = 2; y <= 6; y += 1) {
+      for (let x = 2; x <= 6; x += 1) setPixel(data, 9, x, y, [48, 48, 48, 255]);
+    }
+    for (let x = 3; x <= 5; x += 1) setPixel(data, 9, x, 4, [240, 40, 40, 255]);
+    setPixel(data, 9, 2, 2, [0, 0, 0, 255]);
+
+    const result = convertImageDataToGrid(data, 9, 9, {
+      ...baseSettings,
+      width: 9,
+      height: 9,
+      dither: 'none',
+      pipelineOverride: 'logo',
+      backgroundRemovalEnabled: true,
+      chromaKeyColor: '#2A2A2A',
+    }, palette);
+
+    expect(result.diagnostics.background?.source).toBe('manual');
+    expect(result.grid[4][4]).toBe('red');
+    expect(result.grid[2][2]).toBe('black');
+    expect(result.grid[4][2]).toBeNull();
+    expect(result.grid[2][4]).toBeNull();
+  });
+
   it('removes the outer white background while retaining the hole in a black ring', () => {
     const data = fromAscii([
       '.......',

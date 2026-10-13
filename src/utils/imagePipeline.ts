@@ -486,17 +486,38 @@ function createEdgeConnectedBackgroundMask(
   const isManualBackground = candidateBackground.inference.source === 'manual';
   // Reused for each component so large backgrounds do not allocate JS number arrays.
   const componentQueue = new Int32Array(width * height);
+  const protectedCandidates = new Uint8Array(width * height);
+  for (let index = 0; index < width * height; index += 1) {
+    if (!candidate[index]) continue;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    let localContrast = 0;
+    const pixelOffset = index * 4;
+    const pixelLab = rgbToLab([data[pixelOffset], data[pixelOffset + 1], data[pixelOffset + 2]]);
+    for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+      if (nx < 0 || nx >= width || ny < 0 || ny >= height) continue;
+      const neighbourOffset = (ny * width + nx) * 4;
+      if (data[neighbourOffset + 3] < normalizedAlphaCutoff) continue;
+      localContrast = Math.max(localContrast, deltaE76(pixelLab, rgbToLab([
+        data[neighbourOffset], data[neighbourOffset + 1], data[neighbourOffset + 2],
+      ])));
+    }
+    if (localContrast >= 24 && x > 0 && x + 1 < width && y > 0 && y + 1 < height) protectedCandidates[index] = 1;
+  }
+  const hasInteriorSubjectEvidence = protectedCandidates.reduce((count, value) => count + value, 0) >= 1;
   for (const start of edgePixelIndexes(width, height)) {
     if (!candidate[start] || visited[start]) continue;
     let componentLength = 1;
     componentQueue[0] = start;
     let edgeCoverage = 0;
+    let protectedStructureCount = 0;
     visited[start] = 1;
     for (let cursor = 0; cursor < componentLength; cursor += 1) {
       const index = componentQueue[cursor];
       const x = index % width;
       const y = Math.floor(index / width);
       if (x === 0 || x === width - 1 || y === 0 || y === height - 1) edgeCoverage += 1;
+      if (protectedCandidates[index]) protectedStructureCount += 1;
       const visit = (next: number) => {
         if (!candidate[next] || visited[next]) return;
         visited[next] = 1;
@@ -509,7 +530,12 @@ function createEdgeConnectedBackgroundMask(
       if (y > 0) visit(index - width);
       if (y + 1 < height) visit(index + width);
     }
-    if (isManualBackground || (componentLength >= minComponentSize && edgeCoverage >= minEdgeCoverage)) {
+    const structureRatio = protectedStructureCount / Math.max(1, componentLength);
+    const hasSubjectEvidence = hasInteriorSubjectEvidence && protectedStructureCount >= 1
+      && structureRatio >= 0.02
+      && componentLength < width * height * 0.8
+      && !isManualBackground;
+    if (!hasSubjectEvidence && (isManualBackground || (componentLength >= minComponentSize && edgeCoverage >= minEdgeCoverage))) {
       for (let index = 0; index < componentLength; index += 1) mask[componentQueue[index]] = 1;
     }
   }

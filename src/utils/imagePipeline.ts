@@ -1,4 +1,5 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
+import { consolidateStrayBeans } from './strayBeanConsolidation';
 import {
   classifyGridRegions,
   classifySourceRegions,
@@ -706,39 +707,6 @@ function contentAwareSampleWeight(
   return alphaWeight * Math.min(1.9, centerBoost * saturationBoost * detailBoost * edgeBoost);
 }
 
-function cleanLogoNoise(
-  grid: (string | null)[][],
-  sourceLabs: Array<Lab | null>,
-  width: number,
-  palette: PaletteEntry[],
-  matches: (ColorMatchDiagnostic | null)[][],
-  regionMasks?: RegionMasks,
-  algorithm: 'cie76' | 'ciede2000' = 'cie76',
-): void {
-  const height = grid.length;
-  const updates: Array<{ x: number; y: number; color: string }> = [];
-  for (let y = 1; y + 1 < height; y += 1) {
-    for (let x = 1; x + 1 < width; x += 1) {
-      const current = grid[y][x];
-      if (!current) continue;
-      if (regionMasks && regionMasks.regionType[y * width + x] !== 0) continue;
-      const neighbors = [grid[y - 1][x], grid[y + 1][x], grid[y][x - 1], grid[y][x + 1]];
-      if (neighbors.includes(current) || neighbors.some((value) => !value)) continue;
-      if (hasEightNeighborComponent(grid, x, y, current)) continue;
-      if (neighbors.every((value) => value === neighbors[0])) updates.push({ x, y, color: neighbors[0]! });
-    }
-  }
-  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
-  for (const update of updates) {
-    grid[update.y][update.x] = update.color;
-    const sourceLab = sourceLabs[update.y * width + update.x];
-    const replacement = paletteById.get(update.color);
-    if (sourceLab && replacement) {
-      matches[update.y][update.x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
-    }
-  }
-}
-
 function cleanPhotoNoise(
   grid: (string | null)[][],
   sourceLabs: Array<Lab | null>,
@@ -938,136 +906,6 @@ function repairSingleCellGaps(grid: (string | null)[][], protectedEmpty: Uint8Ar
       const left = grid[y][x - 1];
       const right = grid[y][x + 1];
       if (up && up === down && up === left && up === right) grid[y][x] = up;
-    }
-  }
-}
-
-function cleanCartoonGrid(
-  grid: (string | null)[][],
-  sourceLabs: Array<Lab | null>,
-  width: number,
-  palette: PaletteEntry[],
-  matches: (ColorMatchDiagnostic | null)[][],
-  regionMasks: RegionMasks,
-  algorithm: 'cie76' | 'ciede2000',
-): void {
-  const height = grid.length;
-  const paletteById = new Map(palette.map((entry) => [entry.color.id, entry]));
-  const isDarkOutline = (id: string | null): boolean => {
-    if (!id) return false;
-    const entry = paletteById.get(id);
-    return Boolean(entry && entry.lab[0] <= 34);
-  };
-  const offsets: ReadonlyArray<readonly [number, number]> = [
-    [-1, -1], [0, -1], [1, -1], [-1, 0], [1, 0], [-1, 1], [0, 1], [1, 1],
-  ];
-  const replace = (x: number, y: number, replacementId: string): void => {
-    if (grid[y][x] === replacementId) return;
-    grid[y][x] = replacementId;
-    const sourceLab = sourceLabs[y * width + x];
-    const replacement = paletteById.get(replacementId);
-    if (sourceLab && replacement) {
-      matches[y][x] = diagnosticForReplacement(sourceLab, replacement, palette, algorithm);
-    }
-  };
-
-  // Two majority passes flatten large smooth fills without crossing strong
-  // source edges. Dark cells are never candidates here, so a black contour
-  // remains intact even when it is only one bead wide.
-  for (let pass = 0; pass < 2; pass += 1) {
-    const updates: Array<{ x: number; y: number; replacementId: string }> = [];
-    for (let y = 1; y + 1 < height; y += 1) {
-      for (let x = 1; x + 1 < width; x += 1) {
-        const index = y * width + x;
-        const currentId = grid[y][x];
-        const currentEntry = currentId ? paletteById.get(currentId) : null;
-        const sourceLab = sourceLabs[index];
-        if (!currentId || !currentEntry || !sourceLab || regionMasks.regionType[index] !== 0 || isDarkOutline(currentId)) continue;
-
-        const counts = new Map<string, number>();
-        for (const [ox, oy] of offsets) {
-          const nx = x + ox;
-          const ny = y + oy;
-          const neighbourIndex = ny * width + nx;
-          const neighbourId = grid[ny][nx];
-          if (!neighbourId || isDarkOutline(neighbourId) || regionMasks.regionType[neighbourIndex] === 2) continue;
-          counts.set(neighbourId, (counts.get(neighbourId) ?? 0) + 1);
-        }
-        const dominant = [...counts.entries()].sort((first, second) => second[1] - first[1])[0];
-        if (!dominant || dominant[0] === currentId || dominant[1] < 5) continue;
-        const dominantEntry = paletteById.get(dominant[0]);
-        if (!dominantEntry || deltaE2000(sourceLab, dominantEntry.lab) > 30) continue;
-        updates.push({ x, y, replacementId: dominant[0] });
-      }
-    }
-    for (const update of updates) replace(update.x, update.y, update.replacementId);
-  }
-
-  // Remove small connected islands of a non-outline colour when their border
-  // is overwhelmingly one smooth fill. This catches 1–3 cell colour specks
-  // that a single majority pass cannot remove, while leaving facial features
-  // and black linework protected by regionType === 2 / dark-outline checks.
-  const visited = new Uint8Array(width * height);
-  const queue: number[] = [];
-  for (let y = 1; y + 1 < height; y += 1) {
-    for (let x = 1; x + 1 < width; x += 1) {
-      const start = y * width + x;
-      if (visited[start] || !grid[y][x] || regionMasks.regionType[start] !== 0 || isDarkOutline(grid[y][x])) continue;
-      const colorId = grid[y][x]!;
-      const component: number[] = [];
-      const boundary = new Map<string, number>();
-      queue.length = 0;
-      queue.push(start);
-      visited[start] = 1;
-      for (let cursor = 0; cursor < queue.length; cursor += 1) {
-        const index = queue[cursor];
-        component.push(index);
-        const cx = index % width;
-        const cy = Math.floor(index / width);
-        for (const [ox, oy] of offsets) {
-          const nx = cx + ox;
-          const ny = cy + oy;
-          if (nx <= 0 || nx + 1 >= width || ny <= 0 || ny + 1 >= height) continue;
-          const nextIndex = ny * width + nx;
-          const nextId = grid[ny][nx];
-          if (nextId === colorId && !visited[nextIndex] && regionMasks.regionType[nextIndex] === 0) {
-            visited[nextIndex] = 1;
-            queue.push(nextIndex);
-          } else if (nextId && nextId !== colorId && !isDarkOutline(nextId) && regionMasks.regionType[nextIndex] === 0) {
-            boundary.set(nextId, (boundary.get(nextId) ?? 0) + 1);
-          }
-        }
-      }
-      if (component.length > 3 || boundary.size === 0) continue;
-      const dominant = [...boundary.entries()].sort((first, second) => second[1] - first[1])[0];
-      const dominantEntry = dominant ? paletteById.get(dominant[0]) : null;
-      const sourceClose = component.every((index) => {
-        const sourceLab = sourceLabs[index];
-        return Boolean(sourceLab && dominantEntry && deltaE2000(sourceLab, dominantEntry.lab) <= 32);
-      });
-      const boundaryTotal = [...boundary.values()].reduce((sum, count) => sum + count, 0);
-      if (!dominant || !dominantEntry || !sourceClose || dominant[1] < Math.ceil(boundaryTotal * 0.6)) continue;
-      for (const index of component) replace(index % width, Math.floor(index / width), dominant[0]);
-    }
-  }
-
-  // A dark pixel inside a smooth light fill is a false speck only when its
-  // source sample is not actually dark. This final guard removes such specks
-  // but cannot delete a genuine black outline or facial feature.
-  for (let y = 1; y + 1 < height; y += 1) {
-    for (let x = 1; x + 1 < width; x += 1) {
-      const index = y * width + x;
-      const currentId = grid[y][x];
-      const sourceLab = sourceLabs[index];
-      if (!currentId || !sourceLab || !isDarkOutline(currentId) || sourceLab[0] <= 42 || regionMasks.regionType[index] !== 0) continue;
-      const surrounding = new Map<string, number>();
-      for (const [ox, oy] of offsets) {
-        const neighbourId = grid[y + oy][x + ox];
-        if (neighbourId && !isDarkOutline(neighbourId)) surrounding.set(neighbourId, (surrounding.get(neighbourId) ?? 0) + 1);
-      }
-      const dominant = [...surrounding.entries()].sort((first, second) => second[1] - first[1])[0];
-      const dominantEntry = dominant ? paletteById.get(dominant[0]) : null;
-      if (dominant && dominant[1] >= 5 && dominantEntry && deltaE2000(sourceLab, dominantEntry.lab) <= 32) replace(x, y, dominant[0]);
     }
   }
 }
@@ -1517,13 +1355,12 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       diffuse(x + direction, y + 1, 1 / 16);
     }
   }
-  if (pipeline === 'logo' || pipeline === 'cartoon') {
-    cleanLogoNoise(grid, sourceLabs, settings.width, mappingPalette, matches, gridRegions, matchAlgorithm);
-  }
-  else if (useFloydSteinberg) cleanPhotoNoise(grid, sourceLabs, settings.width, mappingPalette, matches, gridRegions);
+  // Logo conversions never auto-merge islands; the explicit App tool remains
+  // available with manual intent. Photo keeps its source-aware dither cleanup.
+  if (useFloydSteinberg) cleanPhotoNoise(grid, sourceLabs, settings.width, mappingPalette, matches, gridRegions);
 
   const paletteMap = new Map(mappingPalette.map((entry) => [entry.color.id, { lab: entry.lab, color: entry.color }]));
-  if (pipeline === 'logo' || pipeline === 'cartoon' || useFloydSteinberg) {
+  if (useFloydSteinberg) {
     suppressSmoothAreaClutterClusters(
       grid,
       gridRegions,
@@ -1541,15 +1378,25 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   }
 
   if (pipeline === 'cartoon') {
-    cleanCartoonGrid(
-      grid,
-      sourceLabs,
-      settings.width,
-      mappingPalette,
-      matches,
-      gridRegions,
-      matchAlgorithm,
-    );
+    // One component-aware pass replaces the old majority/fixed-size island
+    // passes, so they cannot erase protected decorations before this policy.
+    const consolidated = consolidateStrayBeans(grid, {
+      isFilled: id => id !== null && paletteMap.has(id),
+      getColorKey: id => id!,
+      getColor: id => {
+        const [r, g, b] = paletteMap.get(id!)!.color.rgb;
+        return { r, g, b };
+      },
+      replaceColor: (_noise, replacement) => replacement,
+      canReplace: (_noise, replacement, row, column) => {
+        const index = row * settings.width + column;
+        const source = sourceLabs[index];
+        const target = paletteMap.get(replacement!);
+        return Boolean(source && target && gridRegions.regionType[index] === 0
+          && deltaE2000(source, target.lab) <= 32);
+      },
+    }, 'standard', { mode: pipeline, intent: 'auto' });
+    for (let row = 0; row < grid.length; row += 1) grid[row] = consolidated[row];
   }
 
   if (settings.outlineBoost) {

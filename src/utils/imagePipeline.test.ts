@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as strayBeans from './strayBeanConsolidation';
 import type { BeadColor, ConvertSettings } from '../types';
 import {
   classifyImageColors,
@@ -56,6 +57,67 @@ function fromAscii(lines: string[]): Uint8ClampedArray {
   }));
   return data;
 }
+
+describe('automatic stray-bean entry and mode policy', () => {
+  const fills: BeadColor[] = [
+    { id: 'fill', code: 'F', name: 'Fill', hex: '#DC3C46', rgb: [220, 60, 70], brand: 'MARD' },
+    { id: 'speck', code: 'S', name: 'Speck', hex: '#E64A54', rgb: [230, 74, 84], brand: 'MARD' },
+    { id: 'outline', code: 'O', name: 'Outline', hex: '#141414', rgb: [20, 20, 20], brand: 'MARD' },
+  ];
+  const settings: ConvertSettings = {
+    ...baseSettings, width: 40, height: 40, dither: 'none',
+    kmeansClustering: false, quantizationStrength: 0, backgroundRemovalEnabled: false,
+  };
+
+  it.each(['logo', 'auto'] as const)('logo %s keeps an isolated source-matched bead without automatic merging', (mode) => {
+    const data = makePixels(40, 40, [220, 60, 70]);
+    setPixel(data, 40, 20, 20, [230, 74, 84, 255]);
+    const snapshot = data.slice();
+    const result = convertImageDataToGrid(data, 40, 40, { ...settings, pipelineOverride: mode }, fills);
+    expect(result.diagnostics.pipeline).toBe('logo');
+    expect(result.grid[20][20]).toBe('speck');
+    expect(result.diagnostics.matches[20][20]?.matchedColorId).toBe('speck');
+    expect(data).toEqual(snapshot);
+  });
+
+  it('cartoon real conversion protects a contour decoration while merging ordinary noise', () => {
+    const data = makePixels(40, 40, [220, 60, 70]);
+    for (let y = 6; y < 34; y += 1) setPixel(data, 40, 10, y, [20, 20, 20, 255]);
+    setPixel(data, 40, 12, 14, [20, 20, 20, 255]);
+    setPixel(data, 40, 25, 25, [230, 74, 84, 255]);
+    const spy = vi.spyOn(strayBeans, 'consolidateStrayBeans');
+    try {
+      const result = convertImageDataToGrid(data, 40, 40, { ...settings, pipelineOverride: 'cartoon' }, fills);
+      expect(result.grid[14][12]).toBe('outline');
+      expect(result.grid[25][25]).toBe('fill');
+      expect(spy).toHaveBeenCalledExactlyOnceWith(expect.any(Array), expect.any(Object), 'standard', { mode: 'cartoon', intent: 'auto' });
+      result.grid.forEach((row, y) => row.forEach((id, x) => {
+        expect(result.diagnostics.matches[y][x]?.matchedColorId ?? null).toBe(id);
+      }));
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each([64, 65])('cartoon real percentage threshold crosses 20 and keeps threshold+1 (%s)', (count) => {
+    const size = 80; // 6400 nonempty -> 64, deliberately above both old 20 and proposed max30.
+    const data = makePixels(size, size, [220, 60, 70]);
+    for (let i = 0; i < count; i += 1) setPixel(data, size, 20 + i % 9, 20 + Math.floor(i / 9), [230, 74, 84, 255]);
+    const result = convertImageDataToGrid(data, size, size, {
+      ...settings, width: size, height: size, pipelineOverride: 'cartoon',
+    }, fills);
+    expect(result.grid.flat().filter(id => id === 'speck')).toHaveLength(count <= 64 ? 0 : count);
+  });
+
+  it('photo conversion retains its existing path rather than enabling new global colour cleanup', () => {
+    const data = makePixels(40, 40, [220, 60, 70]);
+    setPixel(data, 40, 20, 20, [230, 74, 84, 255]);
+    const spy = vi.spyOn(strayBeans, 'consolidateStrayBeans');
+    try {
+      const result = convertImageDataToGrid(data, 40, 40, { ...settings, pipelineOverride: 'photo' }, fills);
+      expect(result.grid[20][20]).toBe('speck');
+      expect(spy).not.toHaveBeenCalled();
+    } finally { spy.mockRestore(); }
+  });
+});
 
 describe('CIEDE2000', () => {
   const vectors: Array<[[number, number, number], [number, number, number], number]> = [

@@ -1139,7 +1139,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return true;
   }, [commitGridHistory, invalidateImageRequest]);
 
-  /** Consolidate globally low-usage palette colours in the current in-memory grid only. */
+  /** Explicitly merge small connected islands in the current in-memory grid only. */
   const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard') => {
     const currentGrid = gridRef.current;
     const nextGrid = consolidateStrayBeans(currentGrid, {
@@ -1147,12 +1147,16 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       getColorKey: cell => String(cell),
       getColor: cell => parsePaletteHex(paletteMap.get(cell)?.hex ?? '#000000'),
       replaceColor: (_noise, replacement) => replacement,
-    }, strength);
+    }, strength, {
+      mode: settings.pipelineOverride && settings.pipelineOverride !== 'auto'
+        ? settings.pipelineOverride : conversionDiagnostics?.pipeline ?? 'photo',
+      intent: 'manual',
+    });
 
     // Keep the source image and conversion settings untouched; this is an edit
     // to the working pattern and is intentionally not auto-saved.
     return applyGridChange(nextGrid, false);
-  }, [applyGridChange, paletteMap]);
+  }, [applyGridChange, paletteMap, settings.pipelineOverride, conversionDiagnostics?.pipeline]);
 
   const beginHistoryTransaction = useCallback(() => {
     if (!historyTransactionRef.current) {

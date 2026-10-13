@@ -125,6 +125,27 @@ const AuthContext = createContext<AuthContextType>({
 
 export const useAuth = (): AuthContextType => useContext(AuthContext);
 
+export function deriveMembershipState(userProfile: UserProfile | null, now = Date.now()) {
+  const memberExpire = userProfile?.member_expire ?? null;
+  const active = Boolean(
+    userProfile
+      && userProfile.isVip
+      && (memberExpire === null || memberExpire > now),
+  );
+  const memberType: 0 | 1 | 2 = active ? userProfile?.member_type ?? 0 : 0;
+  const isAdmin = userProfile?.role === 'admin';
+
+  return {
+    active,
+    memberExpire,
+    memberType,
+    // Administrator VIP access does not grant a paid membership tier.
+    isVip: isAdmin || memberType >= 1,
+    isPro: memberType === 2,
+    isAdmin,
+  };
+}
+
 function sessionUser(profile: UserProfile): SessionUser {
   return {
     uid: profile.uid,
@@ -329,14 +350,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true, message: '个人资料修改成功！' };
   };
 
-  const now = Date.now();
-  const memberExpire = userProfile?.member_expire ?? null;
-  const active = Boolean(
-    userProfile
-      && userProfile.isVip
-      && (memberExpire === null || memberExpire > now),
-  );
-  const memberType: 0 | 1 | 2 = active ? userProfile?.member_type ?? 0 : 0;
+  const { active, memberExpire, memberType, isVip, isPro, isAdmin } = deriveMembershipState(userProfile);
 
   return (
     <AuthContext.Provider value={{
@@ -344,9 +358,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userProfile,
       loading,
       memberType,
-      isVip: memberType >= 1,
-      isPro: memberType === 2,
-      isAdmin: userProfile?.role === 'admin',
+      isVip,
+      isPro,
+      isAdmin,
       memberExpire,
       hasFreeTrial: Boolean(currentUser && !active && !userProfile?.freeTrialUsed),
       creditSummary,

@@ -490,10 +490,10 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.font = `bold ${Math.round(11 * Math.max(1, scale * 0.6))}px sans-serif`;
     ctx.textAlign = 'center';
 
-    // Top X coordinates
+    // Top X coordinates (Arabic numbers)
     for (let x = startX; x < endX; x++) {
       const px = startGridX + (x - startX) * cellSize + cellSize / 2;
-      const label = getColumnLetter(x);
+      const label = (x + 1).toString();
       ctx.fillText(label, px, startGridY - 8);
     }
 
@@ -554,9 +554,60 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // 8. Board Outline Overlays (Subtle translucent lines for pegboards)
-  ctx.strokeStyle = 'rgba(59, 130, 246, 0.45)';
-  ctx.lineWidth = 1.5;
+  // 8. Board Outline & Hierarchical Grid System Overlays (5x5 dashed, 10x10 bold solid)
+  // 5x5 dashed lines (small squares)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(100, 116, 139, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  for (let x = startX + 1; x < endX; x++) {
+    if (x % 5 === 0 && x % 10 !== 0) {
+      const px = startGridX + (x - startX) * cellSize;
+      ctx.beginPath();
+      ctx.moveTo(px, startGridY);
+      ctx.lineTo(px, startGridY + gridPixelHeight);
+      ctx.stroke();
+    }
+  }
+  for (let y = startY + 1; y < endY; y++) {
+    if (y % 5 === 0 && y % 10 !== 0) {
+      const py = startGridY + (y - startY) * cellSize;
+      ctx.beginPath();
+      ctx.moveTo(startGridX, py);
+      ctx.lineTo(startGridX + gridPixelWidth, py);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // 10x10 bold solid lines (large squares)
+  ctx.save();
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.75)';
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash([]);
+  for (let x = startX + 1; x < endX; x++) {
+    if (x % 10 === 0 && (boardSize <= 0 || x % boardSize !== 0)) {
+      const px = startGridX + (x - startX) * cellSize;
+      ctx.beginPath();
+      ctx.moveTo(px, startGridY);
+      ctx.lineTo(px, startGridY + gridPixelHeight);
+      ctx.stroke();
+    }
+  }
+  for (let y = startY + 1; y < endY; y++) {
+    if (y % 10 === 0 && (boardSize <= 0 || y % boardSize !== 0)) {
+      const py = startGridY + (y - startY) * cellSize;
+      ctx.beginPath();
+      ctx.moveTo(startGridX, py);
+      ctx.lineTo(startGridX + gridPixelWidth, py);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+
+  // Board Boundary Overlays (Subtle translucent lines for pegboards)
+  ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
+  ctx.lineWidth = 2;
   for (let bx = Math.floor(startX / boardSize); bx <= Math.ceil(endX / boardSize); bx++) {
     const gx = bx * boardSize;
     if (gx >= startX && gx <= endX) {

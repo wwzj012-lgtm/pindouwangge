@@ -87,8 +87,24 @@ export function getAxisLabelPositions({
     specialIndices.add(index);
   }
 
+  // 10-step major landmarks (10th cell = index 9) and 5-step dashed landmarks (5th cell = index 4)
+  const landmarkTens: number[] = [];
+  for (let index = 9; index < count; index += 10) {
+    landmarkTens.push(index);
+  }
+  const landmarkFives: number[] = [];
+  for (let index = 4; index < count; index += 5) {
+    landmarkFives.push(index);
+  }
+
   const placed: CoordinateLabelPosition[] = [];
-  const specialPriority = [0, count - 1, ...Array.from(specialIndices)]
+  const specialPriority = [
+    0,
+    count - 1,
+    ...Array.from(specialIndices),
+    ...landmarkTens,
+    ...landmarkFives,
+  ]
     .filter((index, position, values) => values.indexOf(index) === position)
     .map(index => labels[index]);
 

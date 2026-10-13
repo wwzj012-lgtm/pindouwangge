@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ChevronLeft,
   Pencil,
@@ -26,8 +26,6 @@ import {
   Scissors,
   Loader2,
   Palette,
-  ZoomIn,
-  ZoomOut,
   Maximize2,
   ChevronDown,
   Layers,
@@ -194,8 +192,14 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
 }) => {
   const [currentTab, setCurrentTab] = useState<MobileTab>('canvas');
   const [isFeatureSheetOpen, setIsFeatureSheetOpen] = useState(false);
+  const [isColorTrayOpen, setIsColorTrayOpen] = useState(false);
   const [jsonImportError, setJsonImportError] = useState<string | null>(null);
   const jsonFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Collapse the used-color tray whenever the active tab changes
+  useEffect(() => {
+    setIsColorTrayOpen(false);
+  }, [currentTab]);
 
   const handleJsonFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const input = event.currentTarget;
@@ -267,7 +271,10 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
       {/* Main Screen View Area */}
       <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
         {/* Tab 1: Immersive Fullscreen Mobile Canvas */}
-        <div className={`w-full h-full relative ${currentTab === 'canvas' ? 'block' : 'hidden'}`}>
+        <div
+          className={`w-full h-full relative ${currentTab === 'canvas' ? 'block' : 'hidden'}`}
+          onPointerDownCapture={() => setIsColorTrayOpen(false)}
+        >
           <GridCanvas
             interactionProfile="touch"
             grid={grid}
@@ -407,33 +414,15 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
       </div>
 
       {/* Unified Mobile Bottom Workstation (所有按钮集中在底部) */}
-      <div className="shrink-0 bg-white/98 backdrop-blur-md border-t border-purple-200/90 shadow-2xl flex flex-col z-20 select-none">
-        {/* Row 1: Quick Swatch & Color Selector Bar (Only on canvas tab) */}
+      <div className="shrink-0 relative bg-white/98 backdrop-blur-md border-t border-purple-200/90 shadow-2xl flex flex-col z-20 select-none">
+        {/* Collapsible Used-Color Tray (已用色号快捷托盘，默认收起) */}
         {currentTab === 'canvas' && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 border-b border-purple-100/90 overflow-x-auto scrollbar-none bg-purple-50/40">
-            {/* Active Color Picker Trigger */}
-            <button
-              type="button"
-              onClick={openColorManagerModal}
-              className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-purple-200 bg-white px-2 text-purple-700 shadow-sm active:scale-95"
-              title="点击打开全色库选色"
-            >
-              <div
-                className="w-4 h-4 rounded-full border border-black/20 shadow-xs shrink-0"
-                style={{ backgroundColor: selectedColor?.hex || '#transparent' }}
-              />
-              <div className="flex flex-col text-left">
-                <span className="text-[10px] font-black text-purple-950 leading-tight">
-                  {selectedColor ? selectedColor.code : isEn ? 'Palette' : '色号'}
-                </span>
-              </div>
-              <ChevronDown className="w-3 h-3 text-purple-600" />
-            </button>
-
-            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
-
-            {/* Quick Used Colors List */}
-            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none py-0.5">
+          <div
+            className={`absolute bottom-full left-0 right-0 overflow-hidden bg-purple-50/95 backdrop-blur-md shadow-lg transition-[max-height] duration-200 ease-out ${
+              isColorTrayOpen ? 'max-h-16 border-b border-purple-100/90' : 'max-h-0'
+            }`}
+          >
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-2.5 py-2">
               {usedColorIds.map(colorId => {
                 const bead = paletteMap.get(colorId);
                 if (!bead) return null;
@@ -443,7 +432,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
                     key={bead.code}
                     type="button"
                     onClick={() => setSelectedColor(bead)}
-                    className={`inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border px-2 text-[9px] ${isSelected ? 'scale-105 border-purple-500 bg-purple-600 font-black text-white' : 'border-purple-200 bg-white font-bold text-purple-700'}`}
+                    className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border px-2 ${isSelected ? 'scale-105 border-purple-500 bg-purple-600 font-black text-white' : 'border-purple-200 bg-white font-bold text-purple-700'}`}
                   >
                     <div
                       className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
@@ -455,23 +444,52 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               })}
               <button
                 type="button"
-                onClick={openColorManagerModal}
-                className="inline-flex h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-purple-200 bg-white px-2 text-[9px] font-bold text-purple-700"
+                onClick={() => {
+                  setIsColorTrayOpen(false);
+                  openColorManagerModal();
+                }}
+                className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-purple-200 bg-white px-2 text-[9px] font-bold text-purple-700"
               >
                 <Plus className="w-2.5 h-2.5" />
-                <span>{isEn ? 'More' : '选色'}</span>
+                <span>{isEn ? 'All' : '全色库'}</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Row 2: Main Tool Dock (Pencil, Bucket, Pipette, Eraser, Pan, Undo, Redo, Zoom, Tools) */}
+        {/* Row 1: Single-Line Tool Dock (current color chip + tools + undo/redo + more) */}
         {currentTab === 'canvas' && (
-          <div className="grid grid-cols-5 gap-1 border-b border-purple-100/90 bg-white px-2 py-1.5">
+          <div className="flex items-center gap-1 border-b border-purple-100/90 bg-white px-2 py-1.5">
+            {/* Current Color Chip - toggles the used-color tray */}
+            <button
+              type="button"
+              onClick={() => setIsColorTrayOpen(open => !open)}
+              className={`inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-2 shadow-sm active:scale-95 ${
+                isColorTrayOpen
+                  ? 'border-purple-500 bg-purple-50 text-purple-800'
+                  : 'border-purple-200 bg-white text-purple-700'
+              }`}
+              title={isEn ? 'Show used colors' : '展开已用色号'}
+              aria-expanded={isColorTrayOpen}
+            >
+              <div
+                className="w-4 h-4 rounded-full border border-black/20 shadow-xs shrink-0"
+                style={{ backgroundColor: selectedColor?.hex || 'transparent' }}
+              />
+              <span className="text-[10px] font-black text-purple-950 leading-tight">
+                {selectedColor ? selectedColor.code : isEn ? 'Palette' : '色号'}
+              </span>
+              <ChevronDown className={`w-3 h-3 text-purple-600 transition-transform ${isColorTrayOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
+
+            {/* Scrollable Tool Buttons */}
+            <div className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-none">
             <button
               type="button"
               onClick={() => setActiveTool('pencil')}
-              className={`inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border p-0 ${activeTool === 'pencil' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'pencil' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Pencil' : '画笔'}
               aria-label={isEn ? 'Pencil' : '画笔'}
             >
@@ -480,7 +498,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setActiveTool('bucket')}
-              className={`inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border p-0 ${activeTool === 'bucket' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'bucket' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Bucket Fill' : '油漆桶'}
               aria-label={isEn ? 'Bucket Fill' : '油漆桶'}
             >
@@ -489,7 +507,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setActiveTool('eyedropper')}
-              className={`inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border p-0 ${activeTool === 'eyedropper' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'eyedropper' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Eyedropper' : '吸管'}
               aria-label={isEn ? 'Eyedropper' : '吸管'}
             >
@@ -498,7 +516,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setActiveTool('eraser')}
-              className={`inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border p-0 ${activeTool === 'eraser' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'eraser' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Eraser' : '橡皮擦'}
               aria-label={isEn ? 'Eraser' : '橡皮擦'}
             >
@@ -507,17 +525,20 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <button
               type="button"
               onClick={() => setActiveTool('pan')}
-              className={`inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border p-0 ${activeTool === 'pan' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'pan' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Hand/Pan' : '抓手'}
               aria-label={isEn ? 'Hand/Pan' : '抓手'}
             >
               <Hand className="w-4 h-4" />
             </button>
+
+            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
+
             <button
               type="button"
               onClick={handleUndo}
               disabled={!canUndo}
-              className="inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
               title={isEn ? 'Undo' : '撤销'}
               aria-label={isEn ? 'Undo' : '撤销'}
             >
@@ -527,48 +548,34 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               type="button"
               onClick={handleRedo}
               disabled={!canRedo}
-              className="inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
               title={isEn ? 'Redo' : '重做'}
               aria-label={isEn ? 'Redo' : '重做'}
             >
               <Redo2 className="w-4 h-4" />
             </button>
-            <button
-              type="button"
-              onClick={handleZoomIn}
-              className="inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 active:scale-95"
-              title={isEn ? 'Zoom in' : '放大'}
-              aria-label={isEn ? 'Zoom in' : '放大'}
-            >
-              <ZoomIn className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={handleZoomOut}
-              className="inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 active:scale-95"
-              title={isEn ? 'Zoom out' : '缩小'}
-              aria-label={isEn ? 'Zoom out' : '缩小'}
-            >
-              <ZoomOut className="w-4 h-4" />
-            </button>
+
+            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
+
             <button
               type="button"
               onClick={() => setIsFeatureSheetOpen(true)}
-              className="inline-flex h-11 min-w-0 w-full items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-0 text-purple-700 active:scale-95"
+              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-0 text-purple-700 active:scale-95"
               title={isEn ? 'More tools and view settings' : '更多工具与视图设置'}
               aria-label={isEn ? 'More tools and view settings' : '更多工具与视图设置'}
             >
               <Sliders className="w-4 h-4 text-purple-600" />
             </button>
+            </div>
           </div>
         )}
 
         {/* Row 3: Main Action Navigation Bar (画布 / 转图 / 用量 / 省豆 / 保存 / 导出) */}
-        <nav className="bg-white px-2 py-1.5 sm:px-6 sm:py-2 flex items-center justify-around sm:justify-center sm:gap-6 md:gap-10 text-[10px] sm:text-xs border-t border-purple-100">
+        <nav className="bg-white px-2 py-1 sm:px-6 flex items-center justify-around sm:justify-center sm:gap-6 md:gap-10 text-[10px] sm:text-xs border-t border-purple-100">
           <button
             type="button"
             onClick={() => setCurrentTab('canvas')}
-            className={`inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 ${currentTab === 'canvas' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-h-14 sm:min-w-16 sm:px-3`}
+            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'canvas' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
           >
             <LayoutGrid className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>{isEn ? 'Canvas' : '画布'}</span>
@@ -577,7 +584,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           <button
             type="button"
             onClick={() => setCurrentTab('settings')}
-            className={`inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 ${currentTab === 'settings' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-h-14 sm:min-w-16 sm:px-3`}
+            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'settings' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
           >
             <Sliders className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>{isEn ? 'Convert' : '转图'}</span>
@@ -586,7 +593,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           <button
             type="button"
             onClick={() => setCurrentTab('stats')}
-            className={`inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 py-1 ${currentTab === 'stats' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-h-14 sm:min-w-16 sm:px-3`}
+            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'stats' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
           >
             <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>{isEn ? 'Stats' : '用量'}</span>
@@ -595,7 +602,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           <button
             type="button"
             onClick={openSmartReduce}
-            className="inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-amber-200 bg-amber-50 px-1.5 py-1 font-black text-amber-700 sm:min-h-14 sm:min-w-16 sm:px-3"
+            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-amber-200 bg-amber-50 px-1.5 font-black text-amber-700 sm:min-w-16 sm:px-3"
             title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
           >
             <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 fill-amber-500" />
@@ -606,7 +613,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             type="button"
             onClick={openSaveNameDialog}
             disabled={isSavingPattern}
-            className="inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-emerald-600 px-1.5 py-1 font-black text-white shadow-sm disabled:opacity-50 active:scale-95 sm:min-h-14 sm:min-w-16 sm:px-3"
+            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-emerald-600 px-1.5 font-black text-white shadow-sm disabled:opacity-50 active:scale-95 sm:min-w-16 sm:px-3"
           >
             {isSavingPattern ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Save className="w-4 h-4 sm:w-5 sm:h-5" />}
             <span>{isEn ? 'Save' : '保存'}</span>
@@ -615,7 +622,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           <button
             type="button"
             onClick={openExportModal}
-            className="inline-flex min-h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-black text-emerald-700 active:scale-95 sm:min-h-14 sm:min-w-16 sm:px-4"
+            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 font-black text-emerald-700 active:scale-95 sm:min-w-16 sm:px-4"
           >
             <Download className="w-4 h-4 sm:w-5 sm:h-5" />
             <span>{isEn ? 'Export' : '导出'}</span>

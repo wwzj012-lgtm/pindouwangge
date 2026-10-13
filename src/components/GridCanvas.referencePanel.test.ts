@@ -9,15 +9,15 @@ const previewStart = source.indexOf('{/* Enlarged Original Image Lightbox Modal 
 const preview = source.slice(previewStart);
 
 describe('original image reference panel header contract', () => {
-  it('keeps all three compact controls inside the draggable header', () => {
+  it('keeps all controls organized inside the draggable header and cloud collapsed toggle', () => {
     const headerStart = panel.indexOf('onPointerDown={handleReferencePanelPointerDown}');
     const controlsStart = panel.indexOf('data-reference-panel-controls');
-    const imageBodyStart = panel.indexOf('{!isThumbnailMinimized &&');
 
     expect(headerStart).toBeGreaterThanOrEqual(0);
     expect(controlsStart).toBeGreaterThan(headerStart);
-    expect(imageBodyStart).toBeGreaterThan(controlsStart);
-    expect(panel.match(/h-8 min-w-0 cursor-pointer/g)).toHaveLength(3);
+    expect(panel).toContain('aria-label="收起原图参考"');
+    expect(panel).toContain('aria-label="展开原图参考"');
+    expect(panel).toContain('<Cloud');
     expect(panel).not.toContain('grid grid-cols-3 gap-1.5 p-2');
   });
 
@@ -26,24 +26,22 @@ describe('original image reference panel header contract', () => {
     expect(panel).toContain('onPointerDown={event => event.stopPropagation()}');
     expect(panel).toContain('aria-label="上传原图"');
     expect(panel).toContain('aria-label="重置当前画板"');
-    expect(panel).toContain("aria-label={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}");
+    expect(panel).toContain('aria-label="收起原图参考"');
+    expect(panel).toContain('aria-label="展开原图参考"');
   });
 
   it('uses low-saturation semantic colors and keeps the reference panel compact on mobile', () => {
     expect(panel).toContain('w-[min(220px,calc(100vw-16px))] sm:w-[300px]');
     expect(panel).toContain('border-emerald-300 bg-emerald-50');
     expect(panel).toContain('border-rose-300 bg-rose-50');
-    expect(panel).toContain('border-purple-300 bg-purple-100');
+    expect(panel).toContain('border-purple-200 bg-purple-50/80');
     expect(panel).not.toContain('bg-emerald-600');
     expect(panel).not.toContain('bg-rose-600');
   });
 
   it('keeps the reduced type, icon, and spacing scale without shrinking the upload hit area', () => {
-    expect(panel.match(/h-3 w-3 shrink-0 sm:h-3\.5 sm:w-3\.5/g)).toHaveLength(4);
-    expect(panel.match(/h-8 min-w-0 cursor-pointer/g)).toHaveLength(3);
-    expect(panel.match(/px-0\.5 text-\[10px\] font-bold/g)).toHaveLength(3);
     expect(panel).toContain('min-h-24 w-full');
-    expect(panel).toContain('mb-0.5 h-5 w-5 text-purple-600');
+    expect(panel).toContain('h-5 w-5 text-purple-600');
     expect(panel).toContain('text-[13px] font-extrabold text-purple-950">上传原图');
     expect(panel).toContain('text-[11px] font-medium text-purple-500">对照原图手动绘制');
     expect(panel).toContain('max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px]');

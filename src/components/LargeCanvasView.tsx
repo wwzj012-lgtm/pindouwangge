@@ -38,7 +38,6 @@ import {
   type LargeCanvasMaxSide,
 } from '../utils/largeCanvas';
 import type { BeadShape, CanvasBackdrop, ColorMatchAlgo, DitherMode } from '../types';
-import { getColumnLetter } from '../utils/exportUtils';
 import { useAuth } from '../context/AuthContext';
 
 export interface LargeCanvasFrame {
@@ -665,7 +664,7 @@ function drawExportSheet(
   context.font = '9px sans-serif';
   context.textAlign = 'center';
   context.textBaseline = 'alphabetic';
-  for (let x = 0; x < gridWidth; x += 5) context.fillText(getColumnLetter(minX + x), marginLeft + x * cell + cell / 2, marginTop - 8);
+  for (let x = 0; x < gridWidth; x += 5) context.fillText(String(minX + x + 1), marginLeft + x * cell + cell / 2, marginTop - 8);
   context.textAlign = 'right';
   context.textBaseline = 'middle';
   for (let y = 0; y < gridHeight; y += 5) context.fillText(String(minY + y + 1), marginLeft - 6, marginTop + y * cell + cell / 2);
@@ -2119,8 +2118,8 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
             onPointerUp={finishInteraction}
             onPointerCancel={() => setInteraction(null)}
           >
-            <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-bold text-slate-400">1格 = 1颗拼豆 · 每5格粗线 · {BOARD_GRID_WIDTH} × {BOARD_GRID_HEIGHT}</div>
-            {Array.from({ length: Math.ceil(BOARD_GRID_WIDTH / 5) }, (_, index) => index * 5).map(x => <span key={`col-${x}`} className="pointer-events-none absolute -top-4 -translate-x-1/2 text-[9px] font-semibold text-slate-400" style={{ left: x * scaledCellSize + scaledCellSize / 2 }}>{getColumnLetter(x)}</span>)}
+            <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-bold text-slate-400">1格 = 1颗拼豆 · 每5格虚线 · 每10格粗线 · {BOARD_GRID_WIDTH} × {BOARD_GRID_HEIGHT}</div>
+            {Array.from({ length: Math.ceil(BOARD_GRID_WIDTH / 5) }, (_, index) => index * 5).map(x => <span key={`col-${x}`} className="pointer-events-none absolute -top-4 -translate-x-1/2 text-[9px] font-semibold text-slate-400" style={{ left: x * scaledCellSize + scaledCellSize / 2 }}>{x + 1}</span>)}
             {Array.from({ length: Math.ceil(BOARD_GRID_HEIGHT / 5) }, (_, index) => index * 5).map(y => <span key={`row-${y}`} className="pointer-events-none absolute -left-5 -translate-y-1/2 text-right text-[9px] font-semibold text-slate-400" style={{ top: y * scaledCellSize + scaledCellSize / 2 }}>{y + 1}</span>)}
             {frames.map(frame => {
               const activeInteraction = interactionFrameId === frame.id ? interaction : null;

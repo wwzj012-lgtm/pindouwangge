@@ -431,10 +431,10 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onOpenVipModal?.();
             }}
-            className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <Crown className="w-5 h-5 text-amber-500 shrink-0" />
-            <div className="text-left min-w-0">
+            <div className="min-w-0 text-left">
               <p>{isEn ? 'Stella VIP' : '星格会员'}</p>
               <p className="text-[9px] text-amber-700 font-medium">
                 {isEn ? 'Unlock premium tools' : '解锁高级创作工具'}
@@ -447,10 +447,10 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onOpenSmartReduce?.();
             }}
-            className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <Zap className="w-5 h-5 text-amber-500 fill-amber-400 shrink-0" />
-            <div className="text-left">
+            <div className="min-w-0 text-left">
               <p>{isEn ? 'Smart Bead Saver' : '智能精准省豆'}</p>
               <p className="text-[9px] text-amber-700 font-medium">
                 {isEn ? 'Preserve features' : '合并相近过渡杂色'}
@@ -463,10 +463,10 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onOpenPaletteModal?.();
             }}
-            className="p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-purple-50 border border-purple-200 text-purple-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <Palette className="w-5 h-5 text-purple-600 shrink-0" />
-            <div className="text-left">
+            <div className="min-w-0 text-left">
               <p>{isEn ? 'Color Brand Card' : '品牌色号卡库'}</p>
               <p className="text-[9px] text-purple-700 font-medium">
                 {isEn ? 'MARD, Artkal, Perler' : '查看全色号清单'}
@@ -479,10 +479,10 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onOpenPatternsModal?.();
             }}
-            className="p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <ImageIcon className="w-5 h-5 text-indigo-600 shrink-0" />
-            <div className="text-left">
+            <div className="min-w-0 text-left">
               <p>{isEn ? 'My Pattern Cloud' : '云端图纸库'}</p>
               <p className="text-[9px] text-slate-500 font-medium">
                 {isEn ? 'Saved works' : '查看历史作品'}
@@ -495,10 +495,10 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onClearOuterBackground();
             }}
-            className="p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <Scissors className="w-5 h-5 text-rose-500 shrink-0" />
-            <div className="text-left">
+            <div className="min-w-0 text-left">
               <p>{isEn ? 'Trim Canvas Edge' : '自动裁剪黑白边'}</p>
               <p className="text-[9px] text-slate-500 font-medium">
                 {isEn ? 'Auto crop outer borders' : '消除主体周围空白'}
@@ -511,7 +511,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onRequestImportJson();
             }}
-            className="min-h-[44px] min-w-0 p-3 rounded-2xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <FolderOpen className="w-5 h-5 text-sky-600 shrink-0" />
             <div className="min-w-0 text-left">
@@ -525,7 +525,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onExportJson();
             }}
-            className="min-h-[44px] min-w-0 p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="min-h-12 min-w-0 p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <FileCode className="w-5 h-5 text-emerald-600 shrink-0" />
             <div className="min-w-0 text-left">

@@ -584,7 +584,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
       </header>
 
       {/* Main Container */}
-      <div className="max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-12 sm:space-y-16">
+      <div className="max-w-7xl w-full mx-auto px-3 sm:px-6 lg:px-8 py-6 sm:py-10 space-y-10 sm:space-y-16">
 
         {/* 1. PRODUCT HERO SECTION - STANDALONE SAAS LANDING BANNER */}
         <div className="relative rounded-3xl bg-white/95 backdrop-blur-xl border border-purple-200/90 p-6 sm:p-10 lg:p-12 shadow-2xl shadow-purple-900/5 overflow-hidden">
@@ -622,7 +622,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 <button
                   type="button"
                   onClick={enterWorkspace}
-                  className="px-6 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 hover:brightness-110 text-white font-black text-sm shadow-lg shadow-purple-500/25 transition-all flex items-center gap-2.5 cursor-pointer"
+                  className="w-full sm:w-auto justify-center px-6 py-3.5 sm:px-8 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-600 via-indigo-600 to-fuchsia-600 hover:brightness-110 text-white font-black text-sm shadow-lg shadow-purple-500/25 transition-all flex items-center gap-2.5 cursor-pointer"
                 >
                   <Wand2 className="w-5 h-5 text-amber-300 fill-amber-300" />
                   <span>免费开始创作</span>
@@ -632,7 +632,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 <button
                   type="button"
                   onClick={scrollToLiveCanvas}
-                  className="px-5 py-3.5 sm:px-7 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 border border-purple-300/80 text-purple-900 font-extrabold text-sm shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
+                  className="flex-1 sm:flex-none justify-center px-5 py-3.5 sm:px-7 sm:py-4 rounded-2xl bg-gradient-to-r from-purple-100 to-pink-100 hover:from-purple-200 hover:to-pink-200 border border-purple-300/80 text-purple-900 font-extrabold text-sm shadow-xs transition-colors flex items-center gap-2 cursor-pointer"
                 >
                   <MousePointerClick className="w-4 h-4 text-purple-700" />
                   <span>体验 LIVE 互动画板</span>
@@ -642,7 +642,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 <button
                   type="button"
                   onClick={exploreCommunity}
-                  className="px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl bg-white border border-purple-200 hover:bg-purple-50 text-purple-900 font-extrabold text-sm shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
+                  className="flex-1 sm:flex-none justify-center px-5 py-3.5 sm:px-6 sm:py-4 rounded-2xl bg-white border border-purple-200 hover:bg-purple-50 text-purple-900 font-extrabold text-sm shadow-2xs transition-colors flex items-center gap-2 cursor-pointer"
                 >
                   <Compass className="w-4 h-4 text-purple-600" />
                   <span>浏览社区图纸</span>

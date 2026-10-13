@@ -30,4 +30,16 @@ describe('HomeView hero examples', () => {
     expect(homeSource).toContain('createHeroExampleActivation(example, onLoadHeroExample)');
     expect(appSource).toContain('handleLoadSample(example.url, example.name)');
   });
+
+  it('renders the real announcement as an accessible home action without bypassing load errors', () => {
+    const homeSource = readFileSync(new URL('./HomeView.tsx', import.meta.url), 'utf8');
+    const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
+
+    expect(homeSource).toContain('<button');
+    expect(homeSource).toContain('aria-label={`打开公告：${activeAnnouncement.title}`}');
+    expect(appSource).toContain('activeAnnouncement={activeAnnouncement}');
+    expect(appSource).toContain('publicAnnouncements.find(item => !dismissedAnnouncementIds.has(announcementReadKey(item))) ?? null');
+    expect(appSource).toContain("announcementLoadState === 'error'");
+    expect(appSource).not.toContain("id: 'mock-announcement'");
+  });
 });

@@ -2009,7 +2009,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         />
       )}
 
-      {activeAnnouncement && (
+      {activeAnnouncement && currentTab !== 'home' && (
         <aside role="status" className="mx-3 mt-2 flex min-w-0 shrink-0 items-center gap-2 rounded-2xl border border-violet-200 bg-gradient-to-r from-violet-50 to-fuchsia-50 px-3 py-2 text-violet-950 shadow-sm sm:mx-5 sm:px-4" aria-label="系统公告">
           <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-600 text-white"><Bell className="h-4 w-4" /></div>
           <button type="button" onClick={() => setIsAnnouncementModalOpen(true)} className="min-w-0 flex-1 text-left"><p className="truncate text-xs font-bold">{activeAnnouncement.pinned ? '置顶公告 · ' : '公告 · '}{activeAnnouncement.title}</p><p className="mt-0.5 line-clamp-1 break-words text-xs leading-5 text-violet-800">{activeAnnouncement.content}</p></button>
@@ -2038,6 +2038,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onStartPhotoToBead={handleImageUpload}
           onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
           onImportPattern={handleImportPattern}
+          activeAnnouncement={activeAnnouncement}
+          onOpenAnnouncement={() => setIsAnnouncementModalOpen(true)}
         />
       )}
 

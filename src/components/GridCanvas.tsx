@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useLayoutEffect } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, Upload, RotateCcw } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, Upload, RotateCcw, Cloud } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
-import { drawBeadOnCanvas, getColumnLetter } from '../utils/exportUtils';
+import { drawBeadOnCanvas } from '../utils/exportUtils';
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
 import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
@@ -15,6 +15,8 @@ import {
 } from '../utils/imagePreviewView';
 import {
   clampReferencePanelPosition,
+  getCollapsedReferencePanelPosition,
+  getExpandedReferencePanelPosition,
   getInitialReferencePanelPosition,
   type ReferencePanelPosition,
 } from '../utils/referencePanelPosition';
@@ -242,6 +244,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const referencePanelInitializedRef = useRef(false);
   const [isCanvasResetDialogOpen, setIsCanvasResetDialogOpen] = useState(false);
   const confirmCanvasResetRef = useRef<HTMLButtonElement>(null);
+  const lastExpandedSizeRef = useRef<{ width: number; height: number }>({ width: 300, height: 220 });
 
   const resetModalImageView = useCallback(() => {
     setModalImageView(resetImagePreviewView());
@@ -275,6 +278,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     if (!container || !panel) return;
 
     const updatePosition = () => {
+      if (!isThumbnailMinimized && panel.offsetWidth > 60) {
+        lastExpandedSizeRef.current = {
+          width: panel.offsetWidth,
+          height: panel.offsetHeight,
+        };
+      }
       setReferencePanelPosition(current => {
         if (!referencePanelInitializedRef.current) {
           referencePanelInitializedRef.current = true;
@@ -297,6 +306,54 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     observer.observe(panel);
     return () => observer.disconnect();
   }, [effectiveImage, isThumbnailMinimized]);
+
+  const handleCollapseReferencePanel = useCallback(() => {
+    const container = containerRef.current;
+    const panel = referencePanelRef.current;
+    const isSm = typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches;
+    const cloudSize = isSm ? 48 : 44;
+    const minimizedSize = { width: cloudSize, height: cloudSize };
+
+    if (container && panel) {
+      const expandedSize = {
+        width: panel.offsetWidth || (isSm ? 300 : Math.min(220, container.clientWidth - 16)),
+        height: panel.offsetHeight || 220,
+      };
+      lastExpandedSizeRef.current = expandedSize;
+
+      const targetPos = getCollapsedReferencePanelPosition(
+        referencePanelPosition,
+        { width: container.clientWidth, height: container.clientHeight },
+        expandedSize,
+        minimizedSize,
+      );
+      setReferencePanelPosition(targetPos);
+    }
+    setIsThumbnailMinimized(true);
+  }, [referencePanelPosition]);
+
+  const handleExpandReferencePanel = useCallback(() => {
+    const container = containerRef.current;
+    const isSm = typeof window !== 'undefined' && window.matchMedia('(min-width: 640px)').matches;
+    const cloudSize = isSm ? 48 : 44;
+    const minimizedSize = { width: cloudSize, height: cloudSize };
+
+    if (container) {
+      const expandedSize = {
+        width: lastExpandedSizeRef.current.width || (isSm ? 300 : Math.min(220, container.clientWidth - 16)),
+        height: lastExpandedSizeRef.current.height || 220,
+      };
+
+      const targetPos = getExpandedReferencePanelPosition(
+        referencePanelPosition,
+        { width: container.clientWidth, height: container.clientHeight },
+        expandedSize,
+        minimizedSize,
+      );
+      setReferencePanelPosition(targetPos);
+    }
+    setIsThumbnailMinimized(false);
+  }, [referencePanelPosition]);
 
   const handleReferencePanelPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!event.isPrimary || event.button !== 0) return;
@@ -322,6 +379,58 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const stopReferencePanelDrag = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (referencePanelDragRef.current?.pointerId === event.pointerId) {
       referencePanelDragRef.current = null;
+    }
+  }, []);
+
+  const cloudDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startPos: ReferencePanelPosition;
+    hasMoved: boolean;
+  } | null>(null);
+
+  const handleCloudPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    cloudDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startPos: referencePanelPosition,
+      hasMoved: false,
+    };
+  }, [referencePanelPosition]);
+
+  const handleCloudPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = cloudDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+
+    if (Math.abs(dx) > 4 || Math.abs(dy) > 4) {
+      drag.hasMoved = true;
+      setReferencePanelPosition(clampReferencePanel({
+        x: drag.startPos.x + dx,
+        y: drag.startPos.y + dy,
+      }));
+    }
+  }, [clampReferencePanel]);
+
+  const handleCloudPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = cloudDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+
+    if (!drag.hasMoved) {
+      handleExpandReferencePanel();
+    }
+    cloudDragRef.current = null;
+  }, [handleExpandReferencePanel]);
+
+  const handleCloudPointerCancel = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (cloudDragRef.current?.pointerId === event.pointerId) {
+      cloudDragRef.current = null;
     }
   }, []);
 
@@ -804,9 +913,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const startX = pan.x + coordOffset;
     const startY = pan.y + coordOffset;
 
-    // 1. Render Coordinate Labels (Top letters A..Z, Left numbers 1..N)
+    // 1. Render Coordinate Labels (Top & Left: Arabic numbers 1..N)
     if (showCoordinates) {
-      ctx.fillStyle = '#6B21A8';
+      ctx.fillStyle = canvasBackdrop === 'dark_grid' ? '#E2E8F0' : '#334155';
       ctx.font = `bold ${Math.max(10, Math.floor(11 * Math.min(zoom, 1.2)))}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
@@ -817,7 +926,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         boardSize,
         originX: startX,
         viewportWidth: canvasWidth,
-        getLabel: getColumnLetter,
+        getLabel: index => (index + 1).toString(),
         measureLabel: label => ctx.measureText(label).width,
       });
       for (const { label, center } of columnLabels) {
@@ -980,8 +1089,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
           if (showGridLines) {
             ctx.strokeStyle = showOverlay
-              ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.6)' : 'rgba(124, 58, 237, 0.42)')
-              : (canvasBackdrop === 'wood' ? '#FCD34D' : '#E9D5FF');
+              ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.6)' : 'rgba(100, 116, 139, 0.35)')
+              : (canvasBackdrop === 'wood' ? '#FCD34D' : '#E2E8F0');
             ctx.lineWidth = 0.5;
             ctx.strokeRect(px, py, cellSize, cellSize);
           }
@@ -990,8 +1099,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           ctx.beginPath();
           ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
           ctx.fillStyle = showOverlay
-            ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.65)' : 'rgba(124, 58, 237, 0.45)')
-            : (canvasBackdrop === 'wood' ? '#D97706' : '#C4B5FD');
+            ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.65)' : 'rgba(100, 116, 139, 0.45)')
+            : (canvasBackdrop === 'wood' ? '#D97706' : '#94A3B8');
           ctx.fill();
         }
       }
@@ -1021,12 +1130,18 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ctx.setLineDash([]); // Reset line dash
     }
 
-    // 7. Board Boundary Outlines
-    if (boardSize > 0) {
-      ctx.strokeStyle = 'rgba(124, 58, 237, 0.45)';
-      ctx.lineWidth = 1.5;
+    // 7. 5×5 Dashed & 10×10 Bold Grid System (Standard Physical Bead Board Lines)
+    if (showGridLines) {
+      // (a) 5×5 Dashed Guidelines (forming 5*5 dashed small squares)
+      ctx.save();
+      ctx.strokeStyle = canvasBackdrop === 'wood'
+        ? 'rgba(217, 119, 6, 0.55)'
+        : (canvasBackdrop === 'dark_grid' ? 'rgba(148, 163, 184, 0.6)' : 'rgba(100, 116, 139, 0.65)');
+      ctx.lineWidth = Math.max(1, Math.min(1.5, cellSize * 0.08));
+      ctx.setLineDash([4, 2.5]);
 
-      for (let x = 0; x <= width; x += boardSize) {
+      for (let x = 5; x < width; x += 5) {
+        if (x % 10 === 0) continue; // Multiples of 10 are bold solid lines
         const px = startX + x * cellSize;
         ctx.beginPath();
         ctx.moveTo(px, startY);
@@ -1034,54 +1149,47 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         ctx.stroke();
       }
 
-      for (let y = 0; y <= height; y += boardSize) {
+      for (let y = 5; y < height; y += 5) {
+        if (y % 10 === 0) continue;
         const py = startY + y * cellSize;
         ctx.beginPath();
         ctx.moveTo(startX, py);
         ctx.lineTo(startX + gridPixelWidth, py);
         ctx.stroke();
       }
+      ctx.restore();
 
-      const boardsX = Math.ceil(width / boardSize);
-      const boardsY = Math.ceil(height / boardSize);
+      // (b) 10×10 Bold Solid Guidelines (forming 10*10 bold large squares)
+      ctx.save();
+      ctx.strokeStyle = canvasBackdrop === 'wood'
+        ? 'rgba(180, 83, 9, 0.85)'
+        : (canvasBackdrop === 'dark_grid' ? 'rgba(226, 232, 240, 0.85)' : 'rgba(30, 41, 59, 0.85)');
+      ctx.lineWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
+      ctx.setLineDash([]);
 
-      // Subtle translucent sub-board number badge
-      const fontSize = Math.min(10, Math.max(8, Math.floor(cellSize * 0.45)));
-      ctx.font = `bold ${fontSize}px sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-
-      for (let by = 0; by < boardsY; by++) {
-        for (let bx = 0; bx < boardsX; bx++) {
-          const boardNum = by * boardsX + bx + 1;
-          const px = startX + bx * boardSize * cellSize + 4;
-          const py = startY + by * boardSize * cellSize + 4;
-
-          const labelText = `板 ${boardNum}`;
-          const metrics = ctx.measureText(labelText);
-          const bgW = metrics.width + 6;
-          const bgH = fontSize + 4;
-
-          // Soft light purple translucent background pill
-          ctx.fillStyle = 'rgba(243, 232, 255, 0.9)';
-          if (ctx.roundRect) {
-            ctx.beginPath();
-            ctx.roundRect(px - 2, py - 2, bgW, bgH, 4);
-            ctx.fill();
-          } else {
-            ctx.fillRect(px - 2, py - 2, bgW, bgH);
-          }
-
-          // Deep purple text label
-          ctx.fillStyle = '#6B21A8';
-          ctx.fillText(labelText, px, py);
-        }
+      for (let x = 10; x < width; x += 10) {
+        const px = startX + x * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(px, startY);
+        ctx.lineTo(px, startY + gridPixelHeight);
+        ctx.stroke();
       }
+
+      for (let y = 10; y < height; y += 10) {
+        const py = startY + y * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(startX, py);
+        ctx.lineTo(startX + gridPixelWidth, py);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
-    // 8. Grid Outer Border
-    ctx.strokeStyle = '#7C3AED';
-    ctx.lineWidth = 2;
+    // 8. Grid Outer Border (High-contrast clean frame)
+    ctx.strokeStyle = canvasBackdrop === 'wood'
+      ? 'rgba(180, 83, 9, 0.9)'
+      : (canvasBackdrop === 'dark_grid' ? 'rgba(226, 232, 240, 0.9)' : 'rgba(30, 41, 59, 0.9)');
+    ctx.lineWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
     ctx.restore();
@@ -1372,21 +1480,23 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
       {/* Hover Pixel Info Popover Card */}
       {hoverCell && (
-        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-950 text-[10px] sm:text-xs px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-2xl backdrop-blur-md shadow-md flex items-center gap-2 sm:gap-3 pointer-events-none z-10">
-          <div className="font-mono text-purple-800 font-black">
-            {getColumnLetter(hoverCell.x)}{hoverCell.y + 1} ({hoverCell.x + 1}, {hoverCell.y + 1})
-          </div>
+        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-950 text-xs px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-xl backdrop-blur-md shadow-sm flex items-center gap-2 pointer-events-none z-10 font-medium">
+          <span className="font-mono font-bold text-purple-900">
+            ({hoverCell.x + 1}, {hoverCell.y + 1})
+          </span>
           {hoveredBead ? (
-            <div className="flex items-center gap-1.5 border-l border-purple-200 pl-2 sm:pl-3">
+            <div className="flex items-center gap-1.5 border-l border-purple-200 pl-2">
               <div
-                className="w-3.5 h-3.5 sm:w-4 sm:h-4 rounded-full border border-black/20 shadow-inner shrink-0"
+                className="w-3.5 h-3.5 rounded-full border border-black/20 shadow-xs shrink-0"
                 style={{ backgroundColor: hoveredBead.hex }}
               />
               <span className="font-extrabold text-purple-950">{hoveredBead.code}</span>
-              <span className="text-purple-600 font-medium hidden xs:inline">({hoveredBead.name})</span>
+              {hoveredBead.name && hoveredBead.name !== hoveredBead.code && (
+                <span className="text-purple-600 font-medium">({hoveredBead.name})</span>
+              )}
             </div>
           ) : (
-            <span className="text-purple-400 font-medium border-l border-purple-200 pl-2 sm:pl-3">空位置</span>
+            <span className="text-purple-400 font-medium border-l border-purple-200 pl-2">无色</span>
           )}
         </div>
       )}
@@ -1403,12 +1513,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       </div>
 
       {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
-      <div data-canvas-interaction-ignore className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-white/95 border border-purple-200/90 rounded-2xl p-1.5 shadow-md flex items-center gap-1 z-10 backdrop-blur-md">
-        {/* Toggle Hand / Pan Tool Button */}
+      <div data-canvas-interaction-ignore className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-white/95 border border-purple-200/90 rounded-2xl p-1 sm:p-1.5 shadow-md flex items-center gap-0.5 sm:gap-1 z-10 backdrop-blur-md">
+        {/* Toggle Hand / Pan Tool Button (desktop only; mobile uses the bottom tool dock) */}
         {setActiveTool && (
           <button
             onClick={toggleHandTool}
-            className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all active:scale-95 ${
+            className={`hidden sm:flex w-8 h-8 rounded-xl items-center justify-center cursor-pointer transition-all active:scale-95 ${
               activeTool === 'hand'
                 ? 'bg-purple-600 text-white font-bold shadow-xs'
                 : 'bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80'
@@ -1419,12 +1529,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           </button>
         )}
 
-        <div className="w-px h-4 bg-purple-200" />
+        <div className="hidden sm:block w-px h-4 bg-purple-200" />
 
         {/* Focus / Auto-Fit View Button */}
         <button
           onClick={fitToView}
-          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="居中适应屏幕"
         >
           <Focus className="w-4 h-4" />
@@ -1433,7 +1543,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Fullscreen Full Pattern Preview Button */}
         <button
           onClick={toggleFullscreenPreview}
-          className={`w-9 h-9 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
+          className={`w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
             isFullscreenPreview
               ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
               : 'bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 border-purple-200/80'
@@ -1443,14 +1553,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           {isFullscreenPreview ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-purple-700" />}
         </button>
 
-        <span className="text-[9px] sm:text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[32px] sm:min-w-[36px] text-center">
+        <span className="text-[9px] sm:text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[28px] sm:min-w-[36px] text-center">
           {Math.round(zoom * 100)}%
         </span>
 
         {/* Zoom Out */}
         <button
           onClick={() => setZoom(Math.max(0.1, zoom * 0.8))}
-          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="缩小"
         >
           <ZoomOut className="w-4 h-4" />
@@ -1459,7 +1569,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Zoom In */}
         <button
           onClick={() => setZoom(Math.min(4.5, zoom * 1.25))}
-          className="w-9 h-9 sm:w-8 sm:h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="放大"
         >
           <ZoomIn className="w-4 h-4" />
@@ -1470,7 +1580,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       <div
         ref={referencePanelRef}
         data-canvas-interaction-ignore
-        className="absolute z-20 w-[min(220px,calc(100vw-16px))] sm:w-[300px] pointer-events-auto"
+        className={`absolute z-20 hidden pointer-events-auto sm:block ${
+          isThumbnailMinimized
+            ? 'w-auto'
+            : 'w-[min(220px,calc(100vw-16px))] sm:w-[300px]'
+        }`}
         style={{ left: referencePanelPosition.x, top: referencePanelPosition.y }}
       >
         <input
@@ -1483,93 +1597,124 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           accept="image/*"
           className="hidden"
         />
-        <div className="hidden sm:block overflow-hidden rounded-2xl border border-purple-200/90 bg-white/95 shadow-lg backdrop-blur-md">
+
+        {isThumbnailMinimized ? (
           <div
-            onPointerDown={handleReferencePanelPointerDown}
-            onPointerMove={handleReferencePanelPointerMove}
-            onPointerUp={stopReferencePanelDrag}
-            onPointerCancel={stopReferencePanelDrag}
-            onLostPointerCapture={stopReferencePanelDrag}
-            className="flex min-h-10 cursor-grab touch-none items-center gap-1 border-b border-purple-200/80 bg-purple-50/80 px-1 py-1 text-purple-950 active:cursor-grabbing sm:min-h-12 sm:gap-1.5 sm:px-1.5 sm:py-1.5"
-            title="拖动原图参考位置"
-            aria-label="拖动原图参考位置"
+            onPointerDown={handleCloudPointerDown}
+            onPointerMove={handleCloudPointerMove}
+            onPointerUp={handleCloudPointerUp}
+            onPointerCancel={handleCloudPointerCancel}
+            onLostPointerCapture={handleCloudPointerCancel}
+            role="button"
+            tabIndex={0}
+            title="点击展开原图参考，长按可拖拽"
+            aria-label="展开原图参考"
+            onKeyDown={e => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleExpandReferencePanel();
+              }
+            }}
+            className="group relative flex h-11 w-11 sm:h-12 sm:w-12 cursor-grab touch-none select-none items-center justify-center rounded-2xl border border-purple-200/90 bg-white/95 text-purple-700 shadow-md backdrop-blur-md transition-all hover:scale-105 hover:border-purple-400 hover:shadow-xl active:cursor-grabbing active:scale-95 ring-1 ring-purple-900/5"
           >
-            <div
-              className="grid min-h-8 min-w-0 flex-1 grid-cols-[28px_repeat(3,minmax(0,1fr))] gap-0.5 sm:min-h-9 sm:grid-cols-[42px_repeat(3,minmax(0,1fr))] sm:gap-1"
-              onPointerDown={event => event.stopPropagation()}
-              data-reference-panel-controls
-            >
-              <div className="flex items-center justify-center rounded-md border border-purple-200 bg-purple-50 text-purple-700" aria-hidden="true">
-                <ImageIcon className="h-3.5 w-3.5" />
-              </div>
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!onReferenceImageUpload}
-                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-0.5 text-[10px] font-bold text-emerald-800 transition-colors hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
-                title="上传原图作为画板参考"
-                aria-label="上传原图"
-              >
-                <Upload className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-                <span>上传</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsCanvasResetDialogOpen(true)}
-                disabled={!onResetCanvas}
-                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-0.5 text-[10px] font-bold text-rose-800 transition-colors hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-40 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
-                title="清空当前画板"
-                aria-label="重置当前画板"
-              >
-                <RotateCcw className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
-                <span>重置</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsThumbnailMinimized(value => !value)}
-                className="inline-flex h-8 min-w-0 cursor-pointer items-center justify-center gap-px whitespace-nowrap rounded-md border border-purple-300 bg-purple-100 px-0.5 text-[10px] font-bold text-purple-900 transition-colors hover:bg-purple-200 sm:h-9 sm:gap-1 sm:px-1 sm:text-[11px]"
-                title={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
-                aria-label={isThumbnailMinimized ? '展开原图参考' : '收起原图参考'}
-                aria-expanded={!isThumbnailMinimized}
-              >
-                {isThumbnailMinimized ? <ChevronDown className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" /> : <ChevronUp className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />}
-                <span>{isThumbnailMinimized ? '展开' : '收起'}</span>
-              </button>
-            </div>
-            <div
-              className="h-8 min-w-[12px] flex-1 cursor-grab rounded-md border border-transparent bg-transparent active:cursor-grabbing sm:h-9"
-              aria-hidden="true"
-            />
+            <Cloud className="h-6 w-6 text-purple-600 transition-transform group-hover:scale-110 drop-shadow-xs" />
+            {effectiveImage && (
+              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-emerald-500 ring-2 ring-white">
+                <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
+              </span>
+            )}
+            <span className="pointer-events-none absolute left-full ml-2 hidden whitespace-nowrap rounded-lg bg-purple-950/90 px-2 py-1 text-[11px] font-medium text-white shadow-md backdrop-blur-xs group-hover:sm:inline-block">
+              原图参考 · 点击展开
+            </span>
           </div>
+        ) : (
+          <div className="hidden sm:block overflow-hidden rounded-2xl border border-purple-200/90 bg-white/95 shadow-xl backdrop-blur-md transition-all hover:shadow-2xl ring-1 ring-purple-900/5">
+            <div
+              onPointerDown={handleReferencePanelPointerDown}
+              onPointerMove={handleReferencePanelPointerMove}
+              onPointerUp={stopReferencePanelDrag}
+              onPointerCancel={stopReferencePanelDrag}
+              onLostPointerCapture={stopReferencePanelDrag}
+              className="flex min-h-9 cursor-grab touch-none items-center justify-between gap-1 border-b border-purple-200/80 bg-gradient-to-r from-purple-50 via-indigo-50/50 to-purple-50 p-1 text-purple-950 active:cursor-grabbing sm:min-h-10"
+              title="拖动原图参考位置"
+              aria-label="拖动原图参考位置"
+            >
+              <div
+                className="flex items-center gap-1"
+                onPointerDown={event => event.stopPropagation()}
+                data-reference-panel-controls
+              >
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={!onReferenceImageUpload}
+                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-2 text-[10px] font-bold text-emerald-800 transition-all hover:bg-emerald-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
+                  title="上传原图作为画板参考"
+                  aria-label="上传原图"
+                >
+                  <Upload className="h-3 w-3 shrink-0 text-emerald-600" />
+                  <span className="leading-none">上传</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCanvasResetDialogOpen(true)}
+                  disabled={!onResetCanvas}
+                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-2 text-[10px] font-bold text-rose-800 transition-all hover:bg-rose-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
+                  title="清空当前画板"
+                  aria-label="重置当前画板"
+                >
+                  <RotateCcw className="h-3 w-3 shrink-0 text-rose-600" />
+                  <span className="leading-none">重置</span>
+                </button>
+              </div>
 
-          <div
-            onPointerDown={handleReferencePanelPointerDown}
-            onPointerMove={handleReferencePanelPointerMove}
-            onPointerUp={stopReferencePanelDrag}
-            onPointerCancel={stopReferencePanelDrag}
-            onLostPointerCapture={stopReferencePanelDrag}
-            className="hidden h-1 cursor-grab bg-purple-50/60 active:cursor-grabbing sm:block"
-            title="拖动原图参考窗口"
-            aria-label="拖动原图参考窗口"
-          />
+              {/* Draggable spacer */}
+              <div className="flex-1 h-7 cursor-grab active:cursor-grabbing" />
 
-          {!isThumbnailMinimized && (
-            <div className="p-1.5 sm:p-2">
+              {/* Right side collapse indicator button */}
+              <div
+                className="flex items-center justify-end pr-0.5"
+                onPointerDown={event => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={handleCollapseReferencePanel}
+                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-purple-200 bg-purple-50/80 text-purple-700 transition-all hover:bg-purple-200 hover:text-purple-900 active:scale-90 shadow-2xs"
+                  title="收起原图参考"
+                  aria-label="收起原图参考"
+                >
+                  <ChevronUp className="h-3.5 w-3.5 shrink-0 text-purple-700" />
+                </button>
+              </div>
+            </div>
+
+            <div
+              onPointerDown={handleReferencePanelPointerDown}
+              onPointerMove={handleReferencePanelPointerMove}
+              onPointerUp={stopReferencePanelDrag}
+              onPointerCancel={stopReferencePanelDrag}
+              onLostPointerCapture={stopReferencePanelDrag}
+              className="hidden h-1 cursor-grab bg-purple-50/60 active:cursor-grabbing sm:block"
+              title="拖动原图参考窗口"
+              aria-label="拖动原图参考窗口"
+            />
+
+            <div className="p-1.5 sm:p-2 bg-gradient-to-b from-purple-50/30 to-indigo-50/20">
               {effectiveImage ? (
                 <button
                   type="button"
                   onClick={openEnlargedImagePreview}
-                  className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl border border-purple-200/80 bg-purple-50 shadow-xs transition-transform active:scale-[0.99]"
+                  className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl border border-purple-200/90 bg-purple-50/80 shadow-xs transition-all hover:border-purple-400 hover:shadow-md active:scale-[0.99]"
                   title="点击放大查看原图"
                   aria-label="放大原图查看"
                 >
                   <img
                     src={effectiveImage.src}
                     alt="原图参考"
-                    className="max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px]"
+                    className="max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px] rounded-lg transition-transform duration-300 group-hover:scale-[1.02]"
                   />
-                  <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-purple-950/70 p-2 text-[11px] font-bold text-white opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                    <ZoomIn className="h-5 w-5 text-purple-200" />
+                  <span className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-purple-950/75 p-2 text-[11px] font-bold text-white opacity-0 backdrop-blur-xs transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    <ZoomIn className="h-5 w-5 text-purple-200 animate-pulse" />
                     点击放大原图
                   </span>
                 </button>
@@ -1577,18 +1722,20 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300/90 bg-purple-50/70 p-2 text-center transition-colors hover:border-purple-500 hover:bg-purple-100/70 sm:min-h-28 sm:p-3"
+                  className="flex min-h-24 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-purple-300/90 bg-gradient-to-br from-purple-50/90 via-indigo-50/50 to-pink-50/30 p-2 text-center transition-all hover:border-purple-500 hover:bg-purple-100/80 hover:shadow-inner sm:min-h-28 sm:p-3 group cursor-pointer"
                   title="点击上传图片做原图对照手动绘制"
                   aria-label="上传原图"
                 >
-                  <Upload className="mb-0.5 h-5 w-5 text-purple-600" />
+                  <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-2xl bg-purple-100/90 text-purple-600 flex items-center justify-center border border-purple-200/80 shadow-2xs mb-1 group-hover:scale-110 group-hover:bg-purple-600 group-hover:text-white transition-all">
+                    <Upload className="h-5 w-5 text-purple-600 group-hover:text-white transition-colors" />
+                  </div>
                   <span className="text-[13px] font-extrabold text-purple-950">上传原图</span>
                   <span className="mt-0.5 text-[11px] font-medium text-purple-500">对照原图手动绘制</span>
                 </button>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="sm:hidden absolute top-2 right-2 z-20" data-canvas-interaction-ignore>

@@ -59,6 +59,15 @@ body {
   }
 }
 
+/* Hide scrollbars on horizontal scroll strips (tools, swatches) */
+.scrollbar-none {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Landing page: bead-grid creative surface aligned with the light brand theme. */
 .landing-shell { --landing-ink: #32125f; --landing-muted: #74658f; --landing-line: rgba(112, 54, 194, .17); --landing-header-offset: 88px; position: relative; height: fit-content; min-height: 0 !important; overflow-x: clip; overflow-y: visible; color: var(--landing-ink); background: #fbf9ff; isolation: isolate; scroll-padding-top: var(--landing-header-offset); }
 /* Keep the landing surface continuous when the browser is scrolled to an

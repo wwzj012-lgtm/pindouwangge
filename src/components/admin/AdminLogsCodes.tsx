@@ -1,231 +1,209 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Check,
-  ChevronLeft,
-  ChevronRight,
-  CircleAlert,
-  ClipboardCopy,
-  Copy,
-  KeyRound,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Trash2,
-  Undo2,
-  X,
-} from 'lucide-react';
-import { generateCommercialVipCode } from '../../utils/vipCodeUtils';
-import type { AdminRequest } from './AdminConsole';
+import { ChevronLeft, ChevronRight, ClipboardCopy, Copy, KeyRound, Trash2, Undo2 } from 'lucide-react';
+import { maskCardCode } from '../../utils/vipCodeUtils';
+import type { AdminRequest } from './adminRequest';
+import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
+import { LatestRequest, dateText, requestError } from './adminUserModel';
+import { CodeWriteLocks, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
 
 type Mode = 'logs' | 'codes';
 type LogKind = 'admin' | 'user' | 'error';
-type MemberType = 1 | 2;
-interface AdminLogsCodesProps { mode: Mode; request: AdminRequest; }
-interface Paginated<T> { items: T[]; total: number; limit: number; offset: number; stats?: { total: number; vip: number; pro: number }; }
+interface Paged<T> { items: T[]; total: number; limit: number; offset: number; }
 interface LogEntry { id: string; type: LogKind; operatorUid?: string | null; operatorEmail?: string | null; level?: string | null; details?: string | null; entityType?: string | null; entityId?: string | null; metadata?: unknown; source?: string | null; message?: string | null; fingerprint?: string | null; resolvedAt?: number | null; timestamp: number; }
-interface VipCode { id: string; code: string; days: number; channel?: string | null; member_type?: MemberType; used: boolean; usedBy?: string | null; usedAt?: number | null; copied?: boolean; deletePendingAt?: number | null; createdAt: number; }
-interface Redemption { id: string; code: string; userUid?: string | null; days: number; memberType: MemberType; channel?: string | null; redeemedAt: number; }
-
-const PAGE_SIZE = 20;
-const formatTime = (value?: number | null) => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '-';
-const toStart = (value: string) => value ? new Date(`${value}T00:00:00`).getTime() : null;
-const toEnd = (value: string) => value ? new Date(`${value}T23:59:59.999`).getTime() : null;
-const codeMask = (code: string) => code.length < 9 ? code : `${code.slice(0, 4)}-${'*'.repeat(Math.max(0, code.length - 8))}-${code.slice(-4)}`;
+interface VipCode { id: string; code: string; days: number; channel?: string | null; member_type?: 1 | 2; used: boolean; usedBy?: string | null; usedAt?: number | null; copied?: boolean; deletePendingAt?: number | null; createdAt: number; }
+interface Redemption { id: string; code: string; userUid?: string | null; days: number; memberType: 1 | 2; channel?: string | null; redeemedAt: number; }
+interface CodeStats { total: number; redeemed: number; available: number; deletePending: number; copied: number; }
+interface CodePage { items: VipCode[]; total: number; page: number; limit: number; stats?: CodeStats; }
+const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('zh-CN').format(value) : '—';
 const codeType = (code: VipCode) => code.member_type === 2 ? '商家 Pro' : '普通 VIP';
 
-function Alert({ children, tone = 'amber' }: { children: React.ReactNode; tone?: 'amber' | 'rose' | 'sky' }) {
-  const colors = tone === 'rose' ? 'border-rose-400/30 bg-rose-500/10 text-rose-100' : tone === 'sky' ? 'border-sky-400/30 bg-sky-500/10 text-sky-100' : 'border-amber-400/30 bg-amber-500/10 text-amber-100';
-  return <div role="alert" className={`flex items-start gap-2 border px-3 py-3 text-sm leading-6 ${colors}`}><CircleAlert className="mt-1 h-4 w-4 shrink-0" />{children}</div>;
+function Pager({ page, total, loading, change }: { page: number; total: number; loading: boolean; change: (page: number) => void }) {
+  return <div className="admin-pagination"><span>共 {number(total)} 条 · 第 {page} / {Math.max(1, Math.ceil(total / 20))} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || page <= 1} onClick={() => change(page - 1)}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || page >= Math.ceil(total / 20)} onClick={() => change(page + 1)}><ChevronRight aria-hidden="true" /></AdminButton></div></div>;
+}
+export function AdminLogsCodes({ mode, request }: { mode: Mode; request: AdminRequest }) {
+  return <div className="admin-codes-logs">{mode === 'logs' ? <LogsPanel request={request} /> : <CodesPanelV2 request={request} />}</div>;
 }
 
-function Pager({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  return <div className="mt-4 flex items-center justify-between gap-3 text-sm text-slate-400"><span>共 {total} 条</span><div className="flex items-center gap-2"><button type="button" title="上一页" aria-label="上一页" disabled={page <= 1} onClick={() => onChange(page - 1)} className="grid h-11 w-11 place-items-center border border-slate-700 disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button><span className="min-w-16 text-center tabular-nums">{page} / {pages}</span><button type="button" title="下一页" aria-label="下一页" disabled={page >= pages} onClick={() => onChange(page + 1)} className="grid h-11 w-11 place-items-center border border-slate-700 disabled:opacity-40"><ChevronRight className="h-4 w-4" /></button></div></div>;
-}
-
-function LogDetail({ item, onClose }: { item: LogEntry; onClose: () => void }) {
-  const detail = item.type === 'admin' ? item.details : item.type === 'error' ? item.message : JSON.stringify(item.metadata ?? {}, null, 2);
-  return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/70"><button type="button" aria-label="关闭日志详情" onClick={onClose} className="absolute inset-0 cursor-default" /><aside className="relative flex h-full w-full max-w-xl flex-col border-l border-slate-700 bg-slate-900 shadow-2xl"><header className="flex min-h-16 items-center justify-between border-b border-slate-800 px-4"><div><p className="text-sm font-semibold text-white">日志详情</p><p className="mt-1 text-xs text-slate-500">{formatTime(item.timestamp)}</p></div><button type="button" title="关闭" aria-label="关闭" onClick={onClose} className="grid h-11 w-11 place-items-center text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button></header><div className="space-y-5 overflow-y-auto p-5 text-sm"><dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-y-3"><dt className="text-slate-500">类型</dt><dd className="break-all text-slate-200">{item.type}</dd><dt className="text-slate-500">操作者</dt><dd className="break-all text-slate-200">{item.operatorEmail ?? item.operatorUid ?? '-'}</dd><dt className="text-slate-500">级别/动作</dt><dd className="break-all text-slate-200">{item.level ?? '-'}</dd>{item.source && <><dt className="text-slate-500">来源</dt><dd className="break-all text-slate-200">{item.source}</dd></>}{item.fingerprint && <><dt className="text-slate-500">指纹</dt><dd className="break-all text-slate-200">{item.fingerprint}</dd></>}</dl><section><h2 className="text-sm font-semibold text-white">内容</h2><pre className="mt-3 max-h-[50vh] overflow-auto whitespace-pre-wrap break-words border border-slate-800 bg-slate-950 p-3 text-xs leading-6 text-slate-300">{detail || '-'}</pre></section></div></aside></div>;
-}
-
+interface LogQuery { kind: LogKind; from: string; to: string; operatorUid: string; level: string; page: number; }
+const emptyLogQuery = (): LogQuery => ({ kind: 'admin', from: '', to: '', operatorUid: '', level: '', page: 1 });
 function LogsPanel({ request }: { request: AdminRequest }) {
-  const [kind, setKind] = useState<LogKind>('admin'); const [from, setFrom] = useState(''); const [to, setTo] = useState(''); const [operatorUid, setOperatorUid] = useState(''); const [level, setLevel] = useState(''); const [page, setPage] = useState(1);
-  const [logs, setLogs] = useState<LogEntry[]>([]); const [total, setTotal] = useState(0); const [loading, setLoading] = useState(true); const [forbidden, setForbidden] = useState(false); const [error, setError] = useState(''); const [selected, setSelected] = useState<LogEntry | null>(null); const requestVersion = useRef(0);
-  const load = useCallback(async () => { const version = ++requestVersion.current; setLoading(true); setError(''); const query = new URLSearchParams({ type: kind, page: String(page), limit: String(PAGE_SIZE) }); const start = toStart(from); const end = toEnd(to); if (start !== null) query.set('from', String(start)); if (end !== null) query.set('to', String(end)); if (operatorUid.trim()) query.set('operatorUid', operatorUid.trim()); if (level.trim()) query.set('level', level.trim()); try { const result = await request<Paginated<LogEntry>>(`/api/admin/logs?${query}`); if (version !== requestVersion.current) return; if (result.status === 403) { setForbidden(true); setError('当前角色没有查看系统日志的权限。'); return; } if (!result.ok) { setError(result.error ?? '日志加载失败。'); return; } setLogs(result.data?.items ?? []); setTotal(result.data?.total ?? 0); setForbidden(false); } catch (caught) { if (version === requestVersion.current) setError(caught instanceof Error ? caught.message : '日志加载失败。'); } finally { if (version === requestVersion.current) setLoading(false); } }, [from, kind, level, operatorUid, page, request, to]);
-  useEffect(() => { void load(); }, [load]);
-  const apply = () => { setPage(1); void load(); };
-  const changeKind = (next: LogKind) => { setKind(next); setPage(1); setSelected(null); };
-  return <section><div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 lg:flex-row lg:items-end"><div><p className="text-xs font-medium text-sky-300">可追溯运维记录</p><h1 className="mt-2 text-2xl font-semibold text-white">系统日志</h1></div><button type="button" title="刷新日志" aria-label="刷新日志" disabled={loading || forbidden} onClick={() => void load()} className="grid h-11 w-11 place-items-center border border-slate-700 text-slate-300 disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /></button></div>{error && <div className="mt-5"><Alert tone={forbidden ? 'rose' : 'amber'}>{error}</Alert></div>}<div className="mt-5 flex overflow-x-auto border-b border-slate-800">{(['admin', 'user', 'error'] as LogKind[]).map((item) => <button key={item} type="button" onClick={() => changeKind(item)} className={`min-h-11 shrink-0 px-4 text-sm ${kind === item ? 'border-b-2 border-sky-400 text-sky-200' : 'text-slate-500 hover:text-slate-200'}`}>{item === 'admin' ? '管理员操作' : item === 'user' ? '用户行为' : '错误日志'}</button>)}</div><div className="mt-4 grid gap-2 border border-slate-800 bg-slate-900/50 p-3 sm:grid-cols-2 xl:grid-cols-5"><label className="text-xs text-slate-500">开始日期<input type="date" value={from} onChange={(event) => setFrom(event.target.value)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><label className="text-xs text-slate-500">结束日期<input type="date" value={to} onChange={(event) => setTo(event.target.value)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><label className="text-xs text-slate-500">操作者 UID<input value={operatorUid} onChange={(event) => setOperatorUid(event.target.value)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><label className="text-xs text-slate-500">级别 / 动作<input value={level} onChange={(event) => setLevel(event.target.value)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><button type="button" onClick={apply} disabled={forbidden} className="mt-auto min-h-11 bg-sky-400 px-4 text-sm font-medium text-slate-950 disabled:opacity-40">筛选</button></div><div className="mt-5">{loading ? <div className="grid min-h-64 place-items-center border border-slate-800"><Loader2 className="h-5 w-5 animate-spin text-sky-300" /></div> : logs.length ? <><div className="hidden overflow-x-auto border border-slate-800 md:block"><table className="w-full min-w-[720px] text-left text-sm"><thead className="bg-slate-900 text-xs text-slate-500"><tr><th className="px-4 py-3">时间</th><th className="px-4 py-3">类型</th><th className="px-4 py-3">操作者</th><th className="px-4 py-3">级别 / 动作</th><th className="px-4 py-3 text-right">操作</th></tr></thead><tbody>{logs.map((item) => <tr key={item.id} className="border-t border-slate-800"><td className="px-4 py-3 text-slate-400">{formatTime(item.timestamp)}</td><td className="px-4 py-3 text-slate-300">{item.type}</td><td className="px-4 py-3 text-slate-300">{item.operatorEmail ?? item.operatorUid ?? '-'}</td><td className="px-4 py-3 text-slate-300">{item.level ?? '-'}</td><td className="px-4 py-3 text-right"><button type="button" onClick={() => setSelected(item)} className="min-h-11 px-3 text-sky-200 hover:bg-sky-500/10">详情</button></td></tr>)}</tbody></table></div><div className="space-y-2 md:hidden">{logs.map((item) => <article key={item.id} className="border border-slate-800 bg-slate-950/60 p-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm text-white">{item.level ?? item.type}</p><p className="mt-1 truncate text-xs text-slate-500">{formatTime(item.timestamp)}</p></div><button type="button" onClick={() => setSelected(item)} className="min-h-11 px-3 text-sm text-sky-200">详情</button></div></article>)}</div><Pager page={page} total={total} onChange={setPage} /></> : <div className="grid min-h-64 place-items-center border border-slate-800 px-4 text-center text-sm text-slate-500">没有符合当前筛选条件的日志。</div>}</div>{selected && <LogDetail item={selected} onClose={() => setSelected(null)} />}</section>;
-}
-
-function PlaintextCodes({ codes, onClose }: { codes: string[]; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
-  const copyAll = async () => { try { await navigator.clipboard.writeText(codes.join('\n')); setCopied(true); } catch { setCopied(false); } };
-  return <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4"><section className="w-full max-w-xl border border-slate-700 bg-slate-900 shadow-2xl"><header className="flex min-h-16 items-center justify-between border-b border-slate-800 px-4"><div><p className="text-sm font-semibold text-white">新生成的兑换码</p><p className="mt-1 text-xs text-amber-200">明文仅在本次生成后展示，请立即复制保存。</p></div><button type="button" title="关闭" aria-label="关闭" onClick={onClose} className="grid h-11 w-11 place-items-center text-slate-400 hover:bg-slate-800 hover:text-white"><X className="h-5 w-5" /></button></header><pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-all bg-slate-950 p-4 text-sm leading-7 text-amber-100">{codes.join('\n')}</pre><footer className="flex justify-end gap-2 border-t border-slate-800 p-4"><button type="button" onClick={() => void copyAll()} className="flex min-h-11 items-center gap-2 bg-sky-400 px-4 text-sm font-medium text-slate-950"><ClipboardCopy className="h-4 w-4" />{copied ? '已复制' : '复制全部'}</button><button type="button" onClick={onClose} className="min-h-11 border border-slate-700 px-4 text-sm text-slate-300">关闭</button></footer></section></div>;
-}
-
-function CodesPanel({ request }: { request: AdminRequest }) {
-  const [codes, setCodes] = useState<VipCode[]>([]); const [query, setQuery] = useState(''); const [codePage, setCodePage] = useState(1); const [redemptionPage, setRedemptionPage] = useState(1); const [redemptions, setRedemptions] = useState<Redemption[]>([]); const [redemptionTotal, setRedemptionTotal] = useState(0); const [stats, setStats] = useState({ total: 0, vip: 0, pro: 0 });
-  const [days, setDays] = useState(30); const [memberType, setMemberType] = useState<MemberType>(1); const [count, setCount] = useState(1); const [channel, setChannel] = useState(''); const [plaintext, setPlaintext] = useState<string[] | null>(null); const [busy, setBusy] = useState(''); const [forbidden, setForbidden] = useState(false); const [error, setError] = useState(''); const redemptionVersion = useRef(0);
-  const loadCodes = useCallback(async () => { setError(''); try { const result = await request<VipCode[]>('/api/admin/codes'); if (result.status === 403) { setForbidden(true); setError('当前角色没有查看兑换码的权限。'); return; } if (!result.ok) { setError(result.error ?? '兑换码加载失败。'); return; } setCodes((result.data ?? []).sort((a, b) => b.createdAt - a.createdAt)); setForbidden(false); } catch (caught) { setError(caught instanceof Error ? caught.message : '兑换码加载失败。'); } }, [request]);
-  const loadRedemptions = useCallback(async () => { const version = ++redemptionVersion.current; const params = new URLSearchParams({ page: String(redemptionPage), limit: String(PAGE_SIZE) }); if (query.trim()) params.set('code', query.trim()); try { const result = await request<Paginated<Redemption>>(`/api/admin/code-redemptions?${params}`); if (version !== redemptionVersion.current) return; if (result.status === 403) { setForbidden(true); setError('当前角色没有查看兑换记录的权限。'); return; } if (!result.ok) { setError(result.error ?? '兑换记录加载失败。'); return; } setRedemptions(result.data?.items ?? []); setRedemptionTotal(result.data?.total ?? 0); setStats(result.data?.stats ?? { total: 0, vip: 0, pro: 0 }); } catch (caught) { if (version === redemptionVersion.current) setError(caught instanceof Error ? caught.message : '兑换记录加载失败。'); } }, [query, redemptionPage, request]);
-  useEffect(() => { void loadCodes(); }, [loadCodes]); useEffect(() => { void loadRedemptions(); }, [loadRedemptions]);
-  const filteredCodes = useMemo(() => codes.filter((item) => !query.trim() || item.code.toLowerCase().includes(query.trim().toLowerCase()) || (item.channel ?? '').toLowerCase().includes(query.trim().toLowerCase())), [codes, query]);
-  const visibleCodes = filteredCodes.slice((codePage - 1) * PAGE_SIZE, codePage * PAGE_SIZE);
-  const generate = async (event: React.FormEvent) => { event.preventDefault(); if (days === 7 && memberType !== 1) { setError('7 天体验卡仅支持普通 VIP。'); return; } if (!window.confirm(`确认生成 ${count} 张 ${memberType === 2 ? '商家 Pro' : '普通 VIP'} 兑换码？`)) return; setBusy('generate'); setError(''); try { const prefix = memberType === 2 ? 'BP' : 'PV'; const generated = Array.from({ length: Math.min(500, Math.max(1, count)) }, () => generateCommercialVipCode(channel || '后台', prefix)); const result = await request('/api/admin/generate-codes', { method: 'POST', body: JSON.stringify({ codes: generated.map((code) => ({ code, days, member_type: memberType, channel: channel || null })) }) }); if (result.status === 403) { setForbidden(true); setError('当前角色没有生成兑换码的权限。'); return; } if (!result.ok) { setError(result.error ?? '兑换码生成失败。'); return; } setPlaintext(generated); await loadCodes(); } catch (caught) { setError(caught instanceof Error ? caught.message : '兑换码生成失败。'); } finally { setBusy(''); } };
-  const updateCode = async (code: VipCode, updates: Record<string, unknown>, action: string) => { setBusy(`${action}-${code.id}`); setError(''); try { const result = await request('/api/admin/update-code', { method: 'POST', body: JSON.stringify({ codeId: code.id, updates }) }); if (result.status === 403) { setForbidden(true); setError('当前角色没有管理兑换码的权限。'); return; } if (!result.ok) { setError(result.error ?? '兑换码更新失败。'); return; } await loadCodes(); } catch (caught) { setError(caught instanceof Error ? caught.message : '兑换码更新失败。'); } finally { setBusy(''); } };
-  const copyCode = async (code: VipCode) => { try { await navigator.clipboard.writeText(code.code); } catch { setError('复制失败，请检查浏览器剪贴板权限。'); return; } if (!code.copied) await updateCode(code, { copied: true }, 'copy'); };
-  const requestDelete = async (code: VipCode) => { if (!window.confirm(`确认申请删除兑换码 ${codeMask(code.code)}？该标记会进入 3 天等待期。`)) return; await updateCode(code, { deletePendingAt: Date.now() + 3 * 86_400_000 }, 'delete'); };
-  const cancelDelete = async (code: VipCode) => { if (!window.confirm(`确认撤销 ${codeMask(code.code)} 的删除申请？`)) return; await updateCode(code, { deletePendingAt: null }, 'cancel'); };
-  const applySearch = () => { setCodePage(1); setRedemptionPage(1); void loadRedemptions(); };
-  return <section><div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 lg:flex-row lg:items-end"><div><p className="text-xs font-medium text-sky-300">会员兑换与核销</p><h1 className="mt-2 text-2xl font-semibold text-white">兑换码管理</h1></div><button type="button" title="刷新兑换码" aria-label="刷新兑换码" disabled={busy !== '' || forbidden} onClick={() => { void loadCodes(); void loadRedemptions(); }} className="grid h-11 w-11 place-items-center border border-slate-700 text-slate-300 disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /></button></div>{error && <div className="mt-5"><Alert tone={forbidden ? 'rose' : 'amber'}>{error}</Alert></div>}<form onSubmit={(event) => void generate(event)} className="mt-5 grid gap-3 border border-slate-800 bg-slate-900/50 p-4 md:grid-cols-2 xl:grid-cols-5"><label className="text-xs text-slate-500">会员类型<select value={memberType} disabled={busy !== '' || forbidden} onChange={(event) => setMemberType(Number(event.target.value) as MemberType)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value={1}>普通 VIP</option><option value={2} disabled={days === 7}>商家 Pro</option></select></label><label className="text-xs text-slate-500">开通时长<select value={days} disabled={busy !== '' || forbidden} onChange={(event) => { const nextDays = Number(event.target.value); setDays(nextDays); if (nextDays === 7) setMemberType(1); }} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value={7}>7 天体验卡</option><option value={30}>30 天</option><option value={90}>90 天</option><option value={365}>365 天</option></select></label><label className="text-xs text-slate-500">生成数量<input type="number" min="1" max="500" value={count} disabled={busy !== '' || forbidden} onChange={(event) => setCount(Number(event.target.value))} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><label className="text-xs text-slate-500">发行渠道<input value={channel} disabled={busy !== '' || forbidden} onChange={(event) => setChannel(event.target.value)} maxLength={100} placeholder="可选" className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-600" /></label><button type="submit" disabled={busy !== '' || forbidden} className="mt-auto flex min-h-11 items-center justify-center gap-2 bg-sky-400 px-4 text-sm font-medium text-slate-950 disabled:opacity-40"><Plus className="h-4 w-4" />生成兑换码</button></form><div className="mt-6 grid gap-3 sm:grid-cols-3"><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">累计已兑换</p><p className="mt-2 text-2xl font-semibold text-white">{stats.total}</p></article><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">普通 VIP 兑换</p><p className="mt-2 text-2xl font-semibold text-amber-200">{stats.vip}</p></article><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">商家 Pro 兑换</p><p className="mt-2 text-2xl font-semibold text-violet-200">{stats.pro}</p></article></div><div className="mt-6 flex flex-col gap-2 border border-slate-800 bg-slate-900/50 p-3 sm:flex-row"><input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') applySearch(); }} placeholder="筛选卡密或发行渠道" className="min-h-11 min-w-0 flex-1 border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-600" /><button type="button" onClick={applySearch} disabled={forbidden} className="min-h-11 bg-sky-400 px-4 text-sm font-medium text-slate-950 disabled:opacity-40">筛选</button></div><section className="mt-5"><h2 className="text-sm font-semibold text-white">兑换码列表</h2><p className="mt-1 text-xs text-slate-500">按创建时间显示最近 {codes.length} 条可访问记录。</p><div className="mt-3">{visibleCodes.length ? <><div className="hidden overflow-x-auto border border-slate-800 md:block"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-900 text-xs text-slate-500"><tr><th className="px-4 py-3">兑换码</th><th className="px-4 py-3">权益</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">渠道</th><th className="px-4 py-3 text-right">操作</th></tr></thead><tbody>{visibleCodes.map((code) => <tr key={code.id} className={`border-t border-slate-800 ${code.copied ? 'text-amber-200' : 'text-slate-300'}`}><td className="px-4 py-3 font-mono">{codeMask(code.code)}</td><td className="px-4 py-3">{codeType(code)} · {code.days} 天</td><td className="px-4 py-3 text-xs">{code.used ? `已兑换 ${code.usedBy ?? ''}` : code.deletePendingAt ? `删除等待至 ${formatTime(code.deletePendingAt)}` : '未兑换'}</td><td className="px-4 py-3">{code.channel ?? '-'}</td><td className="px-4 py-3"><div className="flex justify-end gap-1"><button type="button" title="复制并标记已发售" aria-label="复制并标记已发售" disabled={busy !== '' || forbidden} onClick={() => void copyCode(code)} className="grid h-11 w-11 place-items-center hover:bg-slate-800 disabled:opacity-40">{code.copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</button><button type="button" title={code.copied ? '取消发售标记' : '手动标记已发售'} aria-label={code.copied ? '取消发售标记' : '手动标记已发售'} disabled={busy !== '' || forbidden} onClick={() => void updateCode(code, { copied: !code.copied }, 'mark')} className="grid h-11 w-11 place-items-center hover:bg-slate-800 disabled:opacity-40"><KeyRound className="h-4 w-4" /></button>{code.deletePendingAt ? <button type="button" title="撤销删除申请" aria-label="撤销删除申请" disabled={busy !== '' || forbidden} onClick={() => void cancelDelete(code)} className="grid h-11 w-11 place-items-center text-emerald-200 hover:bg-slate-800 disabled:opacity-40"><Undo2 className="h-4 w-4" /></button> : <button type="button" title="申请删除" aria-label="申请删除" disabled={busy !== '' || forbidden} onClick={() => void requestDelete(code)} className="grid h-11 w-11 place-items-center text-rose-200 hover:bg-slate-800 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>}</div></td></tr>)}</tbody></table></div><div className="space-y-2 md:hidden">{visibleCodes.map((code) => <article key={code.id} className={`border border-slate-800 bg-slate-950/60 p-3 ${code.copied ? 'text-amber-100' : 'text-slate-200'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-all font-mono text-sm">{codeMask(code.code)}</p><p className="mt-1 text-xs text-slate-500">{codeType(code)} · {code.days} 天 · {code.used ? '已兑换' : '未兑换'}</p></div><button type="button" title="复制兑换码" aria-label="复制兑换码" disabled={busy !== '' || forbidden} onClick={() => void copyCode(code)} className="grid h-11 w-11 place-items-center border border-slate-700 disabled:opacity-40">{code.copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</button></div><div className="mt-3 flex gap-2"><button type="button" disabled={busy !== '' || forbidden} onClick={() => void updateCode(code, { copied: !code.copied }, 'mark')} className="min-h-11 flex-1 border border-slate-700 text-sm">{code.copied ? '取消发售标记' : '标记已发售'}</button><button type="button" disabled={busy !== '' || forbidden} onClick={() => void (code.deletePendingAt ? cancelDelete(code) : requestDelete(code))} className="min-h-11 flex-1 border border-rose-400/40 text-sm text-rose-200">{code.deletePendingAt ? '撤销删除' : '申请删除'}</button></div></article>)}</div><Pager page={codePage} total={filteredCodes.length} onChange={setCodePage} /></> : <div className="grid min-h-48 place-items-center border border-slate-800 px-4 text-center text-sm text-slate-500">没有符合条件的兑换码。</div>}</div></section><section className="mt-6"><h2 className="text-sm font-semibold text-white">兑换使用记录</h2><div className="mt-3 overflow-x-auto border border-slate-800"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-slate-900 text-xs text-slate-500"><tr><th className="px-4 py-3">兑换码</th><th className="px-4 py-3">用户 UID</th><th className="px-4 py-3">权益</th><th className="px-4 py-3">兑换时间</th></tr></thead><tbody>{redemptions.length ? redemptions.map((item) => <tr key={item.id} className="border-t border-slate-800 text-slate-300"><td className="px-4 py-3 font-mono">{codeMask(item.code)}</td><td className="px-4 py-3">{item.userUid ?? '-'}</td><td className="px-4 py-3">{item.memberType === 2 ? '商家 Pro' : '普通 VIP'} · {item.days} 天</td><td className="px-4 py-3">{formatTime(item.redeemedAt)}</td></tr>) : <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">暂无使用记录。</td></tr>}</tbody></table></div><Pager page={redemptionPage} total={redemptionTotal} onChange={setRedemptionPage} /></section>{plaintext && <PlaintextCodes codes={plaintext} onClose={() => setPlaintext(null)} />}</section>;
-}
-
-export function AdminLogsCodes({ mode, request }: AdminLogsCodesProps) {
-  return mode === 'logs' ? <LogsPanel request={request} /> : <CodesPanelV2 request={request} />;
-}
-
-interface CodeStats { total: number; redeemed: number; available: number; deletePending: number; copied: number; }
-interface CodePage { items: VipCode[]; total: number; page: number; limit: number; stats: CodeStats; }
-type CodeStatus = 'all' | 'delete-pending' | 'redeemed' | 'available';
-type CopiedFilter = 'all' | 'true' | 'false';
-
-function CodesPanelV2({ request }: { request: AdminRequest }) {
-  const [codes, setCodes] = useState<VipCode[]>([]);
-  const [codePage, setCodePage] = useState(1);
-  const [codeTotal, setCodeTotal] = useState(0);
-  const [stats, setStats] = useState<CodeStats>({ total: 0, redeemed: 0, available: 0, deletePending: 0, copied: 0 });
-  const [searchInput, setSearchInput] = useState('');
-  const [channelInput, setChannelInput] = useState('');
-  const [search, setSearch] = useState('');
-  const [channelFilter, setChannelFilter] = useState('');
-  const [memberTypeFilter, setMemberTypeFilter] = useState<'all' | '1' | '2'>('all');
-  const [copiedFilter, setCopiedFilter] = useState<CopiedFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<CodeStatus>('all');
-  const [redemptionPage, setRedemptionPage] = useState(1);
-  const [redemptions, setRedemptions] = useState<Redemption[]>([]);
-  const [redemptionTotal, setRedemptionTotal] = useState(0);
-  const [redemptionStats, setRedemptionStats] = useState({ total: 0, vip: 0, pro: 0 });
-  const [days, setDays] = useState(30);
-  const [memberType, setMemberType] = useState<MemberType>(1);
-  const [count, setCount] = useState(1);
-  const [channel, setChannel] = useState('');
-  const [plaintext, setPlaintext] = useState<string[] | null>(null);
-  const [busy, setBusy] = useState('');
-  const [forbidden, setForbidden] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const codeRequestVersion = useRef(0);
-  const redemptionRequestVersion = useRef(0);
-
-  const loadCodes = useCallback(async () => {
-    const requestVersion = ++codeRequestVersion.current;
-    setError('');
-    const params = new URLSearchParams({ page: String(codePage), limit: String(PAGE_SIZE) });
-    if (search) params.set('search', search);
-    if (channelFilter) params.set('channel', channelFilter);
-    if (memberTypeFilter !== 'all') params.set('memberType', memberTypeFilter);
-    if (copiedFilter !== 'all') params.set('copied', copiedFilter);
-    if (statusFilter !== 'all') params.set('status', statusFilter);
+  const [draft, setDraft] = useState(emptyLogQuery), [query, setQuery] = useState(emptyLogQuery);
+  const [snapshot, setSnapshot] = useState<(Paged<LogEntry> & { page: number }) | null>(null);
+  const [loading, setLoading] = useState(false), [error, setError] = useState(''), [validation, setValidation] = useState('');
+  const [selected, setSelected] = useState<LogEntry | null>(null);
+  const epoch = useRef(new LatestRequest());
+  const load = useCallback(async () => {
+    const version = epoch.current.next(); setLoading(true); setError('');
     try {
-      const result = await request<CodePage>(`/api/admin/codes?${params}`);
-      if (requestVersion !== codeRequestVersion.current) return;
-      if (result.status === 403) { setForbidden(true); setError('当前角色没有查看兑换码的权限。'); return; }
-      if (!result.ok || !result.data) { setError(result.error ?? '兑换码加载失败。'); return; }
-      setCodes(result.data.items);
-      setCodeTotal(result.data.total);
-      setStats(result.data.stats);
-      setForbidden(false);
-    } catch (caught) {
-      if (requestVersion === codeRequestVersion.current) setError(caught instanceof Error ? caught.message : '兑换码加载失败。');
-    }
-  }, [channelFilter, codePage, copiedFilter, memberTypeFilter, request, search, statusFilter]);
-
-  const loadRedemptions = useCallback(async () => {
-    const requestVersion = ++redemptionRequestVersion.current;
-    const params = new URLSearchParams({ page: String(redemptionPage), limit: String(PAGE_SIZE) });
-    if (search) params.set('code', search);
-    try {
-      const result = await request<Paginated<Redemption>>(`/api/admin/code-redemptions?${params}`);
-      if (requestVersion !== redemptionRequestVersion.current) return;
-      if (result.status === 403) { setForbidden(true); setError('当前角色没有查看兑换记录的权限。'); return; }
-      if (!result.ok) { setError(result.error ?? '兑换记录加载失败。'); return; }
-      setRedemptions(result.data?.items ?? []);
-      setRedemptionTotal(result.data?.total ?? 0);
-      setRedemptionStats(result.data?.stats ?? { total: 0, vip: 0, pro: 0 });
-    } catch (caught) {
-      if (requestVersion === redemptionRequestVersion.current) setError(caught instanceof Error ? caught.message : '兑换记录加载失败。');
-    }
-  }, [redemptionPage, request, search]);
-
-  useEffect(() => { void loadCodes(); }, [loadCodes]);
-  useEffect(() => { void loadRedemptions(); }, [loadRedemptions]);
-
-  const resetCodePage = (update: () => void) => { setCodePage(1); update(); };
-  const applyTextFilters = () => { setCodePage(1); setRedemptionPage(1); setSearch(searchInput.trim()); setChannelFilter(channelInput.trim()); };
-  const refreshAll = () => { void loadCodes(); void loadRedemptions(); };
-
-  const generate = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (days === 7 && memberType !== 1) { setError('7 天体验卡仅支持普通 VIP。'); return; }
-    const quantity = Number.isFinite(count) ? Math.min(500, Math.max(1, Math.floor(count))) : 1;
-    if (!window.confirm(`确认生成 ${quantity} 张 ${memberType === 2 ? '商家 Pro' : '普通 VIP'} 兑换码？`)) return;
-    setBusy('generate'); setError('');
-    try {
-      const prefix = memberType === 2 ? 'BP' : 'PV';
-      const generated = Array.from({ length: quantity }, () => generateCommercialVipCode(channel || '后台', prefix));
-      const result = await request('/api/admin/generate-codes', { method: 'POST', body: JSON.stringify({ codes: generated.map((code) => ({ code, days, member_type: memberType, channel: channel || null })) }) });
-      if (result.status === 403) { setForbidden(true); setError('当前角色没有生成兑换码的权限。'); return; }
-      if (!result.ok) { setError(result.error ?? '兑换码生成失败。'); return; }
-      setPlaintext(generated);
-      await loadCodes();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : '兑换码生成失败。'); }
-    finally { setBusy(''); }
-  };
-
-  const updateCode = async (code: VipCode, updates: Record<string, unknown>, action: string) => {
-    // Keep the row responsive while the server persists the change. Only the
-    // active row is locked; the previous implementation blocked every action
-    // and refetched the complete list after each click.
-    const busyKey = `code:${code.id}`;
-    const previous = code;
-    setBusy(busyKey); setError(''); setSuccess('');
-    setCodes((items) => items.map((item) => item.id === code.id ? { ...item, ...updates } as VipCode : item));
-    if (Object.prototype.hasOwnProperty.call(updates, 'copied')) {
-      const copied = Boolean(updates.copied);
-      setStats((current) => ({ ...current, copied: Math.max(0, current.copied + (copied === Boolean(code.copied) ? 0 : copied ? 1 : -1)) }));
-    }
-    try {
-      const result = await request('/api/admin/update-code', { method: 'POST', body: JSON.stringify({ codeId: code.id, updates }) });
-      if (result.status === 403) { setForbidden(true); throw new Error('当前角色没有管理兑换码的权限。'); }
-      if (!result.ok) throw new Error(result.error ?? '兑换码更新失败。');
-      setSuccess(action === 'mark' ? (Boolean(updates.copied) ? '已标记为已发售。' : '已取消发售标记。') : action === 'copy' ? '兑换码已复制并标记。' : action === 'delete' ? '已提交删除申请。' : '已撤销删除申请。');
-    } catch (caught) {
-      setCodes((items) => items.map((item) => item.id === code.id ? previous : item));
-      if (Object.prototype.hasOwnProperty.call(updates, 'copied')) setStats((current) => ({ ...current, copied: Math.max(0, current.copied + (Boolean(code.copied) === Boolean(updates.copied) ? 0 : Boolean(code.copied) ? 1 : -1)) }));
-      setError(caught instanceof Error ? caught.message : '兑换码更新失败。');
-    }
-    finally { setBusy(''); }
-  };
-
-  const copyCode = async (code: VipCode) => {
-    try { await navigator.clipboard.writeText(code.code); } catch { setError('复制失败，请检查浏览器剪贴板权限。'); return; }
-    if (!code.copied) await updateCode(code, { copied: true }, 'copy');
-  };
-  const requestDelete = (code: VipCode) => window.confirm(`确认申请删除兑换码 ${codeMask(code.code)}？该标记会进入 3 天等待期。`) && void updateCode(code, { deletePendingAt: Date.now() + 3 * 86_400_000 }, 'delete');
-  const cancelDelete = (code: VipCode) => window.confirm(`确认撤销 ${codeMask(code.code)} 的删除申请？`) && void updateCode(code, { deletePendingAt: null }, 'cancel');
-
-  const isCodeBusy = (codeId: string) => busy === 'generate' || busy === `code:${codeId}`;
-
+      const dates = logDates(query.from, query.to);
+      const params = new URLSearchParams({ type: query.kind, page: String(query.page), limit: '20' });
+      if (dates.start !== null) params.set('from', String(dates.start)); if (dates.end !== null) params.set('to', String(dates.end));
+      if (query.operatorUid.trim()) params.set('operatorUid', query.operatorUid.trim()); if (query.level.trim()) params.set('level', query.level.trim());
+      const result = await request<Paged<LogEntry>>('/api/admin/logs?' + params);
+      if (!epoch.current.current(version)) return;
+      if (!result.ok || !result.data || !Array.isArray(result.data.items)) { setError(requestError(result, '读取日志')); return; }
+      setSnapshot({ ...result.data, page: query.page });
+    } catch { if (epoch.current.current(version)) setError('日志读取失败，筛选输入和上次成功结果已保留。'); }
+    finally { if (epoch.current.current(version)) setLoading(false); }
+  }, [query, request]);
+  useEffect(() => { void load(); return () => epoch.current.invalidate(); }, [load]);
+  const apply = () => { const dates = logDates(draft.from, draft.to); setValidation(dates.error); if (!dates.error) setQuery({ ...draft, page: 1 }); };
+  const changeKind = (kind: LogKind) => { setDraft(value => ({ ...value, kind })); setQuery(value => ({ ...value, kind, page: 1 })); setSelected(null); };
   return <section>
-    <div className="flex flex-col justify-between gap-4 border-b border-slate-800 pb-5 lg:flex-row lg:items-end"><div><p className="text-xs font-medium text-sky-300">会员兑换与核销</p><h1 className="mt-2 text-2xl font-semibold text-white">兑换码管理</h1></div><button type="button" title="刷新兑换码" aria-label="刷新兑换码" disabled={busy !== '' || forbidden} onClick={refreshAll} className="grid h-11 w-11 place-items-center rounded-lg border border-slate-700 text-slate-300 disabled:opacity-40"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /></button></div>
-     {error && <div className="mt-5"><Alert tone={forbidden ? 'rose' : 'amber'}>{error}</Alert></div>}
-     {success && <div role="status" className="mt-5 flex items-center gap-2 border border-emerald-200 bg-emerald-50 px-3 py-3 text-sm text-emerald-700"><Check className="h-4 w-4" />{success}</div>}
-    <form onSubmit={(event) => void generate(event)} className="mt-5 grid gap-3 border border-slate-800 bg-slate-900/50 p-4 md:grid-cols-2 xl:grid-cols-5"><label className="text-xs text-slate-500">会员类型<select value={memberType} disabled={busy !== '' || forbidden} onChange={(event) => setMemberType(Number(event.target.value) as MemberType)} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value={1}>普通 VIP</option><option value={2} disabled={days === 7}>商家 Pro</option></select></label><label className="text-xs text-slate-500">开通时长<select value={days} disabled={busy !== '' || forbidden} onChange={(event) => { const next = Number(event.target.value); setDays(next); if (next === 7) setMemberType(1); }} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value={7}>7 天体验卡</option><option value={30}>30 天</option><option value={90}>90 天</option><option value={365}>365 天</option></select></label><label className="text-xs text-slate-500">生成数量<input type="number" min="1" max="500" value={count} disabled={busy !== '' || forbidden} onChange={(event) => setCount(Number(event.target.value))} className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white" /></label><label className="text-xs text-slate-500">发行渠道<input value={channel} maxLength={100} disabled={busy !== '' || forbidden} onChange={(event) => setChannel(event.target.value)} placeholder="可选" className="mt-1 min-h-11 w-full border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-600" /></label><button type="submit" disabled={busy !== '' || forbidden} className="mt-auto flex min-h-11 items-center justify-center gap-2 bg-sky-400 px-4 text-sm font-medium text-slate-950 disabled:opacity-40"><Plus className="h-4 w-4" />生成兑换码</button></form>
-    <div className="mt-6 grid gap-3 sm:grid-cols-3"><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">当前筛选总数</p><p className="mt-2 text-2xl font-semibold text-white">{stats.total}</p></article><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">可用 / 已兑换</p><p className="mt-2 text-2xl font-semibold text-emerald-200">{stats.available} / {stats.redeemed}</p></article><article className="border border-slate-800 bg-slate-950/60 p-4"><p className="text-xs text-slate-500">删除等待 / 已发售标记</p><p className="mt-2 text-2xl font-semibold text-amber-200">{stats.deletePending} / {stats.copied}</p></article></div>
-    <div className="mt-6 grid gap-2 border border-slate-800 bg-slate-900/50 p-3 md:grid-cols-2 xl:grid-cols-6"><input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="卡密搜索" className="min-h-11 min-w-0 border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-600" /><input value={channelInput} onChange={(event) => setChannelInput(event.target.value)} placeholder="发行渠道" className="min-h-11 min-w-0 border border-slate-700 bg-slate-950 px-3 text-sm text-white placeholder:text-slate-600" /><select value={memberTypeFilter} onChange={(event) => resetCodePage(() => setMemberTypeFilter(event.target.value as 'all' | '1' | '2'))} className="min-h-11 border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value="all">全部会员</option><option value="1">普通 VIP</option><option value="2">商家 Pro</option></select><select value={copiedFilter} onChange={(event) => resetCodePage(() => setCopiedFilter(event.target.value as CopiedFilter))} className="min-h-11 border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value="all">全部发售标记</option><option value="true">已发售标记</option><option value="false">未发售标记</option></select><select value={statusFilter} onChange={(event) => resetCodePage(() => setStatusFilter(event.target.value as CodeStatus))} className="min-h-11 border border-slate-700 bg-slate-950 px-3 text-sm text-white"><option value="all">全部状态</option><option value="available">可用</option><option value="redeemed">已兑换</option><option value="delete-pending">删除等待</option></select><button type="button" disabled={forbidden} onClick={applyTextFilters} className="min-h-11 bg-sky-400 px-4 text-sm font-medium text-slate-950 disabled:opacity-40">筛选</button></div>
-    <section className="mt-5"><h2 className="text-sm font-semibold text-white">兑换码列表</h2><div className="mt-3">{codes.length ? <><div className="hidden overflow-x-auto border border-slate-800 md:block"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-slate-900 text-xs text-slate-500"><tr><th className="px-4 py-3">兑换码</th><th className="px-4 py-3">权益</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">渠道</th><th className="px-4 py-3 text-right">操作</th></tr></thead><tbody>{codes.map((code) => <tr key={code.id} className={`border-t border-slate-800 ${code.copied ? 'text-amber-200' : 'text-slate-300'}`}><td className="px-4 py-3 font-mono">{codeMask(code.code)}</td><td className="px-4 py-3">{codeType(code)} · {code.days} 天</td><td className="px-4 py-3 text-xs">{code.used ? `已兑换 ${code.usedBy ?? ''}` : code.deletePendingAt ? `删除等待至 ${formatTime(code.deletePendingAt)}` : '未兑换'}</td><td className="px-4 py-3">{code.channel ?? '-'}</td><td className="px-4 py-3"><div className="flex justify-end gap-1"><button type="button" title="复制并标记已发售" aria-label="复制并标记已发售" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void copyCode(code)} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-slate-800 disabled:opacity-40">{busy === `code:${code.id}` && !code.copied ? <Loader2 className="h-4 w-4 animate-spin" /> : code.copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</button><button type="button" title={code.copied ? '取消发售标记' : '手动标记已发售'} aria-label={code.copied ? '取消发售标记' : '手动标记已发售'} disabled={isCodeBusy(code.id) || forbidden} onClick={() => void updateCode(code, { copied: !code.copied }, 'mark')} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-slate-800 disabled:opacity-40"><KeyRound className="h-4 w-4" /></button>{code.deletePendingAt ? <button type="button" title="撤销删除申请" aria-label="撤销删除申请" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void cancelDelete(code)} className="grid h-11 w-11 place-items-center rounded-lg text-emerald-200 hover:bg-slate-800 disabled:opacity-40"><Undo2 className="h-4 w-4" /></button> : <button type="button" title="申请删除" aria-label="申请删除" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void requestDelete(code)} className="grid h-11 w-11 place-items-center rounded-lg text-rose-200 hover:bg-slate-800 disabled:opacity-40"><Trash2 className="h-4 w-4" /></button>}</div></td></tr>)}</tbody></table></div><div className="space-y-2 md:hidden">{codes.map((code) => <article key={code.id} className={`border border-slate-800 bg-slate-950/60 p-3 ${code.copied ? 'text-amber-100' : 'text-slate-200'}`}><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="break-all font-mono text-sm">{codeMask(code.code)}</p><p className="mt-1 text-xs text-slate-500">{codeType(code)} · {code.days} 天 · {code.used ? '已兑换' : '未兑换'}</p></div><button type="button" title="复制兑换码" aria-label="复制兑换码" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void copyCode(code)} className="grid h-11 w-11 place-items-center rounded-lg border border-slate-700 disabled:opacity-40">{code.copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}</button></div><div className="mt-3 flex gap-2"><button type="button" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void updateCode(code, { copied: !code.copied }, 'mark')} className="min-h-11 flex-1 rounded-lg border border-slate-700 text-sm">{code.copied ? '取消发售标记' : '标记已发售'}</button><button type="button" disabled={isCodeBusy(code.id) || forbidden} onClick={() => void (code.deletePendingAt ? cancelDelete(code) : requestDelete(code))} className="min-h-11 flex-1 rounded-lg border border-rose-400/40 text-sm text-rose-200">{code.deletePendingAt ? '撤销删除' : '申请删除'}</button></div></article>)}</div><Pager page={codePage} total={codeTotal} onChange={setCodePage} /></> : <div className="grid min-h-48 place-items-center border border-slate-800 px-4 text-center text-sm text-slate-500">没有符合条件的兑换码。</div>}</div></section>
-    <section className="mt-6"><h2 className="text-sm font-semibold text-white">兑换使用记录</h2><p className="mt-1 text-xs text-slate-500">累计已兑换 {redemptionStats.total}，普通 VIP {redemptionStats.vip}，商家 Pro {redemptionStats.pro}</p><div className="mt-3 hidden overflow-x-auto border border-slate-800 md:block"><table className="w-full min-w-[680px] text-left text-sm"><thead className="bg-slate-900 text-xs text-slate-500"><tr><th className="px-4 py-3">兑换码</th><th className="px-4 py-3">用户 UID</th><th className="px-4 py-3">权益</th><th className="px-4 py-3">兑换时间</th></tr></thead><tbody>{redemptions.length ? redemptions.map((item) => <tr key={item.id} className="border-t border-slate-800 text-slate-300"><td className="px-4 py-3 font-mono">{codeMask(item.code)}</td><td className="px-4 py-3">{item.userUid ?? '-'}</td><td className="px-4 py-3">{item.memberType === 2 ? '商家 Pro' : '普通 VIP'} · {item.days} 天</td><td className="px-4 py-3">{formatTime(item.redeemedAt)}</td></tr>) : <tr><td colSpan={4} className="px-4 py-8 text-center text-slate-500">暂无使用记录。</td></tr>}</tbody></table></div><div className="mt-3 space-y-2 md:hidden">{redemptions.length ? redemptions.map((item) => <article key={item.id} className="border border-slate-800 bg-slate-950/60 p-3"><p className="font-mono text-sm text-slate-200">{codeMask(item.code)}</p><p className="mt-1 text-xs text-slate-400">{item.userUid ?? '-'} · {item.memberType === 2 ? '商家 Pro' : '普通 VIP'} · {item.days} 天</p><p className="mt-1 text-xs text-slate-500">{formatTime(item.redeemedAt)}</p></article>) : <p className="border border-slate-800 px-4 py-8 text-center text-sm text-slate-500">暂无使用记录。</p>}</div><Pager page={redemptionPage} total={redemptionTotal} onChange={setRedemptionPage} /></section>
-    {plaintext && <PlaintextCodes codes={plaintext} onClose={() => setPlaintext(null)} />}
+    <AdminToolbar actions={<AdminButton busy={loading} onClick={() => void load()}>刷新日志</AdminButton>}><h2>可追溯操作记录</h2><p>分类、结果状态与已采集耗时分开展示；未采集耗时为 —。</p></AdminToolbar>
+    <div className="admin-module-tabs" role="group" aria-label="日志类别">{(['admin','user','error'] as LogKind[]).map(kind => <AdminButton key={kind} data-log-kind={kind} variant={query.kind === kind ? 'primary' : 'secondary'} aria-pressed={query.kind === kind} onClick={() => changeKind(kind)}>{kind === 'admin' ? '管理员操作' : kind === 'user' ? '用户行为' : '错误事件'}</AdminButton>)}</div>
+    <div className="admin-stage-panel admin-log-filters" role="search" aria-label="日志查询">
+      <label>开始日期<input type="date" value={draft.from} onChange={event => setDraft(value => ({ ...value, from: event.target.value }))} /></label>
+      <label>结束日期<input type="date" value={draft.to} onChange={event => setDraft(value => ({ ...value, to: event.target.value }))} /></label>
+      <label>操作者UID<input data-log-operator value={draft.operatorUid} maxLength={128} onChange={event => setDraft(value => ({ ...value, operatorUid: event.target.value }))} /></label>
+      <label>级别 / 动作<input data-log-level value={draft.level} maxLength={64} onChange={event => setDraft(value => ({ ...value, level: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') apply(); }} /></label>
+      <div className="admin-filter-actions"><AdminButton data-log-query variant="primary" onClick={apply}>查询</AdminButton><AdminButton onClick={() => { setDraft(emptyLogQuery()); setQuery(emptyLogQuery()); setValidation(''); }}>重置</AdminButton></div>
+    </div>
+    {validation && <p className="admin-field-error" role="alert">{validation}</p>}
+    {error && <AdminErrorState message={error + ' 上次成功结果未丢弃。'} retry={() => void load()} busy={loading} />}
+    <div className="admin-stage-panel" aria-busy={loading}>
+      {loading && snapshot && <p role="status" className="admin-result-caption">正在查询，暂时保留已有记录…</p>}
+      {!snapshot ? loading ? <AdminLoading label="正在读取日志…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
+        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="日志列表"><thead><tr><th>时间</th><th>操作者 / 对象</th><th>动作 / 级别</th><th>结果状态</th><th>采集耗时</th><th>操作</th></tr></thead><tbody>{snapshot.items.map(item => <tr key={item.id}><td>{dateText(item.timestamp)}</td><td><span className="admin-mono">{item.operatorEmail ?? item.operatorUid ?? '未提供'}</span><small>{item.entityType}{item.entityId ? ' · ' + item.entityId : ''}</small></td><td>{item.level ?? '未提供'}</td><td><AdminBadge tone={item.type === 'error' ? 'warning' : 'neutral'}>{logOutcome(item.type, item.metadata, item.resolvedAt)}</AdminBadge></td><td>{logDuration(item.metadata)}</td><td><AdminButton data-log-detail={item.id} onClick={() => setSelected(item)}>详情</AdminButton></td></tr>)}</tbody></table></div>
+        <Pager page={snapshot.page} total={snapshot.total} loading={loading || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
+      </> : <AdminEmptyState title="没有匹配日志" description="调整查询条件或重置后重试。" />}
+    </div>
+    <AdminDrawer open={Boolean(selected)} title="日志详情" description={selected ? dateText(selected.timestamp) : undefined} onClose={() => setSelected(null)} className="admin-log-drawer">
+      {selected && <><dl className="admin-detail-facts"><div><dt>分类 / 动作</dt><dd>{selected.type} · {selected.level ?? '未提供'}</dd></div><div><dt>操作者</dt><dd>{selected.operatorEmail ?? selected.operatorUid ?? '未提供'}</dd></div><div><dt>结果状态</dt><dd>{logOutcome(selected.type, selected.metadata, selected.resolvedAt)}</dd></div><div><dt>采集耗时</dt><dd>{logDuration(selected.metadata)}</dd></div>{selected.source && <div><dt>来源</dt><dd>{selected.source}</dd></div>}{selected.fingerprint && <div><dt>指纹</dt><dd className="admin-mono">{selected.fingerprint}</dd></div>}</dl><h2 className="admin-detail-title">内容与上下文</h2><pre className="admin-log-payload">{selected.type === 'admin' ? selected.details || '未提供' : selected.type === 'error' ? selected.message || '未提供' : JSON.stringify(selected.metadata ?? {}, null, 2)}</pre></>}
+    </AdminDrawer>
+  </section>;
+}
+
+interface CodeQuery { search: string; channel: string; memberType: 'all' | '1' | '2'; copied: 'all' | 'true' | 'false'; status: 'all' | 'delete-pending' | 'redeemed' | 'available'; page: number; }
+const emptyCodeQuery = (): CodeQuery => ({ search: '', channel: '', memberType: 'all', copied: 'all', status: 'all', page: 1 });
+type Review = { kind: 'generation'; value: ReturnType<typeof freezeGeneration> } | { kind: 'row'; code: VipCode; updates: { copied?: boolean; deletePendingAt?: number | null }; label: string; impact: string };
+function CodesPanelV2({ request }: { request: AdminRequest }) {
+  const [draft, setDraft] = useState(emptyCodeQuery), [query, setQuery] = useState(emptyCodeQuery);
+  const [snapshot, setSnapshot] = useState<CodePage | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState('');
+  const [records, setRecords] = useState<(Paged<Redemption> & { page: number; stats?: { total: number; vip: number; pro: number } }) | null>(null);
+  const [redemptionPage, setRedemptionPage] = useState(1), [recordsLoading, setRecordsLoading] = useState(false), [recordsError, setRecordsError] = useState('');
+  const [generation, setGeneration] = useState<GenerationDraft>({ days: 30, memberType: 1, count: 1, channel: '' });
+  const [generationForm, setGenerationForm] = useState(0), [review, setReview] = useState<Review | null>(null), [reviewError, setReviewError] = useState('');
+  const [result, setResult] = useState<{ codes: string[]; confirmed?: number } | null>(null), [copiedAll, setCopiedAll] = useState(false), [copyAllError, setCopyAllError] = useState('');
+  const [rowFeedback, setRowFeedback] = useState<Record<string, { error?: string; success?: string }>>({});
+  const [lockView, setLockView] = useState({ batch: false, rows: new Set<string>() });
+  const [closeResult, setCloseResult] = useState(false);
+  const epoch = useRef(new LatestRequest()), redemptionEpoch = useRef(new LatestRequest()), locks = useRef(new CodeWriteLocks());
+  const loadCodes = useCallback(async () => {
+    const version = epoch.current.next(); setLoading(true); setError('');
+    try {
+      const params = new URLSearchParams({ page: String(query.page), limit: '20' });
+      if (query.search.trim()) params.set('search', query.search.trim()); if (query.channel.trim()) params.set('channel', query.channel.trim());
+      if (query.memberType !== 'all') params.set('memberType', query.memberType); if (query.copied !== 'all') params.set('copied', query.copied); if (query.status !== 'all') params.set('status', query.status);
+      const response = await request<CodePage>('/api/admin/codes?' + params);
+      if (!epoch.current.current(version)) return;
+      if (!response.ok || !response.data || !Array.isArray(response.data.items)) { setError(requestError(response, '读取兑换码')); return; }
+      setSnapshot(response.data);
+    } catch { if (epoch.current.current(version)) setError('兑换码读取失败；查询和上次列表保留。'); }
+    finally { if (epoch.current.current(version)) setLoading(false); }
+  }, [query, request]);
+  const loadRedemptions = useCallback(async () => {
+    const version = redemptionEpoch.current.next(); setRecordsLoading(true); setRecordsError('');
+    try {
+      const params = new URLSearchParams({ page: String(redemptionPage), limit: '20' }); if (query.search.trim()) params.set('code', query.search.trim());
+      const response = await request<Paged<Redemption> & { stats?: { total: number; vip: number; pro: number } }>('/api/admin/code-redemptions?' + params);
+      if (!redemptionEpoch.current.current(version)) return;
+      if (!response.ok || !response.data) { setRecordsError(requestError(response, '读取兑换记录')); return; }
+      setRecords({ ...response.data, page: redemptionPage });
+    } catch { if (redemptionEpoch.current.current(version)) setRecordsError('兑换记录读取失败，旧记录保留。'); }
+    finally { if (redemptionEpoch.current.current(version)) setRecordsLoading(false); }
+  }, [query.search, redemptionPage, request]);
+  useEffect(() => { void loadCodes(); return () => epoch.current.invalidate(); }, [loadCodes]);
+  useEffect(() => { void loadRedemptions(); return () => redemptionEpoch.current.invalidate(); }, [loadRedemptions]);
+  const syncLocks = () => setLockView(locks.current.snapshot());
+  const apply = () => { if (locks.current.any()) return; setQuery({ ...draft, page: 1 }); setRedemptionPage(1); };
+  const refresh = () => { if (!locks.current.any()) { void loadCodes(); void loadRedemptions(); } };
+  const previewGeneration = () => {
+    if (locks.current.any()) return;
+    try { setReviewError(''); setReview({ kind: 'generation', value: freezeGeneration(generation) }); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : '生成参数无效。'); }
+  };
+  const writeRow = async (value: Extract<Review, { kind: 'row' }>) => {
+    if (!locks.current.beginRow(value.code.id)) return; syncLocks();
+    setRowFeedback(previous => ({ ...previous, [value.code.id]: {} }));
+    try {
+      const response = await request('/api/admin/update-code', { method: 'POST', body: JSON.stringify({ codeId: value.code.id, updates: value.updates }) });
+      if (!response.ok) { setRowFeedback(previous => ({ ...previous, [value.code.id]: { error: requestError(response, value.label) } })); return; }
+      setSnapshot(previous => previous ? { ...previous, items: previous.items.map(code => code.id === value.code.id ? { ...code, ...value.updates } : code) } : previous);
+      setRowFeedback(previous => ({ ...previous, [value.code.id]: { success: value.label + '已确认。' } }));
+    } catch { setRowFeedback(previous => ({ ...previous, [value.code.id]: { error: value.label + '失败；原状态保留，可明确重试。' } })); }
+    finally { locks.current.endRow(value.code.id); syncLocks(); if (!locks.current.any()) void loadCodes(); }
+  };
+  const confirm = async () => {
+    if (!review) return;
+    if (review.kind === 'row') { const value = review; setReview(null); void writeRow(value); return; }
+    if (!locks.current.beginBatch()) return; syncLocks(); setReviewError('');
+    try {
+      const response = await request<{ count?: number }>('/api/admin/generate-codes', { method: 'POST', body: JSON.stringify({ codes: review.value.codes }) });
+      if (!response.ok) { setReviewError(requestError(response, '生成兑换码') + (response.status === 0 ? ' 写入结果不确定，请先核对列表；不会自动重试。' : '')); return; }
+      setResult({ codes: review.value.codes.map(code => code.code), confirmed: response.data?.count }); setCopiedAll(false); setCopyAllError(''); setReview(null); setGenerationForm(value => value + 1);
+      await loadCodes();
+    } catch { setReviewError('生成失败；参数和本次待提交码已保留，不自动生成另一批重试。'); }
+    finally { locks.current.endBatch(); syncLocks(); }
+  };
+  const copyCode = async (code: VipCode) => {
+    try { await navigator.clipboard.writeText(code.code); setRowFeedback(value => ({ ...value, [code.id]: { success: '已复制；未改变发售标记。' } })); }
+    catch { setRowFeedback(value => ({ ...value, [code.id]: { error: '复制失败，请检查剪贴板权限；未更改任何后台状态。' } })); }
+  };
+  const reviewRow = (code: VipCode, action: 'mark' | 'delete' | 'restore') => {
+    if (locks.current.rowBusy(code.id)) return;
+    const updates = action === 'mark' ? { copied: !code.copied } : action === 'delete' ? { deletePendingAt: Date.now() + 3 * 86_400_000 } : { deletePendingAt: null };
+    setReviewError(''); setReview({ kind: 'row', code, updates, label: action === 'mark' ? code.copied ? '取消发售标记' : '设置发售标记' : action === 'delete' ? '申请删除' : '撤销删除申请', impact: action === 'mark' ? '只改既有copied标记；不复制、不兑换、不代表支付收入。' : action === 'delete' ? '设置原三天删除等待标记，不直接删除；执行以服务端为准。' : '清空原删除等待标记，不改变兑换或发售状态。' });
+  };
+  const operations = (code: VipCode) => {
+    const busy = lockView.batch || lockView.rows.has(code.id), feedback = rowFeedback[code.id];
+    return <div className="admin-code-actions"><div>
+      <AdminButton data-code-copy={code.id} iconOnly aria-label="复制兑换码" disabled={busy} onClick={() => void copyCode(code)}><Copy aria-hidden="true" /></AdminButton>
+      <AdminButton data-code-mark={code.id} disabled={busy} busy={lockView.rows.has(code.id)} onClick={() => reviewRow(code, 'mark')}><KeyRound aria-hidden="true" />{code.copied ? '取消标记' : '发售标记'}</AdminButton>
+      <AdminButton data-code-delete={code.id} iconOnly variant="danger" aria-label={code.deletePendingAt ? '撤销删除申请' : '申请删除'} disabled={busy} onClick={() => reviewRow(code, code.deletePendingAt ? 'restore' : 'delete')}>{code.deletePendingAt ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}</AdminButton>
+    </div>{feedback?.error && <p className="admin-field-error" role="alert" data-code-feedback={code.id}>{feedback.error}</p>}{feedback?.success && <p className="admin-code-feedback" role="status" data-code-feedback={code.id}>{feedback.success}</p>}</div>;
+  };
+  const anyWrite = lockView.batch || lockView.rows.size > 0;
+  return <section>
+    <AdminToolbar actions={<AdminButton busy={loading} disabled={anyWrite} onClick={refresh}>刷新兑换数据</AdminButton>}><h2>兑换码发行与管理</h2><p>复制与发售标记分离；批次独占，同一行只允许一笔写，不同行可并行。</p></AdminToolbar>
+    <form className="admin-stage-panel admin-code-generation" key={generationForm} onSubmit={event => { event.preventDefault(); previewGeneration(); }}>
+      <label>权益类型<select data-generation-type value={generation.memberType} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, memberType: Number(event.target.value) as 1 | 2 }))}><option value={1}>普通VIP</option><option value={2} disabled={generation.days === 7}>商家Pro</option></select></label>
+      <label>开通时长<select data-generation-days value={generation.days} disabled={anyWrite} onChange={event => { const days = Number(event.target.value); setGeneration(value => ({ ...value, days, memberType: days === 7 ? 1 : value.memberType })); }}>{[7,30,90,365].map(days => <option key={days} value={days}>{days}天{days === 7 ? '体验卡（仅VIP）' : ''}</option>)}</select></label>
+      <label>生成数量<input data-generation-count type="number" min={1} max={500} value={generation.count} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, count: Number(event.target.value) }))} /></label>
+      <label>发行渠道<input data-generation-channel value={generation.channel} maxLength={100} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, channel: event.target.value }))} placeholder="可选，仅记录既有渠道" /></label>
+      <AdminButton data-generation-review type="submit" variant="primary" disabled={anyWrite}>确认参数并生成</AdminButton>
+      <p className="admin-code-scope">本次：{generation.memberType === 2 ? '商家Pro' : '普通VIP'} · {generation.days}天 · 数量 {number(generation.count)}。使用资格沿既有服务端兑换规则；不新增渠道/账号限制。7天只支持VIP，最多500张。</p>
+    </form>
+    {error && <AdminErrorState title="兑换码未更新" message={error + ' 输入与上次成功列表保留。'} retry={refresh} busy={loading || anyWrite} />}
+    <div className="admin-code-statistics" aria-label="服务端筛选统计">{[['筛选总数',snapshot?.stats?.total],['可用',snapshot?.stats?.available],['已兑换',snapshot?.stats?.redeemed],['删除等待',snapshot?.stats?.deletePending],['发售标记',snapshot?.stats?.copied]].map(([label,value]) => <div className="admin-stage-panel" key={String(label)}><small>{label}</small><strong>{number(value)}</strong></div>)}</div>
+    <p className="admin-stage-footnote">统计为服务端读取快照，修改完成后重读；未知为—，发售标记不代表真实支付收入。</p>
+    <div className="admin-stage-panel admin-code-filters" role="search" aria-label="兑换码查询">
+      <label>卡密搜索<input data-code-search value={draft.search} onChange={event => setDraft(value => ({ ...value, search: event.target.value }))} placeholder="卡密搜索" /></label><label>发行渠道<input value={draft.channel} onChange={event => setDraft(value => ({ ...value, channel: event.target.value }))} /></label>
+      <label>权益<select value={draft.memberType} onChange={event => setDraft(value => ({ ...value, memberType: event.target.value as CodeQuery['memberType'] }))}><option value="all">全部</option><option value="1">普通VIP</option><option value="2">商家Pro</option></select></label>
+      <label>发售标记<select value={draft.copied} onChange={event => setDraft(value => ({ ...value, copied: event.target.value as CodeQuery['copied'] }))}><option value="all">全部</option><option value="true">有标记</option><option value="false">无标记</option></select></label>
+      <label>兑换 / 删除状态<select value={draft.status} onChange={event => setDraft(value => ({ ...value, status: event.target.value as CodeQuery['status'] }))}><option value="all">全部</option><option value="available">可用</option><option value="redeemed">已兑换</option><option value="delete-pending">删除等待</option></select></label>
+      <div className="admin-filter-actions"><AdminButton data-code-query variant="primary" disabled={anyWrite} onClick={apply}>查询</AdminButton><AdminButton disabled={anyWrite} onClick={() => { setDraft(emptyCodeQuery()); setQuery(emptyCodeQuery()); setRedemptionPage(1); }}>重置</AdminButton></div>
+    </div>
+    <section className="admin-stage-panel" aria-busy={loading}><h2 className="admin-detail-title">兑换码列表</h2>{loading && snapshot && <p role="status" className="admin-result-caption">正在读取，旧列表保留…</p>}
+      {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
+        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} data-code-row={code.id}><td><span className="admin-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td>{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td>{code.copied ? '有发售标记' : '无发售标记'}{code.deletePendingAt && <small>删除等待至 {dateText(code.deletePendingAt)}</small>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
+        <Pager page={snapshot.page ?? query.page} total={snapshot.total} loading={loading || anyWrite || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
+      </> : <AdminEmptyState title="没有匹配兑换码" description="调整已提交筛选或重置后重试。" />}
+    </section>
+    <section className="admin-stage-panel" aria-busy={recordsLoading}><AdminToolbar><h2>兑换使用记录</h2><p>按当前卡密搜索条件分页；其它发行筛选不冒充兑换记录筛选。</p></AdminToolbar>
+      {recordsError && <AdminErrorState message={recordsError} retry={() => void loadRedemptions()} busy={recordsLoading} />}
+      <p className="admin-result-caption">服务端累计兑换 {number(records?.stats?.total)} · VIP {number(records?.stats?.vip)} · Pro {number(records?.stats?.pro)}</p>
+      {!records ? recordsLoading ? <AdminLoading label="正在读取兑换记录…" /> : <AdminEmptyState title="尚无成功读取结果" /> : records.items.length ? <><div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换使用记录"><thead><tr><th>卡密</th><th>用户UID</th><th>权益</th><th>兑换时间</th></tr></thead><tbody>{records.items.map(item => <tr key={item.id}><td className="admin-mono">{maskCardCode(item.code)}</td><td>{item.userUid ?? '未提供'}</td><td>{item.memberType === 2 ? '商家Pro' : '普通VIP'} · {item.days}天</td><td>{dateText(item.redeemedAt)}</td></tr>)}</tbody></table></div><Pager page={records.page} total={records.total} loading={recordsLoading || Boolean(recordsError)} change={setRedemptionPage} /></> : <AdminEmptyState title="暂无匹配兑换记录" />}
+    </section>
+    <AdminConfirmDialog open={Boolean(review)} title={review?.kind === 'generation' ? '确认生成这一批兑换码' : review?.label ?? '确认操作'} description={review?.kind === 'generation' ? '数量、权益、渠道和待提交码已经冻结；确认才调用现有生成接口。' : review ? '对象：' + maskCardCode(review.code.code) + '，本次仅1条。' : ''} confirmLabel="确认提交" pending={lockView.batch} onClose={() => { if (!lockView.batch) setReview(null); }} onConfirm={() => void confirm()}>
+      {review?.kind === 'generation' ? <div className="admin-change-summary"><p>数量：{review.value.quantity}张；{review.value.memberType === 2 ? '商家Pro' : '普通VIP'} · {review.value.days}天</p><p>渠道：{review.value.channel || '未指定'}</p><p>使用范围：沿现有兑换资格规则；不是新增定向授权或销售收入。</p></div> : review && <div className="admin-change-summary"><p>当前发售标记：{review.code.copied ? '有' : '无'}；删除等待：{dateText(review.code.deletePendingAt)}</p><p>待提交：{JSON.stringify(review.updates)}</p><p>影响：{review.impact}</p></div>}
+      {reviewError && <AdminErrorState message={reviewError} />}
+    </AdminConfirmDialog>
+    <AdminDrawer open={Boolean(result)} title="本批生成结果" description={result ? '服务端确认数量：' + number(result.confirmed) + '；本次提交明文 ' + result.codes.length + '条。' : undefined} onClose={() => { if (copiedAll) setResult(null); else setCloseResult(true); }} className="admin-code-result-drawer">
+      <p>明文只在本次结果窗口展示。复制仅剪贴板操作，不自动标记发售。</p><pre className="admin-log-payload" data-generation-result>{result?.codes.join('\n')}</pre>
+      <AdminButton data-result-copy onClick={() => { void navigator.clipboard.writeText(result?.codes.join('\n') ?? '').then(() => { setCopiedAll(true); setCopyAllError(''); }, () => { setCopyAllError('复制失败；明文结果仍保留，请重试。'); }); }}><ClipboardCopy aria-hidden="true" />复制本批全部</AdminButton>
+      {copiedAll && <p role="status" className="admin-code-feedback">本批已复制，未修改发售标记。</p>}{copyAllError && <AdminErrorState message={copyAllError} />}
+    </AdminDrawer>
+    <AdminConfirmDialog open={closeResult} title="关闭尚未复制的结果？" description="不会自动导出或发售；关闭后只能通过现有列表逐条复制。取消可保留本批明文。" confirmLabel="关闭结果" onClose={() => setCloseResult(false)} onConfirm={() => { setCloseResult(false); setResult(null); }} />
   </section>;
 }

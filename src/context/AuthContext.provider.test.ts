@@ -66,7 +66,7 @@ it.skipIf(!browser)('mounts the real AuthProvider and verifies membership throug
     const reportText = output.match(/<pre id="result">([\s\S]*?)<\/pre>/)?.[1] ?? output.slice(-4000);
     expect(output, reportText).toContain('data-result="passed"');
     const report = JSON.parse(reportText.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
-    expect(report.checks).toHaveLength(23);
+    expect(report.checks).toHaveLength(36);
     expect(report.browserErrors).toEqual([]);
     console.log(`AuthProvider browser: ${report.checks.length} checks passed; ${report.requests.length} mock calls; no real API loaded.`);
     if (artifactRoot) writeFileSync(join(working, 'browser-report.json'), JSON.stringify(report, null, 2));

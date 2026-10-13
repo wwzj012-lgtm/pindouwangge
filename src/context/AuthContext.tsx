@@ -132,14 +132,14 @@ export function deriveMembershipState(userProfile: UserProfile | null, now = Dat
       && userProfile.isVip
       && (memberExpire === null || memberExpire > now),
   );
-  const memberType: 0 | 1 | 2 = active ? userProfile?.member_type ?? 0 : 0;
   const isAdmin = userProfile?.role === 'admin';
+  const memberType: 0 | 1 | 2 = isAdmin ? 2 : active ? userProfile?.member_type ?? 0 : 0;
 
   return {
     active,
-    memberExpire,
+    // Role-based benefits do not change the raw profile or paid-active trial rules.
+    memberExpire: isAdmin ? null : memberExpire,
     memberType,
-    // Administrator VIP access does not grant a paid membership tier.
     isVip: isAdmin || memberType >= 1,
     isPro: memberType === 2,
     isAdmin,

@@ -175,12 +175,14 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
               <button
                 type="button"
                 onClick={() => setIsOverflowMenuOpen(isOpen => !isOpen)}
-                className="flex h-11 w-11 items-center justify-center rounded-full border border-slate-200 bg-slate-100 text-slate-700 transition-all hover:bg-slate-200 active:scale-95"
+                className="group flex h-11 w-11 shrink-0 items-center justify-center rounded-full p-1 text-slate-700 transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
                 aria-label={isEn ? 'Open more actions' : '打开更多操作'}
                 aria-haspopup="menu"
                 aria-expanded={isOverflowMenuOpen}
               >
-                <MoreHorizontal className="h-5 w-5" />
+                <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-slate-100 transition-colors group-hover:bg-slate-200">
+                  <MoreHorizontal className="h-5 w-5" />
+                </span>
               </button>
 
               {isOverflowMenuOpen && (

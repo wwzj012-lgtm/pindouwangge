@@ -300,17 +300,6 @@ export const Header: React.FC<HeaderProps> = ({
               {currentTab === 'largeCanvas' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
             </button>
 
-            <button
-              onClick={() => setCurrentTab?.('assembly')}
-              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
-                currentTab === 'assembly'
-                  ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
-                  : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
-              }`}
-            >
-              {t('assembly')}
-              {currentTab === 'assembly' && <span className="absolute bottom-0 left-1/2 -translate-x-1/2 w-4 h-0.5 bg-purple-600 rounded-full" />}
-            </button>
           </nav>
         </div>
 

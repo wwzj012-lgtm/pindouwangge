@@ -4,7 +4,6 @@ import {
   Palette,
   Compass,
   Grid2X2,
-  Box,
   User,
   Sparkles,
 } from 'lucide-react';
@@ -88,22 +87,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <span className="text-[10px] sm:text-xs leading-tight">{isEn ? 'Big' : '大画板'}</span>
         </button>
 
-        {/* 5. 立体 Assembly */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('assembly')}
-          aria-current={currentTab === 'assembly' ? 'page' : undefined}
-          className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'assembly'
-              ? 'text-purple-600 font-black bg-purple-100/90 shadow-2xs scale-102'
-              : 'text-slate-500 hover:text-purple-900 font-bold'
-          }`}
-        >
-          <Box className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTab === 'assembly' ? 'text-purple-600 stroke-[2.5]' : 'text-slate-500'}`} />
-          <span className="text-[10px] sm:text-xs leading-tight">{isEn ? '3D' : '立体'}</span>
-        </button>
-
-        {/* 6. 我的 Profile / VIP */}
+        {/* 5. 我的 Profile / VIP */}
         <button
           type="button"
           onClick={onOpenProfile}

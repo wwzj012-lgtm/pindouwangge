@@ -19,7 +19,6 @@ import {
   HelpCircle,
   Settings2,
   MoreHorizontal,
-  Box,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
@@ -155,18 +154,6 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
 
         {/* Right Corner: Quick Actions, Language & User Profile Avatar */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setCurrentTab(currentTab === 'assembly' ? 'home' : 'assembly');
-            }}
-            className={`flex items-center gap-1 rounded-xl border px-2 py-1 text-[10px] font-black transition-all active:scale-95 ${currentTab === 'assembly' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-200 bg-purple-50 text-purple-900 hover:bg-purple-100'}`}
-            title={isEn ? '3D Fuse Bead' : '立体拼豆'}
-          >
-            <Box className="h-3 w-3" />
-            <span className="hidden sm:inline">立体</span>
-          </button>
-
           <button
             onClick={() => onOpenVipModal?.()}
             className="flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 text-amber-900 font-black text-[10px] shadow-2xs active:scale-95 cursor-pointer"

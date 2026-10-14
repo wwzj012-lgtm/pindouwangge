@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
 import {
   X,
   User,
@@ -35,9 +35,9 @@ import {
   deleteCloudExportedPatternAndLocal,
   getExportedPatternPreview,
   type ExportedPatternRecord,
-  type EditablePatternProject,
 } from '../utils/patternHistory';
 import { formatChinaDate } from '../utils/dateUtils';
+import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
 
 export function splitProfilePatternSections(records: readonly ExportedPatternRecord[], currentUserId: string | null): {
   privateRecords: ExportedPatternRecord[];
@@ -57,7 +57,7 @@ interface UserProfileModalProps {
   onOpenAccountManagement: () => void;
   onOpenVipModal?: () => void;
   onSelectPattern?: (pattern: CommunityPattern) => void;
-  onContinueEditing?: (project: EditablePatternProject) => void;
+  onContinueEditing?: ContinueEditingPattern;
   onPublishPattern?: (record: ExportedPatternRecord) => void;
 }
 
@@ -157,6 +157,15 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [selectedPatternForAction, setSelectedPatternForAction] = useState<ExportedPatternRecord | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const editRequestRef = useRef(0);
+  const continueEditingRef = useRef(onContinueEditing);
+  continueEditingRef.current = onContinueEditing;
+  // Invalidate during the close/unmount commit, before a pending read resumes.
+  useLayoutEffect(() => {
+    editRequestRef.current += 1;
+    setActionBusyId(null);
+    return () => { editRequestRef.current += 1; };
+  }, [isOpen, currentUser?.uid]);
   const { privateRecords, publishedRecords } = splitProfilePatternSections(savedPatterns, currentUser?.uid ?? null);
   const privatePatternCount = privateRecords.length;
   const publishedPatternCount = publishedRecords.length;
@@ -216,17 +225,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // 1. 编辑 (Edit / Continue Editing)
   const handleEditPattern = async (record: ExportedPatternRecord) => {
     if (!requireFormalLogin('请登录或注册后再编辑个人图纸。')) return;
+    const request = ++editRequestRef.current;
     setActionBusyId(record.id);
+    setActionMessage(null);
     try {
       const project = await getPatternProject(record.id, currentUser?.uid || null);
-      if (onContinueEditing) {
-        onContinueEditing(project);
-      }
-      onClose();
+      if (request !== editRequestRef.current || !continueEditingRef.current) return;
+      const accepted = await continueEditingRef.current(project);
+      if (request === editRequestRef.current && accepted !== false) onClose();
     } catch (err) {
-      setActionMessage('载入图纸项目失败，请重试');
+      if (request === editRequestRef.current) setActionMessage('载入图纸项目失败，请重试');
     } finally {
-      setActionBusyId(null);
+      if (request === editRequestRef.current) setActionBusyId(null);
     }
   };
 

@@ -29,7 +29,8 @@ const creditApi = vi.hoisted(() => ({
 }));
 const renderPreview = vi.hoisted(() => vi.fn());
 
-vi.mock('react', () => ({
+vi.mock('react', () => {
+  const reactMock = {
   default: {},
   useEffect: (effect: () => void | (() => void), dependencies: readonly unknown[]) => {
     const slot = hookRuntime.cursor++;
@@ -60,7 +61,9 @@ vi.mock('react', () => ({
     };
     return [hookRuntime.slots[slot] as T, setValue] as const;
   },
-}));
+  };
+  return { ...reactMock, useLayoutEffect: reactMock.useEffect };
+});
 
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ currentUser: authState.currentUser }) }));
 vi.mock('../context/LanguageContext', () => ({ useLanguage: () => ({ language: 'en' }) }));

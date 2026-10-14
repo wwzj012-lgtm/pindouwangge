@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -30,7 +30,6 @@ import {
   retryPatternCloudSync,
   renameExportedPattern,
   type ExportedPatternRecord,
-  type EditablePatternProject,
 } from '../utils/patternHistory';
 import { renderPatternPreview } from '../utils/patternPreview';
 import {
@@ -40,11 +39,12 @@ import {
   type CommunityPostVisibility,
 } from '../utils/communityApi';
 import { formatChinaDate } from '../utils/dateUtils';
+import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
 
 interface UserPatternsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onContinueEditing: (project: EditablePatternProject) => void;
+  onContinueEditing: ContinueEditingPattern;
   onOpenCommunity: () => void;
   onOpenAuthModal: () => void;
   /** Optional record selected from the profile gallery for immediate publishing. */
@@ -139,6 +139,15 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [records, setRecords] = useState<ExportedPatternRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const editRequestRef = useRef(0);
+  const continueEditingRef = useRef(onContinueEditing);
+  continueEditingRef.current = onContinueEditing;
+  // Invalidate during the close/unmount commit, before a pending read resumes.
+  useLayoutEffect(() => {
+    editRequestRef.current += 1;
+    setBusyId(null);
+    return () => { editRequestRef.current += 1; };
+  }, [isOpen, currentUser?.uid]);
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
@@ -169,16 +178,18 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   }, [isOpen, currentUser?.uid]);
 
   const handleContinueEditing = async (record: ExportedPatternRecord): Promise<void> => {
+    const request = ++editRequestRef.current;
     setBusyId(record.id);
     setMessage(null);
     try {
       const project = await getPatternProject(record.id, currentUser?.uid ?? null);
-      onContinueEditing(project);
-      onClose();
+      if (request !== editRequestRef.current) return;
+      const accepted = await continueEditingRef.current(project);
+      if (request === editRequestRef.current && accepted !== false) onClose();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (isEn ? 'Pattern data is damaged.' : '图纸数据损坏，无法恢复。'));
+      if (request === editRequestRef.current) setMessage(error instanceof Error ? error.message : (isEn ? 'Pattern data is damaged.' : '图纸数据损坏，无法恢复。'));
     } finally {
-      setBusyId(null);
+      if (request === editRequestRef.current) setBusyId(null);
     }
   };
 

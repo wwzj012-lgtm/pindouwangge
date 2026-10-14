@@ -64,6 +64,8 @@ import {
   type EditablePatternProject,
   type ExportedPatternRecord,
 } from './utils/patternHistory';
+import { validateStoredProject } from './utils/patternGridCodec';
+import { normalizeRestoredPatternSettings, patternEditingSnapshot, savedPatternStudioUrl } from './utils/savedPatternNavigation';
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
 
@@ -434,6 +436,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // 1. Core State
   const [currentTab, setCurrentTab] = useState<StudioTab>(initialTab);
+  useEffect(() => { setCurrentTab(initialTab); }, [initialTab]);
   const [projectName, setProjectName] = useState('我的拼豆创意图纸');
   const [activePatternId, setActivePatternId] = useState<string | null>(null);
   const [isSavingPattern, setIsSavingPattern] = useState(false);
@@ -449,6 +452,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const canAccessAssembly = ASSEMBLY_DEV_MODE || publicFeatureFlags['public.assembly'] || (ASSEMBLY_ADMIN_BYPASS && userProfile?.role === 'admin');
   const [brand, setBrand] = useState<BrandKey>('MARD');
   const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
+  const restoredPaletteRef = useRef<{ brand: BrandKey; palette: BeadColor[] } | null>(null);
   const [isConverting, setIsConverting] = useState<boolean>(false);
   const [conversionDiagnostics, setConversionDiagnostics] = useState<ConversionDiagnostics | null>(null);
 
@@ -534,6 +538,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const historyRef = useRef<GridSnapshot[]>(history);
   const historyIndexRef = useRef(historyIndex);
   const historyTransactionRef = useRef<GridSnapshot | null>(null);
+  const savedPatternBaselineRef = useRef<string | null>(null);
+  if (savedPatternBaselineRef.current === null) {
+    savedPatternBaselineRef.current = patternEditingSnapshot(grid, settings, brand, activePalette, projectName);
+  }
 
   useEffect(() => {
     gridRef.current = grid;
@@ -1014,7 +1022,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Sync palette when brand changes
   useEffect(() => {
-    const brandColors = BRAND_PALETTES[brand] || BRAND_PALETTES.MARD;
+    const brandColors = restoredPaletteRef.current?.brand === brand
+      ? restoredPaletteRef.current.palette
+      : BRAND_PALETTES[brand] || BRAND_PALETTES.MARD;
+    restoredPaletteRef.current = null;
     setActivePalette(brandColors);
     if (!selectedColor || !brandColors.some(c => c.id === selectedColor.id)) {
       setSelectedColor(brandColors[0]);
@@ -1705,8 +1716,34 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     }
   };
 
-  const handleRestorePattern = (project: EditablePatternProject): void => {
+  const handleRestorePattern = (project: EditablePatternProject): boolean => {
+    // Local copies need the same integrity checks as decoded cloud projects.
+    // Validate and prepare everything before touching the current draft or URL.
+    validateStoredProject(project);
+    if (typeof project.name !== 'string' || typeof project.workId !== 'string' || !project.workId.trim()) {
+      throw new Error(isEn ? 'Invalid saved pattern.' : '保存的图纸数据无效。');
+    }
+    const restoredGrid = project.grid.map((row) => [...row]);
+    const restoredSettings = normalizeRestoredPatternSettings({
+      ...settings,
+      ...project.settings,
+      width: project.width,
+      height: project.height,
+      boardSize: project.boardSize,
+      brand: project.brand,
+    });
+    const nextBaseline = patternEditingSnapshot(restoredGrid, restoredSettings, project.brand, project.palette, project.name);
+    const studioUrl = savedPatternStudioUrl(window.location.href);
+    if (patternEditingSnapshot(gridRef.current, settings, brand, activePalette, projectName) !== savedPatternBaselineRef.current
+      && !window.confirm(isEn ? 'Replace the current unsaved pattern? Unsaved changes will be lost.' : '当前图纸有未保存的修改，继续载入将替换这些修改。是否继续？')) {
+      return false;
+    }
     beginNewCompletionDraft();
+    // This is a restored identity, not a newly-created draft. Keep its valid
+    // stored entitlement when the work-key effect observes the new ID.
+    lastCompletionWorkKeyRef.current = project.workId;
+    setCompletionPreviewQuote(null);
+    setCompletionPreviewStatus('idle');
     const savedCompletion = asRecord(project);
     const savedCompletionStatus = savedCompletion?.completionStatus;
     const savedPaidNonEmptyBeads = savedCompletion?.paidNonEmptyBeads;
@@ -1725,18 +1762,24 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setCompletedColorIds([]);
     setActivePatternId(project.workId);
     setProjectName(project.name);
+    restoredPaletteRef.current = { brand: project.brand, palette: project.palette };
     setBrand(project.brand);
     setActivePalette(project.palette);
-    setSettings((current) => ({
-      ...current,
-      ...project.settings,
-      width: project.width,
-      height: project.height,
-      boardSize: project.boardSize,
-      brand: project.brand,
-    }));
-    const restoredGrid = project.grid.map((row) => [...row]);
-    applyGridChange(restoredGrid, false);
+    setSettings(restoredSettings);
+    setSourceImage(null);
+    setConversionDiagnostics(null);
+    // A loaded work is its own undo baseline, never an edit of another work.
+    historyTransactionRef.current = null;
+    gridRef.current = restoredGrid;
+    historyRef.current = [restoredGrid.map((row) => [...row])];
+    historyIndexRef.current = 0;
+    setGrid(restoredGrid);
+    setHistory(historyRef.current);
+    setHistoryIndex(0);
+    savedPatternBaselineRef.current = nextBaseline;
+    setCurrentTab('studio');
+    navigatePublic(studioUrl);
+    return true;
   };
 
   const handleSaveCurrentPattern = async (title: string): Promise<void> => {
@@ -1770,7 +1813,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         sourceHash,
         gridHash,
       };
+      const savedBaseline = patternEditingSnapshot(saveInput.grid, settings, brand, activePalette, title);
       const record = await saveExportedPatternRecord(saveInput);
+      savedPatternBaselineRef.current = savedBaseline;
       setActivePatternId(record.id);
       setSaveMessage(currentUser
         ? (record.syncState === 'synced' ? (isEn ? 'Saved to your private cloud gallery.' : '已保存到云端私有图库。') : (isEn ? 'Saved locally. Cloud sync can be retried from your gallery.' : '已保存到本地，云端同步可在图库重试。'))

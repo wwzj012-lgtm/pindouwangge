@@ -227,3 +227,33 @@
 .admin-root .admin-code-result-drawer, .admin-root .admin-log-drawer { width:min(600px,100vw); max-width:600px; }
 @media (max-width:1279px) { .admin-root .admin-code-generation, .admin-root .admin-code-filters, .admin-root .admin-log-filters { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:639px) { .admin-root .admin-code-generation, .admin-root .admin-code-filters, .admin-root .admin-log-filters { grid-template-columns:minmax(0,1fr); } .admin-root .admin-code-statistics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* Stage 4: concrete component namespace only. */
+.admin-root .admin-module:has(> .admin-final-modules) { color:var(--admin-ink); background:transparent; color-scheme:inherit; border:0; padding:0; }
+.admin-root .admin-final-modules { color:var(--admin-ink); min-width:0; }
+.admin-root .admin-final-surface { background:var(--admin-surface); color:var(--admin-ink); border-color:var(--admin-border); border-radius:8px; }
+.admin-root .admin-final-modules label, .admin-root .admin-final-fields label { display:grid; gap:6px; color:var(--admin-muted); font-size:12px; margin-bottom:12px; min-width:0; }
+.admin-root .admin-final-modules :is(input,select,textarea):not([type=checkbox]), .admin-root .admin-final-fields :is(input,select,textarea):not([type=checkbox]) { width:100%; min-width:0; min-height:44px; border:1px solid var(--admin-border); border-radius:8px; padding:8px 12px; color:var(--admin-ink); background:var(--admin-surface); font:14px/1.6 'PingFang SC','Microsoft YaHei',sans-serif; }
+.admin-root .admin-final-modules :is(input,select,textarea):focus-visible, .admin-root .admin-final-fields :is(input,select,textarea):focus-visible { outline:2px solid var(--admin-primary); outline-offset:2px; }
+.admin-root .admin-final-fields textarea { min-height:120px; resize:vertical; }
+.admin-root .admin-final-fields > div { min-width:0; }
+.admin-root .admin-final-fields .admin-filter-actions { margin:16px 0; }
+.admin-root .admin-final-fields .admin-final-check { display:flex; align-items:center; gap:8px; min-height:44px; }
+.admin-root .admin-final-check input { width:18px; height:18px; accent-color:var(--admin-primary); }
+.admin-root .admin-final-drawer { width:min(640px,100vw); max-width:640px; }
+.admin-root .admin-final-active { color:var(--admin-primary); background:var(--admin-primary-soft); border-color:var(--admin-primary); }
+.admin-root .admin-final-notice { display:flex; align-items:flex-start; gap:12px; padding:16px; border:1px solid var(--admin-warning); background:var(--admin-warning-soft); color:var(--admin-warning); border-radius:8px; margin-bottom:16px; font-size:14px; }
+.admin-root .admin-final-notice svg { width:20px; height:20px; flex-shrink:0; }
+.admin-root .admin-final-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.admin-root .admin-final-excerpt { display:block; max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.admin-root .admin-final-preview { margin-top:16px; padding:16px; border:1px solid var(--admin-border); background:var(--admin-subtle); border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.admin-root .admin-final-impact { color:var(--admin-warning); }
+.admin-root .admin-final-diff { display:grid; gap:16px; }
+.admin-root .admin-final-diff h3 { margin:0 0 8px; font-size:14px; }
+.admin-root .admin-final-diff pre { padding:12px; border:1px solid var(--admin-border); background:var(--admin-subtle); border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.6 ui-monospace,Consolas,monospace; max-height:220px; overflow:auto; }
+.admin-root .admin-final-modules table { width:100%; border-collapse:collapse; font-size:13px; color:var(--admin-ink); }
+.admin-root .admin-final-modules table th { text-align:left; padding:12px; border-bottom:1px solid var(--admin-border); background:var(--admin-subtle); color:var(--admin-muted); font-weight:500; }
+.admin-root .admin-final-modules table td { padding:12px; border-bottom:1px solid var(--admin-border); vertical-align:top; }
+.admin-root .admin-final-modules table tr:last-child td { border-bottom:0; }
+.admin-root .admin-final-modules .admin-toolbar { margin-bottom:16px; }
+@media (max-width:639px) { .admin-root .admin-final-actions { flex-wrap:wrap; } .admin-root .admin-final-notice { padding:12px; } .admin-root .admin-final-fields .grid-cols-2 { grid-template-columns:minmax(0,1fr); } }

@@ -1,11 +1,14 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ContentDrawer, frozenValue, parseJsonDraft } from './AdminContentFlow';
+import { ContentDrawer, frozenValue, jsonDraftText, parseJsonDraft } from './AdminContentFlow';
 
 describe('existing JSON values and frozen content submission', () => {
   it('reports invalid JSON inline-compatible error without fabricated value', () => { const result=parseJsonDraft('{invalid');expect(result.error).toContain('JSON');expect(result.value).toBeUndefined(); });
   it('retains explicit JSON null rather than replacing it with an object', () => { expect(parseJsonDraft('null')).toEqual({value:null,error:''}); });
+  it('initializes explicit resource metadata null as literal null', () => { expect(jsonDraftText(null)).toBe('null');expect(parseJsonDraft(jsonDraftText(null)).value).toBeNull(); });
+  it('defaults only new or missing resource metadata to an empty object', () => { expect(jsonDraftText(undefined)).toBe('{}');expect(jsonDraftText(({} as { metadata?: unknown }).metadata)).toBe('{}'); });
+  it('preserves resource metadata objects, arrays and primitive JSON values', () => { for (const value of [{nested:{enabled:false},items:[1,null]},[1,null],false,0,'']) { expect(JSON.parse(jsonDraftText(value))).toEqual(value); } });
   it('retains permitted arrays and primitive JSON values', () => { expect(parseJsonDraft('[1,2]').value).toEqual([1,2]);expect(parseJsonDraft('false').value).toBe(false); });
   it('detaches nested resource metadata from mutable editor state', () => { const body={id:'asset1',metadata:{owner:'old'}};const frozen=frozenValue(body);body.metadata.owner='new';expect(frozen.metadata.owner).toBe('old'); });
   it('freezes before/after independently for exact confirmation', () => { const before={enabled:false,config:{n:1}},after={enabled:true,config:{n:2}};const a=frozenValue(before),b=frozenValue(after);before.config.n=9;after.config.n=10;expect(a.config.n).toBe(1);expect(b.config.n).toBe(2); });

@@ -4,6 +4,7 @@ import { AdminConfirmDialog, AdminDrawer, AdminErrorState } from './AdminPrimiti
 import { requestError } from './adminUserModel';
 
 export function frozenValue<T>(value: T): T { return value === undefined ? value : JSON.parse(JSON.stringify(value)) as T; }
+export function jsonDraftText(value: unknown): string { return JSON.stringify(value === undefined ? {} : value, null, 2); }
 export function parseJsonDraft(raw: string): { value?: unknown; error: string } { try { return { value: JSON.parse(raw), error: '' }; } catch { return { error: 'JSON格式无效，请修正后再提交。' }; } }
 export interface ContentWrite {
   path: string; method: 'POST' | 'PUT' | 'DELETE'; body?: unknown; before?: unknown;

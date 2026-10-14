@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
 import { AdminButton, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
-import { ContentDrawer, useContentWrite } from './AdminContentFlow';
+import { ContentDrawer, jsonDraftText, useContentWrite } from './AdminContentFlow';
 
 type ContentMode = 'colors-assets' | 'community';
 type CardStatus = 'active' | 'disabled' | 'archived';
@@ -187,7 +187,7 @@ function SwatchEditor({ card, initial, onClose, onSave, saving, readOnly }: { ca
 }
 
 function AssetEditor({ initial, onClose, onSave, saving, readOnly }: { initial?: StorageAsset; onClose: () => void; onSave: (body: Record<string, unknown>) => void; saving: boolean; readOnly: boolean }) {
-  const [objectKey, setObjectKey] = useState(initial?.objectKey ?? ''); const [resourceType, setResourceType] = useState(initial?.resourceType ?? ''); const [contentType, setContentType] = useState(initial?.contentType ?? ''); const [byteCount, setByteCount] = useState(String(initial?.byteSize ?? 0)); const [ownerUid, setOwnerUid] = useState(initial?.ownerUid ?? ''); const [visibility, setVisibility] = useState<AssetVisibility>(initial?.visibility ?? 'private'); const [status, setStatus] = useState<AssetStatus>(initial?.status ?? 'active'); const [metadataRaw, setMetadataRaw] = useState(() => JSON.stringify(initial?.metadata ?? {}, null, 2));
+  const [objectKey, setObjectKey] = useState(initial?.objectKey ?? ''); const [resourceType, setResourceType] = useState(initial?.resourceType ?? ''); const [contentType, setContentType] = useState(initial?.contentType ?? ''); const [byteCount, setByteCount] = useState(String(initial?.byteSize ?? 0)); const [ownerUid, setOwnerUid] = useState(initial?.ownerUid ?? ''); const [visibility, setVisibility] = useState<AssetVisibility>(initial?.visibility ?? 'private'); const [status, setStatus] = useState<AssetStatus>(initial?.status ?? 'active'); const [metadataRaw, setMetadataRaw] = useState(() => jsonDraftText(initial?.metadata));
   const parsedSize = Number(byteCount); let metadata: unknown = null; let metadataError = '';
   try { metadata = JSON.parse(metadataRaw); } catch { metadataError = '元数据必须是有效 JSON。'; }
   const valid = objectKey.trim().length > 0 && objectKey.trim().length <= 1000 && resourceType.trim().length > 0 && resourceType.trim().length <= 120 && Number.isInteger(parsedSize) && parsedSize >= 0 && !metadataError;

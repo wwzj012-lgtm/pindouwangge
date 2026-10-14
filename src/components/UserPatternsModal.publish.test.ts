@@ -21,7 +21,6 @@ const patternHistory = vi.hoisted(() => ({
   renameExportedPattern: vi.fn(),
 }));
 const communityApi = vi.hoisted(() => ({
-  getCommunityPublishErrorCode: vi.fn(),
   publishCommunityPost: vi.fn(),
   uploadCommunityAsset: vi.fn(),
 }));
@@ -67,7 +66,10 @@ vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ currentUser: authSt
 vi.mock('../context/LanguageContext', () => ({ useLanguage: () => ({ language: 'en' }) }));
 vi.mock('../utils/patternHistory', () => patternHistory);
 vi.mock('../utils/patternPreview', () => ({ renderPatternPreview: renderPreview }));
-vi.mock('../utils/communityApi', () => communityApi);
+vi.mock('../utils/communityApi', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../utils/communityApi')>(),
+  ...communityApi,
+}));
 vi.mock('../utils/dateUtils', () => ({ formatChinaDate: () => '2026-08-22' }));
 vi.mock('../utils/api', () => creditApi);
 
@@ -228,9 +230,8 @@ describe('UserPatternsModal community publishing', () => {
       previewBlob: new Blob(['preview'], { type: 'image/png' }),
     });
     communityApi.publishCommunityPost
-      .mockResolvedValueOnce({ ok: false, error: 'asset required' })
+      .mockResolvedValueOnce({ ok: false, status: 409, error: 'WORK_ASSET_REQUIRED' })
       .mockResolvedValueOnce({ ok: true });
-    communityApi.getCommunityPublishErrorCode.mockReturnValue('WORK_ASSET_REQUIRED');
 
     const tree = await openPublishDialog(record);
     await confirmPublish(tree);
@@ -244,12 +245,14 @@ describe('UserPatternsModal community publishing', () => {
   });
 
   it.each([
-    ['409 duplicate response', 'DUPLICATE_POST'],
-    ['500 server response', null],
-  ])('does not upload or mark a cloud work after a %s', async (_label, errorCode) => {
+    ['409 duplicate response', 409, 'This work already has an active community post'],
+    ['402 completion required', 402, 'WORK_ASSET_REQUIRED'],
+    ['403 ownership rejected', 403, 'WORK_ASSET_REQUIRED'],
+    ['410 legacy import expired', 410, 'WORK_ASSET_REQUIRED'],
+    ['500 server response', 500, 'WORK_ASSET_REQUIRED'],
+  ])('does not upload or mark a cloud work after a %s', async (_label, status, error) => {
     const record = initialRecord({ id: 'cloud-id', userId: 'user-1', hasCloudCopy: true });
-    communityApi.publishCommunityPost.mockResolvedValue({ ok: false, error: 'publish rejected' });
-    communityApi.getCommunityPublishErrorCode.mockReturnValue(errorCode);
+    communityApi.publishCommunityPost.mockResolvedValue({ ok: false, status, error });
 
     const tree = await openPublishDialog(record);
     await confirmPublish(tree);
@@ -257,6 +260,34 @@ describe('UserPatternsModal community publishing', () => {
     expect(communityApi.uploadCommunityAsset).not.toHaveBeenCalled();
     expect(patternHistory.markExportedPatternPublished).not.toHaveBeenCalled();
     expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry publishing when preview upload fails', async () => {
+    communityApi.publishCommunityPost.mockResolvedValue({ ok: false, status: 409, error: 'WORK_ASSET_REQUIRED' });
+    communityApi.uploadCommunityAsset.mockResolvedValue({ ok: false, status: 413, error: 'Preview is too large' });
+
+    const tree = await confirmPublish(await openPublishDialog(initialRecord({
+      id: 'cloud-id', userId: 'user-1', hasCloudCopy: true,
+      previewBlob: new Blob(['preview'], { type: 'image/png' }),
+    })));
+
+    expect(communityApi.uploadCommunityAsset).toHaveBeenCalledTimes(1);
+    expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
+    expect(patternHistory.markExportedPatternPublished).not.toHaveBeenCalled();
+    expect(textContent(tree)).toContain('Preview is too large');
+  });
+
+  it('stops after a second asset-required conflict instead of looping or marking published', async () => {
+    communityApi.publishCommunityPost.mockResolvedValue({ ok: false, status: 409, error: 'WORK_ASSET_REQUIRED' });
+
+    await confirmPublish(await openPublishDialog(initialRecord({
+      id: 'cloud-id', userId: 'user-1', hasCloudCopy: true,
+      previewBlob: new Blob(['preview'], { type: 'image/png' }),
+    })));
+
+    expect(communityApi.uploadCommunityAsset).toHaveBeenCalledTimes(1);
+    expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(2);
+    expect(patternHistory.markExportedPatternPublished).not.toHaveBeenCalled();
   });
 
   it('syncs a local work first, then uses the returned cloud id for preview, publishing, and marking', async () => {

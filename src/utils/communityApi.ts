@@ -55,7 +55,12 @@ export type CommunityPublishResult = ApiResult<{
 
 export function getCommunityPublishErrorCode(result: CommunityPublishResult): CommunityPublishErrorCode | null {
   if (result.ok) return null;
-  return result.errorCode ?? result.code ?? null;
+  const code = result.errorCode ?? result.code;
+  if (code !== undefined) return code;
+  // Support the Worker's message-only envelope for this recovery signal only.
+  return result.status === 409 && result.error === 'WORK_ASSET_REQUIRED'
+    ? 'WORK_ASSET_REQUIRED'
+    : null;
 }
 
 function publicAssetUrl(assetId: string): string {

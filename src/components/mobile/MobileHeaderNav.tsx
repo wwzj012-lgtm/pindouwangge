@@ -23,6 +23,7 @@ import {
 import { useAuth } from '../../context/AuthContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { consumeSelectedImageFile } from '../../utils/imageFileSelection';
+import { AnnouncementBell } from '../AnnouncementBell';
 
 export interface MobileHeaderNavProps {
   projectName: string;
@@ -31,6 +32,8 @@ export interface MobileHeaderNavProps {
   onExportJson: () => void;
   onImportJson: (jsonStr: string) => void;
   onOpenGuideModal: () => void;
+  onOpenAnnouncements?: () => void;
+  hasUnreadAnnouncements?: boolean;
   onOpenSmartReduceModal?: () => void;
   onOpenPatternsModal?: () => void;
   onOpenPaletteModal?: () => void;
@@ -49,6 +52,8 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
   onExportJson,
   onImportJson,
   onOpenGuideModal,
+  onOpenAnnouncements,
+  hasUnreadAnnouncements,
   onOpenSmartReduceModal,
   onOpenPatternsModal,
   onOpenPaletteModal,
@@ -132,7 +137,7 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
               alt="豆织星格 Logo"
               className="w-8 h-8 rounded-xl object-contain shadow-2xs shrink-0"
             />
-            <div className="flex flex-col">
+            <div className={`flex flex-col ${currentTab === 'studio' ? 'max-[439px]:hidden' : ''}`}>
               <div className="flex items-center gap-1">
                 <span className="text-xs sm:text-sm font-black text-slate-900 tracking-tight leading-none">
                   豆织<span className="text-purple-600">星格</span>
@@ -154,6 +159,7 @@ export const MobileHeaderNav: React.FC<MobileHeaderNavProps> = ({
 
         {/* Right Corner: Quick Actions, Language & User Profile Avatar */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {onOpenAnnouncements && <AnnouncementBell onClick={onOpenAnnouncements} hasUnread={hasUnreadAnnouncements} />}
           <button
             onClick={() => onOpenVipModal?.()}
             className="flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200/80 text-amber-900 font-black text-[10px] shadow-2xs active:scale-95 cursor-pointer"

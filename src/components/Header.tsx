@@ -27,6 +27,7 @@ import { SAMPLE_IMAGES } from '../data/samples';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { consumeSelectedImageFile } from '../utils/imageFileSelection';
+import { AnnouncementBell } from './AnnouncementBell';
 
 interface HeaderProps {
   projectName: string;
@@ -37,6 +38,8 @@ interface HeaderProps {
   onImportJson: (jsonStr: string) => void;
   onOpenExportModal: () => void;
   onOpenGuideModal: () => void;
+  onOpenAnnouncements?: () => void;
+  hasUnreadAnnouncements?: boolean;
   onOpenSmartReduceModal?: () => void;
   onOpenPatternsModal?: () => void;
   onOpenPaletteModal?: () => void;
@@ -110,6 +113,8 @@ export const Header: React.FC<HeaderProps> = ({
   onImportJson,
   onOpenExportModal,
   onOpenGuideModal,
+  onOpenAnnouncements,
+  hasUnreadAnnouncements,
   onOpenSmartReduceModal,
   onOpenPatternsModal,
   onOpenPaletteModal,
@@ -305,6 +310,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Corner: Search bar, Guide, VIP, User badge & Actions */}
         <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
+          {onOpenAnnouncements && <AnnouncementBell onClick={onOpenAnnouncements} hasUnread={hasUnreadAnnouncements} />}
           {/* Header Search Input Bar */}
           <div className="hidden lg:flex items-center relative w-48 xl:w-56">
             <input

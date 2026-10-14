@@ -14,7 +14,6 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { consumeSelectedImageFile } from '../utils/imageFileSelection';
-import type { PublicAnnouncementItem } from './PublicAnnouncementModal';
 
 export interface HeroExample {
   id: 'batiao-cat' | 'boss-xiaoxin' | 'spiderman' | 'chibi-character';
@@ -47,8 +46,6 @@ interface HomeViewProps {
   onStartPhotoToBead: (file: File) => void;
   onLoadHeroExample: (example: HeroExample) => void;
   onImportPattern: () => void;
-  activeAnnouncement: PublicAnnouncementItem | null;
-  onOpenAnnouncement: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -56,8 +53,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartPhotoToBead,
   onLoadHeroExample,
   onImportPattern,
-  activeAnnouncement,
-  onOpenAnnouncement,
 }) => {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [vibeIndex, setVibeIndex] = useState(0);
@@ -96,26 +91,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
             {/* Left Content */}
             <div className="lg:col-span-7 flex flex-col items-start space-y-4">
-              {/* Announcement Capsule */}
-              {activeAnnouncement && (
-                <button
-                  type="button"
-                  onClick={onOpenAnnouncement}
-                  aria-label={`打开公告：${activeAnnouncement.title}`}
-                  className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 hover:bg-white/15 border border-white/20 backdrop-blur-md text-left text-xs text-white transition-all cursor-pointer group mb-2"
-                >
-                  <span className="px-2 py-0.5 rounded-full bg-yellow-400 text-purple-900 font-bold text-[10px]">
-                    {activeAnnouncement.pinned ? '置顶' : '豆讯'}
-                  </span>
-                  <span className="truncate max-w-[200px] sm:max-w-xs md:max-w-md">
-                    {activeAnnouncement.title}
-                  </span>
-                  <svg className="w-3.5 h-3.5 text-white/70 group-hover:translate-x-0.5 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              )}
-
               {/* Tag Pill */}
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs font-bold text-purple-100 shadow-xs">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />

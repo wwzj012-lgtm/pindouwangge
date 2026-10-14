@@ -31,15 +31,14 @@ describe('HomeView hero examples', () => {
     expect(appSource).toContain('handleLoadSample(example.url, example.name)');
   });
 
-  it('renders the real announcement as an accessible home action without bypassing load errors', () => {
+  it('keeps announcements in the shared bell center instead of a home capsule or yellow failure strip', () => {
     const homeSource = readFileSync(new URL('./HomeView.tsx', import.meta.url), 'utf8');
     const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
 
-    expect(homeSource).toContain('<button');
-    expect(homeSource).toContain('aria-label={`打开公告：${activeAnnouncement.title}`}');
-    expect(appSource).toContain('activeAnnouncement={activeAnnouncement}');
-    expect(appSource).toContain('publicAnnouncements.find(item => !dismissedAnnouncementIds.has(announcementReadKey(item))) ?? null');
-    expect(appSource).toContain("announcementLoadState === 'error'");
+    expect(homeSource).not.toContain('activeAnnouncement');
+    expect(appSource).toContain('onOpenAnnouncements={announcement.store.openHistory}');
+    expect(appSource).toContain('state={announcement.state}');
+    expect(appSource).not.toContain('公告暂时无法加载。');
     expect(appSource).not.toContain("id: 'mock-announcement'");
   });
 });

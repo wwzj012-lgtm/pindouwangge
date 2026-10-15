@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback, useLayoutEffect } from 'react';
 import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, Upload, RotateCcw, Cloud } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
-import { drawBeadOnCanvas } from '../utils/exportUtils';
+import { drawPreviewBeadOnCanvas, getPreviewCellBounds } from '../utils/ironedPreview';
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
 import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
@@ -1005,6 +1005,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const previewSet = new Set(previewPoints.map(p => `${p.x},${p.y}`));
 
     const activeHighlightIds = highlightColorIds ?? (highlightColorId ? [highlightColorId] : []);
+    // A visual surface preview, not a pegboard: retain the user's switches in
+    // state so all drafting aids return unchanged when leaving ironed mode.
+    const isIronedPreview = beadShape === 'ironed';
+    const drawGridLines = showGridLines && !isIronedPreview;
 
     // 5. Render Bead Grid Cells
     for (let y = 0; y < height; y++) {
@@ -1028,12 +1032,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           // Render preview ghost bead for shape tools
           ctx.save();
           ctx.globalAlpha = 0.8;
-          drawBeadOnCanvas(ctx, px, py, cellSize, selectedColor.hex, beadShape, null);
+          drawPreviewBeadOnCanvas(ctx, px, py, cellSize, selectedColor.hex, beadShape, null);
           ctx.restore();
         } else if (colorId) {
           const bead = paletteMap.get(colorId);
           const colorHex = bead ? bead.hex : '#CCCCCC';
-          const symbolStr = showSymbols && cellSize >= minSymbolCellSize && bead
+          const symbolStr = showSymbols && !isIronedPreview && cellSize >= minSymbolCellSize && bead
             ? (bead.code || bead.symbol)
             : null;
 
@@ -1048,7 +1052,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             ctx.filter = 'saturate(0.35)';
           }
 
-          drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, symbolStr);
+          drawPreviewBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, symbolStr, grid, x, y);
 
           if (isCompleted) {
             ctx.filter = 'none';
@@ -1085,9 +1089,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           ctx.fillStyle = showOverlay
             ? (canvasBackdrop === 'wood' ? 'rgba(250, 240, 230, 0.18)' : 'rgba(255, 255, 255, 0.12)')
             : (canvasBackdrop === 'wood' ? '#FAF0E6' : '#FFFFFF');
-          ctx.fillRect(px, py, cellSize, cellSize);
+          if (isIronedPreview) {
+            const bounds = getPreviewCellBounds(ctx, px, py, cellSize);
+            ctx.fillRect(bounds.left, bounds.top, bounds.width, bounds.height);
+          } else {
+            ctx.fillRect(px, py, cellSize, cellSize);
+          }
 
-          if (showGridLines) {
+          if (drawGridLines) {
             ctx.strokeStyle = showOverlay
               ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.6)' : 'rgba(100, 116, 139, 0.35)')
               : (canvasBackdrop === 'wood' ? '#FCD34D' : '#E2E8F0');
@@ -1095,13 +1104,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             ctx.strokeRect(px, py, cellSize, cellSize);
           }
 
-          // Peg dot center
-          ctx.beginPath();
-          ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
-          ctx.fillStyle = showOverlay
-            ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.65)' : 'rgba(100, 116, 139, 0.45)')
-            : (canvasBackdrop === 'wood' ? '#D97706' : '#94A3B8');
-          ctx.fill();
+          if (!isIronedPreview) {
+            // Peg dot center is a drafting aid, not part of the fused design.
+            ctx.beginPath();
+            ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
+            ctx.fillStyle = showOverlay
+              ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.65)' : 'rgba(100, 116, 139, 0.45)')
+              : (canvasBackdrop === 'wood' ? '#D97706' : '#94A3B8');
+            ctx.fill();
+          }
         }
       }
     }
@@ -1131,7 +1142,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     }
 
     // 7. 5×5 Dashed & 10×10 Bold Grid System (Standard Physical Bead Board Lines)
-    if (showGridLines) {
+    if (drawGridLines) {
       // (a) 5×5 Dashed Guidelines (forming 5*5 dashed small squares)
       ctx.save();
       ctx.strokeStyle = canvasBackdrop === 'wood'

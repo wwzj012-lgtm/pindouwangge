@@ -1,5 +1,6 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
 import { consolidateStrayBeans } from './strayBeanConsolidation';
+import { projectCartoonInk } from './cartoonSampling';
 import {
   classifyGridRegions,
   classifySourceRegions,
@@ -1197,6 +1198,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     )
     : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
   const targetPixels: GridPixel[] = [];
+  const representedInk = pipeline === 'cartoon' ? new Uint8Array(settings.width * settings.height) : null;
   const protectedEmpty = new Uint8Array(settings.width * settings.height);
   const scaleX = sourceWidth / settings.width;
   const scaleY = sourceHeight / settings.height;
@@ -1238,7 +1240,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           const g = sampleData[sampleOffset + 1];
           const b = sampleData[sampleOffset + 2];
           const detail = sourceRegions.detailProtection[sourceIndex] ?? 0;
-          const contentWeight = contentAwareSampleWeight(
+          const contentWeight = pipeline === 'cartoon' ? alphaWeight : contentAwareSampleWeight(
             alphaWeight,
             x,
             y,
@@ -1287,12 +1289,27 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           linearToSrgb(linearG / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearB / Math.max(weightedValid, 0.00001)),
         ];
+      if (representedInk && Math.max(...rgb) <= 64 && Math.max(...rgb) - Math.min(...rgb) <= 32) {
+        representedInk[gridY * settings.width + gridX] = 1;
+      }
       const adjusted = adjustColor(rgb, settings);
       targetPixels.push({ r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 });
     }
   }
 
-  edgeAwareEnhance(targetPixels, settings.width, settings.height, settings);
+  if (representedInk && (sourceWidth > settings.width || sourceHeight > settings.height)) {
+    const cartoonInk = projectCartoonInk(data, sourceWidth, sourceHeight, settings.width, settings.height,
+      alphaCutoff, backgroundResult.mask, representedInk);
+    cartoonInk.forEach((rgb, index) => {
+      if (!rgb || targetPixels[index].alpha === 0) return;
+      const adjusted = adjustColor(rgb, settings);
+      targetPixels[index] = { r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 };
+    });
+  }
+
+  // Grid lightness sharpening adds colour bands to flat fills; cartoon ink is source-supported.
+  edgeAwareEnhance(targetPixels, settings.width, settings.height,
+    pipeline === 'cartoon' ? { ...settings, sharpening: 0 } : settings);
 
   const matchAlgorithm: 'cie76' | 'ciede2000' = pipeline === 'logo' ? 'cie76' : 'ciede2000';
   const selectedPalette = selectPalette(targetPixels, activePalette, settings.colorLimit, matchAlgorithm);

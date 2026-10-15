@@ -293,6 +293,7 @@ function quantizeBuffer(
   if (total === 0) return quantized;
   const normalizedStrength = Math.min(100, Math.max(0, quantizationStrength)) / 100;
   if (normalizedStrength === 0) return quantized;
+  if (mode === 'cartoon') return stabilizeCartoonColors(data, alphaCutoff, normalizedStrength);
   const profile = quantizationProfile(mode);
   const mergeScale = normalizedStrength * profile.strengthScale;
   // 4-bit/channel cache keeps the hot K-Means and raster passes lightweight;
@@ -382,6 +383,46 @@ function quantizeBuffer(
   return quantized;
 }
 
+/** Bounded colour histogram: share fills without spatially blurring their boundaries. */
+function stabilizeCartoonColors(data: Uint8ClampedArray, alphaCutoff: number, strength: number): Uint8ClampedArray {
+  const buckets = new Map<number, { rgb: Rgb; count: number }>();
+  for (let offset = 0; offset < data.length; offset += 4) {
+    if (data[offset + 3] < alphaCutoff) continue;
+    const key = quantizedRgbKey(data[offset], data[offset + 1], data[offset + 2]);
+    const bucket = buckets.get(key) ?? { rgb: [0, 0, 0] as Rgb, count: 0 };
+    for (let channel = 0; channel < 3; channel++) bucket.rgb[channel] += data[offset + channel];
+    bucket.count++;
+    buckets.set(key, bucket);
+  }
+  const entries = Array.from(buckets, ([key, bucket]) => {
+    const rgb = bucket.rgb.map(value => Math.round(value / bucket.count)) as Rgb;
+    return { key, rgb, lab: rgbToLab(rgb), count: bucket.count };
+  }).sort((a, b) => b.count - a.count || a.key - b.key);
+  const radius = 3 + strength * 18;
+  const anchors: typeof entries = [];
+  const replacements = new Map<number, Rgb>();
+  for (const entry of entries) {
+    let nearest: typeof entry | undefined;
+    let distance = Number.POSITIVE_INFINITY;
+    for (const anchor of anchors) {
+      const next = Math.sqrt(labDistanceSquared(entry.lab, anchor.lab));
+      if (next < distance) { distance = next; nearest = anchor; }
+    }
+    if (nearest && distance <= radius) replacements.set(entry.key, nearest.rgb);
+    else {
+      if (anchors.length < 16) anchors.push(entry);
+      replacements.set(entry.key, entry.rgb);
+    }
+  }
+  const result = new Uint8ClampedArray(data);
+  for (let offset = 0; offset < data.length; offset += 4) {
+    if (data[offset + 3] < alphaCutoff) continue;
+    const rgb = replacements.get(quantizedRgbKey(data[offset], data[offset + 1], data[offset + 2]))!;
+    result.set(rgb, offset);
+  }
+  return result;
+}
+
 /** Classifies original-resolution detail before any grid downsampling. */
 export function classifySourceRegions(detailMask: Float32Array, width: number, height: number): RegionMasks {
   const total = width * height;
@@ -461,7 +502,7 @@ export function preprocessSourceImage(
 
   // Keep detail analysis at source resolution. For very large sources, the
   // denoise and tone passes operate on the bounded work buffer instead.
-  if (sampleWidth >= 8 && sampleHeight >= 8 && processTotal <= MAX_DENOISE_PIXELS) {
+  if (selectedMode !== 'cartoon' && sampleWidth >= 8 && sampleHeight >= 8 && processTotal <= MAX_DENOISE_PIXELS) {
     for (let y = 1; y < sampleHeight - 1; y++) {
       for (let x = 1; x < sampleWidth - 1; x++) {
         const idx = (y * sampleWidth + x) * 4;

@@ -68,6 +68,7 @@ import { validateStoredProject } from './utils/patternGridCodec';
 import { normalizeRestoredPatternSettings, patternEditingSnapshot, savedPatternStudioUrl } from './utils/savedPatternNavigation';
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
+import { advanceCompletionEditRevision, completionInputKey, isCompletionEditRevisionCurrent, isWithinServerPaidCoverage, readServerPaidCoverage, type ServerPaidCoverage } from './utils/patternCompletionState';
 
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
 
@@ -109,6 +110,8 @@ interface PatternCompletionQuote {
 }
 
 interface CompletionQuoteState {
+  scopeKey: string;
+  editRevision: number;
   input: PatternCompletionInput;
   quote: PatternCompletionQuote;
   idempotencyKey: string;
@@ -237,14 +240,14 @@ function getApiMessage(value: unknown, fallback: string): string {
   return typeof nested === 'string' && nested.trim() ? nested : fallback;
 }
 
-function getCreditBalance(summary: unknown): number | null {
+function getCreditBalance(summary: unknown): string | null {
   const record = asRecord(summary);
   if (!record) return null;
-  for (const key of ['availableUnits', 'balance', 'credits', 'units']) {
-    const value = record[key];
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-  }
-  return null;
+  // Match Header's existing spendable-units -> points display contract.
+  const availableUnits = typeof record.availableUnits === 'number' && Number.isFinite(record.availableUnits)
+    ? Math.max(0, record.availableUnits)
+    : Math.max(0, Number(record.balanceUnits ?? 0) - Number(record.heldUnits ?? 0));
+  return Number.isFinite(availableUnits) ? (availableUnits / 10).toFixed(1) : null;
 }
 
 function parsePaletteHex(hex: string): { r: number; g: number; b: number } {
@@ -608,14 +611,32 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [currentSavingTarget, setCurrentSavingTarget] = useState<15 | 25 | 40>(15);
   const [completionStatus, setCompletionStatus] = useState<PatternCompletionStatus>('DRAFT');
   const [completionQuote, setCompletionQuote] = useState<CompletionQuoteState | null>(null);
-  const [completionPreviewQuote, setCompletionPreviewQuote] = useState<PatternCompletionQuote | null>(null);
+  const [completionPreviewQuote, setCompletionPreviewQuote] = useState<Omit<CompletionQuoteState, 'idempotencyKey' | 'editRevision'> | null>(null);
   const [completionPreviewStatus, setCompletionPreviewStatus] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [completionPreviewKey, setCompletionPreviewKey] = useState('');
+  const [completionPreviewRetry, setCompletionPreviewRetry] = useState(0);
+  const [serverPaidCoverage, setServerPaidCoverage] = useState<(ServerPaidCoverage & { scopeKey: string }) | null>(null);
+  const quoteRequestSequenceRef = useRef(0);
   const [paidNonEmptyBeads, setPaidNonEmptyBeads] = useState<number | null>(null);
   const completionSubmissionRef = useRef(false);
+  const completionEditRevisionRef = useRef(0);
   const legacyMigrationAttemptedUsersRef = useRef<Set<string>>(new Set());
   const [alignedPixels, setAlignedPixels] = useState<Uint8ClampedArray | undefined>(undefined);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
+
+  const invalidateCompletionConfirmation = useCallback(() => {
+    // O(1), including same-occupancy edits and A -> B -> A within one render.
+    completionEditRevisionRef.current = advanceCompletionEditRevision(completionEditRevisionRef.current);
+    setCompletionQuote(null);
+    setCompletionStatus(current => current === 'QUOTING' || current === 'AWAITING_CONFIRMATION' ? 'DRAFT' : current);
+    // Keep independently authenticated serverPaidCoverage and paid metadata intact.
+  }, []);
+
+  const handleLargeCanvasCreditUsageChange = useCallback((usage: LargeCanvasCreditUsage) => {
+    invalidateCompletionConfirmation();
+    setLargeCanvasCreditUsage(usage);
+  }, [invalidateCompletionConfirmation]);
 
   const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
 
@@ -692,12 +713,15 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   }, [currentUser?.uid, hasFormalLogin]);
 
   const beginNewCompletionDraft = useCallback(() => {
+    invalidateCompletionConfirmation();
     setDraftSourceKey(createDraftId());
     setCurrentSavingTarget(15);
     setCompletionStatus('DRAFT');
     setCompletionQuote(null);
+    setCompletionPreviewQuote(null);
+    setServerPaidCoverage(null);
     setPaidNonEmptyBeads(null);
-  }, []);
+  }, [invalidateCompletionConfirmation]);
 
   const requireFormalLogin = useCallback((message: string): boolean => {
     if (hasFormalLogin) return true;
@@ -831,6 +855,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       setCompletionPreviewQuote(null);
       setCompletionPreviewStatus('idle');
       setPaidNonEmptyBeads(null);
+      setServerPaidCoverage(null);
     }
     lastCompletionWorkKeyRef.current = stableWorkKey;
   }, [stableWorkKey]);
@@ -850,33 +875,50 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     occupancyBase64: completionUsage.occupancyBase64,
     savingTarget: currentSavingTarget,
   }), [completionUsage, currentSavingTarget, sourceHash, stableWorkKey]);
-  const needsCompletionSupplement = completionStatus === 'COMPLETED'
-    && paidNonEmptyBeads !== null
-    && nonEmptyBeads > paidNonEmptyBeads;
+  const completionScopeKey = JSON.stringify([hasFormalLogin ? currentUser?.uid : null, stableWorkKey, sourceHash]);
+  const completionRequestKey = completionScopeKey + completionInputKey(patternCompletionInput);
+  const completionContextRef = useRef({ key: completionRequestKey, scopeKey: completionScopeKey });
+  // Invalidate synchronously during rendering, including A -> B -> A edits.
+  if (completionContextRef.current.key !== completionRequestKey) {
+    completionContextRef.current = { key: completionRequestKey, scopeKey: completionScopeKey };
+  }
+  const currentCoverage = hasFormalLogin && serverPaidCoverage?.scopeKey === completionScopeKey ? serverPaidCoverage : null;
+  const activeCompletionQuote = hasFormalLogin && completionQuote?.scopeKey === completionScopeKey
+    && isCompletionEditRevisionCurrent(completionQuote.editRevision, completionEditRevisionRef.current)
+    && completionInputKey(completionQuote.input) === completionInputKey(patternCompletionInput) ? completionQuote : null;
+  const activePreviewQuote = hasFormalLogin && completionPreviewQuote?.scopeKey === completionScopeKey
+    && completionInputKey(completionPreviewQuote.input) === completionInputKey(patternCompletionInput) ? completionPreviewQuote : null;
+  const needsCompletionSupplement = currentCoverage !== null
+    && !isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
   // VIP only changes export privileges. Detailed pattern data is available
   // only once the pattern itself has been completed, paid up to date, or is a
   // server-marked legacy pattern.
-  const isPatternUnlocked = (completionStatus === 'COMPLETED' && !needsCompletionSupplement)
-    || completionStatus === 'LEGACY';
+  const isPatternUnlocked = isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
   const displayedCreditBalance = getCreditBalance(creditSummary);
-  const quotedCompletionPoints = completionQuote
-    ? getCompletionChargePoints(completionQuote.quote)
-    : completionPreviewQuote
-      ? getCompletionChargePoints(completionPreviewQuote)
+  const quotedCompletionPoints = activeCompletionQuote
+    ? getCompletionChargePoints(activeCompletionQuote.quote)
+    : activePreviewQuote
+      ? getCompletionChargePoints(activePreviewQuote.quote)
       : null;
   const unauthenticatedEstimate = !hasFormalLogin && nonEmptyBeads > 0
     ? estimateCompletionPoints(nonEmptyBeads, currentSavingTarget)
     : null;
 
   useEffect(() => {
-    setCompletionQuote(current => current
-      && current.input.width === patternCompletionInput.width
-      && current.input.height === patternCompletionInput.height
-      && current.input.occupancyBase64 === patternCompletionInput.occupancyBase64
-      && current.input.savingTarget === patternCompletionInput.savingTarget
-      ? current
-      : null);
-  }, [patternCompletionInput]);
+    if (completionQuote && !activeCompletionQuote) {
+      setCompletionQuote(null);
+      setCompletionStatus(currentCoverage?.status ?? 'DRAFT');
+    }
+  }, [activeCompletionQuote, completionQuote, currentCoverage]);
+
+  useEffect(() => {
+    setServerPaidCoverage(null);
+    setPaidNonEmptyBeads(null);
+    setCompletionStatus('DRAFT');
+    setCompletionQuote(null);
+    setCompletionPreviewQuote(null);
+    setCompletionPreviewStatus('idle');
+  }, [currentUser?.uid, hasFormalLogin]);
 
   const reportCompletionFailure = useCallback((error: unknown, action: 'quote' | 'complete') => {
     const status = getApiStatus(error);
@@ -898,7 +940,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       : (isEn ? 'Unable to complete this pattern right now. Your draft is unchanged.' : '暂时无法完成图纸，草稿未受影响。')));
   }, [isEn]);
 
-  const getCompletionQuoteData = useCallback((result: unknown): PatternCompletionQuote => {
+  const getCompletionQuoteData = useCallback((result: unknown, input: PatternCompletionInput): PatternCompletionQuote => {
     const data = asRecord(asRecord(result)?.data);
     const additionalUnits = typeof data?.additionalUnits === 'number'
       ? data.additionalUnits
@@ -909,41 +951,53 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       || typeof data?.chargedPoints === 'number'
       || typeof data?.currentTotalPoints === 'number'
       || typeof additionalUnits === 'number';
-    if (!data || !hasPoints) {
+    if (!data || !hasPoints || data.workKey !== input.workKey || data.sourceHash !== input.sourceHash
+      || data.width !== input.width || data.height !== input.height) {
       const failure = new Error(getApiMessage(result, isEn ? 'Completion quote was unavailable.' : '完成图纸的报价不可用。'));
       Object.assign(failure, { status: getApiStatus(result) });
       throw failure;
     }
-    return { ...data, ...(typeof additionalUnits === 'number' ? { additionalUnits } : {}) } as unknown as PatternCompletionQuote;
+    const quote = { ...data, ...(typeof additionalUnits === 'number' ? { additionalUnits } : {}) } as unknown as PatternCompletionQuote;
+    const amount = getCompletionChargePoints(quote);
+    if (amount === null || amount < 0) throw new Error(isEn ? 'Invalid completion quote.' : '完成报价无效。');
+    return quote;
+  }, [isEn]);
+
+  const acceptServerCoverage = useCallback((quote: PatternCompletionQuote, input: PatternCompletionInput, scopeKey: string, settled = false) => {
+    const coverage = readServerPaidCoverage(quote, input, settled);
+    if (settled && !coverage) throw new Error(isEn ? 'Completion coverage was not confirmed.' : '服务端未确认完成覆盖，请重新核准。');
+    setServerPaidCoverage(coverage ? { ...coverage, scopeKey } : null);
+    setPaidNonEmptyBeads(coverage?.paidNonEmptyBeads ?? null);
+    return coverage;
   }, [isEn]);
 
   // Keep the required amount visible while the user edits. This is a
   // read-only quote and never creates a hold or charges credits.
   useEffect(() => {
-    if (completionQuote || completionStatus === 'AWAITING_CONFIRMATION' || completionStatus === 'COMPLETING') return;
-    if (nonEmptyBeads === 0) {
+    if (activeCompletionQuote) return;
+    const context = completionContextRef.current;
+    const sequence = ++quoteRequestSequenceRef.current;
+    setCompletionPreviewQuote(null);
+    setCompletionPreviewKey(context.key);
+    if (!hasFormalLogin || nonEmptyBeads === 0) {
       setCompletionPreviewQuote(null);
       setCompletionPreviewStatus('idle');
       return;
     }
-
+    setCompletionPreviewStatus('loading');
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      if (!hasFormalLogin) {
-        setCompletionPreviewQuote(null);
-        setCompletionPreviewStatus('idle');
-        return;
-      }
-      setCompletionPreviewStatus('loading');
       void apiQuotePatternCompletion(patternCompletionInput)
         .then(result => {
-          if (cancelled) return;
-          const quote = getCompletionQuoteData(result);
-          setCompletionPreviewQuote(quote);
+          if (cancelled || completionContextRef.current !== context || quoteRequestSequenceRef.current !== sequence) return;
+          const quote = getCompletionQuoteData(result, patternCompletionInput);
+          const coverage = acceptServerCoverage(quote, patternCompletionInput, context.scopeKey);
+          setCompletionStatus(coverage?.status ?? 'DRAFT');
+          setCompletionPreviewQuote({ input: patternCompletionInput, scopeKey: context.scopeKey, quote });
           setCompletionPreviewStatus('idle');
         })
         .catch(() => {
-          if (cancelled) return;
+          if (cancelled || completionContextRef.current !== context || quoteRequestSequenceRef.current !== sequence) return;
           setCompletionPreviewQuote(null);
           setCompletionPreviewStatus('error');
         });
@@ -953,7 +1007,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [completionQuote, completionStatus, getCompletionQuoteData, hasFormalLogin, nonEmptyBeads, patternCompletionInput]);
+  }, [activeCompletionQuote, completionRequestKey, completionPreviewRetry, acceptServerCoverage, getCompletionQuoteData, hasFormalLogin]);
 
   const handleQuotePatternCompletion = useCallback(async () => {
     if (nonEmptyBeads === 0) {
@@ -966,54 +1020,70 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       return;
     }
 
+    const context = completionContextRef.current;
+    const editRevision = completionEditRevisionRef.current;
+    const sequence = ++quoteRequestSequenceRef.current;
     setCompletionStatus('QUOTING');
     setCompletionQuote(null);
     try {
       const result = await apiQuotePatternCompletion(patternCompletionInput);
-      const quote = getCompletionQuoteData(result);
+      if (completionContextRef.current !== context || quoteRequestSequenceRef.current !== sequence
+        || !isCompletionEditRevisionCurrent(editRevision, completionEditRevisionRef.current)) return;
+      const quote = getCompletionQuoteData(result, patternCompletionInput);
+      acceptServerCoverage(quote, patternCompletionInput, context.scopeKey);
       setCompletionQuote({
+        scopeKey: context.scopeKey,
+        editRevision,
         input: patternCompletionInput,
         quote,
         idempotencyKey: createSessionKey('completion'),
       });
       setCompletionStatus('AWAITING_CONFIRMATION');
     } catch (error) {
-      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      if (completionContextRef.current !== context || quoteRequestSequenceRef.current !== sequence
+        || !isCompletionEditRevisionCurrent(editRevision, completionEditRevisionRef.current)) return;
+      setCompletionPreviewQuote(null);
+      setCompletionPreviewKey(context.key);
+      setCompletionPreviewStatus('error');
+      setCompletionStatus(currentCoverage?.status ?? 'DRAFT');
       reportCompletionFailure(error, 'quote');
     }
-  }, [getCompletionQuoteData, hasFormalLogin, isEn, nonEmptyBeads, paidNonEmptyBeads, patternCompletionInput, reportCompletionFailure]);
+  }, [acceptServerCoverage, currentCoverage, getCompletionQuoteData, hasFormalLogin, isEn, nonEmptyBeads, patternCompletionInput, reportCompletionFailure]);
 
   const handleCompletePattern = useCallback(async () => {
     if (completionSubmissionRef.current) return;
-    if (!completionQuote
-      || completionQuote.input.width !== patternCompletionInput.width
-      || completionQuote.input.height !== patternCompletionInput.height
-      || completionQuote.input.occupancyBase64 !== patternCompletionInput.occupancyBase64
-      || completionQuote.input.savingTarget !== patternCompletionInput.savingTarget) {
+    if (!activeCompletionQuote
+      || !isCompletionEditRevisionCurrent(activeCompletionQuote.editRevision, completionEditRevisionRef.current)
+      || getCompletionChargePoints(activeCompletionQuote.quote) === null) {
       setCompletionQuote(null);
-      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      setCompletionStatus(currentCoverage?.status ?? 'DRAFT');
       setSaveMessage(isEn ? 'The draft changed. Please quote the current pattern again.' : '图纸已修改，请重新核价当前图纸。');
       return;
     }
 
     completionSubmissionRef.current = true;
+    const context = completionContextRef.current;
     setCompletionStatus('COMPLETING');
     try {
-      const result = await apiCompletePattern(completionQuote.input, completionQuote.idempotencyKey);
-      const completedQuote = getCompletionQuoteData(result);
-      const completedPaidBeads = completedQuote.entitlement?.paidNonEmptyBeads ?? completedQuote.nonEmptyBeads;
-      setPaidNonEmptyBeads(completedPaidBeads);
+      const result = await apiCompletePattern(activeCompletionQuote.input, { idempotencyKey: activeCompletionQuote.idempotencyKey });
+      if (completionContextRef.current.scopeKey !== context.scopeKey) return;
+      const completedQuote = getCompletionQuoteData(result, activeCompletionQuote.input);
+      const coverage = acceptServerCoverage(completedQuote, activeCompletionQuote.input, context.scopeKey, true);
       setCompletionQuote(null);
-      setCompletionStatus('COMPLETED');
+      setCompletionStatus(coverage?.status ?? 'DRAFT');
       await refreshCreditSummary();
-      setSaveMessage(isEn ? 'Pattern completed and unlocked.' : '图纸已完成并解锁。');
+      if (completionContextRef.current.scopeKey === context.scopeKey) setSaveMessage(isEn ? 'Pattern completion confirmed.' : '服务端已确认图纸完成。');
     } catch (error) {
-      setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+      if (completionContextRef.current.scopeKey !== context.scopeKey) return;
+      // Retry an uncertain settlement with the same confirmation/key, not a new debit identity.
+      setCompletionStatus(completionContextRef.current === context
+        && isCompletionEditRevisionCurrent(activeCompletionQuote.editRevision, completionEditRevisionRef.current)
+        ? 'AWAITING_CONFIRMATION' : currentCoverage?.status ?? 'DRAFT');
       reportCompletionFailure(error, 'complete');
     } finally {
       completionSubmissionRef.current = false;
     }
-  }, [completionQuote, getCompletionQuoteData, isEn, paidNonEmptyBeads, patternCompletionInput, refreshCreditSummary, reportCompletionFailure]);
+  }, [acceptServerCoverage, activeCompletionQuote, currentCoverage, getCompletionQuoteData, isEn, refreshCreditSummary, reportCompletionFailure]);
 
   const largeCanvasPaletteOptions = useMemo(
     () => (Object.keys(BRAND_PALETTES) as BrandKey[]).map(id => ({ id, label: BRAND_NAMES[id] ?? id })),
@@ -1066,6 +1136,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     const currentGrid = gridRef.current;
     if (gridsEqual(currentGrid, nextGrid)) return false;
 
+    invalidateCompletionConfirmation();
     if (invalidateRequest) invalidateImageRequest();
     gridRef.current = nextGrid;
     setGrid(nextGrid);
@@ -1073,7 +1144,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (historyTransactionRef.current) return true;
     commitGridHistory(currentGrid, nextGrid);
     return true;
-  }, [commitGridHistory, invalidateImageRequest]);
+  }, [commitGridHistory, invalidateCompletionConfirmation, invalidateImageRequest]);
 
   /** Explicitly merge small connected islands in the current in-memory grid only. */
   const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard') => {
@@ -1113,24 +1184,26 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (!nextHistoryState) return false;
 
     const nextGrid = nextHistoryState.history[nextHistoryState.historyIndex];
+    invalidateCompletionConfirmation();
     historyIndexRef.current = nextHistoryState.historyIndex;
     gridRef.current = nextGrid;
     setHistoryIndex(nextHistoryState.historyIndex);
     setGrid(nextGrid);
     return true;
-  }, []);
+  }, [invalidateCompletionConfirmation]);
 
   const handleRedo = useCallback(() => {
     const nextHistoryState = getRedoState(historyRef.current, historyIndexRef.current);
     if (!nextHistoryState) return false;
 
     const nextGrid = nextHistoryState.history[nextHistoryState.historyIndex];
+    invalidateCompletionConfirmation();
     historyIndexRef.current = nextHistoryState.historyIndex;
     gridRef.current = nextGrid;
     setHistoryIndex(nextHistoryState.historyIndex);
     setGrid(nextGrid);
     return true;
-  }, []);
+  }, [invalidateCompletionConfirmation]);
 
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
@@ -1389,6 +1462,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     const resetState = resolveCanvasReset(true, gridRef.current);
     if (!resetState) return;
 
+    invalidateCompletionConfirmation();
     gridRef.current = resetState.grid;
     setGrid(resetState.grid);
     setHistory(resetState.history);
@@ -1398,7 +1472,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setCompletedColorIds([]);
     setReplaceSourceColor(null);
     setErasedColorCoords(new Map());
-  }, [invalidateImageRequest]);
+  }, [invalidateCompletionConfirmation, invalidateImageRequest]);
 
   // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
@@ -1804,12 +1878,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         settings,
         grid: gridRef.current,
         palette: activePalette,
-        completionStatus: completionStatus === 'LEGACY'
-          ? 'LEGACY'
-          : completionStatus === 'COMPLETED'
-            ? 'COMPLETED'
-            : 'DRAFT',
-        paidNonEmptyBeads: completionStatus === 'COMPLETED' ? paidNonEmptyBeads : null,
+        // Preserve restored paid metadata while verification is pending; it never grants access.
+        completionStatus: currentCoverage?.status ?? (completionStatus === 'LEGACY' ? 'LEGACY' : paidNonEmptyBeads !== null ? 'COMPLETED' : 'DRAFT'),
+        paidNonEmptyBeads: currentCoverage?.status === 'COMPLETED' ? currentCoverage.paidNonEmptyBeads : paidNonEmptyBeads,
         sourceHash,
         gridHash,
       };
@@ -1926,13 +1997,16 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       nonEmptyBeads={nonEmptyBeads}
       quotedPoints={quotedCompletionPoints}
       estimatedPoints={unauthenticatedEstimate}
-      quoteStatus={completionPreviewStatus}
+      quoteStatus={!hasFormalLogin || activeCompletionQuote ? 'idle'
+        : completionPreviewKey !== completionRequestKey ? 'invalid' : completionPreviewStatus}
+      hasFormalLogin={hasFormalLogin}
+      onRetryQuote={() => setCompletionPreviewRetry(value => value + 1)}
       completionStatus={completionStatus}
       onQuote={() => void handleQuotePatternCompletion()}
-      quote={completionQuote?.quote ?? null}
+      quote={activeCompletionQuote?.quote ?? null}
       onCancelQuote={() => {
         setCompletionQuote(null);
-        setCompletionStatus(paidNonEmptyBeads === null ? 'DRAFT' : 'COMPLETED');
+        setCompletionStatus(currentCoverage?.status ?? 'DRAFT');
       }}
       onComplete={() => void handleCompletePattern()}
       balance={displayedCreditBalance}
@@ -2053,7 +2127,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               onConvertImage={handleConvertLargeCanvasImage}
               onPrepareImage={prepareLargeCanvasImage}
               onOpenFrame={handleOpenLargeCanvasFrame}
-              onCreditUsageChange={setLargeCanvasCreditUsage}
+              onCreditUsageChange={handleLargeCanvasCreditUsageChange}
             />
           </Suspense>
         </DeferredFeatureBoundary>

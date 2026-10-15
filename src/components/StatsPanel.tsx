@@ -80,7 +80,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 
     for (const row of grid) {
       for (const cellId of row) {
-        if (cellId) {
+        if (cellId !== null) {
           counts.set(cellId, (counts.get(cellId) || 0) + 1);
           total++;
         }
@@ -220,13 +220,14 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </div>
       </div>
 
+      <div className="my-3 rounded-2xl border border-purple-200/80 bg-purple-50/80 p-2.5 text-center" aria-label={isEn ? 'Total Beads' : '总用豆数'}>
+        <div className="text-[10px] font-medium text-purple-600">{isEn ? 'Total Beads' : '总用豆数'}</div>
+        <div className="mt-0.5 font-mono text-sm font-black text-purple-900">{totalBeads}</div>
+      </div>
+
       {hasDetails ? (
         <>
-          <div className="grid grid-cols-3 gap-2 my-3">
-            <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
-              <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Total Beads' : '总用豆数'}</div>
-              <div className="text-sm font-black text-purple-900 font-mono mt-0.5">{totalBeads}</div>
-            </div>
+          <div className="grid grid-cols-2 gap-2 my-3">
             <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
               <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Colors Used' : '使用色数'}</div>
               <div className="text-sm font-black text-purple-900 font-mono mt-0.5">{stats.length}</div>

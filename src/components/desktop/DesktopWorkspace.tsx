@@ -5,7 +5,7 @@ import { SettingsPanel } from '../SettingsPanel';
 import { StatsPanel, type StrayBeadConsolidationStrength } from '../StatsPanel';
 import { GridCanvas } from '../GridCanvas';
 import type { ConversionDiagnostics } from '../../utils/imagePipeline';
-import { FolderOpen, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 
 export interface DesktopWorkspaceProps {
   completionSummary?: React.ReactNode;
@@ -150,7 +150,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-100">
       {/* Top Desktop Toolbar */}
-      <div className="relative shrink-0">
+      <div className="relative z-30 shrink-0">
         <Toolbar
           activeTool={activeTool}
           setActiveTool={setActiveTool}
@@ -186,16 +186,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
           isSavingPattern={isSavingPattern}
           onOpenExport={openExportModal}
           canExport={canExport}
+          onOpenPatterns={onOpenPatternsModal}
         />
-        <button
-          type="button"
-          onClick={onOpenPatternsModal}
-          title="我的图纸"
-          aria-label="我的图纸"
-          className="absolute right-3 top-1/2 z-10 flex h-9 w-9 shrink-0 -translate-y-1/2 items-center justify-center rounded-md border border-purple-200 bg-white text-purple-700 shadow-sm transition-colors hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2"
-        >
-          <FolderOpen className="h-4 w-4" aria-hidden="true" />
-        </button>
       </div>
 
       {/* Main 3-Column Desktop Work Area */}

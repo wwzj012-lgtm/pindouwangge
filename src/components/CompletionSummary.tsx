@@ -72,9 +72,6 @@ export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
           )}
         </div>
 
-        <p className="mt-2 text-[11px] font-bold text-purple-950">
-          {isEn ? 'Total non-empty beads: ' : '总有效豆数：'}{nonEmptyBeads}
-        </p>
         <div className="mt-1 text-[11px] leading-5 text-purple-950" aria-label={isEn ? 'Credit quote' : '积分报价'} role="status" aria-live="polite">
           {!hasFormalLogin
             ? estimatedPoints !== null

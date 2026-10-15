@@ -13,9 +13,11 @@ const summary = (props: Partial<CompletionSummaryProps>) => renderToStaticMarkup
 describe('always-visible completion estimates and existing details gate', () => {
   beforeEach(() => vi.stubGlobal('localStorage', { getItem: () => null, setItem: noop }));
   afterEach(() => vi.unstubAllGlobals());
-  it.each([false, true])('renders total and server quote before any interaction, unlocked=%s', isUnlocked => {
+  it.each([false, true])('does not repeat bead counts in the summary, keeping the server quote visible, unlocked=%s', isUnlocked => {
     const html = summary({ isUnlocked, quotedPoints: isUnlocked ? 0 : 0.7 });
-    expect(html).toContain('总有效豆数：3');
+    expect(html).not.toContain('总有效豆数');
+    expect(html).not.toContain('总用豆数');
+    expect(summary({ isEn: true, isUnlocked })).not.toContain('Total non-empty beads');
     expect(html).toContain('aria-label="积分报价"');
     expect(html).toContain(isUnlocked ? '追加需 0 积分' : '本次需 0.7 积分');
     expect(html).toContain('服务端报价');
@@ -42,13 +44,16 @@ describe('always-visible completion estimates and existing details gate', () => 
     expect(invalid).not.toContain('确认支付 0 积分');
     expect(invalid).toMatch(/disabled=""[^>]*>确认并解锁/);
   });
-  it.each([false, true])('counts non-null cells in sparse 35x35, keeping material gate=%s', detailsUnlocked => {
+  it.each([false, true])('keeps the actual StatsPanel total visible in locked and unlocked states, detailsUnlocked=%s', detailsUnlocked => {
     const color: BeadColor = { id: 'local-color', code: 'SECRET-M01', name: 'SECRET-NAME', hex: '#AABBCC', rgb: [170, 187, 204], symbol: 'A', brand: 'MARD' };
     const grid: (string | null)[][] = Array.from({ length: 35 }, () => Array(35).fill(null));
     grid[17][17] = color.id; grid[17][18] = color.id; grid[17][19] = 'unknown-palette-id';
     const panel = React.createElement(StatsPanel, { grid, paletteMap: new Map([[color.id, color]]), width: 35, height: 35, boardSize: 29, onOpenReplaceModal: noop, onSelectColor: noop, detailsUnlocked });
     const html = renderToStaticMarkup(React.createElement(LanguageProvider, { children: panel }));
     expect(html).toMatch(/aria-label="总用豆数"[\s\S]*?>3<\/div>/);
+    const combined = summary({ isUnlocked: detailsUnlocked }) + html;
+    expect(combined.match(/aria-label="总用豆数"/g)).toHaveLength(1);
+    expect(combined).not.toContain('总有效豆数');
     expect(html).not.toContain('1225');
     if (detailsUnlocked) expect(html).toContain('SECRET-M01');
     else { expect(html).not.toContain('SECRET-M01'); expect(html).not.toContain('SECRET-NAME'); expect(html).toContain('完成图纸后即可解锁'); }

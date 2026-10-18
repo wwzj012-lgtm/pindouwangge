@@ -1,31 +1,31 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Pencil,
-  PaintBucket,
-  Pipette,
+  ChevronDown,
+  Circle as CircleIcon,
+  Download,
   Eraser,
-  RefreshCw,
-  Undo2,
+  Eye,
+  Flame,
+  Grid2x2,
+  Hand,
+  Hash,
+  Layers,
+  Maximize2,
+  Minus,
+  PaintBucket,
+  Pencil,
+  Pipette,
   Redo2,
+  RefreshCw,
+  Save,
+  Scissors,
+  Shapes,
+  SlidersHorizontal,
+  Spline,
+  Square,
+  Undo2,
   ZoomIn,
   ZoomOut,
-  Maximize2,
-  Circle as CircleIcon,
-  Square,
-  Hash,
-  Grid2x2,
-  Eye,
-  Minus,
-  Spline,
-  FlipHorizontal,
-  Layers,
-  Hand,
-  Scissors,
-  ChevronUp,
-  ChevronDown,
-  Save,
-  Download,
-  Flame,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { useLanguage } from '../context/LanguageContext';
@@ -52,7 +52,6 @@ interface ToolbarProps {
   setShowGridLines: (show: boolean) => void;
   showCoordinates: boolean;
   setShowCoordinates: (show: boolean) => void;
-  
   symmetryMode: SymmetryMode;
   setSymmetryMode: (mode: SymmetryMode) => void;
   canvasBackdrop: CanvasBackdrop;
@@ -68,6 +67,11 @@ interface ToolbarProps {
   onOpenExport: () => void;
   canExport: boolean;
 }
+
+type MenuId = 'shape' | 'symmetry' | 'view' | null;
+
+const buttonBase = 'inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
+const iconButton = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-purple-800 transition-colors hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-35';
 
 export const Toolbar: React.FC<ToolbarProps> = ({
   activeTool,
@@ -105,13 +109,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onOpenExport,
   canExport,
 }) => {
-  const { language, t } = useLanguage();
+  const { language } = useLanguage();
   const isEn = language === 'en';
-  const shapeButtonClass = (selected: boolean) => `min-w-0 rounded-lg px-2 py-1 text-purple-700 transition-colors hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 ${
-    selected ? 'bg-purple-600 text-white hover:bg-purple-700 hover:text-white' : ''
-  }`;
-
-  const [isToolsCollapsed, setIsToolsCollapsed] = useState<boolean>(false);
+  const [openMenu, setOpenMenu] = useState<MenuId>(null);
+  const menuTriggerRefs = useRef<Record<Exclude<MenuId, null>, HTMLButtonElement | null>>({ shape: null, symmetry: null, view: null });
   const undoActionRef = useRef(onUndo);
   const redoActionRef = useRef(onRedo);
   const undoRepeatRef = useRef<PressRepeatController | null>(null);
@@ -130,17 +131,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   }
 
   useEffect(() => {
-    const stopRepeatingHistory = () => {
+    const stopHistoryRepeat = () => {
       undoRepeatRef.current?.stop();
       redoRepeatRef.current?.stop();
     };
-
-    window.addEventListener('blur', stopRepeatingHistory);
-    return () => {
-      window.removeEventListener('blur', stopRepeatingHistory);
-      stopRepeatingHistory();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !openMenu) return;
+      event.preventDefault();
+      const menu = openMenu;
+      setOpenMenu(null);
+      window.setTimeout(() => menuTriggerRefs.current[menu]?.focus(), 0);
     };
-  }, []);
+
+    window.addEventListener('blur', stopHistoryRepeat);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('blur', stopHistoryRepeat);
+      window.removeEventListener('keydown', handleKeyDown);
+      stopHistoryRepeat();
+    };
+  }, [openMenu]);
 
   const startHistoryRepeat = (controller: PressRepeatController, event: React.PointerEvent<HTMLButtonElement>) => {
     if (!event.isPrimary || event.button !== 0) return;
@@ -148,332 +158,168 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     controller.start();
   };
 
-  const stopHistoryRepeat = (controller: PressRepeatController) => {
-    controller.stop();
-  };
+  const stopHistoryRepeat = (controller: PressRepeatController) => controller.stop();
+  const toggleMenu = (menu: Exclude<MenuId, null>) => setOpenMenu(current => current === menu ? null : menu);
+  const closeMenu = () => setOpenMenu(null);
 
   const tools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
-    { id: 'pencil', label: isEn ? 'Pencil (P)' : '画笔 (P)', icon: <Pencil className="w-3.5 h-3.5" /> },
-    { id: 'hand', label: isEn ? 'Pan / Move (H)' : '平移拖拽 (H)', icon: <Hand className="w-3.5 h-3.5" /> },
-    { id: 'line', label: isEn ? 'Line' : '直线', icon: <Minus className="w-3.5 h-3.5" /> },
-    { id: 'rectangle', label: isEn ? 'Rectangle' : '矩形', icon: <Square className="w-3.5 h-3.5" /> },
-    { id: 'circle', label: isEn ? 'Circle' : '圆形', icon: <CircleIcon className="w-3.5 h-3.5" /> },
-    { id: 'bucket', label: isEn ? 'Fill Bucket (B)' : '油漆桶 (B)', icon: <PaintBucket className="w-3.5 h-3.5" /> },
-    { id: 'eyedropper', label: isEn ? 'Color Picker (I)' : '吸管 (I)', icon: <Pipette className="w-3.5 h-3.5" /> },
-    { id: 'eraser', label: isEn ? 'Eraser (E)' : '橡皮擦 (E)', icon: <Eraser className="w-3.5 h-3.5" /> },
-    { id: 'replace', label: isEn ? 'Replace Color (R)' : '替换全图此色 (R)', icon: <RefreshCw className="w-3.5 h-3.5" /> },
+    { id: 'pencil', label: isEn ? 'Pencil (P)' : '画笔 (P)', icon: <Pencil className="h-3.5 w-3.5" /> },
+    { id: 'hand', label: isEn ? 'Pan / Move (H)' : '平移拖拽 (H)', icon: <Hand className="h-3.5 w-3.5" /> },
+    { id: 'bucket', label: isEn ? 'Fill Bucket (B)' : '油漆桶 (B)', icon: <PaintBucket className="h-3.5 w-3.5" /> },
+    { id: 'eraser', label: isEn ? 'Eraser (E)' : '橡皮擦 (E)', icon: <Eraser className="h-3.5 w-3.5" /> },
+    { id: 'eyedropper', label: isEn ? 'Color Picker (I)' : '吸管 (I)', icon: <Pipette className="h-3.5 w-3.5" /> },
   ];
+  const shapeTools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
+    { id: 'line', label: isEn ? 'Line' : '直线', icon: <Minus className="h-3.5 w-3.5" /> },
+    { id: 'rectangle', label: isEn ? 'Rectangle' : '矩形', icon: <Square className="h-3.5 w-3.5" /> },
+    { id: 'circle', label: isEn ? 'Circle' : '圆形', icon: <CircleIcon className="h-3.5 w-3.5" /> },
+  ];
+  const shapeTool = shapeTools.find(tool => tool.id === activeTool);
+  const symmetryLabel = {
+    none: isEn ? 'None' : '无对称',
+    horizontal: isEn ? 'Horizontal' : '左右镜像',
+    vertical: isEn ? 'Vertical' : '上下镜像',
+    quad: isEn ? '4-axis' : '四轴镜像',
+  }[symmetryMode];
+
+  const toolButton = (tool: { id: ToolType; label: string; icon: React.ReactNode }) => (
+    <button
+      key={tool.id}
+      type="button"
+      onClick={() => setActiveTool(tool.id)}
+      aria-label={tool.label}
+      aria-pressed={activeTool === tool.id}
+      title={tool.label}
+      className={`${buttonBase} ${activeTool === tool.id
+        ? 'border-purple-600 bg-purple-600 text-white shadow-sm hover:bg-purple-700'
+        : 'border-transparent text-purple-800 hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950'}`}
+    >
+      {tool.icon}
+      <span className="hidden min-[1180px]:inline">{tool.label.split(' ')[0]}</span>
+    </button>
+  );
+
+  const menuButton = (menu: Exclude<MenuId, null>, icon: React.ReactNode, label: string) => (
+    <button
+      ref={element => { menuTriggerRefs.current[menu] = element; }}
+      type="button"
+      onClick={() => toggleMenu(menu)}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === menu}
+      aria-controls={`toolbar-${menu}-menu`}
+      className={`${buttonBase} ${openMenu === menu ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-200 bg-white/70 text-purple-800 hover:bg-purple-100'}`}
+    >
+      {icon}
+      <span>{label}</span>
+      <ChevronDown className={`h-3 w-3 transition-transform ${openMenu === menu ? 'rotate-180' : ''}`} />
+    </button>
+  );
 
   return (
-    <div className="bg-white/90 backdrop-blur-md border-b border-purple-200/80 text-purple-950 px-3 py-2 flex items-center justify-between gap-2.5 text-xs shadow-xs z-20 select-none overflow-x-auto scrollbar-none">
-      {/* Left: Active Color Swatch & Middle Drawing Tools */}
-      <div className="flex items-center gap-2.5 shrink-0">
-        {/* Active Color Swatch */}
-        <button
-          onClick={onOpenColorPicker}
-          className="flex items-center gap-1.5 bg-purple-50 hover:bg-purple-100 border border-purple-200/90 rounded-xl px-2 py-1 sm:px-2.5 sm:py-1.5 cursor-pointer transition-colors shrink-0 shadow-2xs"
-          title={isEn ? 'Click to select active bead color' : '点击选择当前涂色拼豆'}
-        >
-          <div
-            className="w-4 h-4 sm:w-5 sm:h-5 rounded-full border border-black/20 shadow-inner flex items-center justify-center font-bold text-[8px] sm:text-[9px] shrink-0"
-            style={{ backgroundColor: selectedColor ? selectedColor.hex : '#CCCCCC' }}
-          >
-            {selectedColor?.symbol || ''}
-          </div>
-          <div className="text-left shrink-0">
-            <div className="font-extrabold text-purple-950 text-[11px] sm:text-xs leading-none">
-              {selectedColor ? selectedColor.code : (isEn ? 'None' : '未选择')}
-            </div>
-            <div className="text-[9px] sm:text-[10px] text-purple-600 leading-none mt-0.5 max-w-[65px] sm:max-w-[80px] truncate">
-              {selectedColor ? selectedColor.name : (isEn ? 'Select' : '选色')}
-            </div>
-          </div>
-        </button>
+    <div className="relative z-20 shrink-0 border-b border-purple-200/80 bg-white/95 px-2.5 py-1.5 text-purple-950 shadow-sm backdrop-blur-md select-none">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-purple-100 bg-purple-50/70 p-0.5" role="group" aria-label={isEn ? 'Drawing tools' : '绘图工具'}>
+          {tools.map(toolButton)}
+        </div>
 
-        <div className="h-4 w-px bg-purple-200 shrink-0" />
-
-        {/* Middle Drawing Operations Tools (Collapsible Block) */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* First Element: Fold/Unfold Toggle Button ("折叠工具") */}
-          <button
-            onClick={() => setIsToolsCollapsed(!isToolsCollapsed)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl font-bold text-[11px] border transition-all cursor-pointer shrink-0 shadow-2xs hover:scale-102 active:scale-95 ${
-              isToolsCollapsed
-                ? 'bg-purple-600 text-white border-purple-500 shadow-purple-600/30'
-                : 'bg-purple-100/90 hover:bg-purple-200 text-purple-900 border-purple-300/80'
-            }`}
-            title={isToolsCollapsed ? (isEn ? 'Expand Tools' : '展开绘制工具栏') : (isEn ? 'Collapse Tools' : '折叠绘制工具栏')}
-          >
-            <span className="font-black">{isEn ? 'Fold Tools' : '折叠工具'}</span>
-            {isToolsCollapsed ? (
-              <ChevronDown className="w-3.5 h-3.5" />
-            ) : (
-              <ChevronUp className="w-3.5 h-3.5 text-purple-700" />
-            )}
-          </button>
-
-          {/* Active Tool Badge when Collapsed */}
-          {isToolsCollapsed && (
-            <div className="flex items-center gap-1.5 bg-purple-50/90 px-2 py-1 rounded-xl border border-purple-200/80 text-[11px] font-bold text-purple-900 animate-in fade-in duration-200 shrink-0">
-              <span className="text-purple-500 font-medium">{isEn ? 'Active:' : '当前:'}</span>
-              <span className="text-purple-600">{tools.find(t => t.id === activeTool)?.icon}</span>
-              <span>{tools.find(t => t.id === activeTool)?.label.split(' ')[0]}</span>
-            </div>
-          )}
-
-          {/* Collapsible Tools Container with Smooth Unfolding & Shrinking Animation ("铺开和收缩") */}
-          <div
-            className={`flex items-center gap-2.5 transition-all duration-300 ease-in-out origin-left overflow-hidden ${
-              isToolsCollapsed
-                ? 'max-w-0 opacity-0 -translate-x-2 pointer-events-none'
-                : 'max-w-[1400px] opacity-100 translate-x-0'
-            }`}
-          >
-            {/* Paint & Shape Tools Buttons */}
-            <div className="flex items-center bg-purple-50/90 p-0.5 rounded-xl border border-purple-200/80 shrink-0">
-              {tools.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTool(t.id)}
-                  className={`flex items-center gap-1 p-1.5 sm:px-2 sm:py-1.5 rounded-lg font-bold transition-all cursor-pointer shrink-0 ${
-                    activeTool === t.id
-                      ? 'bg-purple-600 text-white shadow-xs'
-                      : 'text-purple-800 hover:text-purple-950 hover:bg-purple-100/80'
-                  }`}
-                  title={t.label}
-                >
-                  {t.icon}
-                  <span className="hidden xl:inline text-[11px]">{t.label.split(' ')[0]}</span>
+        <div className="relative">
+          {menuButton('shape', shapeTool?.icon ?? <Shapes className="h-3.5 w-3.5" />, isEn ? (shapeTool?.label ?? 'Shapes') : (shapeTool?.label ?? '形状'))}
+          {openMenu === 'shape' && (
+            <div id="toolbar-shape-menu" role="menu" className="absolute left-0 top-full mt-1 flex min-w-max gap-1 rounded-xl border border-purple-200 bg-white p-1.5 shadow-lg">
+              {shapeTools.map(tool => (
+                <button key={tool.id} type="button" role="menuitemradio" aria-checked={activeTool === tool.id} onClick={() => { setActiveTool(tool.id); closeMenu(); }} className={`${buttonBase} ${activeTool === tool.id ? 'border-purple-600 bg-purple-600 text-white' : 'border-transparent text-purple-800 hover:bg-purple-100'}`}>
+                  {tool.icon}<span>{tool.label}</span>
                 </button>
               ))}
             </div>
+          )}
+        </div>
 
-            {/* Symmetry Selector */}
-            <div className="flex items-center bg-purple-50/90 p-0.5 rounded-xl border border-purple-200/80 text-[11px] shrink-0">
-              <span className="px-1.5 text-purple-700 flex items-center gap-1 font-bold">
-                <Spline className="w-3 h-3 text-purple-600" />
-                {isEn ? 'Symmetry:' : '对称:'}
-              </span>
-              <select
-                value={symmetryMode}
-                onChange={e => setSymmetryMode(e.target.value as SymmetryMode)}
-                className="bg-white border border-purple-200 rounded-lg px-1.5 py-0.5 text-purple-900 font-bold outline-none cursor-pointer"
-              >
-                <option value="none">{isEn ? 'None' : '无对称'}</option>
-                <option value="horizontal">{isEn ? '↔ Horizontal' : '↔ 左右镜像'}</option>
-                <option value="vertical">{isEn ? '↕ Vertical' : '↕ 上下镜像'}</option>
-                <option value="quad">{isEn ? '❖ 4-Axis' : '❖ 4向四轴镜像'}</option>
-              </select>
+        <div className="relative">
+          {menuButton('symmetry', <Spline className="h-3.5 w-3.5" />, isEn ? `Symmetry: ${symmetryLabel}` : `对称：${symmetryLabel}`)}
+          {openMenu === 'symmetry' && (
+            <div id="toolbar-symmetry-menu" role="menu" className="absolute left-0 top-full mt-1 grid min-w-[180px] gap-1 rounded-xl border border-purple-200 bg-white p-1.5 shadow-lg">
+              {(['none', 'horizontal', 'vertical', 'quad'] as SymmetryMode[]).map(mode => (
+                <button key={mode} type="button" role="menuitemradio" aria-checked={symmetryMode === mode} onClick={() => { setSymmetryMode(mode); closeMenu(); }} className={`flex min-h-8 items-center justify-between rounded-lg px-2 text-left text-[11px] font-bold ${symmetryMode === mode ? 'bg-purple-100 text-purple-950' : 'text-purple-800 hover:bg-purple-50'}`}>
+                  <span>{{ none: isEn ? 'None' : '无对称', horizontal: isEn ? '↔ Horizontal' : '↔ 左右镜像', vertical: isEn ? '↕ Vertical' : '↕ 上下镜像', quad: isEn ? '❖ 4-axis' : '❖ 四轴镜像' }[mode]}</span>
+                  {symmetryMode === mode && <span aria-hidden="true">✓</span>}
+                </button>
+              ))}
             </div>
+          )}
+        </div>
 
-            {/* Undo / Redo */}
-            <div className="flex items-center gap-1 shrink-0">
-              <button
-                onPointerDown={event => startHistoryRepeat(undoRepeatRef.current!, event)}
-                onPointerUp={() => stopHistoryRepeat(undoRepeatRef.current!)}
-                onPointerCancel={() => stopHistoryRepeat(undoRepeatRef.current!)}
-                onPointerLeave={() => stopHistoryRepeat(undoRepeatRef.current!)}
-                onLostPointerCapture={() => stopHistoryRepeat(undoRepeatRef.current!)}
-                onClick={() => {
-                  if (undoRepeatRef.current!.shouldHandleClick()) onUndo();
-                }}
-                disabled={!canUndo}
-                className="p-1.5 rounded-lg text-purple-800 hover:text-purple-950 hover:bg-purple-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
-                title={isEn ? 'Undo (Ctrl+Z)' : '撤销 (Ctrl+Z)'}
-                aria-label={isEn ? 'Undo' : '撤销'}
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-              <button
-                onPointerDown={event => startHistoryRepeat(redoRepeatRef.current!, event)}
-                onPointerUp={() => stopHistoryRepeat(redoRepeatRef.current!)}
-                onPointerCancel={() => stopHistoryRepeat(redoRepeatRef.current!)}
-                onPointerLeave={() => stopHistoryRepeat(redoRepeatRef.current!)}
-                onLostPointerCapture={() => stopHistoryRepeat(redoRepeatRef.current!)}
-                onClick={() => {
-                  if (redoRepeatRef.current!.shouldHandleClick()) onRedo();
-                }}
-                disabled={!canRedo}
-                className="p-1.5 rounded-lg text-purple-800 hover:text-purple-950 hover:bg-purple-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
-                title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'}
-                aria-label={isEn ? 'Redo' : '重做'}
-              >
-                <Redo2 className="w-4 h-4" />
-              </button>
-              <button
-                onClick={onClearOuterBackground}
-                className="p-1.5 rounded-lg text-purple-800 hover:text-rose-600 hover:bg-rose-50 transition-colors cursor-pointer"
-                title={isEn ? 'Clear edge-connected background beads' : '清除与边缘连通的背景豆'}
-              >
-                <Scissors className="w-4 h-4" />
-              </button>
+        <div className="relative">
+          {menuButton('view', <SlidersHorizontal className="h-3.5 w-3.5" />, isEn ? 'View & more' : '视图与辅助')}
+          {openMenu === 'view' && (
+            <div id="toolbar-view-menu" role="menu" className="absolute left-0 top-full mt-1 grid min-w-[245px] gap-1.5 rounded-xl border border-purple-200 bg-white p-2 shadow-lg">
+              <label className="flex items-center justify-between gap-3 rounded-lg px-2 py-1 text-[11px] font-bold text-purple-900 hover:bg-purple-50">
+                <span className="inline-flex items-center gap-1.5"><Layers className="h-3.5 w-3.5" />{isEn ? 'Backdrop' : '画布背景'}</span>
+                <select value={canvasBackdrop} onChange={event => setCanvasBackdrop(event.target.value as CanvasBackdrop)} className="rounded-md border border-purple-200 bg-white px-1.5 py-1 text-[10px] font-bold text-purple-900 outline-none focus-visible:ring-2 focus-visible:ring-purple-500">
+                  <option value="dark_grid">{isEn ? 'Dark Grid' : '深色网格'}</option>
+                  <option value="light_pegboard">{isEn ? 'Light Pegboard' : '白色插板'}</option>
+                  <option value="wood">{isEn ? 'Wood Texture' : '复古木纹'}</option>
+                  <option value="studio">{isEn ? 'Dark Studio' : '暗调工作台'}</option>
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-1 rounded-lg border border-purple-100 bg-purple-50/50 p-1" role="group" aria-label={isEn ? 'Bead display style' : '拼豆显示样式'}>
+                {([
+                  ['fuse_3d', <CircleIcon className="h-3.5 w-3.5 fill-current" />, isEn ? '3D' : '3D豆'],
+                  ['circle_flat', <CircleIcon className="h-3.5 w-3.5" />, isEn ? 'Flat' : '平面圆'],
+                  ['square', <Square className="h-3.5 w-3.5" />, isEn ? 'Pixel' : '像素方'],
+                  ['ironed', <Flame className="h-3.5 w-3.5" />, isEn ? 'Ironed' : '熨烫'],
+                ] as [BeadShape, React.ReactNode, string][]).map(([shape, icon, label]) => (
+                  <button key={shape} type="button" aria-pressed={beadShape === shape} onClick={() => setBeadShape(shape)} className={`inline-flex min-h-8 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-800 hover:bg-purple-100'}`}>
+                    {icon}{label}
+                  </button>
+                ))}
+              </div>
+              <div className="grid grid-cols-2 gap-1">
+                <button type="button" aria-pressed={showSymbols} onClick={() => setShowSymbols(!showSymbols)} className={`${buttonBase} ${showSymbols ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}><Hash className="h-3.5 w-3.5" />{isEn ? 'Symbols' : '色号'}</button>
+                <button type="button" aria-pressed={showGridLines} onClick={() => setShowGridLines(!showGridLines)} className={`${buttonBase} ${showGridLines ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}><Grid2x2 className="h-3.5 w-3.5" />{isEn ? 'Grid' : '网格'}</button>
+                <button type="button" aria-pressed={showCoordinates} onClick={() => setShowCoordinates(!showCoordinates)} className={`${buttonBase} ${showCoordinates ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}>{isEn ? 'Coords' : '坐标'}</button>
+                <button type="button" onClick={onClearOuterBackground} className={`${buttonBase} border-rose-100 bg-white text-rose-700 hover:bg-rose-50`}><Scissors className="h-3.5 w-3.5" />{isEn ? 'Clear edge' : '清边缘'}</button>
+              </div>
+              <button type="button" onClick={() => setActiveTool('replace')} aria-pressed={activeTool === 'replace'} className={`${buttonBase} justify-start ${activeTool === 'replace' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-100 bg-white text-purple-800 hover:bg-purple-50'}`}><RefreshCw className="h-3.5 w-3.5" />{isEn ? 'Replace color (R)' : '替换全图此色 (R)'}</button>
+              {hasImage && (
+                <div className="rounded-lg border border-purple-100 bg-purple-50/50 p-1">
+                  <button type="button" aria-pressed={showOverlay} onClick={() => setShowOverlay(!showOverlay)} className={`${buttonBase} w-full justify-start ${showOverlay ? 'border-amber-300 bg-amber-100 text-amber-950' : 'border-transparent text-purple-800 hover:bg-purple-100'}`}><Eye className="h-3.5 w-3.5" />{isEn ? 'Original overlay' : '原图叠影'}</button>
+                  {showOverlay && <label className="flex items-center gap-2 px-2 py-1 text-[10px] font-bold text-purple-800"><span>{isEn ? 'Opacity' : '透明度'}</span><input type="range" min="10" max="70" step="5" value={Math.round(overlayOpacity * 100)} onChange={event => setOverlayOpacity(Number(event.target.value) / 100)} className="min-w-0 flex-1 accent-amber-500" aria-label={isEn ? 'Overlay opacity' : '原图叠底透明度'} /></label>}
+                </div>
+              )}
             </div>
-          </div>
+          )}
+        </div>
+
+        <div className="ml-auto flex items-center gap-1">
+          <button type="button" onClick={onSavePattern} disabled={isSavingPattern} className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-sky-300 bg-sky-600 px-2.5 text-[11px] font-black text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:cursor-wait disabled:opacity-60" title={isEn ? 'Save editable pattern without downloading' : '保存可编辑图纸，不下载文件'}>
+            <Save className={`h-3.5 w-3.5 ${isSavingPattern ? 'animate-pulse' : ''}`} />{isEn ? (isSavingPattern ? 'Saving' : 'Save') : (isSavingPattern ? '保存中' : '保存')}
+          </button>
+          <button type="button" onClick={onOpenExport} disabled={!canExport} className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-600 px-2.5 text-[11px] font-black text-white shadow-sm transition-colors hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-45" title={canExport ? (isEn ? 'Export pattern and materials list' : '导出图纸与用量清单') : (isEn ? 'Add beads to the canvas before exporting' : '请先导入图片或在画布上绘制拼豆')}>
+            <Download className="h-3.5 w-3.5" />{isEn ? 'Export' : '导出'}
+          </button>
         </div>
       </div>
 
-      {/* Right: Display Overlays, Backdrop & Zoom Controls */}
-      <div className="flex items-center gap-2.5 shrink-0 ml-2">
-        <button
-          onClick={onSavePattern}
-          disabled={isSavingPattern}
-          className="inline-flex items-center gap-1 rounded-xl border border-sky-300 bg-sky-600 px-2 py-1.5 text-[11px] font-bold text-white shadow-2xs transition-colors hover:bg-sky-700 disabled:cursor-wait disabled:opacity-60"
-          title={isEn ? 'Save editable pattern without downloading' : '保存可编辑图纸，不下载文件'}
-        >
-          <Save className={`w-3.5 h-3.5 ${isSavingPattern ? 'animate-pulse' : ''}`} />
-          <span className="hidden md:inline">{isSavingPattern ? (isEn ? 'Saving' : '保存中') : (isEn ? 'Save' : '保存')}</span>
-        </button>
-        <button
-          onClick={onOpenExport}
-          disabled={!canExport}
-          className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-600 px-2 py-1.5 text-[11px] font-bold text-white shadow-2xs transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-45"
-          title={canExport
-            ? (isEn ? 'Export pattern and materials list' : '导出图纸与用量清单')
-            : (isEn ? 'Add beads to the canvas before exporting' : '请先导入图片或在画布上绘制拼豆')}
-        >
-          <Download className="w-3.5 h-3.5" />
-          <span className="hidden md:inline">{isEn ? 'Export' : '导出'}</span>
+      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        <button type="button" onClick={onOpenColorPicker} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-2 text-left transition-colors hover:bg-purple-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1" title={isEn ? 'Click to select active bead color' : '点击选择当前涂色拼豆'}>
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-black/20 text-[9px] font-black shadow-inner" style={{ backgroundColor: selectedColor ? selectedColor.hex : '#CCCCCC' }}>{selectedColor?.symbol || ''}</span>
+          <span className="min-w-0"><span className="block text-[11px] font-black leading-none text-purple-950">{selectedColor ? selectedColor.code : (isEn ? 'None' : '未选择')}</span><span className="mt-0.5 block max-w-[90px] truncate text-[9px] leading-none text-purple-600">{selectedColor ? selectedColor.name : (isEn ? 'Select color' : '选色')}</span></span>
         </button>
 
-        {/* Canvas Backdrop Selector */}
-        <div className="flex items-center bg-purple-50/90 p-0.5 rounded-xl border border-purple-200/80 text-[11px]">
-          <span className="px-1.5 text-purple-700 flex items-center gap-1 font-bold">
-            <Layers className="w-3 h-3 text-purple-600" />
-            {isEn ? 'Bg:' : '背景:'}
-          </span>
-          <select
-            value={canvasBackdrop}
-            onChange={e => setCanvasBackdrop(e.target.value as CanvasBackdrop)}
-            className="bg-white border border-purple-200 rounded-lg px-1.5 py-0.5 text-purple-900 font-bold outline-none cursor-pointer"
-          >
-            <option value="dark_grid">{isEn ? 'Dark Grid' : '深色网格'}</option>
-            <option value="light_pegboard">{isEn ? 'Light Pegboard' : '白色插板'}</option>
-            <option value="wood">{isEn ? 'Wood Texture' : '复古木纹'}</option>
-            <option value="studio">{isEn ? 'Dark Studio' : '暗调工作台'}</option>
-          </select>
+        <div className="flex items-center gap-0.5 rounded-lg border border-purple-100 bg-white/70 p-0.5" role="group" aria-label={isEn ? 'History controls' : '历史操作'}>
+          <button type="button" onPointerDown={event => startHistoryRepeat(undoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(undoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(undoRepeatRef.current!)} onClick={() => { if (undoRepeatRef.current!.shouldHandleClick()) onUndo(); }} disabled={!canUndo} className={iconButton} title={isEn ? 'Undo (Ctrl+Z)' : '撤销 (Ctrl+Z)'} aria-label={isEn ? 'Undo' : '撤销'}><Undo2 className="h-4 w-4" /></button>
+          <button type="button" onPointerDown={event => startHistoryRepeat(redoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(redoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(redoRepeatRef.current!)} onClick={() => { if (redoRepeatRef.current!.shouldHandleClick()) onRedo(); }} disabled={!canRedo} className={iconButton} title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'} aria-label={isEn ? 'Redo' : '重做'}><Redo2 className="h-4 w-4" /></button>
         </div>
 
-        {/* Bead Shape Style */}
-        <div className="flex items-center rounded-xl border border-purple-200/80 bg-purple-50/90 p-0.5 text-[11px]" role="group" aria-label={isEn ? 'Bead display style' : '拼豆显示样式'}>
-          <button
-            onClick={() => setBeadShape('fuse_3d')}
-            className={`flex items-center gap-1 cursor-pointer font-bold ${shapeButtonClass(beadShape === 'fuse_3d')}`}
-            title={isEn ? '3D Fuse Bead' : '3D立体拼豆样式'}
-            aria-label={isEn ? '3D Bead' : '3D立体豆'}
-          >
-            <CircleIcon className="w-3.5 h-3.5 fill-current" />
-            <span className="hidden lg:inline">{isEn ? '3D Bead' : '3D立体豆'}</span>
-          </button>
-          <button
-            onClick={() => setBeadShape('circle_flat')}
-            className={`flex items-center gap-1 cursor-pointer font-bold ${shapeButtonClass(beadShape === 'circle_flat')}`}
-            title={isEn ? 'Flat Round Bead' : '平面圆豆样式'}
-            aria-label={isEn ? 'Flat Round' : '平面圆豆'}
-          >
-            <CircleIcon className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">{isEn ? 'Flat Round' : '平面圆豆'}</span>
-          </button>
-          <button
-            onClick={() => setBeadShape('square')}
-            className={`flex items-center gap-1 cursor-pointer font-bold ${shapeButtonClass(beadShape === 'square')}`}
-            title={isEn ? 'Pixel Square' : '像素方块样式'}
-            aria-label={isEn ? 'Pixel Square' : '像素方块'}
-          >
-            <Square className="w-3.5 h-3.5" />
-            <span className="hidden lg:inline">{isEn ? 'Pixel Square' : '像素方块'}</span>
-          </button>
-          <button
-            onClick={() => setBeadShape('ironed')}
-            className={`flex items-center gap-1 cursor-pointer font-bold ${shapeButtonClass(beadShape === 'ironed')}`}
-            title={isEn ? 'Ironed Preview' : '熨烫预览'}
-            aria-label={isEn ? 'Ironed Preview' : '熨烫预览'}
-          >
-            <Flame className="w-3.5 h-3.5" />
-            <span className="hidden xl:inline">{isEn ? 'Ironed' : '熨烫预览'}</span>
-          </button>
+        <div className="flex items-center gap-0.5 rounded-lg border border-purple-100 bg-white/70 p-0.5" role="group" aria-label={isEn ? 'Zoom controls' : '缩放控制'}>
+          <button type="button" onClick={onZoomOut} className={iconButton} title={isEn ? 'Zoom Out' : '缩小'} aria-label={isEn ? 'Zoom out' : '缩小'}><ZoomOut className="h-3.5 w-3.5" /></button>
+          <span className="min-w-[42px] text-center font-mono text-[11px] font-bold text-purple-950" aria-live="polite">{Math.round(zoom * 100)}%</span>
+          <button type="button" onClick={onZoomIn} className={iconButton} title={isEn ? 'Zoom In' : '放大'} aria-label={isEn ? 'Zoom in' : '放大'}><ZoomIn className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={onResetZoom} className={iconButton} title={isEn ? 'Reset Zoom' : '适应屏幕'} aria-label={isEn ? 'Reset zoom' : '适应屏幕'}><Maximize2 className="h-3.5 w-3.5" /></button>
         </div>
 
-        {/* Overlays: Symbols & Overlay photo */}
-        <div className="flex items-center gap-1">
-          {hasImage && (
-            <div className="flex items-center gap-1">
-            <button
-              onClick={() => setShowOverlay(!showOverlay)}
-              className={`px-2 py-1.5 rounded-xl border transition-all flex items-center gap-1 cursor-pointer font-bold text-[11px] ${
-                showOverlay
-                  ? 'bg-amber-100 border-amber-300 text-amber-900 shadow-2xs'
-                  : 'bg-purple-50/90 border-purple-200 text-purple-800 hover:text-purple-950'
-              }`}
-              title={isEn ? 'Toggle original image overlay' : '在网格上显示原图半透明叠影衬底'}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isEn ? 'Overlay' : '原图叠影'}</span>
-            </button>
-            {showOverlay && (
-              <label className="hidden md:flex items-center gap-1 text-[10px] text-purple-700" title={isEn ? 'Overlay opacity' : '原图叠底透明度'}>
-                <span>{isEn ? 'Opacity' : '透明度'}</span>
-                <input type="range" min="10" max="70" step="5" value={Math.round(overlayOpacity * 100)} onChange={event => setOverlayOpacity(Number(event.target.value) / 100)} className="w-16 accent-amber-500" aria-label={isEn ? 'Overlay opacity' : '原图叠底透明度'} />
-              </label>
-            )}
-            </div>
-          )}
-
-          <button
-            onClick={() => setShowSymbols(!showSymbols)}
-            className={`px-2 py-1.5 rounded-xl border transition-all flex items-center gap-1 cursor-pointer font-bold text-[11px] ${
-              showSymbols
-                ? 'bg-purple-100 border-purple-300 text-purple-900 shadow-2xs'
-                : 'bg-purple-50/90 border-purple-200 text-purple-700 hover:text-purple-950'
-            }`}
-            title={isEn ? 'Toggle color code symbols' : '显示/隐藏拼豆色号标识/符号'}
-          >
-            <Hash className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isEn ? 'Symbols' : '色号标识'}</span>
-          </button>
-
-          <button
-            onClick={() => setShowGridLines(!showGridLines)}
-            className={`px-2 py-1.5 rounded-xl border transition-all flex items-center gap-1 cursor-pointer font-bold text-[11px] ${
-              showGridLines
-                ? 'bg-purple-100 border-purple-300 text-purple-900 shadow-2xs'
-                : 'bg-purple-50/90 border-purple-200 text-purple-700 hover:text-purple-950'
-            }`}
-            title={isEn ? 'Toggle grid lines' : '显示/隐藏网格线'}
-          >
-            <Grid2x2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isEn ? 'Grid' : '网格线'}</span>
-          </button>
-        </div>
-
-        <div className="h-5 w-px bg-purple-200 hidden sm:block" />
-
-        {/* Zoom Controls */}
-        <div className="flex items-center bg-purple-50/90 rounded-xl p-0.5 border border-purple-200/80">
-          <button
-            onClick={onZoomOut}
-            className="p-1 text-purple-700 hover:text-purple-950 hover:bg-purple-100 rounded-lg cursor-pointer"
-            title={isEn ? 'Zoom Out' : '缩小'}
-          >
-            <ZoomOut className="w-3.5 h-3.5" />
-          </button>
-          <span className="px-2 text-[11px] font-mono font-bold text-purple-950 min-w-[42px] text-center">
-            {Math.round(zoom * 100)}%
-          </span>
-          <button
-            onClick={onZoomIn}
-            className="p-1 text-purple-700 hover:text-purple-950 hover:bg-purple-100 rounded-lg cursor-pointer"
-            title={isEn ? 'Zoom In' : '放大'}
-          >
-            <ZoomIn className="w-3.5 h-3.5" />
-          </button>
-          <button
-            onClick={onResetZoom}
-            className="p-1 text-purple-700 hover:text-purple-950 hover:bg-purple-100 rounded-lg cursor-pointer"
-            title={isEn ? 'Reset Zoom' : '适应屏幕'}
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        <span className="hidden min-[1180px]:inline text-[10px] text-purple-500">{isEn ? 'Shortcuts: P / H / B / E / I / R · Ctrl+Z / Ctrl+Y' : '快捷键：P / H / B / E / I / R · Ctrl+Z / Ctrl+Y'}</span>
       </div>
     </div>
   );

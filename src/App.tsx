@@ -52,6 +52,9 @@ import { AccountManagementModal } from './components/AccountManagementModal';
 import { HomeView, type HeroExample } from './components/HomeView';
 import { LandingView } from './components/LandingView';
 import { PublicAnnouncementModal } from './components/PublicAnnouncementModal';
+import { ImportBlueprintWizard } from './components/ImportBlueprintWizard';
+import { recognitionDraftToProject, saveConfirmedRecognition, type ConfirmedRecognitionDraft } from './utils/confirmedRecognition';
+import { MIN_CANVAS_ZOOM } from './utils/canvasViewport';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
@@ -599,6 +602,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [isPaletteModalOpen, setIsPaletteModalOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isStudioModalOpen, setIsStudioModalOpen] = useState(false);
+  const [isImportBlueprintOpen, setIsImportBlueprintOpen] = useState(false);
   const [isGuideModalOpen, setIsGuideModalOpen] = useState(false);
   const [isSmartReduceModalOpen, setRawSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
@@ -1899,6 +1903,24 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     }
   };
 
+  const handleSaveRecognition = async (draft: ConfirmedRecognitionDraft): Promise<string> => {
+    if (!hasFormalLogin || !currentUser?.uid) throw new Error('请先登录，再保存到图库。识别结果已保留。');
+    const ownerId = currentUser.uid;
+    const record = await saveConfirmedRecognition(draft, settings, ownerId);
+    return record.syncState === 'synced'
+      ? '已保存到私有图库。当前画板未改变。'
+      : '已保存到本地图库，云端同步未完成，可在图库重试。当前画板未改变。';
+  };
+
+  const handleEditRecognition = (draft: ConfirmedRecognitionDraft, saved: boolean): boolean => {
+    const previousBaseline = savedPatternBaselineRef.current;
+    if (!handleRestorePattern(recognitionDraftToProject(draft, settings))) return false;
+    // Loading for editing is not a save: preserve unsaved-change detection.
+    if (!saved) savedPatternBaselineRef.current = previousBaseline;
+    setIsImportBlueprintOpen(false);
+    return true;
+  };
+
   const openSaveNameDialog = (): void => {
     if (!requireFormalLogin(isEn ? 'Sign in before saving patterns.' : '请先登录，再保存图纸。')) return;
     if (isSavingPattern) return;
@@ -1938,6 +1960,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // Keyboard Shortcuts (P, B, I, E, R, Ctrl+Z, Ctrl+Y)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isImportBlueprintOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
@@ -1965,7 +1988,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo]);
+  }, [handleUndo, handleRedo, isImportBlueprintOpen]);
 
   const handleImportPattern = useCallback(() => {
     if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
@@ -2074,7 +2097,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onNavigateTab={guardedSetCurrentTab}
           onStartPhotoToBead={handleImageUpload}
           onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
-          onImportPattern={handleImportPattern}
+          onOpenImportBlueprint={() => setIsImportBlueprintOpen(true)}
         />
       )}
 
@@ -2184,7 +2207,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               zoom={zoom}
               setZoom={setZoom}
               handleZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
-              handleZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
+              handleZoomOut={() => setZoom(z => Math.max(MIN_CANVAS_ZOOM, z * 0.85))}
               handleResetZoom={() => setZoom(1.0)}
               beadShape={beadShape}
               setBeadShape={setBeadShape}
@@ -2249,7 +2272,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               zoom={zoom}
               setZoom={setZoom}
               handleZoomIn={() => setZoom(z => Math.min(4.0, z * 1.15))}
-              handleZoomOut={() => setZoom(z => Math.max(0.1, z * 0.85))}
+              handleZoomOut={() => setZoom(z => Math.max(MIN_CANVAS_ZOOM, z * 0.85))}
               handleResetZoom={() => setZoom(1.0)}
               beadShape={beadShape}
               setBeadShape={setBeadShape}
@@ -2446,6 +2469,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
       <AuthModal
         isOpen={isAuthModalOpen}
+        zIndex={isImportBlueprintOpen ? 90 : undefined}
         onClose={() => setIsAuthModalOpen(false)}
         onOpenAdminPanel={() => window.location.assign('/admin')}
         onOpenPatternsModal={openUserPatternsModal}
@@ -2512,6 +2536,16 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           }}
         />
       )}
+
+      <ImportBlueprintWizard
+        isOpen={isImportBlueprintOpen}
+        onClose={() => setIsImportBlueprintOpen(false)}
+        activePalette={activePalette}
+        canSave={hasFormalLogin}
+        onRequestLogin={() => setIsAuthModalOpen(true)}
+        onSave={handleSaveRecognition}
+        onEdit={handleEditRecognition}
+      />
 
       {largeCanvasStudioRequest && (
         <ImageStudioModal

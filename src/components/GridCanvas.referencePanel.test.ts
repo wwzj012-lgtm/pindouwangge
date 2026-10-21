@@ -64,8 +64,8 @@ describe('original image reference panel header contract', () => {
     expect(preview).toContain('<span>重置图纸</span>');
     expect(preview).not.toContain('onClick={resetModalImageView}');
     expect(source).not.toContain('复位视图');
-    expect(preview).toContain('changeImagePreviewScale(view, -0.25)');
-    expect(preview).toContain('changeImagePreviewScale(view, 0.25)');
+    expect(preview).toContain('zoomModalImage(-0.25)');
+    expect(preview).toContain('zoomModalImage(0.25)');
     expect(preview).toContain('handleModalImagePointerMove');
   });
 });

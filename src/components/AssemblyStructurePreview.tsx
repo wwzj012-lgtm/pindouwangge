@@ -118,7 +118,9 @@ function drawProjection(canvas: HTMLCanvasElement, structure: AssemblyStructureS
   const minX = Math.min(...projected.map(point => point.projectionX - 0.72)); const maxX = Math.max(...projected.map(point => point.projectionX + 0.72));
   const minY = Math.min(...projected.map(point => point.projectionY - 0.36)); const maxY = Math.max(...projected.map(point => point.projectionY + 0.86));
   const padding = Math.max(12, Math.min(cssWidth, cssHeight) * 0.1);
-  const tile = Math.max(2.5, Math.min((cssWidth - padding * 2) / Math.max(1, maxX - minX), (cssHeight - padding * 2) / Math.max(1, maxY - minY)));
+  // Large or exploded structures must still fit; a minimum tile size crops
+  // their outer edges in narrow previews.
+  const tile = Math.min(Math.max(1, cssWidth - padding * 2) / Math.max(1, maxX - minX), Math.max(1, cssHeight - padding * 2) / Math.max(1, maxY - minY));
   const translateX = (cssWidth - (maxX - minX) * tile) / 2 - minX * tile;
   const translateY = (cssHeight - (maxY - minY) * tile) / 2 - minY * tile;
   const rendered = projected.map(point => ({ ...point, screenX: translateX + point.projectionX * tile, screenY: translateY + point.projectionY * tile })).sort((left, right) => left.screenY - right.screenY || left.x + left.z - right.x - right.z);

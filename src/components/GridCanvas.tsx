@@ -5,6 +5,7 @@ import { drawPreviewBeadOnCanvas, getPreviewCellBounds } from '../utils/ironedPr
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
 import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
+import { clampCanvasViewport, MIN_CANVAS_ZOOM } from '../utils/canvasViewport';
 import {
   changeImagePreviewScale,
   createInitialImagePreviewView,
@@ -12,6 +13,7 @@ import {
   IMAGE_PREVIEW_CONTROLS,
   IMAGE_PREVIEW_TOOLBAR_CLASS,
   resetImagePreviewView,
+  type ImagePreviewView,
 } from '../utils/imagePreviewView';
 import {
   clampReferencePanelPosition,
@@ -232,7 +234,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     return () => effectiveImage.removeEventListener('load', handleLoad);
   }, [effectiveImage]);
   const [isEnlargedModalOpen, setIsEnlargedModalOpen] = useState(false);
-  const [modalImageView, setModalImageView] = useState(createInitialImagePreviewView);
+  const [modalImageView, updateModalImageView] = useState(createInitialImagePreviewView);
+  const modalImageViewportRef = useRef<HTMLDivElement>(null);
+  const modalImageRef = useRef<HTMLImageElement>(null);
   // Keep the drawing surface clear on phones initially; the reference stays one tap away.
   const [isThumbnailMinimized, setIsThumbnailMinimized] = useState(() => (
     typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
@@ -246,9 +250,49 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const confirmCanvasResetRef = useRef<HTMLButtonElement>(null);
   const lastExpandedSizeRef = useRef<{ width: number; height: number }>({ width: 300, height: 220 });
 
+  const boundModalImageView = useCallback((view: ImagePreviewView): ImagePreviewView => {
+    const viewport = modalImageViewportRef.current;
+    const image = modalImageRef.current;
+    if (!viewport || !image || !image.clientWidth || !image.clientHeight) return view;
+    // The DOM image scales about its center; the shared helper takes a top-left.
+    const centeredX = (viewport.clientWidth - image.clientWidth * view.scale) / 2;
+    const centeredY = (viewport.clientHeight - image.clientHeight * view.scale) / 2;
+    const bounded = clampCanvasViewport(
+      { zoom: view.scale, x: centeredX + view.pan.x, y: centeredY + view.pan.y },
+      { width: viewport.clientWidth, height: viewport.clientHeight },
+      { width: image.clientWidth, height: image.clientHeight },
+    );
+    const pan = { x: bounded.x - centeredX, y: bounded.y - centeredY };
+    return pan.x === view.pan.x && pan.y === view.pan.y ? view : { ...view, pan };
+  }, []);
+
+  const setModalImageView = useCallback((update: React.SetStateAction<ImagePreviewView>) => {
+    updateModalImageView(current => boundModalImageView(typeof update === 'function' ? update(current) : update));
+  }, [boundModalImageView]);
+
+  const zoomModalImage = useCallback((delta: number) => {
+    setModalImageView(current => {
+      const next = changeImagePreviewScale(current, delta);
+      const ratio = next.scale / current.scale;
+      return { ...next, pan: { x: current.pan.x * ratio, y: current.pan.y * ratio } };
+    });
+  }, [setModalImageView]);
+
+  useLayoutEffect(() => {
+    const viewport = modalImageViewportRef.current;
+    const image = modalImageRef.current;
+    if (!isEnlargedModalOpen || !viewport || !image) return;
+    const clamp = () => setModalImageView(current => current);
+    clamp();
+    const observer = new ResizeObserver(clamp);
+    observer.observe(viewport);
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, [isEnlargedModalOpen, effectiveImage, setModalImageView]);
+
   const resetModalImageView = useCallback(() => {
     setModalImageView(resetImagePreviewView());
-  }, []);
+  }, [setModalImageView]);
 
   const openEnlargedImagePreview = useCallback(() => {
     resetModalImageView();
@@ -475,7 +519,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ...view,
       pan: { x: view.pan.x + deltaX, y: view.pan.y + deltaY },
     }));
-  }, []);
+  }, [setModalImageView]);
 
   const stopModalImagePan = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (modalImageDragRef.current?.pointerId === event.pointerId) {
@@ -552,17 +596,41 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const transformFrameRef = useRef<number | null>(null);
   const pendingTransformRef = useRef<{ zoom: number; pan: { x: number; y: number } } | null>(null);
 
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  useEffect(() => { panRef.current = pan; }, [pan]);
   useEffect(() => { activeToolRef.current = activeTool; }, [activeTool]);
+
+  const boundGridTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
+    const container = containerRef.current;
+    if (!container) return { zoom: nextZoom, pan: nextPan };
+    // Rulers are a fixed CSS-pixel strip before the scaled cells, not part of
+    // world-space zoom. Bound the whole decorated board without moving cells
+    // relative to the rulers or changing clientToGrid coordinates.
+    const bounded = clampCanvasViewport(
+      { zoom: 1, ...nextPan },
+      { width: container.clientWidth, height: container.clientHeight },
+      { width: width * baseCellSize * nextZoom + coordOffset, height: height * baseCellSize * nextZoom + coordOffset },
+    );
+    return { zoom: nextZoom, pan: { x: bounded.x, y: bounded.y } };
+  }, [width, height, coordOffset]);
+
+  // Also handle zoom supplied by the parent and ruler/board geometry changes.
+  useLayoutEffect(() => {
+    const bounded = boundGridTransform(zoom, pan);
+    const pending = pendingTransformRef.current;
+    const next = pending ? boundGridTransform(pending.zoom, pending.pan) : bounded;
+    zoomRef.current = next.zoom;
+    panRef.current = next.pan;
+    if (pending) pendingTransformRef.current = next;
+    if (bounded.pan.x !== pan.x || bounded.pan.y !== pan.y) setPan(bounded.pan);
+  }, [zoom, pan, boundGridTransform]);
 
   const scheduleTransformCommit = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     // Pointer/touch events can arrive much faster than a phone can paint. Keep
     // refs current for coordinate math, but commit React state at most once per
     // animation frame so the expensive canvas render is coalesced.
-    zoomRef.current = nextZoom;
-    panRef.current = nextPan;
-    pendingTransformRef.current = { zoom: nextZoom, pan: nextPan };
+    const bounded = boundGridTransform(nextZoom, nextPan);
+    zoomRef.current = bounded.zoom;
+    panRef.current = bounded.pan;
+    pendingTransformRef.current = bounded;
     if (transformFrameRef.current !== null) return;
 
     transformFrameRef.current = window.requestAnimationFrame(() => {
@@ -573,7 +641,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       setZoom(pending.zoom);
       setPan(pending.pan);
     });
-  }, [setZoom]);
+  }, [setZoom, boundGridTransform]);
 
   useEffect(() => () => {
     if (transformFrameRef.current !== null) {
@@ -584,7 +652,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   const changeZoomAtClient = useCallback((targetZoom: number, clientX: number, clientY: number): boolean => {
     const previousZoom = zoomRef.current;
-    const nextZoom = Math.min(4.5, Math.max(0.1, targetZoom));
+    const nextZoom = Math.min(4.5, Math.max(MIN_CANVAS_ZOOM, targetZoom));
     if (nextZoom === previousZoom) return false;
 
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -594,14 +662,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           const localY = clientY - rect.top;
           const ratio = nextZoom / previousZoom;
           return {
-            x: localX - (localX - panRef.current.x) * ratio,
-            y: localY - (localY - panRef.current.y) * ratio,
+            x: localX - coordOffset - (localX - coordOffset - panRef.current.x) * ratio,
+            y: localY - coordOffset - (localY - coordOffset - panRef.current.y) * ratio,
           };
         })()
       : panRef.current;
     scheduleTransformCommit(nextZoom, nextPan);
     return true;
-  }, [scheduleTransformCommit]);
+  }, [scheduleTransformCommit, coordOffset]);
 
   const changeZoomAtCanvasCenter = useCallback((factor: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
@@ -660,27 +728,22 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const { clientWidth, clientHeight } = containerRef.current;
     if (clientWidth <= 0 || clientHeight <= 0) return;
 
-    const totalGridW = width * baseCellSize + coordOffset;
-    const totalGridH = height * baseCellSize + coordOffset;
-
     const padding = clientWidth < 640 ? 12 : 36;
     const availW = Math.max(100, clientWidth - padding * 2);
     const availH = Math.max(100, clientHeight - padding * 2);
 
-    const scaleX = availW / totalGridW;
-    const scaleY = availH / totalGridH;
-    const bestZoom = Math.min(3.5, Math.max(0.1, Math.min(scaleX, scaleY)));
-
-    setZoom(bestZoom);
+    const scaleX = Math.max(1, availW - coordOffset) / (width * baseCellSize);
+    const scaleY = Math.max(1, availH - coordOffset) / (height * baseCellSize);
+    const bestZoom = Math.min(3.5, Math.max(MIN_CANVAS_ZOOM, Math.min(scaleX, scaleY)));
 
     const finalPixelW = width * baseCellSize * bestZoom + coordOffset;
     const finalPixelH = height * baseCellSize * bestZoom + coordOffset;
 
-    setPan({
-      x: Math.max(8, (clientWidth - finalPixelW) / 2),
-      y: Math.max(8, (clientHeight - finalPixelH) / 2),
+    scheduleTransformCommit(bestZoom, {
+      x: (clientWidth - finalPixelW) / 2,
+      y: (clientHeight - finalPixelH) / 2,
     });
-  }, [width, height, coordOffset, baseCellSize, setZoom]);
+  }, [width, height, coordOffset, baseCellSize, scheduleTransformCommit]);
 
   const fitContentToView = useCallback(() => {
     const container = containerRef.current;
@@ -706,7 +769,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const padding = container.clientWidth < 640 ? 20 : 36;
     const contentWidth = (maxX - minX + 1) * baseCellSize;
     const contentHeight = (maxY - minY + 1) * baseCellSize;
-    const bestZoom = Math.min(4.5, Math.max(0.1, Math.min(
+    const bestZoom = Math.min(4.5, Math.max(MIN_CANVAS_ZOOM, Math.min(
       Math.max(100, container.clientWidth - padding * 2) / contentWidth,
       Math.max(100, container.clientHeight - padding * 2) / contentHeight,
     )));
@@ -717,11 +780,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       y: (container.clientHeight - scaledHeight) / 2 - coordOffset - minY * baseCellSize * bestZoom,
     };
 
-    zoomRef.current = bestZoom;
-    panRef.current = nextPan;
-    setZoom(bestZoom);
-    setPan(nextPan);
-  }, [baseCellSize, coordOffset, fitToView, grid, height, setZoom, width]);
+    scheduleTransformCommit(bestZoom, nextPan);
+  }, [baseCellSize, coordOffset, fitToView, grid, height, scheduleTransformCommit, width]);
 
   useEffect(() => {
     fitToView();
@@ -791,18 +851,18 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         if (state.initialDist > 0) {
           const scale = dist / state.initialDist;
-          const newZoom = Math.min(4.5, Math.max(0.1, state.initialZoom * scale));
+          const newZoom = Math.min(4.5, Math.max(MIN_CANVAS_ZOOM, state.initialZoom * scale));
 
           const rect = container.getBoundingClientRect();
-          const focusX = state.initialMidX - rect.left - state.initialPanX;
-          const focusY = state.initialMidY - rect.top - state.initialPanY;
+          const focusX = state.initialMidX - rect.left - state.initialPanX - coordOffset;
+          const focusY = state.initialMidY - rect.top - state.initialPanY - coordOffset;
           const zoomRatio = newZoom / state.initialZoom;
 
           const deltaMidX = midX - state.initialMidX;
           const deltaMidY = midY - state.initialMidY;
 
-          const newPanX = state.initialMidX - rect.left - (focusX * zoomRatio) + deltaMidX;
-          const newPanY = state.initialMidY - rect.top - (focusY * zoomRatio) + deltaMidY;
+          const newPanX = state.initialMidX - rect.left - coordOffset - (focusX * zoomRatio) + deltaMidX;
+          const newPanY = state.initialMidY - rect.top - coordOffset - (focusY * zoomRatio) + deltaMidY;
 
           scheduleTransformCommit(newZoom, { x: newPanX, y: newPanY });
         }
@@ -842,7 +902,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [finishHistoryTransaction, interactionProfile, scheduleTransformCommit]);
+  }, [finishHistoryTransaction, interactionProfile, scheduleTransformCommit, coordOffset]);
 
   // Handle mouse-wheel zoom around the current pointer position.
   const handleWheel = useCallback((event: WheelEvent) => {
@@ -1197,10 +1257,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     }
 
     // 8. Grid Outer Border (High-contrast clean frame)
+    const frameWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.lineWidth = frameWidth + 2;
+    ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
     ctx.strokeStyle = canvasBackdrop === 'wood'
       ? 'rgba(180, 83, 9, 0.9)'
-      : (canvasBackdrop === 'dark_grid' ? 'rgba(226, 232, 240, 0.9)' : 'rgba(30, 41, 59, 0.9)');
-    ctx.lineWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
+      : 'rgba(30, 41, 59, 0.9)';
+    ctx.lineWidth = frameWidth;
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
     ctx.restore();
@@ -1246,14 +1310,23 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         canvasRef.current.height = Math.floor(clientHeight * dpr);
         canvasRef.current.style.width = `${clientWidth}px`;
         canvasRef.current.style.height = `${clientHeight}px`;
+        const bounded = boundGridTransform(zoomRef.current, panRef.current);
+        if (bounded.pan.x !== panRef.current.x || bounded.pan.y !== panRef.current.y) {
+          scheduleTransformCommit(bounded.zoom, bounded.pan);
+        }
         renderCanvas();
       }
     };
 
     handleResize();
+    const observer = new ResizeObserver(handleResize);
+    if (containerRef.current) observer.observe(containerRef.current);
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, [renderCanvas]);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [renderCanvas, boundGridTransform, scheduleTransformCommit]);
 
   useEffect(() => {
     renderCanvas();
@@ -1327,6 +1400,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         x: e.clientX - panStartRef.current.x,
         y: e.clientY - panStartRef.current.y,
       });
+      // Discard overshoot at the boundary so reversing direction moves at once.
+      panStartRef.current = { x: e.clientX - panRef.current.x, y: e.clientY - panRef.current.y };
       return;
     }
 
@@ -1570,7 +1645,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         {/* Zoom Out */}
         <button
-          onClick={() => setZoom(Math.max(0.1, zoom * 0.8))}
+          onClick={() => changeZoomAtCanvasCenter(0.8)}
           className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="缩小"
         >
@@ -1579,7 +1654,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         {/* Zoom In */}
         <button
-          onClick={() => setZoom(Math.min(4.5, zoom * 1.25))}
+          onClick={() => changeZoomAtCanvasCenter(1.25)}
           className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="放大"
         >
@@ -1866,7 +1941,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   <span>上传原图</span>
                 </button>
                 <button
-                  onClick={() => setModalImageView(view => changeImagePreviewScale(view, -0.25))}
+                  onClick={() => zoomModalImage(-0.25)}
                   className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs flex items-center gap-1 border border-purple-300 transition-colors cursor-pointer font-bold"
                   title={IMAGE_PREVIEW_CONTROLS.zoomOut.title}
                   aria-label={IMAGE_PREVIEW_CONTROLS.zoomOut.ariaLabel}
@@ -1877,7 +1952,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   {Math.round(modalImageView.scale * 100)}%
                 </span>
                 <button
-                  onClick={() => setModalImageView(view => changeImagePreviewScale(view, 0.25))}
+                  onClick={() => zoomModalImage(0.25)}
                   className="p-1.5 rounded-xl bg-purple-100 hover:bg-purple-200 text-purple-900 text-xs flex items-center gap-1 border border-purple-300 transition-colors cursor-pointer font-bold"
                   title={IMAGE_PREVIEW_CONTROLS.zoomIn.title}
                   aria-label={IMAGE_PREVIEW_CONTROLS.zoomIn.ariaLabel}
@@ -1909,6 +1984,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             {/* Modal Body: Draggable / Zoomable image preview */}
             <div className="flex-1 overflow-hidden p-4 flex items-center justify-center bg-purple-50/40 min-h-[320px] select-none">
               <div
+                ref={modalImageViewportRef}
                 onPointerDown={handleModalImagePointerDown}
                 onPointerMove={handleModalImagePointerMove}
                 onPointerUp={stopModalImagePan}
@@ -1917,12 +1993,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 className="relative border border-purple-200/80 rounded-2xl overflow-hidden shadow-xl bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:16px_16px] max-w-full max-h-full flex items-center justify-center p-2 cursor-grab active:cursor-grabbing touch-none"
               >
                 <img
+                  ref={modalImageRef}
                   src={effectiveImage.src}
                   alt="原图放大预览"
+                  onLoad={() => setModalImageView(current => current)}
                   style={{
                     transform: `translate(${modalImageView.pan.x}px, ${modalImageView.pan.y}px) scale(${modalImageView.scale})`,
                     transformOrigin: 'center center',
-                    transition: 'transform 0.15s ease-out'
+                    transition: 'transform 0.15s ease-out',
+                    boxShadow: '0 0 0 1px #6d5485, 0 0 0 3px rgba(255,255,255,.95)',
                   }}
                   className="max-h-[68vh] max-w-full object-contain pointer-events-none rounded-lg"
                 />

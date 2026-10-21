@@ -621,7 +621,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   <canvas
                     ref={imageCanvasRef}
                     onClick={handleCanvasClick}
-                    className={`max-w-full max-h-full object-contain rounded ${
+                    className={`max-w-full max-h-full object-contain rounded outline outline-1 outline-slate-500 ${
                       isPickingColor ? 'cursor-crosshair ring-2 ring-rose-500' : ''
                     }`}
                   />
@@ -666,7 +666,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                     <canvas
                       ref={previewCanvasRef}
                       style={{ imageRendering: 'pixelated' }}
-                      className="max-w-full max-h-full object-contain rounded shadow-lg"
+                      className="max-w-full max-h-full object-contain rounded shadow-lg outline outline-1 outline-slate-500"
                     />
                   ) : (
                     <div className="text-slate-500 text-xs flex items-center gap-2">

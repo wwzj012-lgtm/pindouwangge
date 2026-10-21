@@ -28,6 +28,7 @@ import { AUTH_AUTOCOMPLETE, saveBrowserPasswordCredential } from '../utils/authC
 
 interface AuthModalProps {
   isOpen: boolean;
+  zIndex?: number;
   onClose: () => void;
   onOpenAdminPanel?: () => void;
   onOpenPatternsModal?: () => void;
@@ -42,6 +43,7 @@ interface LocalizedError {
 
 export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
+  zIndex,
   onClose,
   onOpenAdminPanel,
   onOpenPatternsModal,
@@ -232,7 +234,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fadeIn">
+    <div role="dialog" aria-modal="true" aria-label="用户登录与账号" style={zIndex === undefined ? undefined : { zIndex }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fadeIn">
       <div className="relative w-full max-w-md bg-[#FAF9FD] border border-purple-200/80 rounded-3xl shadow-2xl shadow-purple-900/10 overflow-hidden flex flex-col max-h-[92vh] text-slate-800">
         {/* Header */}
         <div className="px-5 py-4 bg-gradient-to-r from-purple-100/70 via-slate-50 to-purple-50/50 border-b border-purple-200/70 flex items-center justify-between shrink-0">
@@ -247,6 +249,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="关闭账号窗口"
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-purple-100/60 rounded-xl transition-all cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />

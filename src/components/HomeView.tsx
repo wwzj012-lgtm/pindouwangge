@@ -4,7 +4,6 @@ import {
   Image as ImageIcon,
   Palette,
   Compass,
-  FileDown,
   ArrowRight,
   Zap,
   ChevronRight,
@@ -12,6 +11,7 @@ import {
   Code2,
   Wand2,
   CheckCircle2,
+  FilePlus2,
 } from 'lucide-react';
 import { consumeSelectedImageFile } from '../utils/imageFileSelection';
 
@@ -45,14 +45,14 @@ interface HomeViewProps {
   onNavigateTab: (tab: 'home' | 'community' | 'studio' | 'largeCanvas') => void;
   onStartPhotoToBead: (file: File) => void;
   onLoadHeroExample: (example: HeroExample) => void;
-  onImportPattern: () => void;
+  onOpenImportBlueprint: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
   onStartPhotoToBead,
   onLoadHeroExample,
-  onImportPattern,
+  onOpenImportBlueprint,
 }) => {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [vibeIndex, setVibeIndex] = useState(0);
@@ -131,6 +131,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 >
                   <span>探索社区作品</span>
                   <ChevronRight className="w-5 h-5" />
+                </button>
+
+                <button
+                  onClick={onOpenImportBlueprint}
+                  className="px-5 py-3 sm:py-3.5 rounded-full bg-amber-300/15 hover:bg-amber-300/25 border border-amber-200/40 text-amber-100 font-bold text-sm sm:text-base transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <FilePlus2 className="w-5 h-5" />
+                  <span>颜色识别</span>
                 </button>
               </div>
 
@@ -221,6 +229,24 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
             </div>
 
+            {/* Card 3: 导入图纸 */}
+            <button
+              type="button"
+              onClick={onOpenImportBlueprint}
+              className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group text-left"
+            >
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                  <FilePlus2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-purple-950">颜色识别</h3>
+                  <p className="text-xs text-purple-500 font-medium">手动对齐网格，识别每格主色与色号</p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
+            </button>
+
             {/* Card 3: 逛豆社 */}
             <div
               onClick={() => onNavigateTab('community')}
@@ -233,23 +259,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">豆社灵感</h3>
                   <p className="text-xs text-purple-500 font-medium">发现图纸并 Remix</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
-            </div>
-
-            {/* Card 4: 图纸导入 */}
-            <div
-              onClick={onImportPattern}
-              className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-100 text-emerald-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                  <FileDown className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-purple-950">本地图纸导入</h3>
-                  <p className="text-xs text-purple-500 font-medium">JSON/网格图载入</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />

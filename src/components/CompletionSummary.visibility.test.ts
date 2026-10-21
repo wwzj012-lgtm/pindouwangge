@@ -31,6 +31,13 @@ describe('always-visible completion estimates and existing details gate', () => 
     expect(html).not.toContain('服务端报价');
     expect(summary({ hasFormalLogin: false, estimatedPoints: null, quotedPoints: null })).toContain('登录后核准积分报价');
   });
+  it('marks a manually created canvas free and omits all credit quoting and payment actions', () => {
+    const html = summary({ isFreehand: true, isUnlocked: true, quotedPoints: null, estimatedPoints: null });
+    expect(html).toContain('手工画板 · 免费使用');
+    expect(html).not.toContain('积分报价');
+    expect(html).not.toContain('查看解锁确认');
+    expect(html).not.toContain('确认并解锁');
+  });
   it.each(['loading', 'invalid', 'error'] as const)('does not display the previous amount in %s state', quoteStatus => {
     const html = summary({ quoteStatus });
     expect(html).not.toContain('0.7');

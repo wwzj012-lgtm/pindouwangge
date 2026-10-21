@@ -9,6 +9,7 @@ export interface CompletionSummaryQuote {
 export interface CompletionSummaryProps {
   isEn: boolean;
   isUnlocked: boolean;
+  isFreehand?: boolean;
   needsSupplement: boolean;
   nonEmptyBeads: number;
   quotedPoints: number | null;
@@ -27,6 +28,7 @@ export interface CompletionSummaryProps {
 export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
   isEn,
   isUnlocked,
+  isFreehand = false,
   needsSupplement,
   nonEmptyBeads,
   quotedPoints,
@@ -54,7 +56,7 @@ export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
           <div>
             <p className="text-[11px] font-black text-purple-950">
               {isUnlocked
-                ? (isEn ? 'Pattern unlocked' : '图纸已解锁')
+                ? isFreehand ? (isEn ? 'Freehand canvas' : '手工画板 · 免费使用') : (isEn ? 'Pattern unlocked' : '图纸已解锁')
                 : needsSupplement
                   ? (isEn ? 'Top-up required' : '需要补差价')
                   : (isEn ? 'Draft pattern' : '草稿图纸')}
@@ -72,7 +74,7 @@ export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
           )}
         </div>
 
-        <div className="mt-0.5 text-[11px] leading-4 text-purple-950" aria-label={isEn ? 'Credit quote' : '积分报价'} role="status" aria-live="polite">
+        {!isFreehand && <div className="mt-0.5 text-[11px] leading-4 text-purple-950" aria-label={isEn ? 'Credit quote' : '积分报价'} role="status" aria-live="polite">
           {!hasFormalLogin
             ? estimatedPoints !== null
               ? (isEn ? `Estimate: ${estimatedPoints} credits · sign in for approval` : `预估 ${estimatedPoints} 积分 · 登录核准`)
@@ -93,9 +95,9 @@ export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
               {isEn ? 'Retry quote' : '重试报价'}
             </button>
           )}
-        </div>
+        </div>}
 
-        {!isUnlocked && nonEmptyBeads > 0 && !quote && (
+        {!isFreehand && !isUnlocked && nonEmptyBeads > 0 && !quote && (
           <div className="mt-1.5 flex items-center gap-2">
             <button
               type="button"

@@ -9,11 +9,12 @@ describe('canvas reset confirmation', () => {
     expect(grid).toEqual([['red', null], ['blue', 'green']]);
   });
 
-  it('clears only grid cells and all undo/redo state after confirmation', () => {
+  it('clears generated cells, undo/redo state, and returns the draft to freehand mode', () => {
     expect(resolveCanvasReset(true, grid)).toEqual({
       grid: [[null, null], [null, null]],
       history: [],
       historyIndex: -1,
+      isImageDerivedPattern: false,
     });
   });
 });

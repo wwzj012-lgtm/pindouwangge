@@ -95,7 +95,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
+    <div className="fixed inset-0 z-[100] bg-black/75 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl h-[90vh] max-h-[92vh] flex flex-col shadow-2xl text-slate-200 text-xs overflow-hidden">
         {/* Header */}
         <div className="p-3 sm:p-4 border-b border-slate-800 flex items-center justify-between shrink-0">

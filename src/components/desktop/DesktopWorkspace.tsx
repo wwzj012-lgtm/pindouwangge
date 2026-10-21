@@ -150,7 +150,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-100">
       {/* Top Desktop Toolbar */}
-      <div className="relative shrink-0">
+      <div className="relative z-30 shrink-0 overflow-visible">
         <Toolbar
           activeTool={activeTool}
           setActiveTool={setActiveTool}

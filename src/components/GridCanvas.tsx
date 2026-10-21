@@ -6,6 +6,7 @@ import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoor
 import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
 import { clampCanvasViewport, MIN_CANVAS_ZOOM } from '../utils/canvasViewport';
+import { getVisibleGridRange } from '../utils/visibleGridRange';
 import {
   changeImagePreviewScale,
   createInitialImagePreviewView,
@@ -157,10 +158,12 @@ function isCanvasInteractionIgnoredTarget(target: EventTarget | null): boolean {
 }
 
 function getCanvasDpr(): number {
-  // High-DPR mobile canvases multiply every fill/stroke cost without adding
-  // useful detail at the board's small cell sizes. Keep desktop retina sharp
-  // while bounding the cost on phones and tablets.
-  return Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+  // Large touch boards are dominated by fill/stroke count, not resolution.
+  // Bound backing-store work more aggressively on phones/tablets; desktop
+  // retains a sharper retina canvas.
+  const deviceDpr = window.devicePixelRatio || 1;
+  const isTouchSized = window.matchMedia('(pointer: coarse)').matches;
+  return Math.min(isTouchSized ? 1.35 : 2, Math.max(1, deviceDpr));
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
@@ -964,6 +967,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const dpr = getCanvasDpr();
     const canvasWidth = canvas.width / dpr;
     const canvasHeight = canvas.height / dpr;
+    const visibleColumns = getVisibleGridRange(width, cellSize, pan.x + coordOffset, canvasWidth);
+    const visibleRows = getVisibleGridRange(height, cellSize, pan.y + coordOffset, canvasHeight);
+    const isLargeTouchOverview = interactionProfile === 'touch' && width * height >= 10_000 && cellSize < 14;
+    const useDetailedBeads = !isLargeTouchOverview && (cellSize >= 6 || width * height <= 10_000);
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -1069,24 +1076,20 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     // state so all drafting aids return unchanged when leaving ironed mode.
     const isIronedPreview = beadShape === 'ironed';
     const drawGridLines = showGridLines && !isIronedPreview;
+    const drawCellGridLines = drawGridLines && !isLargeTouchOverview;
 
     // 5. Render Bead Grid Cells
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
+      for (let y = visibleRows.start; y < visibleRows.end; y++) {
+        for (let x = visibleColumns.start; x < visibleColumns.end; x++) {
         const px = startX + x * cellSize;
         const py = startY + y * cellSize;
 
-        if (
-          px + cellSize < 0 ||
-          px > canvasWidth ||
-          py + cellSize < 0 ||
-          py > canvasHeight
-        ) {
-          continue;
-        }
-
         const isShapePreview = previewSet.has(`${x},${y}`);
         const colorId = grid[y]?.[x];
+
+        // At overview zoom, individual empty peg dots and bead bevels become
+        // sub-pixel work. Keep the silhouette/colors; restore detail on zoom.
+        if (!colorId && !isShapePreview && cellSize < 8) continue;
 
         if (isShapePreview && selectedColor) {
           // Render preview ghost bead for shape tools
@@ -1097,6 +1100,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         } else if (colorId) {
           const bead = paletteMap.get(colorId);
           const colorHex = bead ? bead.hex : '#CCCCCC';
+          if (!useDetailedBeads) {
+            ctx.fillStyle = colorHex;
+            ctx.fillRect(px, py, cellSize, cellSize);
+            continue;
+          }
           const symbolStr = showSymbols && !isIronedPreview && cellSize >= minSymbolCellSize && bead
             ? (bead.code || bead.symbol)
             : null;
@@ -1156,7 +1164,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             ctx.fillRect(px, py, cellSize, cellSize);
           }
 
-          if (drawGridLines) {
+          if (drawCellGridLines) {
             ctx.strokeStyle = showOverlay
               ? (canvasBackdrop === 'wood' ? 'rgba(217, 119, 6, 0.6)' : 'rgba(100, 116, 139, 0.35)')
               : (canvasBackdrop === 'wood' ? '#FCD34D' : '#E2E8F0');
@@ -1164,7 +1172,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
             ctx.strokeRect(px, py, cellSize, cellSize);
           }
 
-          if (!isIronedPreview) {
+          if (!isIronedPreview && !isLargeTouchOverview) {
             // Peg dot center is a drafting aid, not part of the fused design.
             ctx.beginPath();
             ctx.arc(px + cellSize / 2, py + cellSize / 2, Math.max(1, cellSize * 0.12), 0, Math.PI * 2);
@@ -1203,6 +1211,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     // 7. 5×5 Dashed & 10×10 Bold Grid System (Standard Physical Bead Board Lines)
     if (drawGridLines) {
+      const firstFiveX = Math.max(5, Math.ceil(visibleColumns.start / 5) * 5);
+      const endFiveX = Math.min(width, visibleColumns.end);
+      const firstFiveY = Math.max(5, Math.ceil(visibleRows.start / 5) * 5);
+      const endFiveY = Math.min(height, visibleRows.end);
       // (a) 5×5 Dashed Guidelines (forming 5*5 dashed small squares)
       ctx.save();
       ctx.strokeStyle = canvasBackdrop === 'wood'
@@ -1211,7 +1223,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ctx.lineWidth = Math.max(1, Math.min(1.5, cellSize * 0.08));
       ctx.setLineDash([4, 2.5]);
 
-      for (let x = 5; x < width; x += 5) {
+      for (let x = firstFiveX; x < endFiveX; x += 5) {
         if (x % 10 === 0) continue; // Multiples of 10 are bold solid lines
         const px = startX + x * cellSize;
         ctx.beginPath();
@@ -1220,7 +1232,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         ctx.stroke();
       }
 
-      for (let y = 5; y < height; y += 5) {
+      for (let y = firstFiveY; y < endFiveY; y += 5) {
         if (y % 10 === 0) continue;
         const py = startY + y * cellSize;
         ctx.beginPath();
@@ -1238,7 +1250,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ctx.lineWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
       ctx.setLineDash([]);
 
-      for (let x = 10; x < width; x += 10) {
+      const firstTenX = Math.max(10, Math.ceil(visibleColumns.start / 10) * 10);
+      const endTenX = Math.min(width, visibleColumns.end);
+      const firstTenY = Math.max(10, Math.ceil(visibleRows.start / 10) * 10);
+      const endTenY = Math.min(height, visibleRows.end);
+      for (let x = firstTenX; x < endTenX; x += 10) {
         const px = startX + x * cellSize;
         ctx.beginPath();
         ctx.moveTo(px, startY);
@@ -1246,7 +1262,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         ctx.stroke();
       }
 
-      for (let y = 10; y < height; y += 10) {
+      for (let y = firstTenY; y < endTenY; y += 10) {
         const py = startY + y * cellSize;
         ctx.beginPath();
         ctx.moveTo(startX, py);
@@ -1406,7 +1422,10 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     }
 
     const cell = clientToGrid(e.clientX, e.clientY);
-    setHoverCell(cell);
+    const needsTouchShapePreview = isDrawing && (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'circle');
+    if (e.pointerType !== 'touch' || needsTouchShapePreview) {
+      setHoverCell(current => current?.x === cell?.x && current?.y === cell?.y ? current : cell);
+    }
 
     if (isDrawing && cell) {
       if (activeTool === 'pencil' || activeTool === 'eraser') {

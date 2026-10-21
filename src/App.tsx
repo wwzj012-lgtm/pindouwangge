@@ -612,6 +612,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [initialPublishRecord, setInitialPublishRecord] = useState<ExportedPatternRecord | null>(null);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
   const [draftSourceKey, setDraftSourceKey] = useState(createDraftId);
+  // Billing origin is explicit: blank/manual canvases and imported grids are
+  // freehand; only a successful photo-to-grid conversion marks the work billable.
+  const [isImageDerivedPattern, setIsImageDerivedPattern] = useState(false);
   const [currentSavingTarget, setCurrentSavingTarget] = useState<15 | 25 | 40>(15);
   const [completionStatus, setCompletionStatus] = useState<PatternCompletionStatus>('DRAFT');
   const [completionQuote, setCompletionQuote] = useState<CompletionQuoteState | null>(null);
@@ -725,6 +728,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setCompletionPreviewQuote(null);
     setServerPaidCoverage(null);
     setPaidNonEmptyBeads(null);
+    setIsImageDerivedPattern(false);
   }, [invalidateCompletionConfirmation]);
 
   const requireFormalLogin = useCallback((message: string): boolean => {
@@ -897,7 +901,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // VIP only changes export privileges. Detailed pattern data is available
   // only once the pattern itself has been completed, paid up to date, or is a
   // server-marked legacy pattern.
-  const isPatternUnlocked = isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
+  const isFreehandPattern = !isImageDerivedPattern && completionStatus !== 'COMPLETED';
+  const isPatternUnlocked = isFreehandPattern || isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
   const displayedCreditBalance = getCreditBalance(creditSummary);
   const quotedCompletionPoints = activeCompletionQuote
     ? getCompletionChargePoints(activeCompletionQuote.quote)
@@ -983,7 +988,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     const sequence = ++quoteRequestSequenceRef.current;
     setCompletionPreviewQuote(null);
     setCompletionPreviewKey(context.key);
-    if (!hasFormalLogin || nonEmptyBeads === 0) {
+    if (isFreehandPattern || !hasFormalLogin || nonEmptyBeads === 0) {
       setCompletionPreviewQuote(null);
       setCompletionPreviewStatus('idle');
       return;
@@ -1011,7 +1016,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [activeCompletionQuote, completionRequestKey, completionPreviewRetry, acceptServerCoverage, getCompletionQuoteData, hasFormalLogin]);
+  }, [activeCompletionQuote, completionRequestKey, completionPreviewRetry, acceptServerCoverage, getCompletionQuoteData, hasFormalLogin, isFreehandPattern]);
 
   const handleQuotePatternCompletion = useCallback(async () => {
     if (nonEmptyBeads === 0) {
@@ -1233,6 +1238,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           const newGrid = conversion.grid;
 
           if (isCurrentImageRequest(requestToken)) {
+            setIsImageDerivedPattern(true);
             applyGridChange(newGrid, false);
             setCompletedColorIds([]);
             setConversionDiagnostics(conversion.diagnostics);
@@ -1423,10 +1429,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     applyGridChange(frame.beanResult, false);
     setCurrentTab('studio');
     if (frame.sourceImageDataUrl) {
+      setIsImageDerivedPattern(true);
       const image = new Image();
       image.onload = () => setSourceImage(image);
       image.src = frame.sourceImageDataUrl;
     } else {
+      setIsImageDerivedPattern(false);
       setSourceImage(null);
     }
   }, [applyGridChange, invalidateImageRequest]);
@@ -1472,6 +1480,17 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setHistory(resetState.history);
     setHistoryIndex(resetState.historyIndex);
     setActivePatternId(null);
+    // Resetting a converted draft discards generated beads but deliberately
+    // keeps sourceImage for tracing/overlay, so the now-empty canvas is freehand.
+    setIsImageDerivedPattern(resetState.isImageDerivedPattern);
+    setConversionDiagnostics(null);
+    setAlignedPixels(undefined);
+    setCompletionStatus('DRAFT');
+    setCompletionQuote(null);
+    setCompletionPreviewQuote(null);
+    setCompletionPreviewStatus('idle');
+    setServerPaidCoverage(null);
+    setPaidNonEmptyBeads(null);
     setHighlightColorIds([]);
     setCompletedColorIds([]);
     setReplaceSourceColor(null);
@@ -1825,14 +1844,19 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     const savedCompletion = asRecord(project);
     const savedCompletionStatus = savedCompletion?.completionStatus;
     const savedPaidNonEmptyBeads = savedCompletion?.paidNonEmptyBeads;
+    // Restored pre-existing drafts retain the historical billing path unless
+    // they are explicitly recorded as free legacy work.
+    setIsImageDerivedPattern(savedCompletionStatus !== 'LEGACY');
     // Legacy works remain entitled. Completed works require their stored paid
     // bead cap so later edits can still trigger the normal supplement flow.
     if (savedCompletionStatus === 'LEGACY') {
+      setIsImageDerivedPattern(false);
       setCompletionStatus('LEGACY');
     } else if (savedCompletionStatus === 'COMPLETED'
       && typeof savedPaidNonEmptyBeads === 'number'
       && Number.isSafeInteger(savedPaidNonEmptyBeads)
       && savedPaidNonEmptyBeads >= 0) {
+      setIsImageDerivedPattern(true);
       setCompletionStatus('COMPLETED');
       setPaidNonEmptyBeads(savedPaidNonEmptyBeads);
     }
@@ -1883,7 +1907,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         grid: gridRef.current,
         palette: activePalette,
         // Preserve restored paid metadata while verification is pending; it never grants access.
-        completionStatus: currentCoverage?.status ?? (completionStatus === 'LEGACY' ? 'LEGACY' : paidNonEmptyBeads !== null ? 'COMPLETED' : 'DRAFT'),
+        completionStatus: isFreehandPattern ? 'LEGACY' : currentCoverage?.status ?? (completionStatus === 'LEGACY' ? 'LEGACY' : paidNonEmptyBeads !== null ? 'COMPLETED' : 'DRAFT'),
         paidNonEmptyBeads: currentCoverage?.status === 'COMPLETED' ? currentCoverage.paidNonEmptyBeads : paidNonEmptyBeads,
         sourceHash,
         gridHash,
@@ -2016,6 +2040,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     <CompletionSummary
       isEn={isEn}
       isUnlocked={isPatternUnlocked}
+      isFreehand={isFreehandPattern}
       needsSupplement={needsCompletionSupplement}
       nonEmptyBeads={nonEmptyBeads}
       quotedPoints={quotedCompletionPoints}

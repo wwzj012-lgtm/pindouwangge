@@ -4,6 +4,8 @@ export interface CanvasResetState {
   grid: CanvasGrid;
   history: CanvasGrid[];
   historyIndex: number;
+  /** Reset discards generated beads; any retained source image becomes a reference only. */
+  isImageDerivedPattern: false;
 }
 
 export function resolveCanvasReset(
@@ -16,5 +18,6 @@ export function resolveCanvasReset(
     grid: grid.map(row => row.map(() => null)),
     history: [],
     historyIndex: -1,
+    isImageDerivedPattern: false,
   };
 }

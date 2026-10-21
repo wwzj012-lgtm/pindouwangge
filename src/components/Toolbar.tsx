@@ -10,7 +10,6 @@ import {
   Hand,
   Hash,
   Layers,
-  Maximize2,
   Minus,
   PaintBucket,
   Pencil,
@@ -24,8 +23,6 @@ import {
   Spline,
   Square,
   Undo2,
-  ZoomIn,
-  ZoomOut,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { useLanguage } from '../context/LanguageContext';
@@ -68,7 +65,7 @@ interface ToolbarProps {
   canExport: boolean;
 }
 
-type MenuId = 'shape' | 'symmetry' | 'view' | null;
+type MenuId = 'shape' | 'symmetry' | 'view' | 'assist' | null;
 
 const buttonBase = 'inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
 const iconButton = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-purple-800 transition-colors hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-35';
@@ -112,7 +109,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const { language } = useLanguage();
   const isEn = language === 'en';
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
-  const menuTriggerRefs = useRef<Record<Exclude<MenuId, null>, HTMLButtonElement | null>>({ shape: null, symmetry: null, view: null });
+  const menuTriggerRefs = useRef<Record<Exclude<MenuId, null>, HTMLButtonElement | null>>({ shape: null, symmetry: null, view: null, assist: null });
   const undoActionRef = useRef(onUndo);
   const redoActionRef = useRef(onRedo);
   const undoRepeatRef = useRef<PressRepeatController | null>(null);
@@ -216,8 +213,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   );
 
   return (
-    <div className="relative z-20 shrink-0 border-b border-purple-200/80 bg-white/95 px-2.5 py-1.5 text-purple-950 shadow-sm backdrop-blur-md select-none">
-      <div className="flex flex-wrap items-center gap-1.5">
+    <div className="relative z-20 isolate shrink-0 border-b border-purple-200/80 bg-white/95 px-2.5 py-1.5 text-purple-950 shadow-sm select-none">
+      <div className="flex flex-nowrap items-center gap-1.5 overflow-visible">
         <div className="flex flex-wrap items-center gap-1 rounded-xl border border-purple-100 bg-purple-50/70 p-0.5" role="group" aria-label={isEn ? 'Drawing tools' : '绘图工具'}>
           {tools.map(toolButton)}
         </div>
@@ -250,7 +247,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
 
         <div className="relative">
-          {menuButton('view', <SlidersHorizontal className="h-3.5 w-3.5" />, isEn ? 'View & more' : '视图与辅助')}
+          {menuButton('view', <SlidersHorizontal className="h-3.5 w-3.5" />, isEn ? 'View' : '视图')}
           {openMenu === 'view' && (
             <div id="toolbar-view-menu" role="menu" className="absolute left-0 top-full mt-1 grid min-w-[245px] gap-1.5 rounded-xl border border-purple-200 bg-white p-2 shadow-lg">
               <label className="flex items-center justify-between gap-3 rounded-lg px-2 py-1 text-[11px] font-bold text-purple-900 hover:bg-purple-50">
@@ -278,9 +275,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 <button type="button" aria-pressed={showSymbols} onClick={() => setShowSymbols(!showSymbols)} className={`${buttonBase} ${showSymbols ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}><Hash className="h-3.5 w-3.5" />{isEn ? 'Symbols' : '色号'}</button>
                 <button type="button" aria-pressed={showGridLines} onClick={() => setShowGridLines(!showGridLines)} className={`${buttonBase} ${showGridLines ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}><Grid2x2 className="h-3.5 w-3.5" />{isEn ? 'Grid' : '网格'}</button>
                 <button type="button" aria-pressed={showCoordinates} onClick={() => setShowCoordinates(!showCoordinates)} className={`${buttonBase} ${showCoordinates ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-100 bg-white text-purple-800'}`}>{isEn ? 'Coords' : '坐标'}</button>
-                <button type="button" onClick={onClearOuterBackground} className={`${buttonBase} border-rose-100 bg-white text-rose-700 hover:bg-rose-50`}><Scissors className="h-3.5 w-3.5" />{isEn ? 'Clear edge' : '清边缘'}</button>
               </div>
-              <button type="button" onClick={() => setActiveTool('replace')} aria-pressed={activeTool === 'replace'} className={`${buttonBase} justify-start ${activeTool === 'replace' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-100 bg-white text-purple-800 hover:bg-purple-50'}`}><RefreshCw className="h-3.5 w-3.5" />{isEn ? 'Replace color (R)' : '替换全图此色 (R)'}</button>
+            </div>
+          )}
+        </div>
+
+        <div className="relative">
+          {menuButton('assist', <Eye className="h-3.5 w-3.5" />, isEn ? 'Assist' : '辅助')}
+          {openMenu === 'assist' && (
+            <div id="toolbar-assist-menu" role="menu" className="absolute left-0 top-full mt-1 grid min-w-[220px] gap-1.5 rounded-xl border border-purple-200 bg-white p-2 shadow-lg">
+              <button type="button" onClick={onClearOuterBackground} className={`${buttonBase} w-full justify-start border-rose-100 bg-white text-rose-700 hover:bg-rose-50`}><Scissors className="h-3.5 w-3.5" />{isEn ? 'Clear edge background' : '清除边缘背景'}</button>
+              <button type="button" onClick={() => { setActiveTool('replace'); closeMenu(); }} aria-pressed={activeTool === 'replace'} className={`${buttonBase} w-full justify-start ${activeTool === 'replace' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-100 bg-white text-purple-800 hover:bg-purple-50'}`}><RefreshCw className="h-3.5 w-3.5" />{isEn ? 'Replace color (R)' : '替换全图此色'}</button>
               {hasImage && (
                 <div className="rounded-lg border border-purple-100 bg-purple-50/50 p-1">
                   <button type="button" aria-pressed={showOverlay} onClick={() => setShowOverlay(!showOverlay)} className={`${buttonBase} w-full justify-start ${showOverlay ? 'border-amber-300 bg-amber-100 text-amber-950' : 'border-transparent text-purple-800 hover:bg-purple-100'}`}><Eye className="h-3.5 w-3.5" />{isEn ? 'Original overlay' : '原图叠影'}</button>
@@ -291,7 +296,15 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           )}
         </div>
 
-        <div className="ml-auto flex items-center gap-1">
+        <button type="button" onClick={onOpenColorPicker} className="inline-flex min-h-8 shrink-0 items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-2 text-left transition-colors hover:bg-purple-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1" title={isEn ? 'Click to select active bead color' : '点击选择当前涂色拼豆'}>
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-black/20 text-[9px] font-black shadow-inner" style={{ backgroundColor: selectedColor ? selectedColor.hex : '#CCCCCC' }}>{selectedColor?.symbol || ''}</span>
+          <span className="min-w-0"><span className="block text-[11px] font-black leading-none text-purple-950">{selectedColor ? selectedColor.code : (isEn ? 'None' : '未选择')}</span><span className="mt-0.5 block max-w-[72px] truncate text-[9px] leading-none text-purple-600">{selectedColor ? selectedColor.name : (isEn ? 'Select color' : '选色')}</span></span>
+        </button>
+        <div className="flex shrink-0 items-center gap-0.5 rounded-lg border border-purple-100 bg-white/70 p-0.5" role="group" aria-label={isEn ? 'History controls' : '历史操作'}>
+          <button type="button" onPointerDown={event => startHistoryRepeat(undoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(undoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(undoRepeatRef.current!)} onClick={() => { if (undoRepeatRef.current!.shouldHandleClick()) onUndo(); }} disabled={!canUndo} className={iconButton} title={isEn ? 'Undo (Ctrl+Z)' : '撤销 (Ctrl+Z)'} aria-label={isEn ? 'Undo' : '撤销'}><Undo2 className="h-4 w-4" /></button>
+          <button type="button" onPointerDown={event => startHistoryRepeat(redoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(redoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(redoRepeatRef.current!)} onClick={() => { if (redoRepeatRef.current!.shouldHandleClick()) onRedo(); }} disabled={!canRedo} className={iconButton} title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'} aria-label={isEn ? 'Redo' : '重做'}><Redo2 className="h-4 w-4" /></button>
+        </div>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           <button type="button" onClick={onSavePattern} disabled={isSavingPattern} className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-sky-300 bg-sky-600 px-2.5 text-[11px] font-black text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:cursor-wait disabled:opacity-60" title={isEn ? 'Save editable pattern without downloading' : '保存可编辑图纸，不下载文件'}>
             <Save className={`h-3.5 w-3.5 ${isSavingPattern ? 'animate-pulse' : ''}`} />{isEn ? (isSavingPattern ? 'Saving' : 'Save') : (isSavingPattern ? '保存中' : '保存')}
           </button>
@@ -301,26 +314,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-        <button type="button" onClick={onOpenColorPicker} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-purple-200 bg-purple-50 px-2 text-left transition-colors hover:bg-purple-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1" title={isEn ? 'Click to select active bead color' : '点击选择当前涂色拼豆'}>
-          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-full border border-black/20 text-[9px] font-black shadow-inner" style={{ backgroundColor: selectedColor ? selectedColor.hex : '#CCCCCC' }}>{selectedColor?.symbol || ''}</span>
-          <span className="min-w-0"><span className="block text-[11px] font-black leading-none text-purple-950">{selectedColor ? selectedColor.code : (isEn ? 'None' : '未选择')}</span><span className="mt-0.5 block max-w-[90px] truncate text-[9px] leading-none text-purple-600">{selectedColor ? selectedColor.name : (isEn ? 'Select color' : '选色')}</span></span>
-        </button>
 
-        <div className="flex items-center gap-0.5 rounded-lg border border-purple-100 bg-white/70 p-0.5" role="group" aria-label={isEn ? 'History controls' : '历史操作'}>
-          <button type="button" onPointerDown={event => startHistoryRepeat(undoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(undoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(undoRepeatRef.current!)} onClick={() => { if (undoRepeatRef.current!.shouldHandleClick()) onUndo(); }} disabled={!canUndo} className={iconButton} title={isEn ? 'Undo (Ctrl+Z)' : '撤销 (Ctrl+Z)'} aria-label={isEn ? 'Undo' : '撤销'}><Undo2 className="h-4 w-4" /></button>
-          <button type="button" onPointerDown={event => startHistoryRepeat(redoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(redoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(redoRepeatRef.current!)} onClick={() => { if (redoRepeatRef.current!.shouldHandleClick()) onRedo(); }} disabled={!canRedo} className={iconButton} title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'} aria-label={isEn ? 'Redo' : '重做'}><Redo2 className="h-4 w-4" /></button>
-        </div>
-
-        <div className="flex items-center gap-0.5 rounded-lg border border-purple-100 bg-white/70 p-0.5" role="group" aria-label={isEn ? 'Zoom controls' : '缩放控制'}>
-          <button type="button" onClick={onZoomOut} className={iconButton} title={isEn ? 'Zoom Out' : '缩小'} aria-label={isEn ? 'Zoom out' : '缩小'}><ZoomOut className="h-3.5 w-3.5" /></button>
-          <span className="min-w-[42px] text-center font-mono text-[11px] font-bold text-purple-950" aria-live="polite">{Math.round(zoom * 100)}%</span>
-          <button type="button" onClick={onZoomIn} className={iconButton} title={isEn ? 'Zoom In' : '放大'} aria-label={isEn ? 'Zoom in' : '放大'}><ZoomIn className="h-3.5 w-3.5" /></button>
-          <button type="button" onClick={onResetZoom} className={iconButton} title={isEn ? 'Reset Zoom' : '适应屏幕'} aria-label={isEn ? 'Reset zoom' : '适应屏幕'}><Maximize2 className="h-3.5 w-3.5" /></button>
-        </div>
-
-        <span className="hidden min-[1180px]:inline text-[10px] text-purple-500">{isEn ? 'Shortcuts: P / H / B / E / I / R · Ctrl+Z / Ctrl+Y' : '快捷键：P / H / B / E / I / R · Ctrl+Z / Ctrl+Y'}</span>
-      </div>
     </div>
   );
 };

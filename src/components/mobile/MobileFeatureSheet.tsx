@@ -29,8 +29,10 @@ import {
   Trash2,
 } from 'lucide-react';
 import { BeadShape, SymmetryMode, CanvasBackdrop } from '../../types';
+import { SymmetryAxisControls, type WorkspaceEditingActions } from '../SymmetryAxisControls';
 
 export interface MobileFeatureSheetProps {
+  editorActions?: WorkspaceEditingActions;
   isOpen: boolean;
   onClose: () => void;
   // Feature actions
@@ -73,6 +75,7 @@ export interface MobileFeatureSheetProps {
 }
 
 export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
+  editorActions,
   isOpen,
   onClose,
   onOpenSmartReduce,
@@ -358,7 +361,16 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               </button>
             ))}
           </div>
+          <SymmetryAxisControls actions={editorActions} mode={symmetryMode} isEn={isEn}/>
         </div>
+
+        {editorActions && <div className="rounded-2xl border border-purple-200 bg-purple-50 p-3">
+          <p className="mb-2 text-xs font-bold text-purple-950">{isEn ? 'Mirror entire pattern' : '镜像翻转整张图纸'}</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" disabled={editorActions.isPracticeMode} onClick={() => {editorActions.onMirrorFlip('horizontal');onClose();}} className="min-h-11 rounded-xl border border-purple-200 bg-white text-xs font-bold text-purple-800 disabled:opacity-40">{isEn ? 'Flip left/right' : '左右翻转'}</button>
+            <button type="button" disabled={editorActions.isPracticeMode} onClick={() => {editorActions.onMirrorFlip('vertical');onClose();}} className="min-h-11 rounded-xl border border-purple-200 bg-white text-xs font-bold text-purple-800 disabled:opacity-40">{isEn ? 'Flip top/bottom' : '上下翻转'}</button>
+          </div>
+        </div>}
 
         {/* 4. Canvas Backdrop Tone */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">

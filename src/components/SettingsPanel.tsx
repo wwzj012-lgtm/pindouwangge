@@ -20,6 +20,7 @@ import { BrandKey, ConvertSettings, DitherMode } from '../types';
 import { BOARD_PRESETS, getBrandOptions } from '../data/palettes';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
 import { resetBackgroundRemovalForNewImage } from '../utils/imageStudioControls';
+import { canvasLimitForMembership } from '../utils/communityPatternAccess';
 
 interface SettingsPanelProps {
   settings: ConvertSettings;
@@ -54,7 +55,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     : 'w-80 max-w-[85vw] bg-white/90 backdrop-blur-md border-r border-purple-200/90 text-purple-950 p-4 flex flex-col h-full overflow-y-auto space-y-5 text-xs select-none shrink-0 shadow-sm';
 
   // Tier max canvas limits
-  const maxCanvasLimit = isPro ? 900 : isVip ? 400 : 100;
+  const maxCanvasLimit = canvasLimitForMembership({ isVip, isPro });
   const [limitWarning, setLimitWarning] = React.useState<string | null>(null);
   const updateSetting = <K extends keyof ConvertSettings>(key: K, value: ConvertSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));

@@ -31,9 +31,8 @@ import {
   renameExportedPattern,
   type ExportedPatternRecord,
 } from '../utils/patternHistory';
-import { renderPatternPreview } from '../utils/patternPreview';
+import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
 import {
-  getCommunityPublishErrorCode,
   publishCommunityPost,
   uploadCommunityAsset,
   type CommunityPostVisibility,
@@ -151,7 +150,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState('');
-  const [section, setSection] = useState<'private' | 'published'>('private');
+  const [section, setSection] = useState<'library' | 'published'>('library');
   const [publishTarget, setPublishTarget] = useState<ExportedPatternRecord | null>(null);
   const [publishTitle, setPublishTitle] = useState('');
   const [publishDescription, setPublishDescription] = useState('');
@@ -207,7 +206,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     try {
       const syncedRecord = await retryPatternCloudSync(record.id, currentUser.uid);
       await loadPatterns();
-      setMessage(isEn ? 'Saved to your private cloud gallery.' : '已保存到云端私有图库。');
+      setMessage(isEn ? 'Saved to your cloud gallery.' : '已保存到云端图库。');
       return syncedRecord;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (isEn ? 'Cloud save failed.' : '云端保存失败。'));
@@ -349,16 +348,6 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     setPublishError(null);
   };
 
-  const createCommunityPreviewFile = async (record: ExportedPatternRecord, userId: string): Promise<File> => {
-    let preview = record.previewBlob ?? null;
-    if (!preview && record.cloudRevision) {
-      preview = await getExportedPatternPreview(record.id, record.cloudRevision, userId);
-    }
-    if (!preview) preview = await renderPatternPreview(await getPatternProject(record.id, userId));
-    const contentType = ['image/png', 'image/webp', 'image/jpeg'].includes(preview.type) ? preview.type : 'image/png';
-    return new File([preview], `${record.title}.png`, { type: contentType });
-  };
-
   const handlePublish = async (): Promise<void> => {
     if (!publishTarget || !currentUser || busyId || publishRequestRef.current) return;
     const title = publishTitle.trim();
@@ -381,9 +370,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setPublishError(isEn ? 'Complete the pattern to unlock publishing.' : '完成图纸后解锁发布。');
       return;
     }
-    // Lock the dialog before any asynchronous cloud sync so double clicks are
-    // ignored immediately. Cloud-backed records can continue synchronously;
-    // local-only records still await the explicit sync step below.
+    // Lock before any asynchronous sync, project read, or upload so double
+    // clicks cannot create duplicate assets or publish requests.
     publishRequestRef.current = true;
     setBusyId(record.id);
     const publishRecord = record.hasCloudCopy && record.userId === currentUser.uid
@@ -394,30 +382,21 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setBusyId(null);
       return;
     }
-    if (!record.hasCloudCopy && publishRecord.id !== record.id) {
-      // Warm the synced project cache so the cloud record is fully hydrated
-      // before publishing (and provide a deterministic fallback for asset
-      // generation if the Worker requests one).
-      try {
-        await getPatternProject(publishRecord.id, currentUser.uid);
-      } catch {
-        // The publish endpoint remains authoritative; a missing local cache
-        // must not block a metadata-only cloud publish.
-      }
-    }
     setBusyId(publishRecord.id);
     setMessage(null);
     setPublishError(null);
     try {
       const metadata = { title, description, visibility: publishVisibility, tags, workId: publishRecord.id };
-      let published = await publishCommunityPost(metadata);
-      if (!published.ok && getCommunityPublishErrorCode(published) === 'WORK_ASSET_REQUIRED') {
-        const upload = await uploadCommunityAsset(await createCommunityPreviewFile(publishRecord, currentUser.uid));
-        if (!upload.ok || !upload.data) throw new Error(upload.error ?? '社区图片上传失败');
-        published = await publishCommunityPost({ ...metadata, assetId: upload.data.asset.id });
-      }
+      // Always publish a fresh lossless image with the full project snapshot,
+      // never a gallery thumbnail or a metadata-only reference to an old asset.
+      const project = await getPatternProject(publishRecord.id, currentUser.uid);
+      const snapshot = await renderCommunityPattern(project);
+      const upload = await uploadCommunityAsset(new File([snapshot], `${publishRecord.title}.png`, { type: 'image/png' }));
+      if (!upload.ok || !upload.data?.asset?.id) throw new Error(upload.error ?? '社区图片上传失败');
+      const published = await publishCommunityPost({ ...metadata, assetId: upload.data.asset.id });
       if (!published.ok) throw new Error(published.error ?? '作品发布失败');
-      await markExportedPatternPublished(publishRecord.id, currentUser.uid);
+      // Backend success is authoritative. A local persistence failure must not
+      // leave the dialog open or offer a second publish for the same work.
       const publishedRecord: ExportedPatternRecord = { ...publishRecord, status: 1, hasCloudCopy: true };
       setRecords((current) => {
         const matchedSyncedRecord = current.some((item) => item.id === publishedRecord.id);
@@ -427,14 +406,20 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
             : item
         ));
       });
-      setSection('published');
       setPublishTarget(null);
       setPublishTitle('');
       setPublishDescription('');
       setPublishTags([]);
       setMessage(publishVisibility === 'public'
-        ? (isEn ? 'Published to the community. Open Community to view it.' : '作品已发布到社区，可前往社区查看。')
-        : (isEn ? 'Published privately. It will not appear in the public community list.' : '作品已私密发布，不会出现在公开社区列表。'));
+        ? (isEn ? 'Published to the community. Open Community to view it. The project remains in My Library.' : '作品已发布到社区，可前往社区查看，工程仍保留在我的图库。')
+        : (isEn ? 'Published privately. It will not appear in the public community list. The project remains in My Library.' : '作品已私密发布，不会出现在公开社区列表，工程仍保留在我的图库。'));
+      try {
+        await markExportedPatternPublished(publishRecord.id, currentUser.uid);
+      } catch {
+        setMessage(isEn
+          ? 'Published, but the local library state could not be updated. Please refresh.'
+          : '已发布，图库本地状态更新失败，请刷新');
+      }
     } catch (error) {
       setPublishError(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
     } finally {
@@ -443,9 +428,12 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     }
   };
 
-  const privateRecords = records.filter((record) => (record.status ?? 0) === 0);
-  const publishedRecords = records.filter((record) => record.status === 1);
-  const visibleRecords = section === 'private' ? privateRecords : publishedRecords;
+  const libraryRecords = records.filter((record) => record.status !== 2
+    && (record.userId === null || record.userId === currentUser?.uid));
+  const publishedRecords = currentUser
+    ? libraryRecords.filter((record) => record.status === 1 && record.userId === currentUser.uid)
+    : [];
+  const visibleRecords = section === 'library' ? libraryRecords : publishedRecords;
 
   if (!isOpen) return null;
 
@@ -490,8 +478,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
         </div>
 
         <div className="flex items-center gap-2 border-b border-slate-800 px-4 py-2">
-          <button onClick={() => setSection('private')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${section === 'private' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-            {isEn ? `Private gallery (${privateRecords.length})` : `私有图库 (${privateRecords.length})`}
+          <button onClick={() => setSection('library')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${section === 'library' ? 'bg-sky-600 text-white' : 'text-slate-400 hover:text-white'}`}>
+            {isEn ? `My Library (${libraryRecords.length})` : `我的图库 (${libraryRecords.length})`}
           </button>
           <button onClick={() => setSection('published')} className={`rounded-md px-3 py-1.5 text-xs font-bold ${section === 'published' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'}`}>
             {isEn ? `Published works (${publishedRecords.length})` : `已发布作品 (${publishedRecords.length})`}
@@ -514,7 +502,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
           ) : visibleRecords.length === 0 ? (
             <div className="flex h-48 flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-slate-700 text-center text-slate-500">
               <HardDrive className="h-7 w-7" />
-              <span>{section === 'private' ? (isEn ? 'Private gallery has 0 works.' : '私有图库作品为 0。') : (isEn ? 'Published works are 0.' : '已发布作品为 0。')}</span>
+              <span>{section === 'library' ? (isEn ? 'My Library has 0 projects.' : '我的图库工程为 0。') : (isEn ? 'Published works are 0.' : '已发布作品为 0。')}</span>
             </div>
           ) : (
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -572,7 +560,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                       </div>
                       <div className="mx-3 mt-2 text-[10px] text-slate-500">{formatChinaDate(record.updatedAt, true)}</div>
                       <div className={`mx-3 mt-2 text-[10px] font-bold ${(record.status ?? 0) === 1 ? 'text-emerald-300' : 'text-sky-300'}`}>
-                        {(record.status ?? 0) === 1 ? (isEn ? 'Published' : '已发布') : (isEn ? 'Private' : '私有')}
+                        {(record.status ?? 0) === 1 ? (isEn ? 'Published' : '已发布') : (isEn ? 'Unpublished' : '未发布')}
                       </div>
                       {record.userId === null && (
                         <p className="mx-3 mt-2 text-[10px] leading-4 text-amber-300">{isEn ? 'Unbound account: stored on this device only.' : '未绑定账号，仅本机可用。'}</p>

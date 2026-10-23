@@ -6,6 +6,7 @@ export interface CommunityPost {
   assetId: string;
   imageUrl: string;
   title: string;
+  workId?: string | null;
   publishedAt: number;
   author: {
     uid: string;
@@ -75,9 +76,13 @@ function normalizePost(post: CommunityPostResponse): CommunityPost {
   };
 }
 
-function normalizeResult(result: ApiResult<CommunityPostResponse>): ApiResult<CommunityPost> {
-  if (!result.ok || !result.data) return result;
-  return { ...result, data: normalizePost(result.data) };
+function normalizeResult(result: ApiResult<CommunityPostResponse | { post: CommunityPostResponse }>): ApiResult<CommunityPost> {
+  if (!result.ok || !result.data) return { ...result, data: undefined };
+  const post = 'post' in result.data ? result.data.post : result.data;
+  if (!post || typeof post.id !== 'string' || typeof post.assetId !== 'string' || !post.author) {
+    return { ok: false, status: result.status, error: '社区作品详情数据无效，请重新加载' };
+  }
+  return { ...result, data: normalizePost(post) };
 }
 
 export async function listCommunityPosts(cursor?: string): Promise<ApiResult<{ posts: CommunityPost[]; nextCursor: string | null }>> {
@@ -109,7 +114,7 @@ export async function listFavoriteCommunityPosts(cursor?: string): Promise<ApiRe
 }
 
 export async function getCommunityPost(id: string): Promise<ApiResult<CommunityPost>> {
-  return normalizeResult(await apiGet<CommunityPostResponse>('/api/community/posts/detail', { id }));
+  return normalizeResult(await apiGet<CommunityPostResponse | { post: CommunityPostResponse }>('/api/community/posts/detail', { id }));
 }
 
 export function reactToCommunityPost(

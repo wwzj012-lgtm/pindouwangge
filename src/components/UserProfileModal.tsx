@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
 import {
   X,
   User,
@@ -24,6 +24,7 @@ import {
   Image as ImageIcon,
   Loader2,
 } from 'lucide-react';
+import './UserProfileModal.css';
 import { useAuth } from '../context/AuthContext';
 import type { CommunityPattern } from '../data/communityData';
 import { listFavoriteCommunityPosts, type CommunityPost } from '../utils/communityApi';
@@ -38,21 +39,31 @@ import {
 } from '../utils/patternHistory';
 import { formatChinaDate } from '../utils/dateUtils';
 import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
+import {
+  getBeadInventorySnapshot,
+  getServerBeadInventorySnapshot,
+  subscribeBeadInventory,
+  writeBeadInventory,
+  type BeadStockItem,
+} from '../utils/beadInventory';
 
 export function splitProfilePatternSections(records: readonly ExportedPatternRecord[], currentUserId: string | null): {
-  privateRecords: ExportedPatternRecord[];
+  libraryRecords: ExportedPatternRecord[];
   publishedRecords: ExportedPatternRecord[];
 } {
+  const libraryRecords = records.filter((record) => record.status !== 2
+    && (record.userId === null || record.userId === currentUserId));
   return {
-    privateRecords: records.filter((record) => (record.status ?? 0) === 0),
+    libraryRecords,
     publishedRecords: currentUserId
-      ? records.filter((record) => record.status === 1 && record.userId === currentUserId)
+      ? libraryRecords.filter((record) => record.status === 1 && record.userId === currentUserId)
       : [],
   };
 }
 
 interface UserProfileModalProps {
   isOpen: boolean;
+  initialTab?: 'works' | 'likes' | 'library' | 'inventory';
   onClose: () => void;
   onOpenAccountManagement: () => void;
   onOpenVipModal?: () => void;
@@ -85,7 +96,7 @@ function PatternCoverThumbnail({ record, userId }: { record: ExportedPatternReco
   }, [record.id, record.previewBlob, record.hasPreview, record.cloudRevision, userId]);
 
   return (
-    <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-slate-950 flex items-center justify-center">
+    <div className="profile-cover relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-white flex items-center justify-center">
       {url ? (
         <img src={url} alt="" className="h-full w-full object-contain [image-rendering:pixelated]" />
       ) : (
@@ -97,17 +108,6 @@ function PatternCoverThumbnail({ record, userId }: { record: ExportedPatternReco
   );
 }
 
-// Local Inventory Item Interface
-interface BeadStockItem {
-  colorId: string;
-  code: string;
-  name: string;
-  hex: string;
-  count: number;
-  alertThreshold: number;
-}
-
-const INVENTORY_STORAGE_KEY = 'beadgrid_user_inventory_v1';
 const GUEST_COMMUNITY_MESSAGE = '游客账号仅可浏览社区。请登录或注册后再使用喜欢、收藏和发布功能。';
 const FORMAL_LOGIN_REQUIRED_MESSAGE = '请登录或注册后再查看喜欢和管理个人图纸。';
 
@@ -125,6 +125,7 @@ function displayFavoriteError(error: string | undefined): string {
 
 export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   isOpen,
+  initialTab = 'library',
   onClose,
   onOpenAccountManagement,
   onOpenVipModal,
@@ -146,7 +147,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   }, [currentUser, openLoginModal, userProfile]);
 
   // Active Main Tab inside Personal Center
-  const [activeTab, setActiveTab] = useState<'works' | 'likes' | 'library' | 'inventory'>('library');
+  const [activeTab, setActiveTab] = useState<'works' | 'likes' | 'library' | 'inventory'>(initialTab);
+  useEffect(() => {
+    if (isOpen) setActiveTab(initialTab);
+  }, [isOpen, initialTab]);
   const [favoritePosts, setFavoritePosts] = useState<CommunityPost[]>([]);
   const [loadingFavorites, setLoadingFavorites] = useState(false);
   const [favoritesError, setFavoritesError] = useState<string | null>(null);
@@ -166,10 +170,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     setActionBusyId(null);
     return () => { editRequestRef.current += 1; };
   }, [isOpen, currentUser?.uid]);
-  const { privateRecords, publishedRecords } = splitProfilePatternSections(savedPatterns, currentUser?.uid ?? null);
-  const privatePatternCount = privateRecords.length;
+  const { libraryRecords, publishedRecords } = splitProfilePatternSections(savedPatterns, currentUser?.uid ?? null);
+  const libraryPatternCount = libraryRecords.length;
   const publishedPatternCount = publishedRecords.length;
-  const activePatternRecords = activeTab === 'works' ? publishedRecords : privateRecords;
+  const activePatternRecords = activeTab === 'works' ? publishedRecords : libraryRecords;
 
   // Load Saved Patterns when modal opens or user changes
   const loadSavedPatterns = async () => {
@@ -266,7 +270,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   };
 
   // --- Bead Inventory State ("豆仓·我的库存") ---
-  const [inventory, setInventory] = useState<Record<string, BeadStockItem>>({});
+  const inventory: Record<string, BeadStockItem> = useSyncExternalStore(subscribeBeadInventory, getBeadInventorySnapshot, getServerBeadInventorySnapshot);
   const [inventorySearch, setInventorySearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'alert'>('all');
   const [letterFilter, setLetterFilter] = useState<string>('all');
@@ -285,43 +289,25 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [newColorCount, setNewColorCount] = useState(600);
   const [newColorAlert, setNewColorAlert] = useState(100);
 
-  // Inventory is user-entered local data. Do not invent stock when none has been recorded.
-  useEffect(() => {
-    try {
-      const stored = localStorage.getItem(INVENTORY_STORAGE_KEY);
-      const initial: Record<string, BeadStockItem> = stored ? JSON.parse(stored) : {};
-      setInventory(initial);
-    } catch {
-      // Fallback
-    }
-  }, []);
-
-  // Save Inventory changes to localStorage
+  // Shared v1 store notifies the practice panel in this window and other tabs.
   const saveInventory = (updated: Record<string, BeadStockItem>) => {
     if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return false;
-    setInventory(updated);
-    try {
-      localStorage.setItem(INVENTORY_STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      // Storage error ignored
+    if (!writeBeadInventory(updated)) {
+      setActionMessage('库存保存失败，请检查浏览器本地存储后重试。');
+      return false;
     }
     return true;
   };
 
   // Adjust Single Color Quantity
-  const handleAdjustCount = (code: string, delta: number) => {
+  const handleAdjustCount = (inventoryKey: string, delta: number) => {
     if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return;
-    const current = inventory[code] || {
-      colorId: `MARD_${code}`,
-      code,
-      name: code,
-      hex: '#888888',
-      count: 0,
-      alertThreshold: 100,
-    };
+    const latest = getBeadInventorySnapshot();
+    const current = latest[inventoryKey];
+    if (!current) return;
     const updated = {
-      ...inventory,
-      [code]: { ...current, count: Math.max(0, current.count + delta) },
+      ...latest,
+      [inventoryKey]: { ...current, count: Math.max(0, current.count + delta) },
     };
     saveInventory(updated);
   };
@@ -329,8 +315,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   // Batch Set All Stock
   const handleApplyBatchSet = () => {
     const updated: Record<string, BeadStockItem> = {};
-    Object.keys(inventory).forEach(code => {
-      updated[code] = { ...inventory[code], count: batchSetValue };
+    const latest = getBeadInventorySnapshot();
+    Object.keys(latest).forEach(code => {
+      updated[code] = { ...latest[code], count: batchSetValue };
     });
     if (saveInventory(updated)) setIsBatchSetOpen(false);
   };
@@ -339,8 +326,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const handleApplyBatchDelta = (multiplier: number) => {
     const updated: Record<string, BeadStockItem> = {};
     const delta = batchDeltaValue * multiplier;
-    Object.keys(inventory).forEach(code => {
-      const current = inventory[code];
+    const latest = getBeadInventorySnapshot();
+    Object.keys(latest).forEach(code => {
+      const current = latest[code];
       updated[code] = { ...current, count: Math.max(0, current.count + delta) };
     });
     if (saveInventory(updated)) setIsBatchDeltaOpen(false);
@@ -354,7 +342,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       alert('请填写拼豆色号 (例如: M13, A24, X01)');
       return;
     }
-    if (inventory[code]) {
+    const latest = getBeadInventorySnapshot();
+    if (Object.hasOwn(latest, code)) {
       alert(`色号 ${code} 已在您的豆仓库存中存在！`);
       return;
     }
@@ -368,7 +357,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       alertThreshold: Math.max(0, newColorAlert),
     };
     const updated = {
-      ...inventory,
+      ...latest,
       [code]: newItem,
     };
     if (!saveInventory(updated)) return;
@@ -382,7 +371,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   };
 
   // Derived Inventory Metrics
-  const inventoryList = useMemo(() => Object.values(inventory || {}), [inventory]);
+  const inventoryList = useMemo(() => Object.entries(inventory).map(([inventoryKey, item]) => ({ ...item, inventoryKey })), [inventory]);
   const totalBeadStock = useMemo(
     () => inventoryList.reduce((sum, item) => sum + (item?.count || 0), 0),
     [inventoryList]
@@ -428,18 +417,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const displayName = userProfile?.displayName || currentUser?.displayName || (currentUser ? '已登录用户' : '未登录用户');
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-4 overflow-y-auto">
+    <div className="profile-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
       <ErrorBoundary fallbackTitle="个人中心界面加载遇到错误">
-      <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] text-slate-100 duration-200">
+      <div className="profile-dialog relative w-full max-w-4xl bg-slate-50 border border-slate-200 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] text-slate-800 duration-200">
         
         {/* Profile Header Banner (Image 2 Inspired Dark Aesthetic) */}
-        <div className="relative bg-gradient-to-b from-slate-950 via-slate-900 to-slate-900 p-5 sm:p-6 border-b border-slate-800/80">
+        <div className="profile-header relative bg-gradient-to-b from-white via-white to-purple-50 p-5 sm:p-6 border-b border-slate-200/80">
           
           {/* Top Right Close Button */}
           <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
             <button
               onClick={onClose}
-              className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer"
+              aria-label="关闭个人中心"
+              className="p-1.5 bg-slate-100/80 hover:bg-slate-200 text-slate-500 hover:text-slate-900 rounded-xl transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -449,7 +439,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             
             {/* Avatar with Click to Manage Account */}
             <div className="relative group shrink-0 cursor-pointer" onClick={onOpenAccountManagement}>
-              <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-purple-500/40 p-1 bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 overflow-hidden shadow-xl group-hover:scale-105 transition-transform">
+              <div className="profile-avatar w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-purple-500/40 p-1 bg-gradient-to-tr from-purple-600 via-indigo-600 to-pink-500 overflow-hidden shadow-xl group-hover:scale-105 transition-transform">
                 {userProfile?.photoURL ? (
                   <img
                     src={userProfile.photoURL}
@@ -457,13 +447,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     className="w-full h-full object-cover rounded-full"
                   />
                 ) : (
-                  <div className="w-full h-full rounded-full bg-slate-800 text-purple-300 font-black text-2xl sm:text-3xl flex items-center justify-center">
+                  <div className="w-full h-full rounded-full bg-slate-100 text-purple-600 font-black text-2xl sm:text-3xl flex items-center justify-center">
                     <User className="w-9 h-9" aria-label="默认用户头像" />
                   </div>
                 )}
               </div>
               <div
-                className="absolute bottom-0 right-0 p-1.5 bg-purple-600 text-white rounded-full border-2 border-slate-900 shadow-md group-hover:bg-purple-500 transition-colors"
+                className="absolute bottom-0 right-0 p-1.5 bg-purple-600 text-slate-900 rounded-full border-2 border-slate-900 shadow-md group-hover:bg-purple-500 transition-colors"
                 title="点击进入账号管理修改头像"
               >
                 <Edit3 className="w-3.5 h-3.5" />
@@ -475,7 +465,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="flex flex-wrap items-center gap-2.5">
                 <h2
                   onClick={onOpenAccountManagement}
-                  className="text-xl sm:text-2xl font-black text-white hover:text-purple-300 transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="text-xl sm:text-2xl font-black text-slate-900 hover:text-purple-600 transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   {displayName}
                   <Edit3 className="w-4 h-4 text-slate-500 opacity-60 hover:opacity-100" />
@@ -486,41 +476,25 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     商家Pro
                   </span>
                 ) : isVip ? (
-                  <span className="text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold px-2.5 py-0.5 rounded-full">
+                  <span className="text-[10px] bg-amber-500/20 text-amber-700 border border-amber-500/40 font-bold px-2.5 py-0.5 rounded-full">
                     VIP会员
                   </span>
                 ) : (
                   <button
                     onClick={onOpenVipModal}
-                    className="text-[10px] bg-purple-500/20 text-purple-300 hover:bg-purple-500/30 border border-purple-500/40 font-bold px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1"
+                    className="text-[10px] bg-purple-500/20 text-purple-600 hover:bg-purple-500/30 border border-purple-500/40 font-bold px-2.5 py-0.5 rounded-full transition-all cursor-pointer flex items-center gap-1"
                   >
-                    <Crown className="w-3 h-3 text-amber-400" />
+                    <Crown className="w-3 h-3 text-amber-700" />
                     <span>升级PRO</span>
                   </button>
                 )}
               </div>
 
-              {/* No social-stat query is available yet, so keep these values honest. */}
-              <div className="flex items-center gap-5 text-xs sm:text-sm pt-1">
-                <div className="flex items-center gap-1">
-                  <span className="text-slate-400 font-medium">关注</span>
-                  <span className="text-white font-black">0</span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <span className="text-slate-400 font-medium">粉丝</span>
-                  <span className="text-white font-black">0</span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <span className="text-slate-400 font-medium">获赞</span>
-                  <span className="text-white font-black">0</span>
-                </div>
-
-                <div className="flex items-center gap-1">
-                  <span className="text-slate-400 font-medium">作品</span>
-                  <span className="text-purple-400 font-black">{worksCount}</span>
-                </div>
+              <p className="profile-description">管理你的图纸收藏与拼豆储备</p>
+              <div className="profile-summary">
+                <span><strong>{libraryPatternCount}</strong> 图库工程</span>
+                <span><strong>{publishedPatternCount}</strong> 已发布</span>
+                <span><strong>{inventoryList.length}</strong> 库存色号</span>
               </div>
 
             </div>
@@ -528,13 +502,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         {/* Profile Navigation Tabs */}
-        <div className="px-4 sm:px-6 bg-slate-950 border-b border-slate-800 flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-none shrink-0 py-2">
+        <div className="profile-tabs px-4 sm:px-6 bg-white border-b border-slate-200 flex items-center gap-1 sm:gap-2 overflow-x-auto scrollbar-none shrink-0 py-2">
           <button
-            onClick={() => setActiveTab('works')}
+            aria-pressed={activeTab === 'works'} onClick={() => setActiveTab('works')}
             className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'works'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                ? 'bg-purple-600 text-slate-900 shadow-md shadow-purple-600/30'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
             <span>作品</span>
@@ -542,11 +516,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           </button>
 
           <button
-            onClick={handleOpenLikes}
+            aria-pressed={activeTab === 'likes'} onClick={handleOpenLikes}
             className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'likes'
-                ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30'
-                : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                ? 'bg-purple-600 text-slate-900 shadow-md shadow-purple-600/30'
+                : 'text-slate-500 hover:text-slate-900 hover:bg-slate-50'
             }`}
           >
             <span>喜欢</span>
@@ -555,31 +529,31 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
           {/* 我的图库 (My Library / Saved Patterns) */}
           <button
-            onClick={() => setActiveTab('library')}
+            aria-pressed={activeTab === 'library'} onClick={() => setActiveTab('library')}
             className={`px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 border ${
               activeTab === 'library'
-                ? 'bg-purple-600 text-white border-purple-500 shadow-md shadow-purple-600/30'
-                : 'bg-purple-950/40 text-purple-200 border-purple-800/60 hover:bg-purple-900/60 hover:text-white'
+                ? 'bg-purple-600 text-slate-900 border-purple-500 shadow-md shadow-purple-600/30'
+                : 'bg-purple-50/40 text-purple-800 border-purple-200/60 hover:bg-purple-100/60 hover:text-slate-900'
             }`}
           >
             <FolderHeart className="w-3.5 h-3.5 text-pink-400" />
             <span>我的图库</span>
-            <span className="px-1.5 py-0.2 bg-purple-500/30 text-purple-300 text-[10px] rounded-full font-mono">
-              {privatePatternCount}
+            <span className="px-1.5 py-0.2 bg-purple-500/30 text-purple-600 text-[10px] rounded-full font-mono">
+              {libraryPatternCount}
             </span>
           </button>
 
           {/* D豆仓·我的库存 */}
           <button
-            onClick={() => setActiveTab('inventory')}
+            aria-pressed={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')}
             className={`px-4 py-2 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center gap-1.5 shrink-0 ml-auto ${
               activeTab === 'inventory'
                 ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-slate-950 shadow-md shadow-amber-500/20'
-                : 'bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20'
+                : 'bg-amber-500/10 text-amber-700 border border-amber-500/30 hover:bg-amber-500/20'
             }`}
           >
             <Package className="w-4 h-4" />
-            <span>豆仓·我的库存</span>
+            <span>我的豆仓</span>
             {alertCount > 0 && (
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
             )}
@@ -587,19 +561,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         </div>
 
         {/* Tab Content Display Area */}
-        <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
+        <div className="profile-content p-4 sm:p-6 overflow-y-auto custom-scrollbar flex-1 space-y-6">
           
           {/* The Worker exposes persisted favorites. Viewing history has no data model yet, so no misleading tab is rendered. */}
           {activeTab === 'likes' && (
             <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3 text-xs text-slate-400">
+              <div className="flex items-center justify-between gap-3 text-xs text-slate-500">
                 <div>
-                  <h3 className="text-sm font-bold text-white">喜欢</h3>
+                  <h3 className="text-sm font-bold text-slate-900">喜欢</h3>
                   <p className="mt-1">已收藏的社区作品，仅自己可见。</p>
                 </div>
                 <button
                   onClick={() => void loadFavoritePosts()}
-                  className="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-800 px-2.5 py-1.5 font-bold text-slate-200 transition-colors hover:bg-slate-700"
+                  className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 px-2.5 py-1.5 font-bold text-slate-700 transition-colors hover:bg-slate-200"
                   title="刷新喜欢列表"
                 >
                   <RotateCcw className="w-3 h-3" />
@@ -608,38 +582,38 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </div>
 
               {loadingFavorites ? (
-                <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-400">
-                  <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+                <div className="py-16 flex flex-col items-center justify-center gap-3 text-slate-500">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
                   <span className="text-xs font-bold">正在读取喜欢列表...</span>
                 </div>
               ) : favoritesError ? (
-                <div className="rounded-2xl border border-rose-900/70 bg-rose-950/30 p-5 text-center text-sm text-rose-200">
+                <div className="rounded-2xl border border-rose-200/70 bg-rose-50/30 p-5 text-center text-sm text-rose-700">
                   <p>{favoritesError}</p>
                   {needsCommunityLogin && (
                     <button
                       type="button"
                       onClick={handleCommunityLogin}
-                      className="mt-3 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-purple-500"
+                      className="mt-3 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-slate-900 transition-colors hover:bg-purple-500"
                     >
                       登录或注册
                     </button>
                   )}
                 </div>
               ) : favoritePosts.length === 0 ? (
-                <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 bg-slate-950/60 border border-slate-800/80 rounded-3xl p-8">
-                  <Heart className="w-8 h-8 text-purple-400" />
-                  <h3 className="text-base font-black text-white">喜欢的作品为 0</h3>
-                  <p className="text-xs text-slate-400">在社区收藏作品后，会显示在这里。</p>
+                <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 bg-white/60 border border-slate-200/80 rounded-3xl p-8">
+                  <Heart className="w-8 h-8 text-purple-600" />
+                  <h3 className="text-base font-black text-slate-900">喜欢的作品为 0</h3>
+                  <p className="text-xs text-slate-500">在社区收藏作品后，会显示在这里。</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="profile-card-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {favoritePosts.map(pattern => (
-                    <article key={pattern.id} className="overflow-hidden rounded-2xl border border-slate-800 bg-slate-950">
+                    <article key={pattern.id} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                       <img src={pattern.imageUrl} alt={pattern.title} className="aspect-[4/3] w-full object-cover" />
                       <div className="space-y-1.5 p-3">
-                        <h4 className="truncate text-sm font-bold text-white">{pattern.title}</h4>
-                        <p className="truncate text-xs text-slate-400">{pattern.author.displayName}</p>
-                        <div className="flex items-center gap-1 text-xs font-bold text-rose-300">
+                        <h4 className="truncate text-sm font-bold text-slate-900">{pattern.title}</h4>
+                        <p className="truncate text-xs text-slate-500">{pattern.author.displayName}</p>
+                        <div className="flex items-center gap-1 text-xs font-bold text-rose-700">
                           <Heart className="w-3.5 h-3.5 fill-current" />
                           {pattern.favoriteCount}
                         </div>
@@ -651,22 +625,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* Published works and private library share one card view with disjoint status sections. */}
+          {/* Published works are a subset of the library and share its card view. */}
           {(activeTab === 'works' || activeTab === 'library') && (
             <div className="space-y-4 animate-in fade-in duration-200">
               
               {/* Header Info */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-purple-950/30 border border-purple-800/40 p-3.5 rounded-2xl">
+              <div className="profile-library-heading flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 bg-purple-50/30 border border-purple-200/40 p-3.5 rounded-2xl">
                 <div className="flex items-center gap-2">
                   <FolderHeart className="w-5 h-5 text-pink-400" />
                   <div>
-                    <h3 className="text-sm font-bold text-white">{activeTab === 'works' ? '我的作品 · 已发布作品' : '我的图库 · 私有工程'}</h3>
-                    <p className="text-xs text-slate-400">{activeTab === 'works' ? `已发布 ${publishedPatternCount} 个作品，可继续编辑或删除。` : `私有 ${privatePatternCount} 个工程，仅自己可见。`}</p>
+                    <h3 className="text-sm font-bold text-slate-900">{activeTab === 'works' ? '我的作品 · 已发布作品' : '我的图库 · 全部工程'}</h3>
+                    <p className="text-xs text-slate-500">{activeTab === 'works' ? `已发布 ${publishedPatternCount} 个作品，可继续编辑或删除。` : `共 ${libraryPatternCount} 个本地或云端工程，包含已发布作品。`}</p>
                   </div>
                 </div>
                 <button
                   onClick={loadSavedPatterns}
-                  className="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold flex items-center gap-1 cursor-pointer self-end sm:self-auto"
+                  className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold flex items-center gap-1 cursor-pointer self-end sm:self-auto"
                 >
                   <RotateCcw className="w-3 h-3" />
                   <span>刷新图库</span>
@@ -675,9 +649,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               {/* Toast Message Alert */}
               {actionMessage && (
-                <div className="p-3 bg-purple-900/60 border border-purple-500/80 rounded-2xl text-purple-100 text-xs font-bold flex items-center justify-between animate-fade-in shadow-lg">
+                <div className="p-3 bg-purple-100/60 border border-purple-500/80 rounded-2xl text-purple-900 text-xs font-bold flex items-center justify-between animate-fade-in shadow-lg">
                   <span>{actionMessage}</span>
-                  <button onClick={() => setActionMessage(null)} className="text-purple-300 hover:text-white">
+                  <button onClick={() => setActionMessage(null)} className="text-purple-600 hover:text-slate-900">
                     <X className="w-4 h-4" />
                   </button>
                 </div>
@@ -685,36 +659,36 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               {/* Loading State */}
               {loadingPatterns ? (
-                <div className="py-16 flex flex-col items-center justify-center text-slate-400 gap-3">
-                  <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
-                  <span className="text-xs font-bold">正在读取{activeTab === 'works' ? '已发布作品' : '私有图库'}...</span>
+                <div className="py-16 flex flex-col items-center justify-center text-slate-500 gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-purple-600" />
+                  <span className="text-xs font-bold">正在读取{activeTab === 'works' ? '已发布作品' : '我的图库'}...</span>
                 </div>
               ) : activePatternRecords.length === 0 ? (
                 /* Empty State */
-                <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 bg-slate-950/60 border border-slate-800/80 rounded-3xl p-8">
-                  <div className="w-16 h-16 rounded-3xl bg-slate-900 border border-slate-800 flex items-center justify-center text-pink-400">
+                <div className="py-16 flex flex-col items-center justify-center text-center space-y-3 bg-white/60 border border-slate-200/80 rounded-3xl p-8">
+                  <div className="w-16 h-16 rounded-3xl bg-slate-50 border border-slate-200 flex items-center justify-center text-pink-400">
                     <FolderHeart className="w-8 h-8" />
                   </div>
-                  <h3 className="text-base font-black text-white">{activeTab === 'works' ? '已发布作品为 0' : '私有图库图纸为 0'}</h3>
-                  <p className="text-xs text-slate-400 max-w-md">
-                    {activeTab === 'works' ? '在私有图库中发布作品后，会显示在这里。' : '在画板完成拼豆设计后，点击顶部【保存】即可存入【我的图库】。'}
+                  <h3 className="text-base font-black text-slate-900">{activeTab === 'works' ? '已发布作品为 0' : '我的图库图纸为 0'}</h3>
+                  <p className="text-xs text-slate-500 max-w-md">
+                    {activeTab === 'works' ? '从我的图库发布作品后，会显示在这里，工程仍保留在图库。' : '在画板完成拼豆设计后，点击顶部【保存】即可存入【我的图库】。'}
                   </p>
                   <button
                     onClick={onClose}
-                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition-all cursor-pointer"
+                    className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-slate-900 text-xs font-bold transition-all cursor-pointer"
                   >
                     前往画板创作
                   </button>
                 </div>
               ) : (
                 /* Saved Pattern Cards Grid */
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="profile-card-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {activePatternRecords.map(record => {
                     const isBusy = actionBusyId === record.id;
                     return (
                       <div
                         key={record.id}
-                        className="group bg-slate-950 border border-slate-800 hover:border-purple-500/80 rounded-2xl overflow-hidden flex flex-col transition-all hover:shadow-xl hover:shadow-purple-950/30 relative"
+                        className="profile-pattern-card group bg-white border border-slate-200 hover:border-purple-500/80 rounded-2xl overflow-hidden flex flex-col transition-all hover:shadow-xl hover:shadow-purple-950/30 relative"
                       >
                         {/* Cover Preview Thumbnail */}
                         <div
@@ -724,10 +698,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           <PatternCoverThumbnail record={record} userId={currentUser?.uid || null} />
                           
                           {/* Top Specs Pill */}
-                          <div className="absolute top-2 left-2 bg-slate-950/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold text-purple-300 border border-slate-800">
+                          <div className="absolute top-2 left-2 bg-white/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold text-purple-600 border border-slate-200">
                             {record.width}×{record.height} 粒
                           </div>
-                          <div className="absolute top-2 right-2 bg-slate-950/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-extrabold text-amber-400 border border-slate-800">
+                          <div className="absolute top-2 right-2 bg-white/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-extrabold text-amber-700 border border-slate-200">
                             {record.totalBeads} 粒
                           </div>
                         </div>
@@ -737,27 +711,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           <div>
                             <h4
                               onClick={() => setSelectedPatternForAction(record)}
-                              className="text-xs font-extrabold text-white hover:text-purple-300 truncate cursor-pointer"
+                              className="text-xs font-extrabold text-slate-900 hover:text-purple-600 truncate cursor-pointer"
                               title={record.title}
                             >
                               {record.title}
                             </h4>
                             <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
                               <span>更新时间: {formatChinaDate(record.updatedAt)}</span>
-                              <span className="text-purple-400 font-medium">{(record.status ?? 0) === 1 ? '已发布' : '私有'}</span>
+                              <span className="text-purple-600 font-medium">{(record.status ?? 0) === 1 ? '已发布' : '未发布'}</span>
                             </div>
                           </div>
 
                           {/* Action Buttons: [编辑], [发布], [删除] */}
-                          <div className={`pt-2 border-t border-slate-800/80 grid ${activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
+                          <div className={`pt-2 border-t border-slate-200/80 grid ${activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
                             {/* 编辑 */}
                             <button
                               disabled={isBusy}
                               onClick={() => handleEditPattern(record)}
-                              className="py-1.5 px-2 rounded-xl bg-purple-900/60 hover:bg-purple-600 text-purple-200 hover:text-white border border-purple-700/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                              className="profile-edit-button py-1.5 px-2 rounded-xl bg-purple-100/60 hover:bg-purple-600 text-purple-800 hover:text-slate-900 border border-purple-200/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                               title="编辑图纸（载入画板）"
                             >
-                              <Pencil className="w-3 h-3 text-purple-300" />
+                              <Pencil className="w-3 h-3 text-purple-600" />
                               <span>编辑</span>
                             </button>
 
@@ -765,10 +739,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               <button
                                 disabled={isBusy}
                                 onClick={() => onPublishPattern(record)}
-                                className="py-1.5 px-2 rounded-xl bg-emerald-900/60 hover:bg-emerald-600 text-emerald-200 hover:text-white border border-emerald-700/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                                className="py-1.5 px-2 rounded-xl bg-emerald-50/60 hover:bg-emerald-600 text-emerald-800 hover:text-slate-900 border border-emerald-700/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                                 title="发布到社区"
                               >
-                                <Sparkles className="w-3 h-3 text-emerald-300" />
+                                <Sparkles className="w-3 h-3 text-emerald-700" />
                                 <span>发布</span>
                               </button>
                             )}
@@ -777,10 +751,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                             <button
                               disabled={isBusy}
                               onClick={() => handleDeletePattern(record)}
-                              className="py-1.5 px-2 rounded-xl bg-rose-950/60 hover:bg-rose-700 text-rose-300 hover:text-white border border-rose-800/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                              className="py-1.5 px-2 rounded-xl bg-rose-50/60 hover:bg-rose-700 text-rose-700 hover:text-slate-900 border border-rose-200/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                               title="从我的图库删除"
                             >
-                              <Trash2 className="w-3 h-3 text-rose-400" />
+                              <Trash2 className="w-3 h-3 text-rose-600" />
                               <span>删除</span>
                             </button>
                           </div>
@@ -800,10 +774,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {/* Header Title Bar */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <Package className="w-5 h-5 text-amber-400" />
-                  <h3 className="text-base font-black text-white">豆仓 · 我的库存</h3>
+                  <Package className="w-5 h-5 text-amber-700" />
+                  <h3 className="text-base font-black text-slate-900">豆仓 · 我的库存</h3>
                 </div>
-                <div className="text-xs text-slate-400 font-medium">
+                <div className="text-xs text-slate-500 font-medium">
                   本机保存个人拼豆色号储备与预警
                 </div>
               </div>
@@ -811,28 +785,28 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {/* 3 Top Summary Stat Cards (Image 1 Style) */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 {/* Stat 1: 总库存 */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-amber-400 tracking-tight">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
+                  <span className="text-2xl font-black text-amber-700 tracking-tight">
                     {totalBeadStock.toLocaleString()}
                   </span>
-                  <span className="text-xs font-bold text-slate-400 mt-0.5">总库存 (粒)</span>
+                  <span className="text-xs font-bold text-slate-500 mt-0.5">总库存 (粒)</span>
                 </div>
 
                 {/* Stat 2: 有库存色号 */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-emerald-400 tracking-tight">
+                <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
+                  <span className="text-2xl font-black text-emerald-700 tracking-tight">
                     {inStockCount}/{inventoryList.length}
                   </span>
-                  <span className="text-xs font-bold text-slate-400 mt-0.5">有库存色号</span>
+                  <span className="text-xs font-bold text-slate-500 mt-0.5">有库存色号</span>
                 </div>
 
                 {/* Stat 3: 预警色号 */}
-                <div className="bg-rose-950/30 border border-rose-500/40 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-rose-400 tracking-tight flex items-center gap-1">
+                <div className="bg-rose-50/30 border border-rose-500/40 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
+                  <span className="text-2xl font-black text-rose-600 tracking-tight flex items-center gap-1">
                     <AlertTriangle className="w-5 h-5" />
                     {alertCount}
                   </span>
-                  <span className="text-xs font-bold text-rose-300 mt-0.5">⚠️ 预警色号</span>
+                  <span className="text-xs font-bold text-rose-700 mt-0.5">⚠️ 预警色号</span>
                 </div>
               </div>
 
@@ -845,7 +819,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     value={inventorySearch}
                     onChange={e => setInventorySearch(e.target.value)}
                     placeholder="🔍 搜索色号，如 A1, M01, 纯白..."
-                    className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-slate-950 border border-slate-800 text-white placeholder-slate-500 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
+                    className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-white border border-slate-200 text-slate-900 placeholder-slate-500 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
                   />
                   <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                 </div>
@@ -862,30 +836,30 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
                   <button
                     onClick={() => setIsBatchSetOpen(true)}
-                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
                   >
-                    <Package className="w-3.5 h-3.5 text-amber-400" />
+                    <Package className="w-3.5 h-3.5 text-amber-700" />
                     <span>批量设置</span>
                   </button>
 
                   <button
                     onClick={() => setIsBatchDeltaOpen(true)}
-                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-purple-300 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-purple-600 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
                   >
-                    <SlidersHorizontal className="w-3.5 h-3.5 text-purple-400" />
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600" />
                     <span>±N 批量加减</span>
                   </button>
                 </div>
               </div>
 
               {/* Filter Tabs Row 1: Stock Status Filter */}
-              <div className="flex items-center gap-2 border-b border-slate-800 pb-2">
+              <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
                 <button
                   onClick={() => setStatusFilter('all')}
                   className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                     statusFilter === 'all'
                       ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                      : 'bg-slate-950 text-slate-400 hover:text-white'
+                      : 'bg-white text-slate-500 hover:text-slate-900'
                   }`}
                 >
                   全部 ({inventoryList.length})
@@ -896,7 +870,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                     statusFilter === 'in_stock'
                       ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
-                      : 'bg-slate-950 text-slate-400 hover:text-white'
+                      : 'bg-white text-slate-500 hover:text-slate-900'
                   }`}
                 >
                   有库存 ({inStockCount})
@@ -906,8 +880,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   onClick={() => setStatusFilter('alert')}
                   className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
                     statusFilter === 'alert'
-                      ? 'bg-rose-500 text-white font-black shadow-sm'
-                      : 'bg-slate-950 text-rose-400 hover:bg-rose-950/40'
+                      ? 'bg-rose-500 text-slate-900 font-black shadow-sm'
+                      : 'bg-white text-rose-600 hover:bg-rose-50/40'
                   }`}
                 >
                   预警色号 ({alertCount})
@@ -923,8 +897,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     onClick={() => setLetterFilter(letter)}
                     className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer ${
                       letterFilter === letter
-                        ? 'bg-purple-600 text-white shadow-sm'
-                        : 'bg-slate-950 border border-slate-800/80 text-slate-400 hover:text-white'
+                        ? 'bg-purple-600 text-slate-900 shadow-sm'
+                        : 'bg-white border border-slate-200/80 text-slate-500 hover:text-slate-900'
                     }`}
                   >
                     {letter === 'all' ? '全部' : letter}
@@ -934,7 +908,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               {/* Grid of Bead Color Inventory Cards (Image 1 Style) */}
               {filteredInventory.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 text-xs font-bold bg-slate-950/40 rounded-2xl border border-slate-800/60">
+                <div className="py-12 text-center text-slate-500 text-xs font-bold bg-white/40 rounded-2xl border border-slate-200/60">
                   没有匹配的拼豆色号库存
                 </div>
               ) : (
@@ -943,11 +917,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     const isAlert = item.count <= item.alertThreshold;
                     return (
                       <div
-                        key={item.code}
-                        className={`bg-slate-950 rounded-2xl border p-2.5 flex flex-col justify-between transition-all hover:border-amber-500/80 ${
+                        key={item.inventoryKey}
+                        className={`bg-white rounded-2xl border p-2.5 flex flex-col justify-between transition-all hover:border-amber-500/80 ${
                           isAlert
                             ? 'border-rose-500/50 bg-gradient-to-b from-rose-950/20 to-slate-950'
-                            : 'border-slate-800'
+                            : 'border-slate-200'
                         }`}
                       >
                         {/* Top Color Box Swatch */}
@@ -955,22 +929,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           className="h-14 rounded-xl relative overflow-hidden flex items-center justify-center p-1 shadow-inner"
                           style={{ backgroundColor: item.hex }}
                         >
-                          <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-white font-black text-xs shadow-md">
+                          <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-slate-900 font-black text-xs shadow-md">
                             {item.code}
                           </span>
                         </div>
 
                         {/* Middle Color Name & Quantity Info */}
                         <div className="my-2 text-center space-y-0.5">
-                          <div className="text-[11px] font-bold text-slate-300 truncate">
+                          <div className="text-[11px] font-bold text-slate-600 truncate">
                             {item.name}
                           </div>
-                          <div className="text-base font-black text-white flex items-center justify-center gap-1">
+                          <div className="text-base font-black text-slate-900 flex items-center justify-center gap-1">
                             <span>{item.count}</span>
                             <span className="text-[10px] text-slate-500 font-medium">粒</span>
                           </div>
                           {isAlert && (
-                            <div className="text-[10px] font-bold text-rose-400 flex items-center justify-center gap-0.5">
+                            <div className="text-[10px] font-bold text-rose-600 flex items-center justify-center gap-0.5">
                               <AlertTriangle className="w-3 h-3" />
                               <span>⚠️ 预警(&lt;{item.alertThreshold})</span>
                             </div>
@@ -978,17 +952,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         </div>
 
                         {/* Bottom - / + Adjust Buttons */}
-                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-800/80">
+                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-200/80">
                           <button
-                            onClick={() => handleAdjustCount(item.code, -100)}
-                            className="flex-1 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-slate-300 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
+                            onClick={() => handleAdjustCount(item.inventoryKey, -100)}
+                            className="flex-1 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-600 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
                             title="-100粒"
                           >
                             <Minus className="w-3 h-3" />
                           </button>
                           <button
-                            onClick={() => handleAdjustCount(item.code, 100)}
-                            className="flex-1 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700/80 text-amber-400 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
+                            onClick={() => handleAdjustCount(item.inventoryKey, 100)}
+                            className="flex-1 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-amber-700 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
                             title="+100粒"
                           >
                             <Plus className="w-3 h-3" />
@@ -1008,23 +982,23 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       {/* Modal 1: Batch Set Stock Value */}
       {isBatchSetOpen && (
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 p-5 rounded-3xl max-w-sm w-full space-y-4 text-slate-100">
-            <h4 className="text-sm font-black text-white flex items-center gap-2">
-              <Package className="w-4 h-4 text-amber-400" />
+          <div className="bg-slate-50 border border-slate-200 p-5 rounded-3xl max-w-sm w-full space-y-4 text-slate-800">
+            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+              <Package className="w-4 h-4 text-amber-700" />
               <span>批量设定所有色号库存</span>
             </h4>
-            <p className="text-xs text-slate-400">将豆仓内所有拼豆色号的存量统一设定为：</p>
+            <p className="text-xs text-slate-500">将豆仓内所有拼豆色号的存量统一设定为：</p>
             <input
               type="number"
               value={batchSetValue}
               onChange={e => setBatchSetValue(Number(e.target.value))}
-              className="w-full px-4 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-white text-sm font-bold"
+              className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm font-bold"
               min={0}
             />
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setIsBatchSetOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold"
               >
                 取消
               </button>
@@ -1042,37 +1016,37 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       {/* Modal: Selected Saved Pattern Actions Overlay (编辑 / 发布 / 删除) */}
       {selectedPatternForAction && (
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 max-w-md w-full space-y-4 text-slate-100 shadow-2xl relative">
+          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5 max-w-md w-full space-y-4 text-slate-800 shadow-2xl relative">
             <button
               onClick={() => setSelectedPatternForAction(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 text-slate-500 hover:text-slate-900"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-2xl bg-purple-500/20 border border-purple-500/30 text-purple-600 flex items-center justify-center">
                 <FolderHeart className="w-5 h-5 text-pink-400" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-white">{selectedPatternForAction.title}</h3>
-                <p className="text-xs text-slate-400">
+                <h3 className="text-base font-bold text-slate-900">{selectedPatternForAction.title}</h3>
+                <p className="text-xs text-slate-500">
                   {selectedPatternForAction.width}×{selectedPatternForAction.height} 粒 · 共 {selectedPatternForAction.totalBeads} 粒拼豆
                 </p>
-                <p className="mt-1 text-[11px] font-medium text-purple-300">
-                  {(selectedPatternForAction.status ?? 0) === 1 ? '已发布到社区' : '私有图纸'}
+                <p className="mt-1 text-[11px] font-medium text-purple-600">
+                  {(selectedPatternForAction.status ?? 0) === 1 ? '已发布到社区' : '未发布图纸'}
                 </p>
               </div>
             </div>
 
-            <div className="rounded-2xl overflow-hidden bg-slate-950 p-2 border border-slate-800 max-h-56 flex items-center justify-center">
+            <div className="rounded-2xl overflow-hidden bg-white p-2 border border-slate-200 max-h-56 flex items-center justify-center">
               <PatternCoverThumbnail record={selectedPatternForAction} userId={currentUser?.uid || null} />
             </div>
 
             <div className="space-y-2 pt-2">
               <button
                 onClick={() => handleEditPattern(selectedPatternForAction)}
-                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-purple-600/30"
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-slate-900 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-lg shadow-purple-600/30"
               >
                 <Pencil className="w-4 h-4" />
                 <span>编辑图纸（载入画板继续制作）</span>
@@ -1080,9 +1054,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
               <button
                 onClick={() => handleDeletePattern(selectedPatternForAction)}
-                className="w-full py-2.5 rounded-xl bg-rose-950/80 hover:bg-rose-800 text-rose-300 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-rose-800/80"
+                className="w-full py-2.5 rounded-xl bg-rose-50/80 hover:bg-rose-800 text-rose-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-rose-200/80"
               >
-                <Trash2 className="w-4 h-4 text-rose-400" />
+                <Trash2 className="w-4 h-4 text-rose-600" />
                 <span>从我的图库删除此图纸</span>
               </button>
             </div>
@@ -1093,21 +1067,21 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       {/* Modal 3: Add Custom Color Code Modal */}
       {isAddColorOpen && (
         <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-800 p-6 rounded-3xl max-w-md w-full space-y-4 text-slate-100 relative shadow-2xl">
+          <div className="bg-slate-50 border border-slate-200 p-6 rounded-3xl max-w-md w-full space-y-4 text-slate-800 relative shadow-2xl">
             <button
               onClick={() => setIsAddColorOpen(false)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white"
+              className="absolute top-4 right-4 text-slate-500 hover:text-slate-900"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center">
+              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-700 flex items-center justify-center">
                 <Plus className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="text-base font-black text-white">添加新拼豆色号</h4>
-                <p className="text-xs text-slate-400">录入自定义色号储备并加入您的豆仓库存</p>
+                <h4 className="text-base font-black text-slate-900">添加新拼豆色号</h4>
+                <p className="text-xs text-slate-500">录入自定义色号储备并加入您的豆仓库存</p>
               </div>
             </div>
 
@@ -1116,51 +1090,51 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 {/* Color Code */}
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">
-                    色号编号 <span className="text-amber-400">*</span>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">
+                    色号编号 <span className="text-amber-700">*</span>
                   </label>
                   <input
                     type="text"
                     value={newColorCode}
                     onChange={e => setNewColorCode(e.target.value)}
                     placeholder="如 M13, A24, X01"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-bold uppercase placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold uppercase placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
 
                 {/* Color Name */}
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">颜色名称</label>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">颜色名称</label>
                   <input
                     type="text"
                     value={newColorName}
                     onChange={e => setNewColorName(e.target.value)}
                     placeholder="如 薄荷绿, 马卡龙粉"
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-bold placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
               </div>
 
               {/* Color Hex & Preview */}
               <div>
-                <label className="block text-[11px] font-bold text-slate-400 mb-1">颜色 (HEX / 调色盘)</label>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">颜色 (HEX / 调色盘)</label>
                 <div className="flex items-center gap-2">
                   <input
                     type="color"
                     value={newColorHex}
                     onChange={e => setNewColorHex(e.target.value)}
-                    className="w-10 h-9 rounded-xl bg-slate-950 border border-slate-700 cursor-pointer p-0.5"
+                    className="w-10 h-9 rounded-xl bg-white border border-slate-200 cursor-pointer p-0.5"
                   />
                   <input
                     type="text"
                     value={newColorHex}
                     onChange={e => setNewColorHex(e.target.value)}
                     placeholder="#A8DADC"
-                    className="flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                   {/* Color Swatch Preview Box */}
                   <div
-                    className="w-16 h-9 rounded-xl border border-slate-700 shadow-inner flex items-center justify-center font-black text-[10px] text-white drop-shadow-md"
+                    className="w-16 h-9 rounded-xl border border-slate-200 shadow-inner flex items-center justify-center font-black text-[10px] text-slate-900 drop-shadow-md"
                     style={{ backgroundColor: newColorHex }}
                   >
                     {newColorCode || '预览'}
@@ -1184,7 +1158,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     <button
                       key={p.hex}
                       onClick={() => setNewColorHex(p.hex)}
-                      className="w-6 h-6 rounded-lg border border-slate-700 shrink-0 shadow-xs hover:scale-110 transition-transform cursor-pointer"
+                      className="w-6 h-6 rounded-lg border border-slate-200 shrink-0 shadow-xs hover:scale-110 transition-transform cursor-pointer"
                       style={{ backgroundColor: p.hex }}
                       title={p.name}
                     />
@@ -1195,34 +1169,34 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               {/* Initial Count & Alert Threshold */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">初始库存数量 (粒)</label>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">初始库存数量 (粒)</label>
                   <input
                     type="number"
                     value={newColorCount}
                     onChange={e => setNewColorCount(Number(e.target.value))}
                     min={0}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-400 mb-1">库存预警门槛 (粒)</label>
+                  <label className="block text-[11px] font-bold text-slate-500 mb-1">库存预警门槛 (粒)</label>
                   <input
                     type="number"
                     value={newColorAlert}
                     onChange={e => setNewColorAlert(Number(e.target.value))}
                     min={0}
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
                   />
                 </div>
               </div>
             </div>
 
             {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
               <button
                 onClick={() => setIsAddColorOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 transition-colors"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-600 transition-colors"
               >
                 取消
               </button>

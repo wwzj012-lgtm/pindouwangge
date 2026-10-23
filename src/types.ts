@@ -35,6 +35,7 @@ export type ToolType =
   | 'bucket'
   | 'eyedropper'
   | 'eraser'
+  | 'region_clear'
   | 'replace'
   | 'hand';
 

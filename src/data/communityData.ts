@@ -1,3 +1,5 @@
+import type { StoredPatternProject } from '../utils/patternGridCodec';
+
 export interface CommunityPattern {
   id: string;
   title: string;
@@ -20,4 +22,6 @@ export interface CommunityPattern {
   isLiked?: boolean;
   isFeatured?: boolean;
   sampleKey?: string;
+  /** Published grids restore directly; never run them through photo conversion. */
+  project?: StoredPatternProject;
 }

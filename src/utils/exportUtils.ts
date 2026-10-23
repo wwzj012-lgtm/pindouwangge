@@ -7,6 +7,13 @@ export type LegendScaleMode = 'auto' | '1.0' | '1.5' | '2.0' | '2.5' | '3.0';
 export type SymbolDisplayType = 'code' | 'symbol' | 'none';
 export type ExportQuality = 'normal' | 'high' | 'ultra';
 
+export class PatternExportSizeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PatternExportSizeError';
+  }
+}
+
 export interface ExportOptions {
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -150,14 +157,17 @@ export function drawBeadOnCanvas(
   colorHex: string,
   shape: BeadShape,
   symbolStr?: string | null,
-  symbolFontScale: number = 1.0
+  symbolFontScale: number = 1.0,
+  drawSquareOutline: boolean = true
 ) {
   if (shape === 'square') {
     ctx.fillStyle = colorHex;
     ctx.fillRect(x, y, size, size);
-    ctx.strokeStyle = '#00000022';
-    ctx.lineWidth = Math.max(0.5, size * 0.02);
-    ctx.strokeRect(x, y, size, size);
+    if (drawSquareOutline) {
+      ctx.strokeStyle = '#00000022';
+      ctx.lineWidth = Math.max(0.5, size * 0.02);
+      ctx.strokeRect(x, y, size, size);
+    }
   } else if (shape === 'circle_flat') {
     ctx.beginPath();
     ctx.arc(x + size / 2, y + size / 2, size * 0.46, 0, Math.PI * 2);
@@ -360,9 +370,10 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   const activeWidth = endX - startX;
   const activeHeight = endY - startY;
 
-  // Sizing parameters: dynamically adjust cellSize based on grid dimensions & exportQuality
+  // Keep the existing HD layout as logical coordinates. Quality changes only
+  // raster density, never cell geometry, automatic legend scaling or wrapping.
   const exportQuality = options.exportQuality || 'high';
-  const qualityMultiplier = exportQuality === 'normal' ? 1.0 : exportQuality === 'ultra' ? 2.0 : 1.4;
+  const qualityFactor = exportQuality === 'normal' ? 1 / 1.4 : exportQuality === 'ultra' ? 2 / 1.4 : 1;
 
   const maxGridBeadsInView = Math.max(activeWidth, activeHeight);
   let baseCellSize = 28;
@@ -374,7 +385,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     baseCellSize = 25;
   }
 
-  const cellSize = Math.round(baseCellSize * qualityMultiplier);
+  const cellSize = Math.round(baseCellSize * 1.4);
 
   const gridPixelWidth = activeWidth * cellSize;
   const gridPixelHeight = activeHeight * cellSize;
@@ -455,11 +466,21 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     totalCanvasHeight = startGridY + gridPixelHeight + totalLegendHeight + Math.round(40 * scale);
   }
 
+  // Apply the existing download pixel budget before allocating preview/output.
+  // Large public grids must stay readable without exhausting a phone's memory.
+  const physicalWidth = Math.round(totalCanvasWidth * qualityFactor);
+  const physicalHeight = Math.round(totalCanvasHeight * qualityFactor);
+  if (physicalWidth * physicalHeight > MAX_EXPORT_PIXELS) {
+    throw new PatternExportSizeError(isEn ? 'Full PNG is too large. Select an individual board to export without resizing the pattern.' : '整张 PNG 超过浏览器安全尺寸，请在「导出范围」选择单块分板；图纸网格不会缩小。');
+  }
   const canvas = document.createElement('canvas');
-  canvas.width = totalCanvasWidth;
-  canvas.height = totalCanvasHeight;
+  canvas.width = physicalWidth;
+  canvas.height = physicalHeight;
   const ctx = canvas.getContext('2d');
   if (!ctx) return canvas;
+  // One uniform transform covers backgrounds, text, clips, beads, watermarks
+  // and line widths/dashes; do not derive separate factors from rounded bounds.
+  ctx.scale(qualityFactor, qualityFactor);
 
   // White background
   ctx.fillStyle = '#FFFFFF';
@@ -505,19 +526,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
 
-  // 7. Render Grid Background and Lines First (Allows round beads to overlap lines cleanly and keeps white beads highly visible)
+  // 7. Render Grid Background (keeps white beads visible without per-cell lines)
   ctx.fillStyle = '#F1F5F9';
   ctx.fillRect(startGridX, startGridY, gridPixelWidth, gridPixelHeight);
-
-  ctx.strokeStyle = '#E2E8F0';
-  ctx.lineWidth = 0.5;
-  for (let y = startY; y < endY; y++) {
-    for (let x = startX; x < endX; x++) {
-      const px = startGridX + (x - startX) * cellSize;
-      const py = startGridY + (y - startY) * cellSize;
-      ctx.strokeRect(px, py, cellSize, cellSize);
-    }
-  }
 
   // Draw Beads or Peg Dots on top of the background grid
   const symbolDisplayType = options.symbolDisplayType ?? (showSymbols ? 'code' : 'none');
@@ -543,7 +554,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
           }
         }
 
-        drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label, symbolFontScale);
+        // Only exports omit square outlines; other canvas callers keep their defaults.
+        drawBeadOnCanvas(ctx, px, py, cellSize, colorHex, beadShape, label, symbolFontScale, false);
       } else if (!hideEmptyPegs) {
         // Simple elegant peg dot inside empty cell (rendered beautifully over the grey background grid)
         ctx.beginPath();
@@ -586,7 +598,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.lineWidth = 1.6;
   ctx.setLineDash([]);
   for (let x = startX + 1; x < endX; x++) {
-    if (x % 10 === 0 && (boardSize <= 0 || x % boardSize !== 0)) {
+    if (x % 10 === 0) {
       const px = startGridX + (x - startX) * cellSize;
       ctx.beginPath();
       ctx.moveTo(px, startGridY);
@@ -595,7 +607,7 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     }
   }
   for (let y = startY + 1; y < endY; y++) {
-    if (y % 10 === 0 && (boardSize <= 0 || y % boardSize !== 0)) {
+    if (y % 10 === 0) {
       const py = startGridY + (y - startY) * cellSize;
       ctx.beginPath();
       ctx.moveTo(startGridX, py);
@@ -605,29 +617,14 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   }
   ctx.restore();
 
-  // Board Boundary Overlays (Subtle translucent lines for pegboards)
-  ctx.strokeStyle = 'rgba(59, 130, 246, 0.6)';
-  ctx.lineWidth = 2;
-  for (let bx = Math.floor(startX / boardSize); bx <= Math.ceil(endX / boardSize); bx++) {
-    const gx = bx * boardSize;
-    if (gx >= startX && gx <= endX) {
-      const px = startGridX + (gx - startX) * cellSize;
-      ctx.beginPath();
-      ctx.moveTo(px, startGridY);
-      ctx.lineTo(px, startGridY + gridPixelHeight);
-      ctx.stroke();
-    }
-  }
-  for (let by = Math.floor(startY / boardSize); by <= Math.ceil(endY / boardSize); by++) {
-    const gy = by * boardSize;
-    if (gy >= startY && gy <= endY) {
-      const py = startGridY + (gy - startY) * cellSize;
-      ctx.beginPath();
-      ctx.moveTo(startGridX, py);
-      ctx.lineTo(startGridX + gridPixelWidth, py);
-      ctx.stroke();
-    }
-  }
+  // A single neutral frame also bounds partial edge boards. Internal lines use
+  // absolute pattern coordinates above, never board-local multiples.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(51, 65, 85, 0.75)';
+  ctx.lineWidth = 1.6;
+  ctx.setLineDash([]);
+  ctx.strokeRect(startGridX, startGridY, gridPixelWidth, gridPixelHeight);
+  ctx.restore();
 
   // Render Grid Watermark Overlay
   drawWatermarkOverlay(

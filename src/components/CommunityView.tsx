@@ -22,10 +22,17 @@ import {
   Loader2,
   RefreshCw,
   Upload,
+  Crop,
+  Crown,
 } from 'lucide-react';
 import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
+import { loadCommunityPattern } from '../utils/communityPattern';
+import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
+import type { StoredPatternProject } from '../utils/patternGridCodec';
+import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
+import { CommunityPatternWorkspace } from './CommunityPatternWorkspace';
 import {
   type CommunityPost,
   getCommunityPost,
@@ -36,9 +43,11 @@ import {
 } from '../utils/communityApi';
 
 interface CommunityViewProps {
-  onRemixPattern: (pattern: CommunityPattern) => void;
+  onRemixPattern: (pattern: CommunityPattern) => boolean | void;
   onNavigateToStudio: () => void;
   onOpenAuthModal: () => void;
+  onOpenVipModal?: () => void;
+  onOpenInventory?: () => void;
 }
 
 type SortMode = 'hot' | 'new' | 'favorites';
@@ -60,8 +69,8 @@ function publishedLabel(timestamp: number): string {
   return new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(timestamp));
 }
 
-function remixPattern(post: CommunityPost): CommunityPattern {
-  // Public posts currently expose a source image, but not persisted bead-grid dimensions.
+function remixPattern(post: CommunityPost, project: StoredPatternProject): CommunityPattern {
+  const cells = project.grid.flat().filter((cell) => cell !== null);
   return {
     id: post.id,
     title: post.title,
@@ -70,15 +79,16 @@ function remixPattern(post: CommunityPost): CommunityPattern {
     category: '社区作品',
     tags: [],
     imageUrl: post.imageUrl,
-    width: 29,
-    height: 29,
-    boardCount: 1,
-    beadCount: 29 * 29,
-    colorCount: 0,
+    width: project.width,
+    height: project.height,
+    boardCount: Math.ceil(project.width / project.boardSize) * Math.ceil(project.height / project.boardSize),
+    beadCount: cells.length,
+    colorCount: new Set(cells).size,
     likes: post.likeCount,
     forks: post.favoriteCount,
     views: 0,
     isLiked: post.liked,
+    project,
   };
 }
 
@@ -86,11 +96,21 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   onRemixPattern,
   onNavigateToStudio,
   onOpenAuthModal,
+  onOpenVipModal,
+  onOpenInventory,
 }) => {
-  const { currentUser, userProfile } = useAuth();
+  const { currentUser, userProfile, isVip, isPro } = useAuth();
+  const membership = { isVip, isPro };
+  const editLimit = canvasLimitForMembership(membership);
   const [activeCategory, setActiveCategory] = useState<string>('全部');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
+  const [selectedProject, setSelectedProject] = useState<StoredPatternProject | null>(null);
+  const [detailMessage, setDetailMessage] = useState<string | null>(null);
+  const [ownerOriginal, setOwnerOriginal] = useState<StoredPatternProject | null>(null);
+  const [originalPreview, setOriginalPreview] = useState<string | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'practice' | 'crop' | null>(null);
+  const detailRequestRef = useRef(0);
   const [patternsState, setPatternsState] = useState<CommunityPost[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortMode>('hot');
@@ -105,6 +125,45 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const [publishError, setPublishError] = useState<string | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
   const publishSubmissionRef = useRef(false);
+
+  useEffect(() => {
+    // A former owner's legacy private fallback must not stay visible after logout.
+    detailRequestRef.current++;
+    setWorkspaceMode(null);
+    setSelectedPattern(null);
+    setSelectedProject(null);
+    setOwnerOriginal(null);
+    setOriginalPreview(null);
+  }, [currentUser?.uid]);
+
+  const openMembership = () => {
+    setWorkspaceMode(null);
+    setSelectedPattern(null);
+    if (onOpenVipModal) onOpenVipModal(); else onOpenAuthModal();
+  };
+  const editPublicCopy = (project: StoredPatternProject): boolean => {
+    if (!selectedPattern || !canEditCommunityPattern(project, membership)) return false;
+    const accepted = onRemixPattern({ ...remixPattern(selectedPattern, project), title: project === selectedProject ? selectedPattern.title : project.name });
+    if (accepted === false) return false;
+    setWorkspaceMode(null);
+    setSelectedPattern(null);
+    return true;
+  };
+
+  useEffect(() => {
+    setOriginalPreview(null);
+    if (!ownerOriginal) return;
+    let disposed = false;
+    let previewUrl: string | undefined;
+    void renderCommunityPattern(ownerOriginal).then((blob) => {
+      if (disposed) return;
+      previewUrl = URL.createObjectURL(blob);
+      setOriginalPreview(previewUrl);
+    }).catch(() => {
+      if (!disposed) setDetailMessage('原稿已载入，但预览生成失败。你仍可载入完整图纸，当前图片是旧版发布缩略图。');
+    });
+    return () => { disposed = true; if (previewUrl) URL.revokeObjectURL(previewUrl); };
+  }, [ownerOriginal]);
 
   const refreshPatterns = useCallback(async () => {
     setIsLoading(true);
@@ -177,12 +236,30 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   };
 
   const openPattern = async (pattern: CommunityPost) => {
+    const requestId = ++detailRequestRef.current;
     setSelectedPattern(pattern);
+    setSelectedProject(null);
+    setOwnerOriginal(null);
+    setOriginalPreview(null);
+    setDetailMessage(null);
     setIsOpeningPattern(true);
-    const result = await getCommunityPost(pattern.id);
-    if (result.ok && result.data) setSelectedPattern(result.data);
-    else setRequestError(result.error ?? '作品详情暂时无法加载');
-    setIsOpeningPattern(false);
+    try {
+      const result = await getCommunityPost(pattern.id);
+      if (!result.ok || !result.data) throw new Error(result.error ?? '作品详情暂时无法加载');
+      if (requestId !== detailRequestRef.current) return;
+      setSelectedPattern(result.data);
+      const source = await loadCommunityPattern(result.data, currentUser?.uid);
+      if (requestId !== detailRequestRef.current) return;
+      setSelectedProject(source.project);
+      setOwnerOriginal(source.fromOwnerLibrary ? source.project : null);
+      setDetailMessage(source.fromOwnerLibrary
+        ? '这条旧版发布只保存了缩略图，将载入你图库中保留的原稿。撤回后重新发布可分享完整图纸。'
+        : source.project ? null : '这条作品只包含展示图片，没有原始网格和色号。请作者从图库重新发布完整图纸。');
+    } catch (error) {
+      if (requestId === detailRequestRef.current) setDetailMessage(error instanceof Error ? error.message : '图纸加载失败，请重试');
+    } finally {
+      if (requestId === detailRequestRef.current) setIsOpeningPattern(false);
+    }
   };
 
   const handleReaction = async (event: React.MouseEvent, pattern: CommunityPost, reaction: 'like' | 'favorite') => {
@@ -416,7 +493,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   <img
                     src={pattern.imageUrl}
                     alt={pattern.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    className="w-full h-full object-contain [image-rendering:pixelated]"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-purple-950/60 via-transparent to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
 
@@ -524,11 +601,11 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                       </button>
 
                       <button
-                        onClick={() => onRemixPattern(remixPattern(pattern))}
+                        onClick={() => void openPattern(pattern)}
                         className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
                       >
                         <Zap className="w-3.5 h-3.5 fill-amber-300 text-amber-300" />
-                        <span>一键做同款</span>
+                        <span>查看图纸</span>
                       </button>
                     </div>
                   </div>
@@ -553,15 +630,16 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         <div className="fixed inset-0 z-50 bg-purple-950/50 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl max-w-2xl w-full p-6 border border-purple-200 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <button
-              onClick={() => setSelectedPattern(null)}
-              className="absolute top-4 right-4 p-2 text-purple-400 hover:text-purple-900 rounded-xl hover:bg-purple-50 cursor-pointer"
+              onClick={() => { detailRequestRef.current++; setSelectedPattern(null); setOwnerOriginal(null); }}
+              className="absolute top-4 right-4 z-10 bg-white/95 p-2 text-purple-400 hover:text-purple-900 rounded-xl shadow-sm hover:bg-purple-50 cursor-pointer"
+              title="关闭图纸详情"
             >
               ✕
             </button>
 
             <div className="flex flex-col sm:flex-row gap-5 items-start">
               <div className="w-full sm:w-1/2 aspect-square rounded-2xl overflow-hidden bg-purple-50 border border-purple-200 relative shrink-0">
-                <img src={selectedPattern.imageUrl} alt={selectedPattern.title} className="w-full h-full object-cover" />
+                <img src={originalPreview ?? selectedPattern.imageUrl} alt={selectedPattern.title} className="w-full h-full object-contain [image-rendering:pixelated]" />
                 <span className="absolute bottom-3 left-3 bg-black/70 text-white font-mono text-[10px] px-2.5 py-1 rounded-md">
                   {publishedLabel(selectedPattern.publishedAt)}
                 </span>
@@ -588,7 +666,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 </div>
 
                 <h2 className="text-lg font-black text-purple-950">{selectedPattern.title}</h2>
-                <p className="text-xs text-purple-700 leading-relaxed">这是来自豆社的公开作品。你可以点赞、收藏，或将图片导入画板继续制作。</p>
+                <p className="text-xs text-purple-700 leading-relaxed">完整查看、定位色号与计时拼豆不受图纸大小限制。进入画板编辑时，按你当前账号的尺寸权限创建独立副本。</p>
+                {detailMessage && <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">{detailMessage}</p>}
+                {selectedProject && <p className="text-xs text-purple-700">{selectedProject.width} × {selectedProject.height} 格 · {selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0)} 颗豆 · {new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size} 种颜色</p>}
 
                 <div className="grid grid-cols-3 gap-2 bg-purple-50 p-3 rounded-2xl border border-purple-200/80 text-center">
                   <div>
@@ -605,24 +685,42 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   </div>
                 </div>
 
-                <div className="pt-2 flex items-center gap-2">
+                {selectedProject && !canEditCommunityPattern(selectedProject, membership) && <div role="status" className="rounded-xl border border-purple-200 bg-purple-50 p-3 text-xs leading-6 text-purple-800">
+                  当前账号最多编辑 {editLimit} × {editLimit} 格。你仍可完整查看、收藏和实操；编辑可框选区域副本，或升级会员。原图不会自动缩小。
+                  <button type="button" onClick={openMembership} className="mt-1 inline-flex min-h-11 items-center gap-1.5 font-bold text-purple-700"><Crown size={15} />查看会员权益</button>
+                </div>}
+                <div className="grid gap-2 pt-2">
+                  <button type="button" onClick={() => setWorkspaceMode('practice')} disabled={isOpeningPattern || !selectedProject}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50">
+                    <Eye size={16} />查看与实操
+                  </button>
                   <button
                     onClick={() => {
-                      const p = selectedPattern;
-                      setSelectedPattern(null);
-                      onRemixPattern(remixPattern(p));
+                      if (selectedProject) editPublicCopy(selectedProject);
                     }}
-                    className="flex-1 py-3 rounded-2xl bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-extrabold text-xs shadow-md flex items-center justify-center gap-2 cursor-pointer active:scale-98"
+                    disabled={isOpeningPattern || !selectedProject || !canEditCommunityPattern(selectedProject, membership)}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-4 py-3 text-xs font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <Zap className="w-4 h-4 fill-amber-300 text-amber-300" />
-                    <span>加载至画布一键制作同款</span>
+                    <Zap className="w-4 h-4" />
+                    <span>{isOpeningPattern ? '正在加载原始图纸…' : selectedProject && !canEditCommunityPattern(selectedProject, membership) ? '超出当前账号编辑上限' : '载入完整图纸'}</span>
                   </button>
+                  <button type="button" disabled={isOpeningPattern || !selectedProject} onClick={() => setWorkspaceMode('crop')}
+                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"><Crop size={15} />框选区域副本</button>
                 </div>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {workspaceMode && selectedPattern && selectedProject && <CommunityPatternWorkspace
+        project={selectedProject} title={selectedPattern.title} postId={selectedPattern.id} initialMode={workspaceMode}
+        onClose={() => setWorkspaceMode(null)} onEdit={editPublicCopy} onUpgrade={openMembership}
+        onOpenInventory={() => {
+          setWorkspaceMode(null);
+          setSelectedPattern(null);
+          if (onOpenInventory) onOpenInventory(); else onOpenAuthModal();
+        }} />}
 
       {isPublishOpen && (
         <div className="fixed inset-0 z-50 bg-purple-950/50 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">

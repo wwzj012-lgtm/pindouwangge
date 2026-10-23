@@ -31,6 +31,8 @@ import {
   Layers,
   Check,
   Plus,
+  Timer,
+  Trash2,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop, ConvertSettings } from '../../types';
 import { SettingsPanel } from '../SettingsPanel';
@@ -38,8 +40,10 @@ import { StatsPanel } from '../StatsPanel';
 import { GridCanvas } from '../GridCanvas';
 import { MobileFeatureSheet } from './MobileFeatureSheet';
 import { MobileBottomNav } from './MobileBottomNav';
+import type { WorkspaceEditingActions } from '../SymmetryAxisControls';
 
 export interface MobileWorkspaceProps {
+  editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -120,6 +124,7 @@ export interface MobileWorkspaceProps {
 export type MobileTab = 'canvas' | 'settings' | 'stats';
 
 export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
+  editorActions,
   completionSummary,
   grid,
   paletteMap,
@@ -276,24 +281,26 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           onPointerDownCapture={() => setIsColorTrayOpen(false)}
         >
           <GridCanvas
+            symmetryAxes={editorActions?.axes}
+            onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
             interactionProfile="touch"
             grid={grid}
             paletteMap={paletteMap}
             width={settings.width}
             height={settings.height}
             boardSize={settings.boardSize}
-            activeTool={activeTool}
+            activeTool={editorActions?.isPracticeMode ? 'hand' : activeTool}
             setActiveTool={setActiveTool}
             selectedColor={selectedColor}
             highlightColorIds={highlightColorIds}
             highlightColorId={highlightColorIds.length === 1 ? highlightColorIds[0] : null}
-            completedColorIds={completedColorIds}
+            completedColorIds={editorActions?.isPracticeMode ? [] : completedColorIds}
             beadShape={beadShape}
             showSymbols={showSymbols}
             showGridLines={showGridLines}
             showCoordinates={showCoordinates}
             canvasBackdrop={canvasBackdrop}
-            symmetryMode={symmetryMode}
+            symmetryMode={editorActions?.isPracticeMode ? 'none' : symmetryMode}
             sourceImage={sourceImage}
             keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
@@ -414,9 +421,10 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
       </div>
 
       {/* Unified Mobile Bottom Workstation (所有按钮集中在底部) */}
+      {editorActions?.isPracticeMode && <div className="max-h-[40dvh] shrink-0 overflow-y-auto border-t border-emerald-200 bg-white">{editorActions.practicePanel}</div>}
       <div className="shrink-0 relative bg-white/98 backdrop-blur-md border-t border-purple-200/90 shadow-2xl flex flex-col z-20 select-none">
         {/* Collapsible Used-Color Tray (已用色号快捷托盘，默认收起) */}
-        {currentTab === 'canvas' && (
+        {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
           <div
             className={`absolute bottom-full left-0 right-0 overflow-hidden bg-purple-50/95 backdrop-blur-md shadow-lg transition-[max-height] duration-200 ease-out ${
               isColorTrayOpen ? 'max-h-16 border-b border-purple-100/90' : 'max-h-0'
@@ -458,7 +466,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         )}
 
         {/* Row 1: Single-Line Tool Dock (current color chip + tools + undo/redo + more) */}
-        {currentTab === 'canvas' && (
+        {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
           <div className="flex items-center gap-1 border-b border-purple-100/90 bg-white px-2 py-1.5">
             {/* Current Color Chip - toggles the used-color tray */}
             <button
@@ -486,6 +494,9 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
 
             {/* Scrollable Tool Buttons */}
             <div className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-none">
+            <button type="button" onClick={() => setActiveTool('region_clear')}
+              aria-label={isEn ? 'Clear Region' : '区域清除'} title={isEn ? 'Clear connected same-color region' : '点击清除连通同色区域'}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border ${activeTool === 'region_clear' ? 'border-rose-500 bg-rose-600 text-white' : 'border-purple-200 text-purple-700'}`}><Trash2 size={16}/></button>
             <button
               type="button"
               onClick={() => setActiveTool('pencil')}
@@ -524,8 +535,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setActiveTool('pan')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'pan' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
+              onClick={() => setActiveTool('hand')}
+              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'hand' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
               title={isEn ? 'Hand/Pan' : '抓手'}
               aria-label={isEn ? 'Hand/Pan' : '抓手'}
             >
@@ -572,6 +583,10 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
 
         {/* Row 3: Main Action Navigation Bar (画布 / 转图 / 用量 / 省豆 / 保存 / 导出) */}
         <nav className="bg-white px-2 py-1 sm:px-6 flex items-center justify-around sm:justify-center sm:gap-6 md:gap-10 text-[10px] sm:text-xs border-t border-purple-100">
+          {editorActions && <button type="button" aria-pressed={editorActions.isPracticeMode}
+            onClick={() => {setCurrentTab('canvas');editorActions.onTogglePractice();}}
+            className={`inline-flex h-12 min-w-10 flex-col items-center justify-center gap-0.5 rounded-lg px-1 ${editorActions.isPracticeMode ? 'bg-emerald-600 text-white' : 'text-emerald-800'}`}>
+            <Timer size={16}/><span>{isEn ? 'Practice' : '实操'}</span></button>}
           <button
             type="button"
             onClick={() => setCurrentTab('canvas')}
@@ -632,6 +647,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
 
       {/* Feature Sheet Modal Drawer */}
       <MobileFeatureSheet
+        editorActions={editorActions}
         isOpen={isFeatureSheetOpen}
         onClose={() => setIsFeatureSheetOpen(false)}
         onOpenSmartReduce={openSmartReduce}

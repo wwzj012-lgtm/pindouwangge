@@ -58,6 +58,7 @@ describe('always-visible completion estimates and existing details gate', () => 
     const panel = React.createElement(StatsPanel, { grid, paletteMap: new Map([[color.id, color]]), width: 35, height: 35, boardSize: 29, onOpenReplaceModal: noop, onSelectColor: noop, detailsUnlocked });
     const html = renderToStaticMarkup(React.createElement(LanguageProvider, { children: panel }));
     expect(html).toMatch(/aria-label="总用豆数"[\s\S]*?>3<\/div>/);
+    expect(html).toMatch(/aria-label="颜色种类数量"[\s\S]*?>2<\/div>/);
     const combined = summary({ isUnlocked: detailsUnlocked }) + html;
     expect(combined.match(/aria-label="总用豆数"/g)).toHaveLength(1);
     expect(combined).not.toContain('总有效豆数');

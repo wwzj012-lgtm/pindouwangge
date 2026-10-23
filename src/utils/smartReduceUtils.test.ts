@@ -181,6 +181,166 @@ describe('membership bead-saving targets', () => {
     expect(report.savedPercent).toBeLessThanOrEqual(saving + 1);
   });
 
+  it('uses distinct target budgets for all three tiers after background removal', () => {
+    // Synthetic foreground on removable border background; isolate the tier
+    // budget from optional denoise/color-merging passes.
+    const grid = Array.from({ length: 100 }, () => Array<string | null>(100).fill('light'));
+    for (let y = 20; y < 80; y += 1) {
+      for (let x = 20; x < 80; x += 1) grid[y][x] = 'red';
+    }
+    const reports = ([15, 25, 40] as const).map(saving => smartReduceGrid(grid, palette, {
+      ...structuralOptions(saving),
+      removeBackgroundBeads: true,
+    }));
+
+    expect(reports[0].bgBeadsSaved).toBeGreaterThan(0);
+    expect(reports[0].optimizedGrid).toHaveLength(92);
+    expect(reports[1].optimizedGrid).toHaveLength(87);
+    expect(reports[2].optimizedGrid).toHaveLength(77);
+    expect(reports[0].optimizedGrid.length * reports[0].optimizedGrid[0].length)
+      .toBeGreaterThan(reports[1].optimizedGrid.length * reports[1].optimizedGrid[0].length);
+    expect(reports[1].optimizedGrid.length * reports[1].optimizedGrid[0].length)
+      .toBeGreaterThan(reports[2].optimizedGrid.length * reports[2].optimizedGrid[0].length);
+    for (const report of reports) {
+      const baseline = report.originalTotalBeads - report.bgBeadsSaved;
+      const actualPercent = baseline > 0
+        ? Math.round(((baseline - report.optimizedTotalBeads) / baseline) * 1000) / 10
+        : 0;
+      expect(report.savedPercent).toBe(actualPercent);
+    }
+  });
+
+  it('does not invent opaque bridges across border background during sparse downsampling', () => {
+    const grid = Array.from({ length: 60 }, () => Array<string | null>(60).fill('light'));
+    for (let y = 2; y < 58; y += 4) for (let x = 2; x < 58; x += 4) grid[y][x] = 'red';
+    const report = smartReduceGrid(grid, palette, {
+      ...structuralOptions(15),
+      removeBackgroundBeads: true,
+    });
+    expect(report.bgBeadsSaved).toBeGreaterThan(0);
+    expect(report.optimizedTotalBeads).toBeLessThanOrEqual(report.originalTotalBeads - report.bgBeadsSaved);
+  });
+
+  it('only removes the border background when its option is enabled', () => {
+    const grid = Array.from({ length: 15 }, () => Array<string | null>(15).fill('light'));
+    for (let y = 5; y < 10; y++) for (let x = 5; x < 10; x++) grid[y][x] = 'red';
+    const baseOptions: ReductionOptions = {
+      ...options(0), downscaleRatio: 0.99, protectSaliencyAndContours: false,
+      protectVibrantColors: false, removeIsolatedNoise: false, mergeMinorColors: false,
+    };
+    const untouched = smartReduceGrid(grid, palette, { ...baseOptions, removeBackgroundBeads: false });
+    const removed = smartReduceGrid(grid, palette, { ...baseOptions, removeBackgroundBeads: true });
+    expect(untouched.bgBeadsSaved).toBe(0);
+    expect(removed.bgBeadsSaved).toBeGreaterThan(0);
+    expect(removed.optimizedGrid[0][0]).toBeNull();
+    expect(untouched.optimizedGrid[0][0]).toBe('light');
+  });
+
+  it('does not change background tolerance when a color-simplification level changes', () => {
+    const grid = Array.from({ length: 20 }, () => Array<string | null>(20).fill('light'));
+    for (let y = 5; y < 15; y++) for (let x = 5; x < 15; x++) grid[y][x] = 'red';
+    const reports = (['light', 'medium', 'strong'] as const).map(intensity => smartReduceGrid(grid, palette, {
+      ...options(0), intensity, downscaleRatio: 0.99,
+      protectSaliencyAndContours: false, removeBackgroundBeads: true, backgroundTolerance: 5,
+    }));
+    expect(reports.map(r => r.bgBeadsSaved)).toEqual([300, 300, 300]);
+  });
+
+  it('does not move a contour or erase a saturated accent when the protection switches are enabled', () => {
+    const grid = Array.from({ length: 12 }, () => Array<string | null>(12).fill('near'));
+    grid[6][6] = 'red';
+    const common = { ...modalDefaults(15), downscaleRatio: 0.99, protectSaliencyAndContours: false };
+    const protectedResult = smartReduceGrid(grid, palette, { ...common, protectVibrantColors: true });
+    const unprotectedResult = smartReduceGrid(grid, palette, { ...common, protectVibrantColors: false });
+    expect(protectedResult.optimizedGrid[6][6]).toBe('red');
+    expect(unprotectedResult.optimizedGrid[6][6]).toBe('near');
+  });
+
+  it('only recolours isolated noise when its option is enabled', () => {
+    const grid = Array.from({ length: 9 }, () => Array<string | null>(9).fill('dark'));
+    grid[4][4] = 'red';
+    const baseOptions: ReductionOptions = {
+      ...options(0), intensity: 'strong', downscaleRatio: 0.99,
+      protectSaliencyAndContours: false, protectVibrantColors: false,
+      removeBackgroundBeads: false, mergeMinorColors: false,
+    };
+    const retained = smartReduceGrid(grid, palette, { ...baseOptions, removeIsolatedNoise: false });
+    const cleaned = smartReduceGrid(grid, palette, { ...baseOptions, removeIsolatedNoise: true });
+    expect(retained.optimizedGrid[4][4]).toBe('red');
+    expect(cleaned.optimizedGrid[4][4]).toBe('dark');
+    expect(cleaned.recoloredNoiseCount).toBeGreaterThan(0);
+  });
+
+  it('only merges low-frequency colors when its option is enabled', () => {
+    const grid = Array.from({ length: 9 }, () => Array<string | null>(9).fill('shadowA'));
+    grid[3][3] = grid[3][4] = grid[4][3] = grid[4][4] = 'shadowA';
+    grid[3][5] = grid[4][5] = 'shadowB';
+    const baseOptions: ReductionOptions = {
+      ...options(0), intensity: 'light', downscaleRatio: 0.99,
+      protectSaliencyAndContours: false, protectVibrantColors: false,
+      removeBackgroundBeads: false, removeIsolatedNoise: false,
+    };
+    const retained = smartReduceGrid(grid, palette, { ...baseOptions, mergeMinorColors: false });
+    const merged = smartReduceGrid(grid, palette, { ...baseOptions, mergeMinorColors: true });
+    expect(retained.optimizedGrid[3][5]).toBe('shadowB');
+    expect(retained.optimizedGrid[4][5]).toBe('shadowB');
+    expect(merged.optimizedGrid[3][5]).toBe('shadowA');
+    expect(merged.optimizedGrid[4][5]).toBe('shadowA');
+  });
+
+  it('gives light, medium and strong different smoothing results on the same source', () => {
+    const shades: BeadColor[] = [100, 120, 140].map(value => ({
+      id: `grey-${value}`, code: `${value}`, name: 'grey',
+      hex: `#${value.toString(16).repeat(3)}`, rgb: [value, value, value], brand: 'MARD',
+    }));
+    const grid = Array.from({ length: 16 }, () => Array<string | null>(16).fill('grey-100'));
+    grid[4][4] = 'grey-120';
+    grid[11][11] = 'grey-140';
+    const results = (['light', 'medium', 'strong'] as const).map(intensity => smartReduceGrid(grid, shades, {
+      ...options(0), downscaleRatio: 0.99, intensity,
+      protectSaliencyAndContours: false, protectVibrantColors: false,
+      mergeMinorColors: true,
+    }));
+    expect(results.map(report => report.optimizedGrid.flat().filter(cell => cell !== 'grey-100').length))
+      .toEqual([2, 1, 0]);
+    expect(results.map(report => report.recoloredSourceBeads)).toEqual([0, 1, 2]);
+    expect(grid[4][4]).toBe('grey-120');
+    expect(grid[11][11]).toBe('grey-140');
+  });
+
+  it('merges repeated small color islands even when the global color count is above the threshold', () => {
+    const grid = Array.from({ length: 16 }, () => Array<string | null>(16).fill('shadowA'));
+    for (const offset of [2, 9]) {
+      grid[offset][offset] = grid[offset][offset + 1] = 'shadowA';
+      grid[offset + 1][offset] = grid[offset + 1][offset + 1] = 'shadowA';
+      grid[offset][offset + 2] = grid[offset + 1][offset + 2] = 'shadowB';
+    }
+    const report = smartReduceGrid(grid, palette, {
+      ...options(0), downscaleRatio: 0.99, intensity: 'light',
+      protectSaliencyAndContours: false, protectVibrantColors: false,
+      mergeMinorColors: true,
+    });
+    expect(report.optimizedGrid.flat()).not.toContain('shadowB');
+    expect(grid.flat().filter(cell => cell === 'shadowB')).toHaveLength(4);
+  });
+
+  it('keeps intensity differences with detail protection enabled on a shaded block', () => {
+    const shades: BeadColor[] = [100, 120, 130].map(value => ({
+      id: `grey-${value}`, code: `${value}`, name: 'grey',
+      hex: `#${value.toString(16).repeat(3)}`, rgb: [value, value, value], brand: 'MARD',
+    }));
+    const grid = Array.from({ length: 24 }, () => Array<string | null>(24).fill('grey-100'));
+    for (let y = 3; y < 9; y++) for (let x = 3; x < 9; x++) grid[y][x] = 'grey-120';
+    for (let y = 14; y < 20; y++) for (let x = 14; x < 20; x++) grid[y][x] = 'grey-130';
+    const reports = (['light', 'medium', 'strong'] as const).map(intensity => smartReduceGrid(grid, shades, {
+      ...modalDefaults(15), downscaleRatio: 0.99, intensity,
+    }));
+    expect(reports[0].optimizedGrid).not.toEqual(reports[1].optimizedGrid);
+    expect(reports[1].optimizedGrid).not.toEqual(reports[2].optimizedGrid);
+    expect(reports[0].recoloredSourceBeads).toBeLessThan(reports[1].recoloredSourceBeads);
+    expect(reports[1].recoloredSourceBeads).toBeLessThan(reports[2].recoloredSourceBeads);
+  });
+
   it('keeps a repeated subject color dominant over one isolated high-contrast pixel', () => {
     const grid = Array.from({ length: 20 }, () => Array(20).fill('light'));
     grid[5][5] = 'dark';

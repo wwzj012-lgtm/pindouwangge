@@ -13,6 +13,8 @@ import {
   ImagePlus,
   Lock,
   ScanSearch,
+  Eraser,
+  Undo2,
   Upload,
   X,
 } from 'lucide-react';
@@ -20,6 +22,7 @@ import type { BeadColor, BrandKey } from '../types';
 import { BRAND_NAMES, BRAND_ORDER, BRAND_PALETTES } from '../data/palettes';
 import { applyRecognitionCorrections, getRecognitionReviewCells, recognitionCellKey, type ImportRecognitionCorrections } from '../utils/importRecognitionReview';
 import { ImportRecognitionCanvas, ImportSourceCellCrop } from './ImportRecognitionCanvas';
+import { getRecognitionBackgroundCandidate, getRecognitionBackgroundCells, recognitionBackgroundCorrections, releaseRecognitionBackgroundCell } from '../utils/recognitionBackground';
 import './ImportBlueprintWizard.css';
 import { confirmRecognitionResult, type ConfirmedRecognitionDraft } from '../utils/confirmedRecognition';
 import { ImportGridAlignmentCanvas } from './ImportGridAlignmentCanvas';
@@ -103,6 +106,9 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const [localPalette, setLocalPalette] = useState<BeadColor[]>(activePalette);
   const [edgeInsetRatio, setEdgeInsetRatio] = useState(0);
   const [corrections, setCorrections] = useState<ImportRecognitionCorrections>({});
+  const [backgroundHistory, setBackgroundHistory] = useState<string[][]>([]);
+  const [backgroundColorId, setBackgroundColorId] = useState('');
+  const [backgroundStatus, setBackgroundStatus] = useState<string | null>(null);
   const [onlyReview, setOnlyReview] = useState(false);
   const [colorSearch, setColorSearch] = useState('');
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -135,17 +141,28 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setRecognitionProgress(0);
   }, []);
 
+  const invalidateConfirmation = useCallback(() => {
+    setConfirmation(null);
+    setSavedDraftId(null);
+    currentConfirmationIdRef.current = null;
+  }, []);
+
+  const resetBackground = useCallback(() => {
+    setBackgroundHistory([]);
+    setBackgroundColorId('');
+    setBackgroundStatus(null);
+  }, []);
+
   const invalidateRecognition = useCallback(() => {
     cancelRecognition();
+    resetBackground();
     setRecognition(null);
     setCorrections({});
     setSelectedCell(null);
     setOnlyReview(false);
     setColorSearch('');
-    setConfirmation(null);
-    setSavedDraftId(null);
-    currentConfirmationIdRef.current = null;
-  }, [cancelRecognition]);
+    invalidateConfirmation();
+  }, [cancelRecognition, resetBackground, invalidateConfirmation]);
 
   const clearImage = useCallback(() => {
     invalidateRecognition();
@@ -321,9 +338,11 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setSnapshot(frozen);
     setRecognition(null);
     setCorrections({});
+    resetBackground();
+    invalidateConfirmation();
     setStep('recognize');
     setStatus({ tone: 'neutral', message: '校准已冻结，请选择识别模式并开始识别。' });
-  }, [calibration, imageDimensions, imageUrl]);
+  }, [calibration, imageDimensions, imageUrl, resetBackground, invalidateConfirmation]);
 
   const runRecognition = useCallback(async () => {
     if (recognitionControllerRef.current || !imageElement || !imageDimensions || !snapshot || localPalette.length === 0) return;
@@ -333,9 +352,8 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setRecognitionProgress(0);
     setRecognition(null);
     setCorrections({});
-    setConfirmation(null);
-    setSavedDraftId(null);
-    currentConfirmationIdRef.current = null;
+    resetBackground();
+    invalidateConfirmation();
     setOnlyReview(false);
     setSelectedCell(null);
     setStatus({ tone: 'neutral', message: '正在准备图片像素…' });
@@ -375,12 +393,14 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         setIsRecognizing(false);
       }
     }
-  }, [localPalette, edgeInsetRatio, imageDimensions, imageElement, recognitionMode, snapshot]);
+  }, [localPalette, edgeInsetRatio, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
 
-  const effectiveRecognition = useMemo(() => recognition ? applyRecognitionCorrections(recognition, corrections, localPalette) : null, [recognition, corrections, localPalette]);
+  const backgroundCorrections = useMemo(() => recognitionBackgroundCorrections(backgroundHistory), [backgroundHistory]);
+  const effectiveCorrections = useMemo(() => ({ ...corrections, ...backgroundCorrections }), [corrections, backgroundCorrections]);
+  const effectiveRecognition = useMemo(() => recognition ? applyRecognitionCorrections(recognition, effectiveCorrections, localPalette) : null, [recognition, effectiveCorrections, localPalette]);
   const currentConfirmation = confirmation && confirmation.result === effectiveRecognition && confirmation.draft.title === resultTitle.trim() ? confirmation.draft : null;
   currentConfirmationIdRef.current = currentConfirmation?.id ?? null;
-  const pendingCells = useMemo(() => recognition ? getRecognitionReviewCells(recognition, corrections) : [], [recognition, corrections]);
+  const pendingCells = useMemo(() => recognition ? getRecognitionReviewCells(recognition, effectiveCorrections) : [], [recognition, effectiveCorrections]);
   const pendingKeys = useMemo(() => new Set(pendingCells.map(cell => recognitionCellKey(cell.row, cell.column))), [pendingCells]);
   const initialReviewCount = useMemo(() => recognition ? getRecognitionReviewCells(recognition).length : 0, [recognition]);
 
@@ -388,7 +408,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     if (!effectiveRecognition) return;
     try {
       await navigator.clipboard.writeText(recognitionResultToCodeMatrix(effectiveRecognition).map(row => row.join('\t')).join('\n'));
-      if (mountedRef.current && openRef.current) setStatus({ tone: 'success', message: '颜色代码矩阵已复制，包含本次人工修正。' });
+      if (mountedRef.current && openRef.current) setStatus({ tone: 'success', message: '颜色代码矩阵已复制，包含本次人工修正和背景移除。' });
     } catch {
       if (mountedRef.current && openRef.current) setStatus({ tone: 'error', message: '复制失败，请检查浏览器剪贴板权限。' });
     }
@@ -412,10 +432,10 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
 
   const colorCounts = useMemo(() => {
     if (!effectiveRecognition) return [];
-    const counts = new Map<string, { code: string; name: string; hex: string; count: number }>();
+    const counts = new Map<string, { id: string; code: string; name: string; hex: string; count: number }>();
     effectiveRecognition.cells.forEach(row => row.forEach(cell => {
       if (!cell.color) return;
-      const item = counts.get(cell.color.id) ?? { code: cell.color.code, name: cell.color.name, hex: cell.color.hex, count: 0 };
+      const item = counts.get(cell.color.id) ?? { id: cell.color.id, code: cell.color.code, name: cell.color.name, hex: cell.color.hex, count: 0 };
       item.count += 1;
       counts.set(cell.color.id, item);
     }));
@@ -425,7 +445,13 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const selectedEffective = selectedCell ? effectiveRecognition?.cells[selectedCell.row]?.[selectedCell.column] ?? null : null;
   const selectedKey = selectedCell ? recognitionCellKey(selectedCell.row, selectedCell.column) : null;
   const selectedIsManual = selectedKey !== null && Object.prototype.hasOwnProperty.call(corrections, selectedKey);
+  const selectedIsBackground = selectedKey !== null && Object.hasOwn(backgroundCorrections, selectedKey);
   const manualCount = Object.keys(corrections).length;
+  const majorityBackgroundId = useMemo(() => effectiveRecognition ? getRecognitionBackgroundCandidate(effectiveRecognition) : null, [effectiveRecognition]);
+  const candidateBackgroundId = backgroundColorId || selectedEffective?.colorId || majorityBackgroundId;
+  const candidateBackground = localPalette.find(color => color.id === candidateBackgroundId);
+  const backgroundCells = useMemo(() => effectiveRecognition ? getRecognitionBackgroundCells(effectiveRecognition, candidateBackgroundId) : [], [effectiveRecognition, candidateBackgroundId]);
+  const removedBackgroundCount = backgroundHistory.reduce((total, batch) => total + batch.length, 0);
   const filteredPalette = useMemo(() => {
     const query = colorSearch.trim().toLocaleLowerCase();
     return localPalette.filter(color => color.enabled !== false && (!query || `${color.code} ${color.name} ${color.hex}`.toLocaleLowerCase().includes(query)));
@@ -449,11 +475,39 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   };
   const correctSelected = (colorId: string | null) => {
     if (selectedKey === null) return;
+    invalidateConfirmation();
+    setBackgroundHistory(current => releaseRecognitionBackgroundCell(current, selectedKey));
     setCorrections(current => ({ ...current, [selectedKey]: colorId }));
+    setStatus({ tone: 'neutral', message: '本格已修正，请重新确认当前结果。' });
   };
   const resetSelectedCorrection = () => {
     if (selectedKey === null) return;
+    invalidateConfirmation();
+    setBackgroundHistory(current => releaseRecognitionBackgroundCell(current, selectedKey));
     setCorrections(current => { const next = { ...current }; delete next[selectedKey]; return next; });
+    setStatus({ tone: 'neutral', message: '本格已恢复自动结果，请重新确认。' });
+  };
+  const removeBackground = () => {
+    if (!backgroundCells.length || !candidateBackgroundId) return;
+    invalidateConfirmation();
+    setBackgroundColorId(candidateBackgroundId);
+    setBackgroundHistory(current => [...current, backgroundCells]);
+    setBackgroundStatus(`本次已移除 ${backgroundCells.length} 格 ${candidateBackground?.code ?? ''} 背景，可撤销。`);
+    setStatus({ tone: 'neutral', message: '背景已移除，请复核后重新确认当前结果。' });
+  };
+  const undoBackground = () => {
+    const batch = backgroundHistory.at(-1);
+    if (!batch) return;
+    invalidateConfirmation();
+    setBackgroundHistory(current => current.slice(0, -1));
+    setBackgroundStatus(`已撤销上次背景移除，恢复 ${batch.length} 格；保留期间的逐格手改。`);
+    setStatus({ tone: 'neutral', message: '背景移除已撤销，请重新确认当前结果。' });
+  };
+  const restoreAutomaticResult = () => {
+    invalidateConfirmation();
+    resetBackground();
+    setCorrections({});
+    setStatus({ tone: 'neutral', message: '已恢复全部自动识别结果，请重新确认。' });
   };
 
   const confirmResult = () => {
@@ -590,8 +644,22 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
               <p className="ir-help">按有效像素面积选择占比最高的色板颜色。忽略边线时仅统计每格内部区域；透明像素不参与占比。</p>
             </section>
             {recognition && effectiveRecognition && <>
-              <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>有色格</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}
+              <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats" aria-label="当前结果统计"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>总用豆数</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}
                 <details className="ir-details"><summary>原始自动识别测量</summary><p className="ir-summary-line">平均主色占比 {recognition.summary.meanConfidence === null ? '—' : `${(recognition.summary.meanConfidence * 100).toFixed(1)}%`} · 平均色差 ΔE {recognition.summary.meanDistance?.toFixed(1) ?? '—'}</p><p className="ir-help">占比不代表准确率。此处保留原始测量，不以人工修正后的数据计算质量。</p></details>
+              </section>
+              <section className="ir-section ir-background-panel" aria-labelledby="ir-background-title">
+                <div className="ir-section-title"><h2 id="ir-background-title">一键去背景</h2><span className="ir-badge">已移除 {removedBackgroundCount} 格</span></div>
+                <label className="ir-label">候选背景色<select aria-label="候选背景色" value={backgroundColorId} onChange={event => { setBackgroundColorId(event.target.value); setBackgroundStatus(null); }}>
+                  <option value="">跟随选中格 / 边缘多数色{!backgroundColorId && candidateBackground ? ` · ${candidateBackground.code}` : ''}</option>
+                  {localPalette.filter(color => color.enabled !== false && (colorCounts.some(item => item.id === color.id) || color.id === backgroundColorId)).map(color => <option key={color.id} value={color.id}>{color.code} · {color.name}</option>)}
+                </select></label>
+                <p className="ir-help" id="ir-background-help">仅移除候选单色经上下左右与四周连通的区域；已有空白可连通，封闭区域与其他颜色保留。原图保留，可继续逐格手改。</p>
+                <p className="ir-background-preview" role="status">{!candidateBackgroundId ? '未找到明确背景候选，请选中背景格或指定色号。' : backgroundCells.length ? `${candidateBackground?.code ?? '候选色'} · 预计移除 ${backgroundCells.length} 格` : '当前候选色没有与四周连通的有色格，无需移除。'}</p>
+                <div className="ir-background-actions">
+                  <button type="button" className="ir-button ir-primary" aria-describedby="ir-background-help" disabled={!backgroundCells.length} onClick={removeBackground}><Eraser size={15} />一键去背景</button>
+                  <button type="button" className="ir-button" disabled={!backgroundHistory.length} onClick={undoBackground}><Undo2 size={15} />撤销去背景</button>
+                </div>
+                {backgroundStatus && <p className="ir-status" role="status">{backgroundStatus}</p>}
               </section>
               <section className="ir-section"><div className="ir-section-title"><h2>逐格复核</h2><span className="ir-review-count">待复核 {pendingCells.length} / {initialReviewCount}</span></div>
                 <label className="ir-check"><input type="checkbox" checked={onlyReview} onChange={event => { setOnlyReview(event.target.checked); if (event.target.checked && pendingCells.length && (!selectedKey || !pendingKeys.has(selectedKey))) setSelectedCell(pendingCells[0]); }} />仅看待复核格</label>
@@ -599,19 +667,19 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
                 <p className="ir-help">主色占比 &lt;60%、领先次色 &lt;10 个百分点、色差 ΔE &gt;15 或无效的格子列为待复核。人工指定后移出待复核。</p>
                 {selectedCell && selectedResult && selectedEffective && imageElement && <>
                   <div className="ir-position"><label>行<input type="number" aria-label="选中格行号" min={1} max={recognition.calibration.rows} value={selectedCell.row + 1} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) setSelectedCell({ ...selectedCell, row: Math.max(0, Math.min(recognition.calibration.rows - 1, Math.round(value) - 1)) }); }} /></label><label>列<input type="number" aria-label="选中格列号" min={1} max={recognition.calibration.columns} value={selectedCell.column + 1} onChange={event => { const value = event.currentTarget.valueAsNumber; if (Number.isFinite(value)) setSelectedCell({ ...selectedCell, column: Math.max(0, Math.min(recognition.calibration.columns - 1, Math.round(value) - 1)) }); }} /></label></div>
-                  <div className="ir-cell-comparison"><figure><ImportSourceCellCrop image={imageElement} calibration={recognition.calibration} selected={selectedCell} edgeInsetRatio={currentInset} /><figcaption>原图单格 · 真实像素放大</figcaption></figure><figure><div className="ir-cell-swatch" style={{ background: selectedEffective.color?.hex ?? 'var(--ir-soft)', color: selectedEffective.color ? swatchInk : 'var(--ir-muted)' }}><strong>{selectedEffective.color?.code ?? (selectedEffective.status === 'blank' ? '空白' : '无效')}</strong><span>{selectedEffective.color?.name ?? '未指定颜色'}</span></div><figcaption>{selectedIsManual ? '人工指定 · 当前结果' : '自动识别 · 当前结果'}</figcaption></figure></div>
+                  <div className="ir-cell-comparison"><figure><ImportSourceCellCrop image={imageElement} calibration={recognition.calibration} selected={selectedCell} edgeInsetRatio={currentInset} /><figcaption>原图单格 · 真实像素放大</figcaption></figure><figure><div className="ir-cell-swatch" style={{ background: selectedEffective.color?.hex ?? 'var(--ir-soft)', color: selectedEffective.color ? swatchInk : 'var(--ir-muted)' }}><strong>{selectedEffective.color?.code ?? (selectedEffective.status === 'blank' ? '空白' : '无效')}</strong><span>{selectedEffective.color?.name ?? '未指定颜色'}</span></div><figcaption>{selectedIsBackground ? '背景已移除 · 当前结果' : selectedIsManual ? '人工指定 · 当前结果' : '自动识别 · 当前结果'}</figcaption></figure></div>
                   <div className="ir-cell-measurements"><strong>原始测量 · {selectedResult.color?.code ?? (selectedResult.status === 'blank' ? '空白' : '无效')}</strong><br />{recognition.mode === 'fast' ? '估算主色占比' : '主色占比'} {selectedResult.dominantRatio === null ? '—' : `${(selectedResult.dominantRatio * 100).toFixed(1)}%`} · 次色 {selectedResult.runnerUpRatio === null ? '—' : `${(selectedResult.runnerUpRatio * 100).toFixed(1)}%`}<br />色差 ΔE {selectedResult.distance?.toFixed(1) ?? '—'} · 有效覆盖 {selectedResult.sampledArea > 0 ? `${(selectedResult.coverage / selectedResult.sampledArea * 100).toFixed(1)}%` : '—'}{currentInset > 0 && <><br />以上占比仅针对忽略边线后的内部区域。</>}</div>
-                  {selectedIsManual && <p className="ir-manual-note">本格已人工{selectedEffective.color ? `指定为 ${selectedEffective.color.code}` : '标为空白'}；人工色号没有实测面积占比。</p>}
-                  <div className="ir-correction"><label className="ir-label" htmlFor="ir-color-search">人工指定色号</label><input id="ir-color-search" className="ir-correction-search" type="search" aria-label="搜索修正色号或颜色名称" placeholder="搜索色号、名称或 HEX" value={colorSearch} onChange={event => setColorSearch(event.target.value)} /><select aria-label="人工修正颜色代码" value="" onChange={event => { if (event.target.value) correctSelected(event.target.value); }}><option value="">{filteredPalette.length ? `选择颜色 · ${filteredPalette.length} 个可选` : '没有匹配的色号'}</option>{filteredPalette.map(color => <option key={color.id} value={color.id}>{color.code} · {color.name} · {color.hex}</option>)}</select><div className="ir-correction-buttons"><button type="button" className="ir-text-button" onClick={() => correctSelected(null)}>标为空白</button><button type="button" className="ir-text-button" disabled={!selectedIsManual} onClick={resetSelectedCorrection}>恢复本格自动结果</button></div></div>
+                  {selectedIsManual && !selectedIsBackground && <p className="ir-manual-note">本格已人工{selectedEffective.color ? `指定为 ${selectedEffective.color.code}` : '标为空白'}；人工色号没有实测面积占比。</p>}
+                  <div className="ir-correction"><label className="ir-label" htmlFor="ir-color-search">人工指定色号</label><input id="ir-color-search" className="ir-correction-search" type="search" aria-label="搜索修正色号或颜色名称" placeholder="搜索色号、名称或 HEX" value={colorSearch} onChange={event => setColorSearch(event.target.value)} /><select aria-label="人工修正颜色代码" value="" onChange={event => { if (event.target.value) correctSelected(event.target.value); }}><option value="">{filteredPalette.length ? `选择颜色 · ${filteredPalette.length} 个可选` : '没有匹配的色号'}</option>{filteredPalette.map(color => <option key={color.id} value={color.id}>{color.code} · {color.name} · {color.hex}</option>)}</select><div className="ir-correction-buttons"><button type="button" className="ir-text-button" onClick={() => correctSelected(null)}>标为空白</button><button type="button" className="ir-text-button" disabled={!selectedIsManual && !selectedIsBackground} onClick={resetSelectedCorrection}>恢复本格自动结果</button></div></div>
                 </>}
               </section>
-              <section className="ir-section"><div className="ir-section-title"><h2>最终色号统计</h2><span className="ir-review-count">{effectiveRecognition.summary.total} 格</span></div><p className="ir-help">统计与复制矩阵均包含当前人工修正。</p><div className="ir-counts">{colorCounts.map(item => <div className="ir-count-row" key={item.code}><i style={{ background: item.hex }} /><strong>{item.code}</strong><span>{item.name}</span><b>{item.count}</b></div>)}</div><button type="button" className="ir-button ir-full" style={{ marginTop: 12 }} onClick={copyCodeMatrix}><Clipboard size={14} />复制颜色代码矩阵</button><button type="button" className="ir-text-button" disabled={!manualCount} onClick={() => setCorrections({})}>恢复全部自动结果（{manualCount} 格修正）</button></section>
+              <section className="ir-section"><div className="ir-section-title"><h2>最终色号统计</h2><span className="ir-review-count">{effectiveRecognition.summary.total} 格</span></div><p className="ir-help">统计与复制矩阵均包含当前人工修正和背景移除。</p><div className="ir-counts">{colorCounts.map(item => <div className="ir-count-row" key={item.code}><i style={{ background: item.hex }} /><strong>{item.code}</strong><span>{item.name}</span><b>{item.count}</b></div>)}</div><button type="button" className="ir-button ir-full" style={{ marginTop: 12 }} onClick={copyCodeMatrix}><Clipboard size={14} />复制颜色代码矩阵</button><button type="button" className="ir-text-button" disabled={!manualCount && !removedBackgroundCount} onClick={restoreAutomaticResult}>恢复全部自动结果（手改 {manualCount} 格 / 去背景 {removedBackgroundCount} 格）</button></section>
             </>}
           </>}
           {effectiveRecognition && <section className="ir-section">
             <div className="ir-section-title"><h2>确认与保存</h2><span className="ir-badge">{currentConfirmation ? '已确认当前版本' : '待确认'}</span></div>
-            <label className="ir-label">作品名称<input aria-label="识别作品名称" maxLength={60} value={resultTitle} onChange={event => setResultTitle(event.target.value)} placeholder="输入作品名称" /></label>
-            <p className="ir-help">确认后保存的是当前色号和人工修正。修改结果或名称后，需要重新确认；保存不会替换当前画板。</p>
+            <label className="ir-label">作品名称<input aria-label="识别作品名称" maxLength={60} value={resultTitle} onChange={event => { invalidateConfirmation(); setResultTitle(event.target.value); setStatus({ tone: 'neutral', message: '作品名称已修改，请重新确认当前结果。' }); }} placeholder="输入作品名称" /></label>
+            <p className="ir-help">确认后保存的是当前色号、人工修正和背景移除结果。修改结果或名称后，需要重新确认；保存不会替换当前画板。</p>
             {!canSave && <p className="ir-help">图库保存需要登录。登录不会清空本次识别结果。</p>}
           </section>}
           {status && <p role={status.tone === 'error' ? 'alert' : 'status'} className="ir-status" data-tone={status.tone}>{status.message}</p>}

@@ -469,7 +469,7 @@ export async function apiGetBlob(path: string, params?: Record<string, string>, 
   const controller = new AbortController();
   const timeoutId = globalThis.setTimeout(() => controller.abort(), normalizedTimeout(timeoutMs));
   try {
-    const headers = new Headers({ Accept: 'image/webp, image/png' });
+    const headers = new Headers({ Accept: 'image/webp, image/png, image/jpeg' });
     const token = getApiToken();
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
@@ -480,7 +480,7 @@ export async function apiGetBlob(path: string, params?: Record<string, string>, 
       }
     }
     const type = response.headers.get('Content-Type')?.split(';', 1)[0]?.toLowerCase();
-    if (!response.ok || (type !== 'image/webp' && type !== 'image/png')) {
+    if (!response.ok || (type !== 'image/webp' && type !== 'image/png' && type !== 'image/jpeg')) {
       return { ok: false, status: response.status, error: `预览图不可用 (${response.status})` };
     }
     return { ok: true, status: response.status, data: await response.blob() };

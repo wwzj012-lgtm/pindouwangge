@@ -23,12 +23,18 @@ import {
   Spline,
   Square,
   Undo2,
+  FlipHorizontal2,
+  FlipVertical2,
+  Timer,
+  Trash2,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { createPressRepeatController, type PressRepeatController } from '../utils/pressRepeat';
+import { SymmetryAxisControls, type WorkspaceEditingActions } from './SymmetryAxisControls';
 
 interface ToolbarProps {
+  editorActions?: WorkspaceEditingActions;
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
   selectedColor: BeadColor | null;
@@ -65,12 +71,13 @@ interface ToolbarProps {
   canExport: boolean;
 }
 
-type MenuId = 'shape' | 'symmetry' | 'view' | 'assist' | null;
+type MenuId = 'shape' | 'symmetry' | 'view' | 'assist' | 'mirror' | null;
 
 const buttonBase = 'inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
 const iconButton = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-purple-800 transition-colors hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-35';
 
 export const Toolbar: React.FC<ToolbarProps> = ({
+  editorActions,
   activeTool,
   setActiveTool,
   selectedColor,
@@ -109,7 +116,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const { language } = useLanguage();
   const isEn = language === 'en';
   const [openMenu, setOpenMenu] = useState<MenuId>(null);
-  const menuTriggerRefs = useRef<Record<Exclude<MenuId, null>, HTMLButtonElement | null>>({ shape: null, symmetry: null, view: null, assist: null });
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const menuTriggerRefs = useRef<Record<Exclude<MenuId, null>, HTMLButtonElement | null>>({ shape: null, symmetry: null, view: null, assist: null, mirror: null });
   const undoActionRef = useRef(onUndo);
   const redoActionRef = useRef(onRedo);
   const undoRepeatRef = useRef<PressRepeatController | null>(null);
@@ -139,12 +147,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       setOpenMenu(null);
       window.setTimeout(() => menuTriggerRefs.current[menu]?.focus(), 0);
     };
+    const closeOutside = (event: PointerEvent) => {
+      if (openMenu && event.target instanceof Node && !toolbarRef.current?.contains(event.target)) setOpenMenu(null);
+    };
 
     window.addEventListener('blur', stopHistoryRepeat);
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('pointerdown', closeOutside);
     return () => {
       window.removeEventListener('blur', stopHistoryRepeat);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('pointerdown', closeOutside);
       stopHistoryRepeat();
     };
   }, [openMenu]);
@@ -165,6 +178,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     { id: 'bucket', label: isEn ? 'Fill Bucket (B)' : '油漆桶 (B)', icon: <PaintBucket className="h-3.5 w-3.5" /> },
     { id: 'eraser', label: isEn ? 'Eraser (E)' : '橡皮擦 (E)', icon: <Eraser className="h-3.5 w-3.5" /> },
     { id: 'eyedropper', label: isEn ? 'Color Picker (I)' : '吸管 (I)', icon: <Pipette className="h-3.5 w-3.5" /> },
+    { id: 'region_clear', label: isEn ? 'Clear Region (U)' : '区域清除 (U)', icon: <Trash2 className="h-3.5 w-3.5" /> },
   ];
   const shapeTools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
     { id: 'line', label: isEn ? 'Line' : '直线', icon: <Minus className="h-3.5 w-3.5" /> },
@@ -202,20 +216,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       type="button"
       onClick={() => toggleMenu(menu)}
       aria-haspopup="menu"
+      aria-label={label}
+      title={label}
       aria-expanded={openMenu === menu}
       aria-controls={`toolbar-${menu}-menu`}
       className={`${buttonBase} ${openMenu === menu ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-200 bg-white/70 text-purple-800 hover:bg-purple-100'}`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="hidden min-[1100px]:inline">{label}</span>
       <ChevronDown className={`h-3 w-3 transition-transform ${openMenu === menu ? 'rotate-180' : ''}`} />
     </button>
   );
 
   return (
-    <div className="relative z-20 isolate shrink-0 border-b border-purple-200/80 bg-white/95 px-2.5 py-1.5 text-purple-950 shadow-sm select-none">
+    <div ref={toolbarRef} className="relative z-20 isolate shrink-0 border-b border-purple-200/80 bg-white/95 px-2.5 py-1.5 text-purple-950 shadow-sm select-none">
       <div className="flex flex-nowrap items-center gap-1.5 overflow-visible">
-        <div className="flex flex-wrap items-center gap-1 rounded-xl border border-purple-100 bg-purple-50/70 p-0.5" role="group" aria-label={isEn ? 'Drawing tools' : '绘图工具'}>
+        <div className="flex shrink-0 flex-nowrap items-center gap-1 rounded-xl border border-purple-100 bg-purple-50/70 p-0.5" role="group" aria-label={isEn ? 'Drawing tools' : '绘图工具'}>
           {tools.map(toolButton)}
         </div>
 
@@ -242,6 +258,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                   {symmetryMode === mode && <span aria-hidden="true">✓</span>}
                 </button>
               ))}
+              <SymmetryAxisControls actions={editorActions} mode={symmetryMode} isEn={isEn} />
             </div>
           )}
         </div>
@@ -304,6 +321,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button type="button" onPointerDown={event => startHistoryRepeat(undoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(undoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(undoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(undoRepeatRef.current!)} onClick={() => { if (undoRepeatRef.current!.shouldHandleClick()) onUndo(); }} disabled={!canUndo} className={iconButton} title={isEn ? 'Undo (Ctrl+Z)' : '撤销 (Ctrl+Z)'} aria-label={isEn ? 'Undo' : '撤销'}><Undo2 className="h-4 w-4" /></button>
           <button type="button" onPointerDown={event => startHistoryRepeat(redoRepeatRef.current!, event)} onPointerUp={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerCancel={() => stopHistoryRepeat(redoRepeatRef.current!)} onPointerLeave={() => stopHistoryRepeat(redoRepeatRef.current!)} onLostPointerCapture={() => stopHistoryRepeat(redoRepeatRef.current!)} onClick={() => { if (redoRepeatRef.current!.shouldHandleClick()) onRedo(); }} disabled={!canRedo} className={iconButton} title={isEn ? 'Redo (Ctrl+Y)' : '重做 (Ctrl+Y)'} aria-label={isEn ? 'Redo' : '重做'}><Redo2 className="h-4 w-4" /></button>
         </div>
+        {editorActions && <div className="relative shrink-0">
+          {menuButton('mirror', <FlipHorizontal2 className="h-3.5 w-3.5" />, isEn ? 'Mirror' : '镜像翻转')}
+          {openMenu === 'mirror' && <div id="toolbar-mirror-menu" role="menu" className="absolute right-0 top-full mt-1 grid min-w-[170px] gap-1 rounded-xl border border-purple-200 bg-white p-2 shadow-lg">
+            <button type="button" disabled={editorActions.isPracticeMode} className={buttonBase} onClick={() => { editorActions.onMirrorFlip('horizontal'); closeMenu(); }}><FlipHorizontal2 size={14} />{isEn ? 'Flip left/right' : '整图左右翻转'}</button>
+            <button type="button" disabled={editorActions.isPracticeMode} className={buttonBase} onClick={() => { editorActions.onMirrorFlip('vertical'); closeMenu(); }}><FlipVertical2 size={14} />{isEn ? 'Flip top/bottom' : '整图上下翻转'}</button>
+          </div>}
+        </div>}
+        {editorActions && <button type="button" aria-pressed={editorActions.isPracticeMode} onClick={editorActions.onTogglePractice}
+          className={`${buttonBase} shrink-0 ${editorActions.isPracticeMode ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
+          <Timer size={14} />{isEn ? 'Practice' : '拼豆实操'}
+        </button>}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           <button type="button" onClick={onSavePattern} disabled={isSavingPattern} className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-sky-300 bg-sky-600 px-2.5 text-[11px] font-black text-white shadow-sm transition-colors hover:bg-sky-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 focus-visible:ring-offset-1 disabled:cursor-wait disabled:opacity-60" title={isEn ? 'Save editable pattern without downloading' : '保存可编辑图纸，不下载文件'}>
             <Save className={`h-3.5 w-3.5 ${isSavingPattern ? 'animate-pulse' : ''}`} />{isEn ? (isSavingPattern ? 'Saving' : 'Save') : (isSavingPattern ? '保存中' : '保存')}

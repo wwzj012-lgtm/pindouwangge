@@ -55,6 +55,8 @@ import { PublicAnnouncementModal } from './components/PublicAnnouncementModal';
 import { ImportBlueprintWizard } from './components/ImportBlueprintWizard';
 import { recognitionDraftToProject, saveConfirmedRecognition, type ConfirmedRecognitionDraft } from './utils/confirmedRecognition';
 import { MIN_CANVAS_ZOOM } from './utils/canvasViewport';
+import { clearConnectedColorRegion, flipGrid, normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes } from './utils/gridEditing';
+import { PracticePanel } from './components/PracticePanel';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
@@ -68,6 +70,8 @@ import {
   type ExportedPatternRecord,
 } from './utils/patternHistory';
 import { validateStoredProject } from './utils/patternGridCodec';
+import { communityDraft } from './utils/communityPatternSnapshot';
+import { canEditCommunityPattern } from './utils/communityPatternAccess';
 import { normalizeRestoredPatternSettings, patternEditingSnapshot, savedPatternStudioUrl } from './utils/savedPatternNavigation';
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
@@ -436,7 +440,7 @@ interface StudioAppProps {
 
 function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const { language } = useLanguage();
-  const { currentUser, userProfile, creditSummary, refreshCreditSummary } = useAuth();
+  const { currentUser, userProfile, creditSummary, refreshCreditSummary, isVip, isPro } = useAuth();
   const isDesktop = useIsDesktop();
   const isEn = language === 'en';
 
@@ -567,6 +571,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [highlightColorIds, setHighlightColorIds] = useState<string[]>([]);
   const [completedColorIds, setCompletedColorIds] = useState<string[]>([]);
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
+  const [customSymmetryAxes, setCustomSymmetryAxes] = useState<SymmetryAxes | null>(null);
+  const symmetryAxes = normalizeSymmetryAxes(customSymmetryAxes, settings.width, settings.height);
+  const [isPracticeMode, setIsPracticeMode] = useState(false);
+  const [practiceColorId, setPracticeColorId] = useState<string | null>(null);
 
   const handleToggleHighlightColorId = useCallback((colorId: string) => {
     setHighlightColorIds(prev =>
@@ -607,6 +615,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [isSmartReduceModalOpen, setRawSmartReduceModalOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
+  const [profileInitialTab, setProfileInitialTab] = useState<'library' | 'inventory'>('library');
   const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
   const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
   const [initialPublishRecord, setInitialPublishRecord] = useState<ExportedPatternRecord | null>(null);
@@ -729,6 +738,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setServerPaidCoverage(null);
     setPaidNonEmptyBeads(null);
     setIsImageDerivedPattern(false);
+    setCustomSymmetryAxes(null);
+    setIsPracticeMode(false);
+    setPracticeColorId(null);
   }, [invalidateCompletionConfirmation]);
 
   const requireFormalLogin = useCallback((message: string): boolean => {
@@ -1499,57 +1511,19 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
+    if (isPracticeMode) return;
     if (x < 0 || x >= settings.width || y < 0 || y >= settings.height) return;
     const currentGrid = gridRef.current;
 
-    if (activeTool === 'pencil') {
-      if (!selectedColor) return;
-      const nextColorId = selectedColor.id;
-      if (currentGrid[y][x] === nextColorId) return;
-
+    if (activeTool === 'pencil' || activeTool === 'eraser') {
+      if (activeTool === 'pencil' && !selectedColor) return;
+      const value = activeTool === 'eraser' ? null : selectedColor!.id;
+      const points = reflectGridPoints([{x,y}], symmetryMode, settings.width, settings.height, symmetryAxes);
       const newGrid = currentGrid.map(row => [...row]);
-
-      const applyPoint = (px: number, py: number) => {
-        if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
-          newGrid[py][px] = nextColorId;
-        }
-      };
-
-      // Apply with symmetry
-      applyPoint(x, y);
-      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
-        applyPoint(settings.width - 1 - x, y);
-      }
-      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
-        applyPoint(x, settings.height - 1 - y);
-      }
-      if (symmetryMode === 'quad') {
-        applyPoint(settings.width - 1 - x, settings.height - 1 - y);
-      }
-
+      for (const p of points) newGrid[p.y][p.x] = value;
       applyGridChange(newGrid);
-    } else if (activeTool === 'eraser') {
-      if (currentGrid[y][x] === null) return;
-      const newGrid = currentGrid.map(row => [...row]);
-
-      const erasePoint = (px: number, py: number) => {
-        if (px >= 0 && px < settings.width && py >= 0 && py < settings.height) {
-          newGrid[py][px] = null;
-        }
-      };
-
-      erasePoint(x, y);
-      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
-        erasePoint(settings.width - 1 - x, y);
-      }
-      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
-        erasePoint(x, settings.height - 1 - y);
-      }
-      if (symmetryMode === 'quad') {
-        erasePoint(settings.width - 1 - x, settings.height - 1 - y);
-      }
-
-      applyGridChange(newGrid);
+    } else if (activeTool === 'region_clear') {
+      applyGridChange(clearConnectedColorRegion(currentGrid, x, y));
     } else if (activeTool === 'bucket') {
       if (!selectedColor) return;
       const targetColorId = currentGrid[y][x];
@@ -1590,7 +1564,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Shape creation handler from GridCanvas (Line / Rectangle / Circle)
   const handleApplyShape = (points: { x: number; y: number }[]) => {
-    if (!selectedColor || points.length === 0) return;
+    if (isPracticeMode || !selectedColor || points.length === 0) return;
     const colorId = selectedColor.id;
     const newGrid = gridRef.current.map(row => [...row]);
 
@@ -1600,18 +1574,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       }
     };
 
-    points.forEach(pt => {
-      applyPoint(pt.x, pt.y);
-      if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
-        applyPoint(settings.width - 1 - pt.x, pt.y);
-      }
-      if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
-        applyPoint(pt.x, settings.height - 1 - pt.y);
-      }
-      if (symmetryMode === 'quad') {
-        applyPoint(settings.width - 1 - pt.x, settings.height - 1 - pt.y);
-      }
-    });
+    reflectGridPoints(points, symmetryMode, settings.width, settings.height, symmetryAxes)
+      .forEach(pt => applyPoint(pt.x, pt.y));
 
     applyGridChange(newGrid);
   };
@@ -2007,6 +1971,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       else if (key === 'b') setActiveTool('bucket');
       else if (key === 'i') setActiveTool('eyedropper');
       else if (key === 'e') setActiveTool('eraser');
+      else if (key === 'u') setActiveTool('region_clear');
       else if (key === 'r') setActiveTool('replace');
     };
 
@@ -2022,7 +1987,17 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     }, 100);
   }, [isEn, openUserPatternsModal, requireFormalLogin]);
 
-  const handleRemixPattern = useCallback((pattern: CommunityPattern) => {
+  const handleRemixPattern = (pattern: CommunityPattern) => {
+    if (pattern.project) {
+      // Enforce at the state-changing boundary too, not only on community buttons.
+      if (!canEditCommunityPattern(pattern.project, { isVip, isPro })) {
+        setIsVipModalOpen(true);
+        return false;
+      }
+      // A public copy has a new draft identity and cannot inherit the author's
+      // saved work ID, ownership, or paid completion metadata.
+      return handleRestorePattern(communityDraft({ ...pattern.project, name: pattern.title }, createDraftId()));
+    }
     setProjectName(pattern.title);
     setSettings(prev => ({
       ...prev,
@@ -2033,9 +2008,27 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (pattern.imageUrl) {
       handleLoadSample(pattern.imageUrl);
     }
-  }, [handleLoadSample]);
+  };
 
 
+  const practicePanel = isPracticeMode ? <PracticePanel
+    grid={grid} paletteMap={paletteMap} workKey={stableWorkKey} userId={currentUser?.uid ?? null}
+    detailsUnlocked={isPatternUnlocked} activeColorId={practiceColorId}
+    onHighlightColor={setPracticeColorId} onClose={() => {setIsPracticeMode(false);setPracticeColorId(null);}}
+    onOpenInventory={() => {if(requireFormalLogin(isEn ? 'Sign in to manage inventory.' : '请先登录后管理豆仓。')) {setProfileInitialTab('inventory');setIsUserProfileModalOpen(true);}}}
+  /> : undefined;
+  const editorActions = {
+    axes: symmetryAxes, width: settings.width, height: settings.height,
+    onAxesChange: setCustomSymmetryAxes,
+    onMirrorFlip: (direction: 'horizontal' | 'vertical') => {
+      if (isPracticeMode) return;
+      applyGridChange(flipGrid(gridRef.current, direction));
+    },
+    isPracticeMode,
+    onTogglePractice: () => {setIsPracticeMode(value => !value);setPracticeColorId(null);},
+    practicePanel,
+  };
+  const canvasHighlightColorIds = isPracticeMode ? (practiceColorId && isPatternUnlocked ? [practiceColorId] : []) : highlightColorIds;
   const completionSummary = (
     <CompletionSummary
       isEn={isEn}
@@ -2079,7 +2072,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onOpenPatternsModal={openUserPatternsModal}
           onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
+          onOpenUserProfileModal={() => {setProfileInitialTab('library');setIsUserProfileModalOpen(true);}}
           onOpenVipModal={() => setIsVipModalOpen(true)}
           onClearCanvas={handleClearCanvas}
           currentTab={currentTab}
@@ -2100,7 +2093,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onOpenPatternsModal={openUserPatternsModal}
           onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onOpenUserProfileModal={() => setIsUserProfileModalOpen(true)}
+          onOpenUserProfileModal={() => {setProfileInitialTab('library');setIsUserProfileModalOpen(true);}}
           onOpenVipModal={() => setIsVipModalOpen(true)}
           onClearCanvas={handleClearCanvas}
           currentTab={currentTab}
@@ -2133,6 +2126,13 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               onRemixPattern={handleRemixPattern}
               onNavigateToStudio={() => setCurrentTab('studio')}
               onOpenAuthModal={() => setIsAuthModalOpen(true)}
+              onOpenVipModal={() => setIsVipModalOpen(true)}
+              onOpenInventory={() => {
+                if (requireFormalLogin(isEn ? 'Sign in to manage inventory.' : '请先登录后管理豆仓。')) {
+                  setProfileInitialTab('inventory');
+                  setIsUserProfileModalOpen(true);
+                }
+              }}
             />
           </Suspense>
         </DeferredFeatureBoundary>
@@ -2212,6 +2212,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             <PatternDetailsUnlockContext.Provider value={isPatternUnlocked}>
             {isDesktop ? (
             <DesktopWorkspace
+              editorActions={editorActions}
               completionSummary={completionSummary}
               grid={grid}
               paletteMap={paletteMap}
@@ -2250,7 +2251,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
                 setShowOverlay={setShowOverlay}
                 overlayOpacity={overlayOpacity}
                 setOverlayOpacity={setOverlayOpacity}
-              highlightColorIds={highlightColorIds}
+              highlightColorIds={canvasHighlightColorIds}
               setHighlightColorIds={setHighlightColorIds}
               handleToggleHighlightColorId={handleToggleHighlightColorId}
               completedColorIds={completedColorIds}
@@ -2277,6 +2278,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             />
           ) : (
             <MobileWorkspace
+              editorActions={editorActions}
               completionSummary={completionSummary}
               grid={grid}
               paletteMap={paletteMap}
@@ -2315,7 +2317,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
                 setShowOverlay={setShowOverlay}
                 overlayOpacity={overlayOpacity}
                 setOverlayOpacity={setOverlayOpacity}
-              highlightColorIds={highlightColorIds}
+              highlightColorIds={canvasHighlightColorIds}
               setHighlightColorIds={setHighlightColorIds}
               handleToggleHighlightColorId={handleToggleHighlightColorId}
               completedColorIds={completedColorIds}
@@ -2402,6 +2404,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         settings={settings}
         onPatternArchived={setActivePatternId}
         onOpenAuthModal={() => setIsAuthModalOpen(true)}
+        onOpenVipModal={() => {setIsExportModalOpen(false);setIsVipModalOpen(true);}}
         unlocked={isPatternUnlocked}
       />
 
@@ -2501,6 +2504,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       />
 
       <UserProfileModal
+        initialTab={profileInitialTab}
         isOpen={isUserProfileModalOpen}
         onClose={() => setIsUserProfileModalOpen(false)}
         onOpenAccountManagement={() => setIsAccountManagementModalOpen(true)}

@@ -74,7 +74,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   const activeHighlightIds = highlightColorIds ?? (highlightColorId ? [highlightColorId] : []);
 
   // Compute active & erased stats
-  const { stats, erasedStats, totalBeads } = useMemo(() => {
+  const { stats, erasedStats, totalBeads, colorTypes } = useMemo(() => {
     const counts = new Map<string, number>();
     let total = 0;
 
@@ -119,7 +119,7 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
       });
     }
 
-    return { stats: statList, erasedStats: erasedList, totalBeads: total };
+    return { stats: statList, erasedStats: erasedList, totalBeads: total, colorTypes: counts.size };
   }, [grid, paletteMap, erasedColorCoords]);
 
   // Filter stats
@@ -220,18 +220,20 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </div>
       </div>
 
-      <div className="my-3 rounded-2xl border border-purple-200/80 bg-purple-50/80 p-2.5 text-center" aria-label={isEn ? 'Total Beads' : '总用豆数'}>
+      <div className="my-3 grid grid-cols-2 gap-2">
+      <div className="rounded-2xl border border-purple-200/80 bg-purple-50/80 p-2.5 text-center" aria-label={isEn ? 'Total Beads' : '总用豆数'}>
         <div className="text-[10px] font-medium text-purple-600">{isEn ? 'Total Beads' : '总用豆数'}</div>
         <div className="mt-0.5 font-mono text-sm font-black text-purple-900">{totalBeads}</div>
+      </div>
+      <div className="rounded-2xl border border-purple-200/80 bg-purple-50/80 p-2.5 text-center" aria-label={isEn ? 'Colors Used' : '颜色种类数量'}>
+        <div className="text-[10px] font-medium text-purple-600">{isEn ? 'Colors Used' : '颜色种类'}</div>
+        <div className="mt-0.5 font-mono text-sm font-black text-purple-900">{colorTypes}</div>
+      </div>
       </div>
 
       {hasDetails ? (
         <>
-          <div className="grid grid-cols-2 gap-2 my-3">
-            <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
-              <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Colors Used' : '使用色数'}</div>
-              <div className="text-sm font-black text-purple-900 font-mono mt-0.5">{stats.length}</div>
-            </div>
+          <div className="my-3">
             <div className="bg-purple-50/80 p-2.5 rounded-2xl border border-purple-200/80 text-center">
               <div className="text-[10px] text-purple-600 font-medium">{isEn ? 'Boards Needed' : '需拼豆板'}</div>
               <div className="text-sm font-black text-indigo-700 font-mono mt-0.5">{totalBoards} {isEn ? 'boards' : '板'}</div>

@@ -4,10 +4,12 @@ import { Toolbar } from '../Toolbar';
 import { SettingsPanel } from '../SettingsPanel';
 import { StatsPanel, type StrayBeadConsolidationStrength } from '../StatsPanel';
 import { GridCanvas } from '../GridCanvas';
+import type { WorkspaceEditingActions } from '../SymmetryAxisControls';
 import type { ConversionDiagnostics } from '../../utils/imagePipeline';
 import { Sparkles } from 'lucide-react';
 
 export interface DesktopWorkspaceProps {
+  editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
   // Canvas & Grid State
   grid: (string | null)[][];
@@ -82,6 +84,7 @@ export interface DesktopWorkspaceProps {
 }
 
 export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
+  editorActions,
   completionSummary,
   grid,
   paletteMap,
@@ -152,6 +155,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
       {/* Top Desktop Toolbar */}
       <div className="relative z-30 shrink-0 overflow-visible">
         <Toolbar
+          editorActions={editorActions}
           activeTool={activeTool}
           setActiveTool={setActiveTool}
           selectedColor={selectedColor}
@@ -206,24 +210,26 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
         {/* Center Main Canvas Viewport */}
         <main className="flex-1 h-full relative min-w-0 bg-slate-100 flex flex-col overflow-hidden">
           <GridCanvas
+            symmetryAxes={editorActions?.axes}
+            onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
             interactionProfile="desktop"
             grid={grid}
             paletteMap={paletteMap}
             width={settings.width}
             height={settings.height}
             boardSize={settings.boardSize}
-            activeTool={activeTool}
+            activeTool={editorActions?.isPracticeMode ? 'hand' : activeTool}
             setActiveTool={setActiveTool}
             selectedColor={selectedColor}
             highlightColorIds={highlightColorIds}
             highlightColorId={highlightColorIds.length === 1 ? highlightColorIds[0] : null}
-            completedColorIds={completedColorIds}
+            completedColorIds={editorActions?.isPracticeMode ? [] : completedColorIds}
             beadShape={beadShape}
             showSymbols={showSymbols}
             showGridLines={showGridLines}
             showCoordinates={showCoordinates}
             canvasBackdrop={canvasBackdrop}
-            symmetryMode={symmetryMode}
+            symmetryMode={editorActions?.isPracticeMode ? 'none' : symmetryMode}
             sourceImage={sourceImage}
             keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
@@ -259,7 +265,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
         </main>
 
         {/* Right Sidebar: Color Palette & Quantity Statistics */}
-        <aside className="h-full z-20 shrink-0 border-l border-purple-200/80 bg-white/90 shadow-sm flex flex-col">
+        <aside className="h-full z-20 shrink-0 border-l border-purple-200/80 bg-white/90 shadow-sm flex flex-col" style={editorActions?.isPracticeMode ? {width:328} : undefined}>
+          {editorActions?.isPracticeMode ? editorActions.practicePanel : <>
           {completionSummary}
           <StatsPanel
             grid={grid}
@@ -281,6 +288,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             erasedColorCoords={erasedColorCoords}
             onConsolidateStrayBeads={onConsolidateStrayBeads}
           />
+          </>}
         </aside>
       </div>
     </div>

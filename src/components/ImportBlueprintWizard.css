@@ -670,6 +670,39 @@
   gap:20px;
   margin:12px 0 0
 }
+.ir-background-panel .ir-label {
+  display:flex;
+  flex-direction:column;
+  gap:7px
+}
+.ir-background-panel select {
+  width:100%
+}
+.ir-background-preview {
+  margin:12px 0;
+  padding:10px 12px;
+  border:1px solid var(--ir-line);
+  border-radius:9px;
+  background:var(--ir-tint);
+  color:var(--ir-ink);
+  font-size:11px;
+  line-height:1.7;
+  font-variant-numeric:tabular-nums
+}
+.ir-background-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px
+}
+.ir-background-actions .ir-button {
+  flex:1;
+  min-height:44px;
+  white-space:nowrap
+}
+.ir-background-panel button:focus-visible,.ir-background-panel select:focus-visible {
+  outline:2px solid var(--ir-purple);
+  outline-offset:2px
+}
 .ir-stats>div {
   flex:1
 }

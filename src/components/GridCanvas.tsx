@@ -7,6 +7,7 @@ import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
 import { clampCanvasViewport, MIN_CANVAS_ZOOM } from '../utils/canvasViewport';
 import { getVisibleGridRange } from '../utils/visibleGridRange';
+import { normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes } from '../utils/gridEditing';
 import {
   changeImagePreviewScale,
   createInitialImagePreviewView,
@@ -25,6 +26,8 @@ import {
 } from '../utils/referencePanelPosition';
 
 interface GridCanvasProps {
+  symmetryAxes?: SymmetryAxes;
+  onSymmetryAxesChange?: (axes: SymmetryAxes) => void;
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
   width: number;
@@ -167,6 +170,8 @@ function getCanvasDpr(): number {
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
+  symmetryAxes,
+  onSymmetryAxesChange,
   grid,
   paletteMap,
   width,
@@ -590,6 +595,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const cellSize = baseCellSize * zoom;
   const minSymbolCellSize = 18;
   const coordOffset = showCoordinates ? 28 : 0;
+  const axes = normalizeSymmetryAxes(symmetryAxes, width, height);
+  const axisDragRef = useRef<{axis:'x'|'y'; pointerId:number} | null>(null);
 
   // Refs for touch gesture sync
   const zoomRef = useRef(zoom);
@@ -923,38 +930,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     return () => container.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  // Expand points by Symmetry Mode
   const applySymmetryToPoints = useCallback(
-    (pts: { x: number; y: number }[]): { x: number; y: number }[] => {
-      if (symmetryMode === 'none') return pts;
-
-      const result = new Set<string>();
-      for (const p of pts) {
-        result.add(`${p.x},${p.y}`);
-
-        if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
-          const symX = width - 1 - p.x;
-          if (symX >= 0 && symX < width) result.add(`${symX},${p.y}`);
-        }
-        if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
-          const symY = height - 1 - p.y;
-          if (symY >= 0 && symY < height) result.add(`${p.x},${symY}`);
-        }
-        if (symmetryMode === 'quad') {
-          const symX = width - 1 - p.x;
-          const symY = height - 1 - p.y;
-          if (symX >= 0 && symX < width && symY >= 0 && symY < height) {
-            result.add(`${symX},${symY}`);
-          }
-        }
-      }
-
-      return Array.from(result).map(str => {
-        const [x, y] = str.split(',').map(Number);
-        return { x, y };
-      });
-    },
-    [symmetryMode, width, height]
+    (points: {x:number;y:number}[]) => reflectGridPoints(points, symmetryMode as SymmetryMode, width, height, symmetryAxes),
+    [symmetryMode, width, height, symmetryAxes?.x, symmetryAxes?.y],
   );
 
   // Main Canvas Render loop
@@ -1101,8 +1079,16 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           const bead = paletteMap.get(colorId);
           const colorHex = bead ? bead.hex : '#CCCCCC';
           if (!useDetailedBeads) {
+            const state = getColorDisplayState(colorId, activeHighlightIds, completedColorIds);
+            ctx.save();
+            if (state === 'dimmed') ctx.globalAlpha = 0.15;
             ctx.fillStyle = colorHex;
             ctx.fillRect(px, py, cellSize, cellSize);
+            if (state === 'focused') {
+              ctx.strokeStyle = '#e11d48'; ctx.lineWidth = Math.max(1, cellSize * 0.18);
+              ctx.strokeRect(px, py, cellSize, cellSize);
+            }
+            ctx.restore();
             continue;
           }
           const symbolStr = showSymbols && !isIronedPreview && cellSize >= minSymbolCellSize && bead
@@ -1192,14 +1178,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ctx.setLineDash([4, 4]);
 
       if (symmetryMode === 'horizontal' || symmetryMode === 'quad') {
-        const midX = startX + (width * cellSize) / 2;
+        const midX = startX + axes.x * cellSize;
         ctx.beginPath();
         ctx.moveTo(midX, startY);
         ctx.lineTo(midX, startY + gridPixelHeight);
         ctx.stroke();
       }
       if (symmetryMode === 'vertical' || symmetryMode === 'quad') {
-        const midY = startY + (height * cellSize) / 2;
+        const midY = startY + axes.y * cellSize;
         ctx.beginPath();
         ctx.moveTo(startX, midY);
         ctx.lineTo(startX + gridPixelWidth, midY);
@@ -1315,6 +1301,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     shapeStartCell,
     hoverCell,
     applySymmetryToPoints,
+    axes.x,
+    axes.y,
   ]);
 
   useEffect(() => {
@@ -1396,7 +1384,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       isHistoryTransactionActiveRef.current = true;
     }
 
-    if (activeTool === 'pencil' || activeTool === 'eraser' || activeTool === 'bucket' || activeTool === 'replace') {
+    if (activeTool === 'pencil' || activeTool === 'eraser' || activeTool === 'bucket' || activeTool === 'replace' || activeTool === 'region_clear') {
       const symPoints = applySymmetryToPoints([cell]);
       if (onMultiCellClick && symPoints.length > 1) {
         onMultiCellClick(symPoints);
@@ -1582,6 +1570,38 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         onPointerLeave={() => setHoverCell(null)}
         className="w-full h-full block touch-none"
       />
+      {onSymmetryAxesChange && symmetryMode !== 'none' && (['x','y'] as const).map(axis => {
+        if ((axis === 'x' && symmetryMode === 'vertical') || (axis === 'y' && symmetryMode === 'horizontal')) return null;
+        const start = (event: React.PointerEvent<HTMLButtonElement>) => {
+          event.preventDefault(); event.stopPropagation();
+          axisDragRef.current = {axis, pointerId:event.pointerId};
+          event.currentTarget.setPointerCapture(event.pointerId);
+        };
+        return <button key={axis} type="button" data-canvas-interaction-ignore
+          aria-label={axis === 'x' ? '拖动左右对称轴' : '拖动上下对称轴'}
+          title={axis === 'x' ? '左右对称轴：拖动调整，方向键微调' : '上下对称轴：拖动调整，方向键微调'}
+          className="absolute z-10 flex h-11 w-11 touch-none items-center justify-center rounded-full border-2 border-white bg-purple-600 text-xs font-bold text-white shadow-md"
+          style={axis === 'x' ? {left:Math.max(4,Math.min((containerRef.current?.clientWidth ?? 48)-48,pan.x+coordOffset+axes.x*cellSize-22)),top:4}
+            : {left:4,top:Math.max(4,Math.min((containerRef.current?.clientHeight ?? 48)-48,pan.y+coordOffset+axes.y*cellSize-22))}}
+          onPointerDown={start}
+          onPointerMove={event => {
+            if (axisDragRef.current?.pointerId !== event.pointerId) return;
+            event.preventDefault(); event.stopPropagation();
+            const rect = canvasRef.current!.getBoundingClientRect();
+            const position = axis === 'x' ? (event.clientX-rect.left-pan.x-coordOffset)/cellSize : (event.clientY-rect.top-pan.y-coordOffset)/cellSize;
+            onSymmetryAxesChange(normalizeSymmetryAxes({...axes,[axis]:position},width,height));
+          }}
+          onPointerUp={event => { axisDragRef.current=null; if(event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+          onPointerCancel={() => {axisDragRef.current=null;}}
+          onLostPointerCapture={() => {axisDragRef.current=null;}}
+          onKeyDown={event => {
+            if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return;
+            event.preventDefault(); event.stopPropagation();
+            const delta = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -0.5 : 0.5;
+            onSymmetryAxesChange(normalizeSymmetryAxes({...axes,[axis]:axes[axis]+delta},width,height));
+          }}
+        >{axis === 'x' ? '↔' : '↕'}</button>;
+      })}
 
       {/* Hover Pixel Info Popover Card */}
       {hoverCell && (

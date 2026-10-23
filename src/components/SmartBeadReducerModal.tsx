@@ -88,6 +88,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
   const [savingTarget, setSavingTarget] = useState<15 | 25 | 40>(15);
   // Background removal is destructive and must be explicitly selected.
   const [removeBackgroundBeads, setRemoveBackgroundBeads] = useState<boolean>(false);
+  const [backgroundTolerance, setBackgroundTolerance] = useState(18);
   const [protectSaliencyAndContours, setProtectSaliencyAndContours] = useState<boolean>(true);
   const [protectVibrantColors, setProtectVibrantColors] = useState<boolean>(true);
   const [removeIsolatedNoise, setRemoveIsolatedNoise] = useState<boolean>(true);
@@ -204,6 +205,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
       intensity,
       downscaleRatio: savingPercentToScale(savingTarget),
       removeBackgroundBeads,
+      backgroundTolerance,
       protectSaliencyAndContours,
       protectVibrantColors,
       removeIsolatedNoise,
@@ -234,6 +236,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
     intensity,
     savingTarget,
     removeBackgroundBeads,
+    backgroundTolerance,
     protectSaliencyAndContours,
     protectVibrantColors,
     removeIsolatedNoise,
@@ -323,7 +326,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
       onOpenAuthModal?.();
       return;
     }
-    if (!report) return;
+    if (isCalculating || !report) return;
     onApplyReducedGrid(report.optimizedGrid, savingTarget);
     onClose();
   };
@@ -473,6 +476,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-white border-slate-300 text-amber-600 focus:ring-amber-500 w-5 h-5 cursor-pointer shrink-0 ml-2"
                 />
               </label>
+              {removeBackgroundBeads && <label className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600">
+                <span>{language === 'zh' ? '去背景容差' : 'Background tolerance'} · {backgroundTolerance}</span>
+                <input type="range" min={0} max={30} step={1} value={backgroundTolerance}
+                  aria-label={language === 'zh' ? '去背景容差' : 'Background tolerance'}
+                  onChange={event => setBackgroundTolerance(Number(event.target.value))} className="w-full accent-amber-600" />
+                <span>{language === 'zh' ? '数值越小越保守；只移除与图片边缘连通的背景，不随精简档位改变。' : 'Lower is more conservative. Only edge-connected background is removed; intensity does not change this setting.'}</span>
+              </label>}
             </div>
           </div>
 
@@ -493,13 +503,13 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between font-bold text-sm">
-                  <span className="text-sky-900">{language === 'zh' ? '1档 · 微调精炼' : 'Level 1 · Light Polish'}</span>
+                  <span className="text-sky-900">{language === 'zh' ? '1档 · 细节保留' : 'Level 1 · Preserve detail'}</span>
                   <span className="text-[10px] bg-sky-100 px-1.5 py-0.5 rounded-full text-sky-800 font-bold">
                     {language === 'zh' ? '微调色块' : 'Light Merge'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {language === 'zh' ? '保留原始所有微小阴影渐变，仅清除分散游离噪点。' : 'Keep all original shading details, only clean stray individual noise beads.'}
+                    {language === 'zh' ? '仅归并颜色非常接近的微小杂色，保留主体色块与阴影层次。' : 'Merge only tiny, very similar color islands; retain shading and main color blocks.'}
                 </p>
               </button>
 
@@ -514,7 +524,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
               >
                 <div className="flex items-center justify-between font-bold text-sm">
                   <span className="text-purple-900 flex items-center gap-1">
-                    <span>{language === 'zh' ? '2档 · 标准推荐' : 'Level 2 · Recommended'}</span>
+                    <span>{language === 'zh' ? '2档 · 碎色整理' : 'Level 2 · Consolidate patches'}</span>
                     <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                   </span>
                   <span className="text-[10px] bg-purple-100 text-purple-800 px-1.5 py-0.5 rounded-full font-bold">
@@ -522,7 +532,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {language === 'zh' ? '智能合并相近的大面积色块，减少零碎颜色；请对照预览检查主体特征。' : 'Merge similar large color patches and review the preview for subject details.'}
+                  {language === 'zh' ? '将低反差的小色块整片并入相邻主色，减少频繁换色，保留主要明暗关系。' : 'Merge low-contrast small patches into adjacent dominant regions; reduce color changes while retaining major shading.'}
                 </p>
               </button>
 
@@ -536,16 +546,21 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 }`}
               >
                 <div className="flex items-center justify-between font-bold text-sm">
-                  <span className="text-indigo-900">{language === 'zh' ? '3档 · 极简平滑' : 'Level 3 · Bold blocks'}</span>
+                  <span className="text-indigo-900">{language === 'zh' ? '3档 · 大色块简化' : 'Level 3 · Broad color blocks'}</span>
                   <span className="text-[10px] bg-indigo-100 px-1.5 py-0.5 rounded-full text-indigo-800 font-bold">
                     {language === 'zh' ? '块状纯色化' : 'Bold blocks'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {language === 'zh' ? '强力合并近似颜色，图纸更具经典像素风，极速拼搭。' : 'Strong merge of close colors for a classic bold pixel art style, faster to build.'}
+                  {language === 'zh' ? '允许相邻较大近似色块合并，明显减少渐变与碎色；细节损失更大，请先对照预览。' : 'Merge larger adjacent similar regions to simplify gradients; more detail may be lost, so compare before applying.'}
                 </p>
               </button>
             </div>
+            <p className="text-[11px] leading-relaxed text-slate-500">
+              {language === 'zh'
+                ? '省豆目标控制图纸尺寸；精简档位控制颜色合并范围和力度。每次均从原始图纸重新计算，纯色图或受保护的细节在不同档位下可能保持一致。'
+                : 'Saving targets control canvas dimensions; intensity controls color simplification. Each preview starts from the original. Flat colors or protected details may remain unchanged across levels.'}
+            </p>
           </div>
 
           {/* Layer Protection Controls Grid */}
@@ -565,7 +580,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                 />
                 <span className="font-semibold flex items-center gap-1 text-slate-800">
                   <Eye className="w-3.5 h-3.5 text-purple-600" />
-                  <span>{language === 'zh' ? '五官与高反差轮廓锁死' : 'Face & Contour Lock'}</span>
+                  <span>{language === 'zh' ? '保护高反差轮廓与细线' : 'Protect contours & thin strokes'}</span>
                 </span>
               </label>
 
@@ -577,7 +592,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-white border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-800">
-                  {language === 'zh' ? '💎 核心高饱和色彩纯净保护' : '💎 Vibrant Color Protection'}
+                  {language === 'zh' ? '💎 保留鲜艳点缀' : '💎 Preserve vibrant accents'}
                 </span>
               </label>
 
@@ -589,7 +604,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-white border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-800">
-                  {language === 'zh' ? '🧹 1-3px 悬空噪点清除' : '🧹 Remove Stray Noises'}
+                  {language === 'zh' ? '🧹 零星杂色归并' : '🧹 Merge isolated color noise'}
                 </span>
               </label>
 
@@ -601,7 +616,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   className="rounded bg-white border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
                 />
                 <span className="font-semibold text-slate-800">
-                  {language === 'zh' ? '🎨 压缩极低频零碎色卡' : '🎨 Condense Stray Colors'}
+                  {language === 'zh' ? '🎨 合并相似色块（使用上方档位）' : '🎨 Merge similar regions (selected level)'}
                 </span>
               </label>
 
@@ -704,6 +719,16 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
           {/* Precision Comparison & Savings Breakdown Card */}
           {report && (
             <div className="space-y-3">
+              <div role="status" className="rounded-xl border border-purple-200 bg-white px-4 py-3 text-xs leading-6 text-slate-700">
+                {language === 'zh'
+                  ? `本次${intensity === 'light' ? '轻度' : intensity === 'medium' ? '标准' : '强力'}精简：调整原图 ${report.recoloredSourceBeads} 格颜色，减少 ${Math.max(0, report.savedColorTypesCount)} 种用色；缩小图纸实际减少 ${report.resamplingBeadsSaved} 颗豆。改色格数不计作省豆数。`
+                  : `${intensity} simplification: ${report.recoloredSourceBeads} source cells recolored, ${Math.max(0, report.savedColorTypesCount)} colors removed; resizing saved ${report.resamplingBeadsSaved} beads. Recoloring does not count as material savings.`}
+                {!report.materialBudgetMet && <p className="mt-1 text-amber-800">
+                  {language === 'zh'
+                    ? `为保留连通结构与留白，实际保留 ${report.optimizedTotalBeads} 颗，超过本档目标 ${report.materialBudgetBeads} 颗。此结果未达到用豆量目标，请对照预览后决定是否应用。`
+                    : `Structure and empty-space preservation retained ${report.optimizedTotalBeads} beads, above the ${report.materialBudgetBeads}-bead target. The material target was not met; review the preview before applying.`}
+                </p>}
+              </div>
               {/* 2-Item Clear Savings Breakdown Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                 {/* Item 1: Bead Material Savings */}

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Ban, ChevronLeft, ChevronRight, Plus, ShieldCheck, X } from 'lucide-react';
+import { Ban, ChevronLeft, ChevronRight, KeyRound, Plus, ShieldCheck, X } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { AdminPasswordReset } from './AdminPasswordReset';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, dateText, emptyUserQuery, memberLabel, membershipDraft, membershipPresentation, membershipProposal, requestError, returnedExpiry, userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery, type UserStatus } from './adminUserModel';
@@ -10,6 +12,8 @@ interface UsersPage { items: AdminUser[]; total: number; limit: number; offset: 
 interface Snapshot extends UsersPage { query: UserQuery; }
 
 export function AdminUsers({ request }: { request: AdminRequest }) {
+  const { currentUser } = useAuth();
+  const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [draft, setDraft] = useState(emptyUserQuery);
   const [query, setQuery] = useState(emptyUserQuery);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -39,6 +43,7 @@ export function AdminUsers({ request }: { request: AdminRequest }) {
   const apply = () => setQuery({ ...draft, search: draft.search.trim(), page: 1 });
   const reset = () => { setDraft(emptyUserQuery()); setQuery(emptyUserQuery()); };
   const open = (user: AdminUser) => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected(user); };
+  const resetEntry = (user: AdminUser, disabled = false) => <AdminButton data-user-reset-password={user.uid} disabled={disabled || user.uid === currentUser?.uid} title={user.uid === currentUser?.uid ? '不能重置当前管理员自己的密码' : '重置该用户登录密码'} onClick={() => setResetUser(user)}><KeyRound aria-hidden="true" />重置密码</AdminButton>;
   const close = () => { setSelected(null); requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); }); };
   const tagText = (user: AdminUser) => {
     const known = details[user.uid]?.tags ?? user.tags;
@@ -62,20 +67,21 @@ export function AdminUsers({ request }: { request: AdminRequest }) {
           <td><strong>{userLabel(user)}</strong><small>{user.email}</small><small className="admin-mono">{user.uid}</small></td>
           <td><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small>限制至 {dateText(user.moderation.expiresAt)}</small>}</td>
           <td>{eligibility(user)}</td><td><span className="admin-tag-summary">{tagText(user)}</span></td><td>{dateText(user.lastActiveAt)}{user.lastActiveAt == null && <small>接口未提供</small>}</td>
-          <td><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton></td>
+          <td><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></td>
         </tr>)}</tbody></table></div>
-        <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono">{user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p>最近活动：{user.lastActiveAt == null ? '接口未提供' : dateText(user.lastActiveAt)}</p><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton></article>)}</div>
+        <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono">{user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p>最近活动：{user.lastActiveAt == null ? '接口未提供' : dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
       </>}
       {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {Math.max(1, Math.ceil(snapshot.total / 20))} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= Math.ceil(snapshot.total / 20)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
     </div>
     <p className="admin-stage-footnote">列表接口不返回逐用户标签或最近活动时间。标签在详情读取后展示；不额外批量请求或伪造活动记录。</p>
-    {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} />}
+    {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} resetEntry={resetEntry} />}
+    {resetUser && <AdminPasswordReset key={resetUser.uid} user={resetUser} currentUserUid={currentUser?.uid} request={request} onClose={() => setResetUser(null)} />}
   </section>;
 }
 
-interface DrawerProps { user: AdminUser; tags: AdminTag[]; request: AdminRequest; onClose: () => void; onRead: (detail: UserDetail) => void; onChanged: () => void; key?: string; }
+interface DrawerProps { user: AdminUser; tags: AdminTag[]; request: AdminRequest; onClose: () => void; onRead: (detail: UserDetail) => void; onChanged: () => void; resetEntry: (user: AdminUser, disabled?: boolean) => React.ReactNode; key?: string; }
 type Confirmation = { kind: 'membership'; proposal: ReturnType<typeof membershipProposal> } | { kind: 'moderation'; payload: { userUid: string; action: string; reason: string; expiresAt?: number } } | { kind: 'tag'; id: string; name: string };
-function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged }: DrawerProps) {
+function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, resetEntry }: DrawerProps) {
   const [detail, setDetail] = useState<UserDetail | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState('');
   const [draft, setDraft] = useState<MembershipDraft>(() => membershipDraft(user));
   const [note, setNote] = useState(''), [tagId, setTagId] = useState('');
@@ -130,7 +136,7 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged }: D
       {success && <p className="admin-success-message" role="status">{success}</p>}
       {error && <AdminErrorState title="操作尚未完成" message={error} retry={() => void read()} busy={busy || loading} />}
       {!detail ? loading ? <AdminLoading label="正在读取用户详情…" /> : <AdminEmptyState title="无法读取该用户" description="接口未返回详情；不会按列表信息编造。" /> : <>
-        <section className="admin-detail-section"><h2>概况</h2><dl className="admin-detail-facts"><div><dt>账号</dt><dd>{detail.user.email}</dd></div><div><dt>UID</dt><dd className="admin-mono">{detail.user.uid}</dd></div><div><dt>账号状态</dt><dd><StatusBadge status={detail.moderation.status} /></dd></div><div><dt>角色有效权益</dt><dd>{view.effective}</dd></div><div><dt>创建时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div><div><dt>图纸数量</dt><dd>{detail.aggregates?.works ?? detail.workCount ?? '—'}</dd></div><div><dt>最近活动</dt><dd>{dateText(detail.user.lastActiveAt)}（未提供时不推断）</dd></div></dl></section>
+        <section className="admin-detail-section"><h2>概况</h2><dl className="admin-detail-facts"><div><dt>账号</dt><dd>{detail.user.email}</dd></div><div><dt>UID</dt><dd className="admin-mono">{detail.user.uid}</dd></div><div><dt>账号状态</dt><dd><StatusBadge status={detail.moderation.status} /></dd></div><div><dt>角色有效权益</dt><dd>{view.effective}</dd></div><div><dt>创建时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div><div><dt>图纸数量</dt><dd>{detail.aggregates?.works ?? detail.workCount ?? '—'}</dd></div><div><dt>最近活动</dt><dd>{dateText(detail.user.lastActiveAt)}（未提供时不推断）</dd></div></dl><div className="admin-reset-entry">{resetEntry(detail.user, disabled)}</div></section>
         <section className="admin-detail-section"><h2>会员权益</h2><div className="admin-info-box"><p>当前接口付费字段：<strong>{view.paid}</strong></p><p>当前到期值：{view.expiry}</p>{detail.user.role === 'admin' && <p>Pro来自管理员角色，不代表付费Pro，也不会写回付费字段。</p>}{view.caveat && <p>{view.caveat}</p>}</div>
           <div className="admin-form-grid" key={formVersion}>
             <label>将提交的付费级别<select data-membership-type value={draft.type} disabled={disabled} onChange={event => setDraft(current => ({ ...current, type: Number(event.target.value) as 0 | 1 | 2 }))}>{draft.type === '' && <option value="">未提供，请选择</option>}<option value={0}>免费</option><option value={1}>VIP</option><option value={2}>商家 Pro</option></select></label>

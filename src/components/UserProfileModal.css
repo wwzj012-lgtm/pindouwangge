@@ -68,3 +68,56 @@
 }
 @media(max-width:370px) { .profile-card-grid { grid-template-columns:1fr; } .profile-summary { gap:8px; } }
 @media(prefers-reduced-motion:reduce) { .profile-overlay * { transition:none!important; animation:none!important; } }
+
+.bead-stock { --stock-accent:#90672e; --stock-border:#e8e0ed; color:#463252; display:grid; gap:16px; min-width:0; }
+.bead-stock h3 { font-size:17px; font-weight:750; }
+.bead-stock p,.bead-stock small { font-size:12px; color:#766680; line-height:1.6; }
+.bead-stock__heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px; }
+.bead-stock label { display:grid; gap:5px; font-size:12px; font-weight:600; min-width:0; }
+.bead-stock :is(input,select) { width:100%; min-width:0; min-height:44px; padding:8px 10px; border:1px solid var(--stock-border); border-radius:9px; background:#fff; color:#463252; font-size:13px; }
+.bead-stock input[aria-invalid=true] { border-color:#b64b53; }
+.bead-stock button { min-height:44px; padding:8px 12px; border:1px solid var(--stock-border); border-radius:9px; background:#fff; color:#695076; font-size:12px; font-weight:650; cursor:pointer; }
+.bead-stock button:hover { background:#f7f1fb; }
+.bead-stock button:disabled { opacity:.45; cursor:default; }
+.bead-stock button[aria-pressed=true] { background:#f9eedc; border-color:#e5cc9f; color:#775224; }
+.bead-stock__stats { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.bead-stock__stats > div { background:white; border:1px solid var(--stock-border); border-radius:12px; padding:14px 6px; text-align:center; display:grid; gap:4px; }
+.bead-stock__stats strong { font-size:21px; color:var(--stock-accent); overflow-wrap:anywhere; }
+.bead-stock__stats span { font-size:11px; color:#766680; }
+.bead-stock__filters { display:flex; gap:8px; flex-wrap:wrap; }
+.bead-stock__groups { display:flex; gap:6px; overflow-x:auto; padding:4px; scrollbar-width:thin; }
+.bead-stock__groups button { flex-shrink:0; }
+.bead-stock__batch { display:flex; flex-wrap:wrap; align-items:end; gap:8px; padding:12px; background:#f7f1e8; border:1px solid #eddfc7; border-radius:12px; }
+.bead-stock__batch p { flex-basis:100%; }
+.bead-stock__batch label { width:130px; }
+.bead-stock__batch small { flex-basis:100%; color:#a53c48; }
+.bead-stock__message:empty { display:none; }
+.bead-stock__grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.bead-stock__card { min-width:0; background:white; border:1px solid var(--stock-border); border-radius:12px; padding:10px; display:flex; flex-direction:column; gap:8px; }
+.bead-stock__swatch { height:54px; border-radius:8px; display:flex; align-items:center; justify-content:center; box-shadow:inset 0 0 0 1px #0000000d; }
+.bead-stock__swatch strong { color:#403148; background:#fffffff0; padding:3px 8px; border-radius:5px; font-size:13px; }
+.bead-stock__card h4 { color:#766680; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.bead-stock__quantity { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.bead-stock__quantity label { flex:1; }
+.bead-stock__quantity input { padding:6px; text-align:center; font-weight:700; }
+.bead-stock__quantity > span { font-size:11px; }
+.bead-stock__quantity button { padding:4px 6px; }
+.bead-stock__quantity small { flex-basis:100%; color:#a53c48; }
+.bead-stock__adjust { display:flex; gap:6px; }
+.bead-stock__adjust button { flex:1; padding:6px; }
+.bead-stock__card > small { font-size:10px; }
+.bead-stock__pagination { display:flex; align-items:center; justify-content:center; gap:12px; }
+.bead-stock__pagination span { font-size:11px; text-align:center; }
+.bead-stock__legacy { border:1px solid var(--stock-border); border-radius:12px; padding:12px; min-width:0; }
+.bead-stock__legacy summary { cursor:pointer; min-height:32px; font-size:13px; font-weight:650; }
+.bead-stock__legacy :is(p,label,button) { margin-top:12px; }
+@media(max-width:767px) {
+ .bead-stock__grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+ .bead-stock__brand { width:100%; }
+ .bead-stock__stats strong { font-size:17px; }
+ .bead-stock__card { padding:8px; }
+ .bead-stock__quantity label { flex-basis:calc(100% - 20px); }
+ .bead-stock__quantity button { width:100%; }
+ .bead-stock__batch label { width:100%; flex-basis:100%; }
+ .bead-stock__batch button { flex:1; white-space:nowrap; }
+}

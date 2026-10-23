@@ -78,7 +78,7 @@ describe('community API mapping', () => {
     await reactToCommunityPost('post_1234567890abcdef', 'like', true);
     await reactToCommunityPost('post_1234567890abcdef', 'favorite', false);
 
-    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://worker.example/api/community/posts/like'));
+    expect(fetchMock.mock.calls[0][0]).toEqual(new URL('https://worker.example/api/community/posts/like?id=post_1234567890abcdef'));
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('PUT');
     expect((fetchMock.mock.calls[0][1] as RequestInit).body).toBe(JSON.stringify({ id: 'post_1234567890abcdef' }));
     expect(fetchMock.mock.calls[1][0]).toEqual(new URL('https://worker.example/api/community/posts/favorite?id=post_1234567890abcdef'));

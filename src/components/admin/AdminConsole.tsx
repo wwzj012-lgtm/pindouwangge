@@ -82,12 +82,24 @@ function Dashboard({ data, error, loading, retry }: { data: DashboardData | null
 }
 type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 const controlValue = (control: Control) => control instanceof HTMLInputElement && control.type === 'checkbox' ? String(control.checked) : control.value;
-function isEditorControl(target: EventTarget | null): target is Control {
-  return target instanceof HTMLElement && target.matches('input, textarea, select') && (target.matches('textarea, input[type="checkbox"]') || Boolean(target.closest('form, [role="dialog"], .fixed')));
+export function isEditorControl(target: EventTarget | null): target is Control {
+  // Secret inputs must never enter the generic dirty-editor value cache.
+  return target instanceof HTMLElement && !target.matches('input[type="password"]') && !target.closest('[data-admin-sensitive]') && target.matches('input, textarea, select') && (target.matches('textarea, input[type="checkbox"]') || Boolean(target.closest('form, [role="dialog"], .fixed')));
+}
+function pruneEditorCache(cache: Map<Control, string>) {
+  for (const control of cache.keys()) {
+    if (!control.isConnected || !isEditorControl(control)) cache.delete(control);
+  }
 }
 type PendingAction = { kind: 'refresh' } | { kind: 'navigate'; section: SectionId; fromHistory?: boolean };
 
 export function AdminConsole() {
+  const { currentUser } = useAuth();
+  // A different operator must receive a new shell, editor cache and request state.
+  return <AdminConsoleSession key={currentUser?.uid ?? 'signed-out'} />;
+}
+
+function AdminConsoleSession(_props: { key?: string }) {
   const { currentUser } = useAuth();
   const signedIn = Boolean(currentUser), userUid = currentUser?.uid;
   const [access, setAccess] = useState<AccessState>('checking');
@@ -108,6 +120,19 @@ export function AdminConsole() {
   const [logoutError, setLogoutError] = useState('');
   const generation = useRef(0);
   const edits = useRef(new Map<Control, string>());
+  const editorRoot = useRef<HTMLElement | null>(null);
+  const hasDirtyEdits = useCallback(() => {
+    pruneEditorCache(edits.current);
+    return Array.from(edits.current).some(([control, initial]) => controlValue(control) !== initial);
+  }, []);
+  useEffect(() => {
+    const root = editorRoot.current;
+    pruneEditorCache(edits.current);
+    if (!root) return;
+    const observer = new MutationObserver(() => pruneEditorCache(edits.current));
+    observer.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['type', 'data-admin-sensitive'] });
+    return () => { observer.disconnect(); edits.current.clear(); };
+  }, [access]);
   const section = currentMenu(activeSection);
   const fetchAdmin = useMemo(() => createAdminRequest(), []);
   const adminRequest = useCallback(async <T,>(path: string, init?: RequestInit): Promise<AdminApiResult<T>> => {
@@ -157,7 +182,7 @@ export function AdminConsole() {
   useEffect(() => {
     const popstate = () => {
       const next = resolveAdminSection(new URLSearchParams(window.location.search).get('section'));
-      const dirty = Array.from(edits.current).some(([control, initial]) => control.isConnected && controlValue(control) !== initial);
+      const dirty = hasDirtyEdits();
       if (dirty) setPendingAction({ kind: 'navigate', section: next, fromHistory: true });
       else { edits.current.clear(); setActiveSection(next); }
     };
@@ -181,7 +206,7 @@ export function AdminConsole() {
   };
   const queueAction = (action: PendingAction) => {
     setMobileNavigation(false);
-    const dirty = Array.from(edits.current).some(([control, initial]) => control.isConnected && controlValue(control) !== initial);
+    const dirty = hasDirtyEdits();
     if (dirty) setPendingAction(action); else performAction(action);
   };
   const navigate = (id: SectionId) => { if (id === activeSection) { setMobileNavigation(false); return; } queueAction({ kind: 'navigate', section: id }); };
@@ -220,9 +245,9 @@ export function AdminConsole() {
       <AdminButton data-admin-refresh data-admin-focus-fallback iconOnly variant="ghost" aria-label={'刷新' + section.label} title={'只刷新' + section.label} busy={busy} onClick={() => queueAction({ kind: 'refresh' })}>{!busy && <RefreshCw aria-hidden="true" />}</AdminButton>
       <AdminButton iconOnly variant="ghost" aria-label="退出后台会话" title="退出后台会话" onClick={() => { setLogoutError(''); setLogoutOpen(true); }}><LogOut aria-hidden="true" /></AdminButton>
     </div></header>
-      <main className="admin-main" id="admin-main" tabIndex={-1}
-        onFocusCapture={event => { if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, controlValue(event.target)); }}
-        onChangeCapture={event => { if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, '\u0000'); }}>
+      <main ref={editorRoot} className="admin-main" id="admin-main" tabIndex={-1}
+        onFocusCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, controlValue(event.target)); }}
+        onChangeCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, '\u0000'); }}>
         {requestNotice && <AdminErrorState title="模块连接失败" message={requestNotice} retry={() => queueAction({ kind: 'refresh' })} busy={busy} />}
         {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
       </main>

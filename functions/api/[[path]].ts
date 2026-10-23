@@ -1,4 +1,5 @@
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
+const MAX_COMMUNITY_IMAGE_BYTES = 15 * 1024 * 1024;
 const BACKEND_ORIGIN = 'https://stellabean-api.internal';
 
 const ALLOWED_METHODS = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
@@ -67,7 +68,16 @@ function hasRequestBody(method: string): boolean {
   return method !== 'GET' && method !== 'HEAD';
 }
 
-async function readBodyWithLimit(request: Request): Promise<ArrayBuffer | null> {
+function requestBodyLimit(request: Request, pathname: string): number {
+  const type = request.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
+  return request.method === 'POST'
+    && pathname === '/api/community/assets'
+    && (type === 'image/png' || type === 'image/jpeg' || type === 'image/webp')
+    ? MAX_COMMUNITY_IMAGE_BYTES
+    : MAX_REQUEST_BODY_BYTES;
+}
+
+async function readBodyWithLimit(request: Request, maxBytes: number): Promise<ArrayBuffer | null> {
   if (!request.body) return new ArrayBuffer(0);
 
   const reader = request.body.getReader();
@@ -79,8 +89,8 @@ async function readBodyWithLimit(request: Request): Promise<ArrayBuffer | null> 
       const { done, value } = await reader.read();
       if (done) break;
       totalBytes += value.byteLength;
-      if (totalBytes > MAX_REQUEST_BODY_BYTES) {
-        await reader.cancel();
+      if (totalBytes > maxBytes) {
+        void reader.cancel().catch(() => {});
         return null;
       }
       chunks.push(value);
@@ -98,11 +108,11 @@ async function readBodyWithLimit(request: Request): Promise<ArrayBuffer | null> 
   return body.buffer;
 }
 
-function declaredBodyIsTooLarge(request: Request): boolean {
+function declaredBodyIsTooLarge(request: Request, maxBytes: number): boolean {
   const contentLength = request.headers.get('content-length');
   if (!contentLength) return false;
   const length = Number(contentLength);
-  return !Number.isSafeInteger(length) || length < 0 || length > MAX_REQUEST_BODY_BYTES;
+  return !Number.isSafeInteger(length) || length < 0 || length > maxBytes;
 }
 
 function responseHeaders(headers: Headers): Headers {
@@ -133,14 +143,16 @@ export async function handleApiGateway(request: Request, env: GatewayEnv): Promi
     return errorResponse(400, 'Protocol upgrades are not supported');
   }
 
-  if (declaredBodyIsTooLarge(request)) {
+  const maxBytes = requestBodyLimit(request, incomingUrl.pathname);
+  if (declaredBodyIsTooLarge(request, maxBytes)) {
+    void request.body?.cancel().catch(() => {});
     return errorResponse(413, 'Request body is too large');
   }
 
   let body: ArrayBuffer | undefined;
   const bodyWasRead = hasRequestBody(method);
   if (bodyWasRead) {
-    body = await readBodyWithLimit(request) ?? undefined;
+    body = await readBodyWithLimit(request, maxBytes) ?? undefined;
     if (!body) {
       return errorResponse(413, 'Request body is too large');
     }
@@ -148,9 +160,12 @@ export async function handleApiGateway(request: Request, env: GatewayEnv): Promi
 
   // The internal origin is fixed. The browser never controls the upstream target.
   const backendUrl = new URL(`${incomingUrl.pathname}${incomingUrl.search}`, BACKEND_ORIGIN);
+  const headers = forwardedHeaders(request.headers, bodyWasRead);
+  // Replace the untrusted incoming length with the measured payload length.
+  if (body) headers.set('Content-Length', String(body.byteLength));
   const backendRequest = new Request(backendUrl, {
     method,
-    headers: forwardedHeaders(request.headers, bodyWasRead),
+    headers,
     body: bodyWasRead ? body : undefined,
   });
   const backendResponse = await env.BACKEND_API.fetch(backendRequest);

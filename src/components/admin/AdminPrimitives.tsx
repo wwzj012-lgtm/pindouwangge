@@ -122,11 +122,11 @@ function AdminDialog({ open, title, description, children, onClose, pending = fa
 
 export function AdminDrawer(props: Omit<DialogProps, 'kind'>) { return <AdminDialog {...props} kind="drawer" />; }
 
-export function AdminConfirmDialog({ open, title, description, confirmLabel = '确认', onConfirm, onClose, pending = false, children }: {
-  open: boolean; title: string; description: string; confirmLabel?: string; onConfirm: () => void; onClose: () => void; pending?: boolean; children?: ReactNode;
+export function AdminConfirmDialog({ open, title, description, confirmLabel = '确认', onConfirm, onClose, pending = false, confirmDisabled = false, children }: {
+  open: boolean; title: string; description: string; confirmLabel?: string; onConfirm: () => void; onClose: () => void; pending?: boolean; confirmDisabled?: boolean; children?: ReactNode;
 }) {
   return <AdminDialog open={open} title={title} description={description} onClose={onClose} pending={pending}>
     {children}<div className="admin-dialog-actions"><AdminButton data-admin-autofocus onClick={onClose} disabled={pending}>取消</AdminButton>
-      <AdminButton variant="danger" onClick={onConfirm} busy={pending}>{confirmLabel}</AdminButton></div>
+      <AdminButton variant="danger" onClick={onConfirm} busy={pending} disabled={confirmDisabled}>{confirmLabel}</AdminButton></div>
   </AdminDialog>;
 }

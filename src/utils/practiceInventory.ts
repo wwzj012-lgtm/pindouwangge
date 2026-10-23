@@ -1,5 +1,5 @@
 import type { BeadColor } from '../types';
-import type { BeadInventory } from './beadInventory';
+import { getInventoryColor, type BeadInventory } from './beadInventory';
 
 export interface PracticeRequirement {
   id: string;
@@ -42,25 +42,17 @@ export function buildPracticePlan(
     id, color: paletteMap.get(id) ?? null, required,
     stock: 0, remaining: 0, shortage: required, recorded: false, inventoryConflict: false,
   }));
-  const knownIds = new Map<string, BeadColor>();
-  for (const [key, color] of paletteMap) {
-    knownIds.set(key, color);
-    knownIds.set(color.id, color);
-  }
   type Candidate = { row: PracticeRequirement; count: number; exact: boolean };
   const pools = new Map<string, Candidate[]>();
   for (const item of Object.values(inventory)) {
     if (!Number.isFinite(item.count) || item.count < 0) continue;
-    const brand = item.brand ? normalize(item.brand) : null;
-    const known = knownIds.get(item.colorId);
-    if (brand && known && normalize(known.brand) !== brand) continue;
-    const exact = rows.filter(row => row.color
-      && (row.id === item.colorId || row.color.id === item.colorId)
-      && (!brand || normalize(row.color.brand) === brand));
-    // An unbranded record never matches on code. A conflicting known ID is authoritative.
-    const fallback = exact.length || !brand || (known && normalize(known.code) !== normalize(item.code))
-      ? [] : rows.filter(row => row.color
-        && normalize(row.color.brand) === brand && normalize(row.color.code) === normalize(item.code));
+    // Resolve against the full catalog, exactly as the inventory UI does. A work's
+    // palette subset must never turn a known conflicting ID into a code fallback.
+    const color = getInventoryColor(item);
+    if (!color) continue;
+    const compatible = rows.filter(row => row.color && colorKey(row.color) === colorKey(color));
+    const exact = compatible.filter(row => row.id === item.colorId || row.color!.id === item.colorId);
+    const fallback = exact.length ? [] : compatible;
     const targets = exact.length ? exact : fallback.length === 1 ? fallback : [];
     for (const row of targets) {
       const key = colorKey(row.color!);

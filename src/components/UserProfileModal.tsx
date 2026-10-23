@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, useSyncExternalStore } from 'react';
 import {
   X,
   User,
@@ -7,9 +7,6 @@ import {
   Heart,
   Bookmark,
   Package,
-  Search,
-  Plus,
-  Minus,
   SlidersHorizontal,
   Layers,
   Crown,
@@ -27,13 +24,19 @@ import {
 import './UserProfileModal.css';
 import { useAuth } from '../context/AuthContext';
 import type { CommunityPattern } from '../data/communityData';
-import { listFavoriteCommunityPosts, type CommunityPost } from '../utils/communityApi';
-import { BeadColor } from '../types';
+import {
+  listFavoriteCommunityPosts,
+  setCommunityPostVisibility,
+  withdrawCommunityPost,
+  type CommunityPost,
+  type CommunityPostVisibility,
+} from '../utils/communityApi';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
   getUserExportedPatterns,
   getPatternProject,
   deleteCloudExportedPatternAndLocal,
+  deleteLocalExportedPatternCopy,
   getExportedPatternPreview,
   type ExportedPatternRecord,
 } from '../utils/patternHistory';
@@ -43,9 +46,11 @@ import {
   getBeadInventorySnapshot,
   getServerBeadInventorySnapshot,
   subscribeBeadInventory,
-  writeBeadInventory,
-  type BeadStockItem,
+  type BeadInventory,
 } from '../utils/beadInventory';
+import { BeadInventoryPanel } from './BeadInventoryPanel';
+import { PatternConfirmDialog } from './PatternConfirmDialog';
+import { PatternPublicationDialog } from './PatternPublicationDialog';
 
 export function splitProfilePatternSections(records: readonly ExportedPatternRecord[], currentUserId: string | null): {
   libraryRecords: ExportedPatternRecord[];
@@ -56,9 +61,21 @@ export function splitProfilePatternSections(records: readonly ExportedPatternRec
   return {
     libraryRecords,
     publishedRecords: currentUserId
-      ? libraryRecords.filter((record) => record.status === 1 && record.userId === currentUserId)
+      ? libraryRecords.filter((record) => isPublishedRecord(record) && record.userId === currentUserId)
       : [],
   };
+}
+
+function isPublishedRecord(record: ExportedPatternRecord): boolean {
+  // New cloud summaries carry the active community post explicitly. Keep the
+  // status fallback for legacy local records created before this metadata existed.
+  return Boolean(record.communityPost) || record.status === 1;
+}
+
+function publicationLabel(record: ExportedPatternRecord): string {
+  if (record.communityPost?.visibility === 'private') return '私密';
+  if (record.communityPost?.visibility === 'public') return '公开';
+  return record.status === 1 ? '已发布' : '未发布';
 }
 
 interface UserProfileModalProps {
@@ -159,6 +176,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [savedPatterns, setSavedPatterns] = useState<ExportedPatternRecord[]>([]);
   const [loadingPatterns, setLoadingPatterns] = useState(false);
   const [selectedPatternForAction, setSelectedPatternForAction] = useState<ExportedPatternRecord | null>(null);
+  const [pendingDeletePattern, setPendingDeletePattern] = useState<ExportedPatternRecord | null>(null);
+  const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
+  const [publicationTarget, setPublicationTarget] = useState<ExportedPatternRecord | null>(null);
+  const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
   const editRequestRef = useRef(0);
@@ -245,18 +266,62 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   };
 
   // 3. 删除 (Delete pattern from 我的图库)
+  const requestDeletePattern = (record: ExportedPatternRecord) => {
+    if (record.hasCloudCopy && !requireFormalLogin('请登录或注册后再删除云端图纸。')) return;
+    setSelectedPatternForAction(null);
+    setDeleteDialogError(null);
+    setPendingDeletePattern(record);
+  };
+
   const handleDeletePattern = async (record: ExportedPatternRecord) => {
-    if (!requireFormalLogin('请登录或注册后再删除个人图纸。')) return;
-    if (!window.confirm(`确定要从【我的图库】中删除图纸《${record.title}》吗？`)) return;
     setActionBusyId(record.id);
     try {
-      await deleteCloudExportedPatternAndLocal(record.id, currentUser?.uid || null);
+      if (record.hasCloudCopy) await deleteCloudExportedPatternAndLocal(record.id, currentUser?.uid || null);
+      else await deleteLocalExportedPatternCopy(record.id, currentUser?.uid || null);
       setSavedPatterns(prev => prev.filter(p => p.id !== record.id));
       setActionMessage('🗑️ 图纸已成功从【我的图库】删除');
       setSelectedPatternForAction(null);
+      setPendingDeletePattern(null);
+      setDeleteDialogError(null);
       setTimeout(() => setActionMessage(null), 2000);
     } catch {
-      setActionMessage('删除图纸失败，请重试');
+      setDeleteDialogError('删除失败，请检查网络后重试。');
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleSetPublicationVisibility = async (record: ExportedPatternRecord, visibility: CommunityPostVisibility) => {
+    if (!record.communityPost) return;
+    setActionBusyId(record.id);
+    setPublicationDialogError(null);
+    try {
+      const result = await setCommunityPostVisibility(record.communityPost.id, visibility);
+      if (!result.ok) throw new Error(result.error ?? '作品可见性更新失败');
+      setPublicationTarget(null);
+      await loadSavedPatterns();
+      setActionMessage(visibility === 'public' ? '作品已公开，仍保留在我的图库。' : '作品已转为私密，仍保留在我的图库。');
+      setTimeout(() => setActionMessage(null), 2400);
+    } catch (error) {
+      setPublicationDialogError(error instanceof Error ? error.message : '作品可见性更新失败，请重试');
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const handleWithdrawPublication = async (record: ExportedPatternRecord) => {
+    if (!record.communityPost) return;
+    setActionBusyId(record.id);
+    setPublicationDialogError(null);
+    try {
+      const result = await withdrawCommunityPost(record.communityPost.id);
+      if (!result.ok) throw new Error(result.error ?? '撤回作品失败');
+      setPublicationTarget(null);
+      await loadSavedPatterns();
+      setActionMessage('作品已从豆社撤回，工程仍保留在我的图库。');
+      setTimeout(() => setActionMessage(null), 2400);
+    } catch (error) {
+      setPublicationDialogError(error instanceof Error ? error.message : '撤回作品失败，请重试');
     } finally {
       setActionBusyId(null);
     }
@@ -269,148 +334,10 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     openLoginModal();
   };
 
-  // --- Bead Inventory State ("豆仓·我的库存") ---
-  const inventory: Record<string, BeadStockItem> = useSyncExternalStore(subscribeBeadInventory, getBeadInventorySnapshot, getServerBeadInventorySnapshot);
-  const [inventorySearch, setInventorySearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'alert'>('all');
-  const [letterFilter, setLetterFilter] = useState<string>('all');
-
-  // Batch Modals for Inventory
-  const [isBatchSetOpen, setIsBatchSetOpen] = useState(false);
-  const [batchSetValue, setBatchSetValue] = useState(500);
-  const [isBatchDeltaOpen, setIsBatchDeltaOpen] = useState(false);
-  const [batchDeltaValue, setBatchDeltaValue] = useState(100);
-
-  // Add Custom Color Code State
-  const [isAddColorOpen, setIsAddColorOpen] = useState(false);
-  const [newColorCode, setNewColorCode] = useState('');
-  const [newColorName, setNewColorName] = useState('');
-  const [newColorHex, setNewColorHex] = useState('#A8DADC');
-  const [newColorCount, setNewColorCount] = useState(600);
-  const [newColorAlert, setNewColorAlert] = useState(100);
-
-  // Shared v1 store notifies the practice panel in this window and other tabs.
-  const saveInventory = (updated: Record<string, BeadStockItem>) => {
-    if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return false;
-    if (!writeBeadInventory(updated)) {
-      setActionMessage('库存保存失败，请检查浏览器本地存储后重试。');
-      return false;
-    }
-    return true;
-  };
-
-  // Adjust Single Color Quantity
-  const handleAdjustCount = (inventoryKey: string, delta: number) => {
-    if (!requireFormalLogin('请登录或注册后再修改拼豆库存。')) return;
-    const latest = getBeadInventorySnapshot();
-    const current = latest[inventoryKey];
-    if (!current) return;
-    const updated = {
-      ...latest,
-      [inventoryKey]: { ...current, count: Math.max(0, current.count + delta) },
-    };
-    saveInventory(updated);
-  };
-
-  // Batch Set All Stock
-  const handleApplyBatchSet = () => {
-    const updated: Record<string, BeadStockItem> = {};
-    const latest = getBeadInventorySnapshot();
-    Object.keys(latest).forEach(code => {
-      updated[code] = { ...latest[code], count: batchSetValue };
-    });
-    if (saveInventory(updated)) setIsBatchSetOpen(false);
-  };
-
-  // Batch Add / Subtract Stock
-  const handleApplyBatchDelta = (multiplier: number) => {
-    const updated: Record<string, BeadStockItem> = {};
-    const delta = batchDeltaValue * multiplier;
-    const latest = getBeadInventorySnapshot();
-    Object.keys(latest).forEach(code => {
-      const current = latest[code];
-      updated[code] = { ...current, count: Math.max(0, current.count + delta) };
-    });
-    if (saveInventory(updated)) setIsBatchDeltaOpen(false);
-  };
-
-  // Add Custom Color Code Handler
-  const handleAddCustomColor = () => {
-    if (!requireFormalLogin('请登录或注册后再添加拼豆库存。')) return;
-    const code = newColorCode.trim().toUpperCase();
-    if (!code) {
-      alert('请填写拼豆色号 (例如: M13, A24, X01)');
-      return;
-    }
-    const latest = getBeadInventorySnapshot();
-    if (Object.hasOwn(latest, code)) {
-      alert(`色号 ${code} 已在您的豆仓库存中存在！`);
-      return;
-    }
-    const name = newColorName.trim() || code;
-    const newItem: BeadStockItem = {
-      colorId: `CUSTOM_${code}`,
-      code,
-      name,
-      hex: newColorHex || '#A8DADC',
-      count: Math.max(0, newColorCount),
-      alertThreshold: Math.max(0, newColorAlert),
-    };
-    const updated = {
-      ...latest,
-      [code]: newItem,
-    };
-    if (!saveInventory(updated)) return;
-    setIsAddColorOpen(false);
-
-    // Reset Form
-    setNewColorCode('');
-    setNewColorName('');
-    setNewColorHex('#A8DADC');
-    setNewColorCount(600);
-  };
-
-  // Derived Inventory Metrics
-  const inventoryList = useMemo(() => Object.entries(inventory).map(([inventoryKey, item]) => ({ ...item, inventoryKey })), [inventory]);
-  const totalBeadStock = useMemo(
-    () => inventoryList.reduce((sum, item) => sum + (item?.count || 0), 0),
-    [inventoryList]
-  );
-  const inStockCount = useMemo(
-    () => inventoryList.filter(item => (item?.count || 0) > 0).length,
-    [inventoryList]
-  );
-  const alertCount = useMemo(
-    () => inventoryList.filter(item => (item?.count || 0) <= (item?.alertThreshold ?? 100)).length,
-    [inventoryList]
-  );
-
-  // Filtered Inventory List
-  const filteredInventory = useMemo(() => {
-    return inventoryList.filter(item => {
-      if (!item || !item.code) return false;
-      // 1. Search Query
-      if (inventorySearch.trim()) {
-        const query = inventorySearch.trim().toLowerCase();
-        const matchCode = (item.code || '').toLowerCase().includes(query);
-        const matchName = (item.name || '').toLowerCase().includes(query);
-        if (!matchCode && !matchName) return false;
-      }
-      // 2. Status Filter
-      const count = item.count ?? 0;
-      const threshold = item.alertThreshold ?? 100;
-      if (statusFilter === 'in_stock' && count <= 0) return false;
-      if (statusFilter === 'alert' && count > threshold) return false;
-
-      // 3. Code Letter Group Filter
-      if (letterFilter !== 'all') {
-        const firstChar = (item.code || '').charAt(0).toUpperCase();
-        if (firstChar !== letterFilter) return false;
-      }
-
-      return true;
-    });
-  }, [inventoryList, inventorySearch, statusFilter, letterFilter]);
+  // Shared inventory summary; brand catalog management lives in the inventory panel.
+  const inventory: BeadInventory = useSyncExternalStore(subscribeBeadInventory, getBeadInventorySnapshot, getServerBeadInventorySnapshot);
+  const inventoryList = Object.values(inventory);
+  const alertCount = inventoryList.filter(item => item.count <= item.alertThreshold).length;
 
   if (!isOpen) return null;
 
@@ -685,6 +612,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 <div className="profile-card-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {activePatternRecords.map(record => {
                     const isBusy = actionBusyId === record.id;
+                    const isPublished = isPublishedRecord(record);
+                    const canPublish = activeTab === 'library' && !isPublished && Boolean(onPublishPattern);
+                    const canManagePublication = isPublished && Boolean(record.communityPost);
                     return (
                       <div
                         key={record.id}
@@ -718,12 +648,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                             </h4>
                             <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
                               <span>更新时间: {formatChinaDate(record.updatedAt)}</span>
-                              <span className="text-purple-600 font-medium">{(record.status ?? 0) === 1 ? '已发布' : '未发布'}</span>
+                               <span className={`font-medium ${record.communityPost?.visibility === 'private' ? 'text-amber-700' : 'text-purple-600'}`}>{publicationLabel(record)}</span>
                             </div>
                           </div>
 
                           {/* Action Buttons: [编辑], [发布], [删除] */}
-                          <div className={`pt-2 border-t border-slate-200/80 grid ${activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
+                           <div className={`pt-2 border-t border-slate-200/80 grid ${(canPublish || canManagePublication) ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
                             {/* 编辑 */}
                             <button
                               disabled={isBusy}
@@ -735,7 +665,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               <span>编辑</span>
                             </button>
 
-                            {activeTab === 'library' && (record.status ?? 0) === 0 && onPublishPattern && (
+                            {canPublish && onPublishPattern && (
                               <button
                                 disabled={isBusy}
                                 onClick={() => onPublishPattern(record)}
@@ -747,10 +677,22 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               </button>
                             )}
 
+                            {canManagePublication && (
+                              <button
+                                disabled={isBusy}
+                                onClick={() => setPublicationTarget(record)}
+                                className="py-1.5 px-2 rounded-xl bg-amber-50/70 hover:bg-amber-100 text-amber-800 border border-amber-200/80 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                                title="管理豆社可见性、撤回或重新公开"
+                              >
+                                <SlidersHorizontal className="w-3 h-3" />
+                                <span>发布管理</span>
+                              </button>
+                            )}
+
                             {/* 删除 */}
                             <button
                               disabled={isBusy}
-                              onClick={() => handleDeletePattern(record)}
+                              onClick={() => requestDeletePattern(record)}
                               className="py-1.5 px-2 rounded-xl bg-rose-50/60 hover:bg-rose-700 text-rose-700 hover:text-slate-900 border border-rose-200/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
                               title="从我的图库删除"
                             >
@@ -767,251 +709,13 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
             </div>
           )}
 
-          {/* TAB 5: 豆仓·我的库存 (IMAGE 1 EXPAT REFERENCE) */}
+          {/* Brand catalogs are read-only until an explicit quantity edit. */}
           {activeTab === 'inventory' && (
-            <div className="space-y-5 animate-in fade-in duration-200">
-              
-              {/* Header Title Bar */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Package className="w-5 h-5 text-amber-700" />
-                  <h3 className="text-base font-black text-slate-900">豆仓 · 我的库存</h3>
-                </div>
-                <div className="text-xs text-slate-500 font-medium">
-                  本机保存个人拼豆色号储备与预警
-                </div>
-              </div>
-
-              {/* 3 Top Summary Stat Cards (Image 1 Style) */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Stat 1: 总库存 */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-amber-700 tracking-tight">
-                    {totalBeadStock.toLocaleString()}
-                  </span>
-                  <span className="text-xs font-bold text-slate-500 mt-0.5">总库存 (粒)</span>
-                </div>
-
-                {/* Stat 2: 有库存色号 */}
-                <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-emerald-700 tracking-tight">
-                    {inStockCount}/{inventoryList.length}
-                  </span>
-                  <span className="text-xs font-bold text-slate-500 mt-0.5">有库存色号</span>
-                </div>
-
-                {/* Stat 3: 预警色号 */}
-                <div className="bg-rose-50/30 border border-rose-500/40 rounded-2xl p-4 flex flex-col items-center justify-center text-center shadow-md">
-                  <span className="text-2xl font-black text-rose-600 tracking-tight flex items-center gap-1">
-                    <AlertTriangle className="w-5 h-5" />
-                    {alertCount}
-                  </span>
-                  <span className="text-xs font-bold text-rose-700 mt-0.5">⚠️ 预警色号</span>
-                </div>
-              </div>
-
-              {/* Search & Batch Toolbar Bar */}
-              <div className="flex flex-col sm:flex-row items-center gap-3">
-                {/* Search Bar */}
-                <div className="relative flex-1 w-full">
-                  <input
-                    type="text"
-                    value={inventorySearch}
-                    onChange={e => setInventorySearch(e.target.value)}
-                    placeholder="🔍 搜索色号，如 A1, M01, 纯白..."
-                    className="w-full pl-9 pr-4 py-2.5 rounded-2xl bg-white border border-slate-200 text-slate-900 placeholder-slate-500 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 transition-all"
-                  />
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
-                </div>
-
-                {/* Batch & Add Actions Buttons */}
-                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 flex-wrap sm:flex-nowrap">
-                  <button
-                    onClick={() => setIsAddColorOpen(true)}
-                    className="flex-1 sm:flex-initial px-4 py-2.5 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer shadow-md shadow-amber-500/20 active:scale-95"
-                  >
-                    <Plus className="w-4 h-4 text-slate-950" />
-                    <span>+ 添加新色号</span>
-                  </button>
-
-                  <button
-                    onClick={() => setIsBatchSetOpen(true)}
-                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                  >
-                    <Package className="w-3.5 h-3.5 text-amber-700" />
-                    <span>批量设置</span>
-                  </button>
-
-                  <button
-                    onClick={() => setIsBatchDeltaOpen(true)}
-                    className="flex-1 sm:flex-initial px-3.5 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-purple-600 text-xs font-extrabold flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                  >
-                    <SlidersHorizontal className="w-3.5 h-3.5 text-purple-600" />
-                    <span>±N 批量加减</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Filter Tabs Row 1: Stock Status Filter */}
-              <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-                <button
-                  onClick={() => setStatusFilter('all')}
-                  className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                    statusFilter === 'all'
-                      ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                      : 'bg-white text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  全部 ({inventoryList.length})
-                </button>
-
-                <button
-                  onClick={() => setStatusFilter('in_stock')}
-                  className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                    statusFilter === 'in_stock'
-                      ? 'bg-emerald-500 text-slate-950 font-black shadow-sm'
-                      : 'bg-white text-slate-500 hover:text-slate-900'
-                  }`}
-                >
-                  有库存 ({inStockCount})
-                </button>
-
-                <button
-                  onClick={() => setStatusFilter('alert')}
-                  className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
-                    statusFilter === 'alert'
-                      ? 'bg-rose-500 text-slate-900 font-black shadow-sm'
-                      : 'bg-white text-rose-600 hover:bg-rose-50/40'
-                  }`}
-                >
-                  预警色号 ({alertCount})
-                </button>
-              </div>
-
-              {/* Filter Tabs Row 2: Letter Code Prefix Filter */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-                <span className="text-[11px] font-bold text-slate-500 shrink-0 mr-1">色号分组:</span>
-                {['all', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M'].map(letter => (
-                  <button
-                    key={letter}
-                    onClick={() => setLetterFilter(letter)}
-                    className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer ${
-                      letterFilter === letter
-                        ? 'bg-purple-600 text-slate-900 shadow-sm'
-                        : 'bg-white border border-slate-200/80 text-slate-500 hover:text-slate-900'
-                    }`}
-                  >
-                    {letter === 'all' ? '全部' : letter}
-                  </button>
-                ))}
-              </div>
-
-              {/* Grid of Bead Color Inventory Cards (Image 1 Style) */}
-              {filteredInventory.length === 0 ? (
-                <div className="py-12 text-center text-slate-500 text-xs font-bold bg-white/40 rounded-2xl border border-slate-200/60">
-                  没有匹配的拼豆色号库存
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
-                  {filteredInventory.map(item => {
-                    const isAlert = item.count <= item.alertThreshold;
-                    return (
-                      <div
-                        key={item.inventoryKey}
-                        className={`bg-white rounded-2xl border p-2.5 flex flex-col justify-between transition-all hover:border-amber-500/80 ${
-                          isAlert
-                            ? 'border-rose-500/50 bg-gradient-to-b from-rose-950/20 to-slate-950'
-                            : 'border-slate-200'
-                        }`}
-                      >
-                        {/* Top Color Box Swatch */}
-                        <div
-                          className="h-14 rounded-xl relative overflow-hidden flex items-center justify-center p-1 shadow-inner"
-                          style={{ backgroundColor: item.hex }}
-                        >
-                          <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-slate-900 font-black text-xs shadow-md">
-                            {item.code}
-                          </span>
-                        </div>
-
-                        {/* Middle Color Name & Quantity Info */}
-                        <div className="my-2 text-center space-y-0.5">
-                          <div className="text-[11px] font-bold text-slate-600 truncate">
-                            {item.name}
-                          </div>
-                          <div className="text-base font-black text-slate-900 flex items-center justify-center gap-1">
-                            <span>{item.count}</span>
-                            <span className="text-[10px] text-slate-500 font-medium">粒</span>
-                          </div>
-                          {isAlert && (
-                            <div className="text-[10px] font-bold text-rose-600 flex items-center justify-center gap-0.5">
-                              <AlertTriangle className="w-3 h-3" />
-                              <span>⚠️ 预警(&lt;{item.alertThreshold})</span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Bottom - / + Adjust Buttons */}
-                        <div className="flex items-center gap-1.5 pt-1 border-t border-slate-200/80">
-                          <button
-                            onClick={() => handleAdjustCount(item.inventoryKey, -100)}
-                            className="flex-1 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-slate-600 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
-                            title="-100粒"
-                          >
-                            <Minus className="w-3 h-3" />
-                          </button>
-                          <button
-                            onClick={() => handleAdjustCount(item.inventoryKey, 100)}
-                            className="flex-1 py-1 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200/80 text-amber-700 font-bold text-xs flex items-center justify-center transition-colors active:scale-95 cursor-pointer"
-                            title="+100粒"
-                          >
-                            <Plus className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <BeadInventoryPanel requireLogin={() => requireFormalLogin('请登录或注册后再修改拼豆库存。')} />
           )}
 
         </div>
       </div>
-
-      {/* Modal 1: Batch Set Stock Value */}
-      {isBatchSetOpen && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-50 border border-slate-200 p-5 rounded-3xl max-w-sm w-full space-y-4 text-slate-800">
-            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-              <Package className="w-4 h-4 text-amber-700" />
-              <span>批量设定所有色号库存</span>
-            </h4>
-            <p className="text-xs text-slate-500">将豆仓内所有拼豆色号的存量统一设定为：</p>
-            <input
-              type="number"
-              value={batchSetValue}
-              onChange={e => setBatchSetValue(Number(e.target.value))}
-              className="w-full px-4 py-2.5 rounded-xl bg-white border border-slate-200 text-slate-900 text-sm font-bold"
-              min={0}
-            />
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setIsBatchSetOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleApplyBatchSet}
-                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs"
-              >
-                确认应用
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal: Selected Saved Pattern Actions Overlay (编辑 / 发布 / 删除) */}
       {selectedPatternForAction && (
@@ -1034,7 +738,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   {selectedPatternForAction.width}×{selectedPatternForAction.height} 粒 · 共 {selectedPatternForAction.totalBeads} 粒拼豆
                 </p>
                 <p className="mt-1 text-[11px] font-medium text-purple-600">
-                  {(selectedPatternForAction.status ?? 0) === 1 ? '已发布到社区' : '未发布图纸'}
+                  {publicationLabel(selectedPatternForAction)}
                 </p>
               </div>
             </div>
@@ -1053,163 +757,69 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
               </button>
 
               <button
-                onClick={() => handleDeletePattern(selectedPatternForAction)}
+                onClick={() => requestDeletePattern(selectedPatternForAction)}
                 className="w-full py-2.5 rounded-xl bg-rose-50/80 hover:bg-rose-800 text-rose-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-rose-200/80"
               >
                 <Trash2 className="w-4 h-4 text-rose-600" />
-                <span>从我的图库删除此图纸</span>
+                <span>删除图库工程</span>
               </button>
+
+              {isPublishedRecord(selectedPatternForAction) && selectedPatternForAction.communityPost && (
+                <button
+                  onClick={() => setPublicationTarget(selectedPatternForAction)}
+                  className="w-full py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-amber-200/80"
+                >
+                  <SlidersHorizontal className="w-4 h-4" />
+                  <span>管理豆社发布状态</span>
+                </button>
+              )}
+              {!isPublishedRecord(selectedPatternForAction) && onPublishPattern && (
+                <button
+                  onClick={() => onPublishPattern(selectedPatternForAction)}
+                  className="w-full py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-emerald-200/80"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  <span>发布到豆社</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal 3: Add Custom Color Code Modal */}
-      {isAddColorOpen && (
-        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-slate-50 border border-slate-200 p-6 rounded-3xl max-w-md w-full space-y-4 text-slate-800 relative shadow-2xl">
-            <button
-              onClick={() => setIsAddColorOpen(false)}
-              className="absolute top-4 right-4 text-slate-500 hover:text-slate-900"
-            >
-              <X className="w-5 h-5" />
-            </button>
+      <PatternConfirmDialog
+        isOpen={Boolean(pendingDeletePattern)}
+        title="删除图库工程？"
+        description={pendingDeletePattern
+          ? pendingDeletePattern.hasCloudCopy
+            ? `《${pendingDeletePattern.title}》将从图库和云端记录中删除；关联的豆社作品也会撤回。此操作与单独撤回不同。`
+            : `《${pendingDeletePattern.title}》只会从此浏览器删除本地副本；不会影响云端作品。`
+          : ''}
+        confirmLabel="确认删除"
+        busy={Boolean(pendingDeletePattern && actionBusyId === pendingDeletePattern.id)}
+        error={deleteDialogError}
+        onClose={() => { if (!actionBusyId) { setPendingDeletePattern(null); setDeleteDialogError(null); } }}
+        onConfirm={() => { if (pendingDeletePattern) void handleDeletePattern(pendingDeletePattern); }}
+      />
 
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-700 flex items-center justify-center">
-                <Plus className="w-5 h-5" />
-              </div>
-              <div>
-                <h4 className="text-base font-black text-slate-900">添加新拼豆色号</h4>
-                <p className="text-xs text-slate-500">录入自定义色号储备并加入您的豆仓库存</p>
-              </div>
-            </div>
-
-            {/* Form Fields */}
-            <div className="space-y-3 pt-2">
-              <div className="grid grid-cols-2 gap-3">
-                {/* Color Code */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1">
-                    色号编号 <span className="text-amber-700">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newColorCode}
-                    onChange={e => setNewColorCode(e.target.value)}
-                    placeholder="如 M13, A24, X01"
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold uppercase placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-
-                {/* Color Name */}
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1">颜色名称</label>
-                  <input
-                    type="text"
-                    value={newColorName}
-                    onChange={e => setNewColorName(e.target.value)}
-                    placeholder="如 薄荷绿, 马卡龙粉"
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-              </div>
-
-              {/* Color Hex & Preview */}
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 mb-1">颜色 (HEX / 调色盘)</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={newColorHex}
-                    onChange={e => setNewColorHex(e.target.value)}
-                    className="w-10 h-9 rounded-xl bg-white border border-slate-200 cursor-pointer p-0.5"
-                  />
-                  <input
-                    type="text"
-                    value={newColorHex}
-                    onChange={e => setNewColorHex(e.target.value)}
-                    placeholder="#A8DADC"
-                    className="flex-1 px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 font-mono text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                  {/* Color Swatch Preview Box */}
-                  <div
-                    className="w-16 h-9 rounded-xl border border-slate-200 shadow-inner flex items-center justify-center font-black text-[10px] text-slate-900 drop-shadow-md"
-                    style={{ backgroundColor: newColorHex }}
-                  >
-                    {newColorCode || '预览'}
-                  </div>
-                </div>
-
-                {/* Quick Color Presets */}
-                <div className="flex items-center gap-1.5 mt-2 overflow-x-auto pb-1 scrollbar-none">
-                  <span className="text-[10px] font-bold text-slate-500 shrink-0">预设色卡:</span>
-                  {[
-                    { hex: '#F8BBD0', name: '粉' },
-                    { hex: '#E1BEE7', name: '紫' },
-                    { hex: '#BBDEFB', name: '蓝' },
-                    { hex: '#B2DFDB', name: '绿' },
-                    { hex: '#FFF9C4', name: '黄' },
-                    { hex: '#FFE0B2', name: '橙' },
-                    { hex: '#D7CCC8', name: '咖' },
-                    { hex: '#000000', name: '黑' },
-                    { hex: '#FFFFFF', name: '白' },
-                  ].map(p => (
-                    <button
-                      key={p.hex}
-                      onClick={() => setNewColorHex(p.hex)}
-                      className="w-6 h-6 rounded-lg border border-slate-200 shrink-0 shadow-xs hover:scale-110 transition-transform cursor-pointer"
-                      style={{ backgroundColor: p.hex }}
-                      title={p.name}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {/* Initial Count & Alert Threshold */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1">初始库存数量 (粒)</label>
-                  <input
-                    type="number"
-                    value={newColorCount}
-                    onChange={e => setNewColorCount(Number(e.target.value))}
-                    min={0}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 mb-1">库存预警门槛 (粒)</label>
-                  <input
-                    type="number"
-                    value={newColorAlert}
-                    onChange={e => setNewColorAlert(Number(e.target.value))}
-                    min={0}
-                    className="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-amber-500"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
-              <button
-                onClick={() => setIsAddColorOpen(false)}
-                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-600 transition-colors"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleAddCustomColor}
-                className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs shadow-md shadow-amber-500/20 transition-all active:scale-95 cursor-pointer"
-              >
-                确认添加色号
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PatternPublicationDialog
+        record={publicationTarget}
+        busy={Boolean(publicationTarget && actionBusyId === publicationTarget.id)}
+        error={publicationDialogError}
+        onClose={() => { if (!actionBusyId) { setPublicationTarget(null); setPublicationDialogError(null); } }}
+        onSetVisibility={(visibility) => {
+          if (publicationTarget) void handleSetPublicationVisibility(publicationTarget, visibility);
+        }}
+        onWithdraw={() => {
+          if (publicationTarget) void handleWithdrawPublication(publicationTarget);
+        }}
+        onRepublish={() => {
+          if (publicationTarget) {
+            setPublicationTarget(null);
+            onPublishPattern?.(publicationTarget);
+          }
+        }}
+      />
 
       </ErrorBoundary>
     </div>

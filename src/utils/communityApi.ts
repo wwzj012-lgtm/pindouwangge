@@ -39,6 +39,12 @@ export interface CommunityAsset {
 
 export type CommunityPostVisibility = 'public' | 'private';
 
+export interface CommunityPublicationMutationResult {
+  id?: string;
+  visibility?: CommunityPostVisibility;
+  withdrawn?: boolean;
+}
+
 export interface CommunityPublishInput {
   title: string;
   description: string;
@@ -51,7 +57,10 @@ export interface CommunityPublishInput {
 export type CommunityPublishErrorCode = 'WORK_ASSET_REQUIRED' | (string & {});
 
 export type CommunityPublishResult = ApiResult<{
-  post: Pick<CommunityPost, 'id' | 'assetId' | 'title' | 'publishedAt'>;
+  post: Pick<CommunityPost, 'id' | 'assetId' | 'title' | 'publishedAt'> & {
+    visibility: CommunityPostVisibility;
+    workId?: string | null;
+  };
 }>;
 
 export function getCommunityPublishErrorCode(result: CommunityPublishResult): CommunityPublishErrorCode | null {
@@ -123,8 +132,10 @@ export function reactToCommunityPost(
   active: boolean,
 ): Promise<ApiResult<{ active: boolean }>> {
   const path = `/api/community/posts/${reaction}`;
+  // Query ids keep PUT/DELETE consistent and work with older Workers; retain
+  // the PUT body for clients/servers that already use the JSON contract.
   return active
-    ? apiPut<{ active: boolean }>(path, { id: postId })
+    ? apiPut<{ active: boolean }>(`${path}?${new URLSearchParams({ id: postId })}`, { id: postId })
     : apiDelete<{ active: boolean }>(path, { id: postId });
 }
 
@@ -164,4 +175,18 @@ export function publishCommunityPost(
     ...(input.workId ? { workId: input.workId } : {}),
     ...(input.assetId ? { assetId: input.assetId } : {}),
   });
+}
+
+export function setCommunityPostVisibility(
+  postId: string,
+  visibility: CommunityPostVisibility,
+): Promise<ApiResult<CommunityPublicationMutationResult>> {
+  return apiPut<CommunityPublicationMutationResult>('/api/community/posts/visibility', {
+    id: postId,
+    visibility,
+  });
+}
+
+export function withdrawCommunityPost(postId: string): Promise<ApiResult<CommunityPublicationMutationResult>> {
+  return apiDelete<CommunityPublicationMutationResult>('/api/community/posts', { id: postId });
 }

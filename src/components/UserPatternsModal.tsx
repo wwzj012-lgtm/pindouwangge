@@ -13,6 +13,7 @@ import {
   Trash2,
   Check,
   Compass,
+  EyeOff,
   X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -34,9 +35,13 @@ import {
 import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
 import {
   publishCommunityPost,
+  setCommunityPostVisibility,
+  withdrawCommunityPost,
   uploadCommunityAsset,
   type CommunityPostVisibility,
 } from '../utils/communityApi';
+import { PatternConfirmDialog } from './PatternConfirmDialog';
+import { PatternPublicationDialog } from './PatternPublicationDialog';
 import { formatChinaDate } from '../utils/dateUtils';
 import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
 
@@ -53,6 +58,16 @@ interface UserPatternsModalProps {
 const COMMUNITY_TAG_OPTIONS = ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo'];
 const COMMUNITY_MAX_TAGS = 5;
 const COMMUNITY_MAX_TAG_LENGTH = 24;
+
+function isCommunityPublished(record: ExportedPatternRecord): boolean {
+  return Boolean(record.communityPost) || record.status === 1;
+}
+
+function communityStatusLabel(record: ExportedPatternRecord, isEn: boolean): string {
+  if (record.communityPost?.visibility === 'private') return isEn ? 'Private' : '私密';
+  if (record.communityPost?.visibility === 'public') return isEn ? 'Public' : '公开';
+  return isCommunityPublished(record) ? (isEn ? 'Published' : '已发布') : (isEn ? 'Unpublished' : '未发布');
+}
 
 function PatternCover({ record, userId }: { record: ExportedPatternRecord; userId: string | null }): React.ReactElement {
   const [url, setUrl] = useState<string | null>(null);
@@ -158,6 +173,10 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [publishTags, setPublishTags] = useState<string[]>([]);
   const [publishTagDraft, setPublishTagDraft] = useState('');
   const [publishError, setPublishError] = useState<string | null>(null);
+  const [publicationTarget, setPublicationTarget] = useState<ExportedPatternRecord | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ record: ExportedPatternRecord; scope: 'local' | 'cloud' } | null>(null);
+  const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
+  const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
   const publishRequestRef = useRef(false);
 
   const loadPatterns = async (): Promise<void> => {
@@ -221,31 +240,64 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   };
 
   const handleDeleteLocal = async (record: ExportedPatternRecord): Promise<void> => {
-    if (!window.confirm(isEn ? 'Delete the copy stored in this browser only?' : '仅删除此浏览器中的本地副本吗？')) return;
     setBusyId(record.id);
+    setDeleteDialogError(null);
     setMessage(null);
     try {
       await deleteLocalExportedPatternCopy(record.id, currentUser?.uid ?? null);
       await loadPatterns();
+      setPendingDelete(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (isEn ? 'Delete failed.' : '删除失败。'));
+      setDeleteDialogError(error instanceof Error ? error.message : (isEn ? 'Delete failed.' : '删除失败。'));
     } finally {
       setBusyId(null);
     }
   };
 
   const handleDeleteCloudAndLocal = async (record: ExportedPatternRecord): Promise<void> => {
-    const confirmation = record.hasLocalCopy
-      ? (isEn ? 'Delete this cloud pattern and its copy in this browser?' : '删除云端图纸及此浏览器中的本地副本吗？')
-      : (isEn ? 'Delete this cloud pattern?' : '删除此云端图纸吗？');
-    if (!window.confirm(confirmation)) return;
     setBusyId(record.id);
+    setDeleteDialogError(null);
     setMessage(null);
     try {
       await deleteCloudExportedPatternAndLocal(record.id, currentUser?.uid ?? null);
       await loadPatterns();
+      setPendingDelete(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : (isEn ? 'Delete failed.' : '删除失败。'));
+      setDeleteDialogError(error instanceof Error ? error.message : (isEn ? 'Delete failed.' : '删除失败。'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleSetVisibility = async (record: ExportedPatternRecord, visibility: CommunityPostVisibility): Promise<void> => {
+    if (!record.communityPost) return;
+    setBusyId(record.id);
+    setPublicationDialogError(null);
+    try {
+      const result = await setCommunityPostVisibility(record.communityPost.id, visibility);
+      if (!result.ok) throw new Error(result.error ?? (isEn ? 'Visibility update failed.' : '可见范围更新失败。'));
+      setPublicationTarget(null);
+      await loadPatterns();
+      setMessage(visibility === 'public' ? (isEn ? 'Published publicly; the library copy remains.' : '作品已公开，仍保留在图库。') : (isEn ? 'Switched to private; the library copy remains.' : '作品已转为私密，仍保留在图库。'));
+    } catch (error) {
+      setPublicationDialogError(error instanceof Error ? error.message : (isEn ? 'Visibility update failed.' : '可见范围更新失败。'));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleWithdraw = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!record.communityPost) return;
+    setBusyId(record.id);
+    setPublicationDialogError(null);
+    try {
+      const result = await withdrawCommunityPost(record.communityPost.id);
+      if (!result.ok) throw new Error(result.error ?? (isEn ? 'Withdrawal failed.' : '撤回失败。'));
+      setPublicationTarget(null);
+      await loadPatterns();
+      setMessage(isEn ? 'Withdrawn from Community; the library copy remains.' : '作品已从豆社撤回，工程仍保留在图库。');
+    } catch (error) {
+      setPublicationDialogError(error instanceof Error ? error.message : (isEn ? 'Withdrawal failed.' : '撤回失败。'));
     } finally {
       setBusyId(null);
     }
@@ -397,7 +449,14 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       if (!published.ok) throw new Error(published.error ?? '作品发布失败');
       // Backend success is authoritative. A local persistence failure must not
       // leave the dialog open or offer a second publish for the same work.
-      const publishedRecord: ExportedPatternRecord = { ...publishRecord, status: 1, hasCloudCopy: true };
+      const publishedRecord: ExportedPatternRecord = {
+        ...publishRecord,
+        status: publishVisibility === 'public' ? 1 : 0,
+        ...(published.data?.post?.id ? {
+          communityPost: { id: published.data.post.id, visibility: publishVisibility },
+        } : {}),
+        hasCloudCopy: true,
+      };
       setRecords((current) => {
         const matchedSyncedRecord = current.some((item) => item.id === publishedRecord.id);
         return current.map((item) => (
@@ -431,7 +490,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const libraryRecords = records.filter((record) => record.status !== 2
     && (record.userId === null || record.userId === currentUser?.uid));
   const publishedRecords = currentUser
-    ? libraryRecords.filter((record) => record.status === 1 && record.userId === currentUser.uid)
+    ? libraryRecords.filter((record) => isCommunityPublished(record) && record.userId === currentUser.uid)
     : [];
   const visibleRecords = section === 'library' ? libraryRecords : publishedRecords;
 
@@ -559,8 +618,8 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                         {isEn ? 'Cloud save and sync are free.' : '云端保存与同步均不收费。'}
                       </div>
                       <div className="mx-3 mt-2 text-[10px] text-slate-500">{formatChinaDate(record.updatedAt, true)}</div>
-                      <div className={`mx-3 mt-2 text-[10px] font-bold ${(record.status ?? 0) === 1 ? 'text-emerald-300' : 'text-sky-300'}`}>
-                        {(record.status ?? 0) === 1 ? (isEn ? 'Published' : '已发布') : (isEn ? 'Unpublished' : '未发布')}
+                      <div className={`mx-3 mt-2 text-[10px] font-bold ${isCommunityPublished(record) ? 'text-emerald-300' : 'text-sky-300'}`}>
+                        {communityStatusLabel(record, isEn)}
                       </div>
                       {record.userId === null && (
                         <p className="mx-3 mt-2 text-[10px] leading-4 text-amber-300">{isEn ? 'Unbound account: stored on this device only.' : '未绑定账号，仅本机可用。'}</p>
@@ -586,7 +645,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                           {isEn ? 'Sync to this account' : '同步到当前账号'}
                         </button>
                       )}
-                      {(record.status ?? 0) === 0 && (
+                      {!isCommunityPublished(record) && (
                         <button
                           onClick={() => openPublishDialog(record)}
                           disabled={busy || !isCompletionUnlocked(record)}
@@ -597,7 +656,16 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                           {isEn ? 'Publish' : '发布到社区'}
                         </button>
                       )}
-                      {record.status === 1 && (
+                      {isCommunityPublished(record) && record.communityPost && (
+                        <button
+                          onClick={() => setPublicationTarget(record)}
+                          className="inline-flex items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-xs font-bold text-amber-200 hover:bg-amber-500/20"
+                        >
+                          <EyeOff className="h-3.5 w-3.5" />
+                          {isEn ? 'Publication settings' : '发布管理'}
+                        </button>
+                      )}
+                      {isCommunityPublished(record) && !record.communityPost && (
                         <button
                           onClick={onOpenCommunity}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20"
@@ -618,7 +686,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                       )}
                       {deletionActions.includes('local') && (
                         <button
-                          onClick={() => void handleDeleteLocal(record)}
+                          onClick={() => { setDeleteDialogError(null); setPendingDelete({ record, scope: 'local' }); }}
                           disabled={busy}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-700 px-2 py-2 text-xs font-bold text-slate-300 hover:border-rose-500/60 hover:text-rose-300 disabled:opacity-50"
                         >
@@ -628,7 +696,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                       )}
                       {deletionActions.includes('cloud-and-local') && (
                         <button
-                          onClick={() => void handleDeleteCloudAndLocal(record)}
+                          onClick={() => { setDeleteDialogError(null); setPendingDelete({ record, scope: 'cloud' }); }}
                           disabled={busy}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-slate-700 px-2 py-2 text-xs font-bold text-slate-300 hover:border-rose-500/60 hover:text-rose-300 disabled:opacity-50"
                         >
@@ -749,6 +817,44 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
           </section>
         </div>
       )}
+      <PatternConfirmDialog
+        isOpen={Boolean(pendingDelete)}
+        title={isEn ? 'Delete this pattern copy?' : '确认删除这份图纸？'}
+        description={pendingDelete
+          ? pendingDelete.scope === 'local'
+            ? (isEn ? 'Only the copy stored in this browser will be deleted. The cloud copy and any community publication remain unchanged.' : '只删除当前浏览器中的本地副本；云端图库和豆社发布状态不受影响。')
+            : (isEn ? 'The cloud gallery project and its local copy, if present, will be deleted. Any linked community publication will also be withdrawn.' : '将删除云端图库工程及本机副本（如果有）；关联的豆社作品也会同时撤回。')
+          : ''}
+        confirmLabel={isEn ? 'Delete' : '确认删除'}
+        cancelLabel={isEn ? 'Cancel' : '取消'}
+        busy={Boolean(pendingDelete && busyId === pendingDelete.record.id)}
+        error={deleteDialogError}
+        onClose={() => { if (!busyId) { setPendingDelete(null); setDeleteDialogError(null); } }}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          if (pendingDelete.scope === 'local') void handleDeleteLocal(pendingDelete.record);
+          else void handleDeleteCloudAndLocal(pendingDelete.record);
+        }}
+      />
+      <PatternPublicationDialog
+        record={publicationTarget}
+        busy={Boolean(publicationTarget && busyId === publicationTarget.id)}
+        error={publicationDialogError}
+        onClose={() => { if (!busyId) { setPublicationTarget(null); setPublicationDialogError(null); } }}
+        onSetVisibility={(visibility) => {
+          if (publicationTarget) void handleSetVisibility(publicationTarget, visibility);
+        }}
+        onWithdraw={() => {
+          if (publicationTarget) void handleWithdraw(publicationTarget);
+        }}
+        onRepublish={() => {
+          if (!publicationTarget) return;
+          const record = publicationTarget;
+          setPublicationTarget(null);
+          setPublicationDialogError(null);
+          openPublishDialog(record);
+        }}
+      />
     </div>
   );
 };

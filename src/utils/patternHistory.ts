@@ -13,6 +13,7 @@ import {
   retryPatternCloudSync as retryPatternCloudSyncFromStore,
   savePatternRecord,
   type PatternRecordSummary,
+  type PatternCommunityPublication,
   type PatternSyncState,
 } from './patternStore';
 import type { GridMatrix, PatternSettingsSnapshot, StoredPatternProject } from './patternGridCodec';
@@ -29,7 +30,7 @@ export interface PatternCompletionMetadata {
 }
 
 export type ExportedPatternRecord = PatternRecordSummary & PatternCompletionMetadata;
-export type { PatternSyncState, StoredPatternProject };
+export type { PatternCommunityPublication, PatternSyncState, StoredPatternProject };
 
 export interface EditablePatternProject extends StoredPatternProject, PatternCompletionMetadata {
   workId: string;

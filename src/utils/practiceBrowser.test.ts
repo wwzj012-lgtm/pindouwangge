@@ -148,7 +148,7 @@ it.skipIf(!existsSync(chromePath))('drives real practice UI, live inventory, tim
       probe.store.writeBeadInventory({...probe.stock,A1:{...probe.stock.A1,count:9}});await wait();check(document.querySelector('.practice-panel__stock-totals').textContent.includes('匹配库存9'),'same-window live stock');
       const original=localStorage.getItem(probe.store.INVENTORY_STORAGE_KEY);let unauthorized=0;window.addEventListener('unauthorized',()=>unauthorized++);
       probe.profile({initialTab:'inventory'});await wait();check(document.body.textContent.includes('豆仓 · 我的库存'),'initialTab inventory');
-      document.querySelector('button[title="-100粒"]').click();await wait();check(unauthorized===1,'anonymous login guard');check(localStorage.getItem(probe.store.INVENTORY_STORAGE_KEY)===original,'guard prevents stock write');
+      document.querySelector('button[aria-label="A1 增加100粒"]').click();await wait();check(unauthorized===1,'anonymous login guard');check(localStorage.getItem(probe.store.INVENTORY_STORAGE_KEY)===original,'guard prevents stock write');
       probe.profile({isOpen:false,initialTab:'library'});await wait();probe.profile({isOpen:true,initialTab:'library'});await wait();check(!document.body.textContent.includes('豆仓 · 我的库存'),'reopen library target');
       probe.profile({isOpen:false,initialTab:'inventory'});await wait();probe.profile({isOpen:true,initialTab:'inventory'});await wait();check(document.body.textContent.includes('豆仓 · 我的库存'),'reopen inventory target');
       probe.mount();await wait();

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BeadColor } from '../types';
-import type { BeadInventory, BeadStockItem } from './beadInventory';
+import { BRAND_PALETTES } from '../data/palettes';
+import { assignLegacyInventory, getBrandInventory, updateBrandInventory, type BeadInventory, type BeadStockItem } from './beadInventory';
 import { buildPracticePlan, createPracticeRestockList, filterPracticeRequirements } from './practiceInventory';
 
 const mard: BeadColor = { id: 'MARD_A1', code: 'A1', name: '奶黄', brand: 'MARD', hex: '#FAF4C8', rgb: [250, 244, 200] };
-const coco: BeadColor = { ...mard, id: 'COCO_A1', name: '雪白', brand: 'COCO' };
+const coco: BeadColor = { ...BRAND_PALETTES.COCO[0], name: '雪白' };
 const red: BeadColor = { ...mard, id: 'MARD_A2', code: 'A2', name: '红色' };
 const palette = new Map([mard, coco, red].map(color => [color.id, color]));
 const stock = (count: number, overrides: Partial<BeadStockItem> = {}): BeadStockItem => ({ colorId: mard.id, code: mard.code, name: mard.name, hex: mard.hex, count, alertThreshold: 100, ...overrides });
@@ -16,7 +17,7 @@ describe('practice requirement and inventory matching', () => {
     const inventory = { A1: stock(8), A2: stock(1, { colorId: red.id, code: red.code }) };
     const plan = buildPracticePlan(grid, palette, inventory, true);
     expect(plan).toMatchObject({ total: 5, colorCount: 3 });
-    expect(plan.rows.map(row => row.id)).toEqual([coco.id, red.id, mard.id]);
+    expect(plan.rows.map(row => row.id)).toEqual([red.id, coco.id, mard.id]);
     expect(byId(plan, mard.id)).toMatchObject({ required: 2, stock: 8, remaining: 6, shortage: 0, recorded: true });
     expect(byId(plan, coco.id)).toMatchObject({ required: 1, stock: 0, shortage: 1, recorded: false });
     expect(inventory.A1.count).toBe(8);
@@ -38,7 +39,7 @@ describe('practice requirement and inventory matching', () => {
 
   it('accepts brand+code fallback only within the same brand', () => {
     const plan = buildPracticePlan([[coco.id, mard.id]], palette, {
-      renamed: stock(9, { colorId: 'old-name', brand: 'COCO' }),
+      renamed: stock(9, { colorId: 'old-name', brand: 'COCO', code: coco.code }),
     }, true);
     expect(byId(plan, coco.id).stock).toBe(9);
     expect(byId(plan, mard.id).stock).toBe(0);
@@ -64,7 +65,7 @@ describe('practice requirement and inventory matching', () => {
   it('assigns a brand/code pool only once even if palette IDs alias the same physical color', () => {
     const alias = { ...mard, id: 'other-id' };
     const aliasedPalette = new Map([...palette, [alias.id, alias] as [string, BeadColor]]);
-    const inventory = { first: stock(10), second: stock(10, { colorId: alias.id }) };
+    const inventory = { first: stock(10), second: stock(10, { colorId: alias.id, brand: 'MARD' }) };
     const plan = buildPracticePlan([[mard.id, alias.id]], aliasedPalette, inventory, true);
     expect(plan.rows.reduce((sum, row) => sum + row.stock, 0)).toBe(10);
     expect(plan.rows.filter(row => row.recorded)).toHaveLength(1);
@@ -97,7 +98,7 @@ describe('practice requirement and inventory matching', () => {
     expect(filterPracticeRequirements(plan.rows, '奶黄', false).map(row => row.id)).toEqual([mard.id]);
     expect(filterPracticeRequirements(plan.rows, ' a2 ', true).map(row => row.id)).toEqual([red.id]);
     const text = createPracticeRestockList(plan);
-    expect(text).toContain('COCO A1 雪白：补 1 粒');
+    expect(text).toContain(`COCO ${coco.code} 雪白：补 1 粒`);
     expect(text).toContain('MARD A2 红色：补 1 粒');
     expect(text).not.toContain('MARD A1');
     expect(text).toContain('未录入');
@@ -110,12 +111,55 @@ describe('practice requirement and inventory matching', () => {
   });
 
   it('keeps different brands and material sizes in distinct stock pools', () => {
-    const mini = { ...mard, id: 'ARTKAL_MINI_A1', brand: 'ARTKAL_MINI' as const };
-    const small = { ...mard, id: 'ARTKAL_S_A1', brand: 'ARTKAL_S' as const };
+    const mini = BRAND_PALETTES.ARTKAL_MINI[0];
+    const small = BRAND_PALETTES.ARTKAL_S[0];
     const ownPalette = new Map([mini, small].map(color => [color.id, color]));
     const inventory: BeadInventory = { mini: stock(20, { colorId: mini.id, brand: 'ARTKAL_MINI' }) };
     const plan = buildPracticePlan([[mini.id, small.id]], ownPalette, inventory, true);
     expect(byId(plan, small.id).stock).toBe(0);
     expect(byId(plan, mini.id).stock).toBe(20);
+  });
+
+  it.each([
+    ['cross-brand conflict outside the work palette', stock(123, { brand: 'COCO', code: coco.code }), coco],
+    ['same-brand stale code outside the work palette', stock(123, { brand: 'MARD', code: red.code }), red],
+    ['unknown unbranded ID outside the catalog', stock(123, { colorId: 'CUSTOM_A2', code: red.code }), red],
+    ['unknown branded code outside the catalog', stock(123, { colorId: 'old', brand: 'COCO', code: 'UNKNOWN' }), coco],
+  ] as const)('agrees with inventory for %s using a one-color work subset', (_label, item, target) => {
+    const inventory = { legacy: item };
+    const original = JSON.stringify(inventory);
+    const plan = buildPracticePlan([[target.id, target.id]], new Map([[target.id, target]]), inventory, true);
+    expect(getBrandInventory(inventory, target.brand).find(row => row.colorId === target.id)?.count).toBe(0);
+    expect(plan.rows[0]).toMatchObject({ stock: 0, shortage: 2, recorded: false });
+    expect(createPracticeRestockList(plan)).toContain('补 2 粒');
+    expect(JSON.stringify(inventory)).toBe(original);
+  });
+
+  it('uses the global authoritative ID when its redundant code points at another demanded color', () => {
+    const inventory = { legacy: stock(123, { brand: 'MARD', code: red.code }) };
+    const plan = buildPracticePlan([[mard.id, red.id]], new Map([[mard.id, mard], [red.id, red]]), inventory, true);
+    expect(byId(plan, mard.id)).toMatchObject({ stock: 123, shortage: 0 });
+    expect(byId(plan, red.id)).toMatchObject({ stock: 0, shortage: 1, recorded: false });
+  });
+
+  it('does not trust a work-local exact ID for an unknown unbranded legacy record', () => {
+    const custom = { ...mard, id: 'CUSTOM_A1', brand: 'CUSTOM' as const };
+    const plan = buildPracticePlan([[custom.id]], new Map([[custom.id, custom]]), { legacy: stock(123, { colorId: custom.id }) }, true);
+    expect(plan.rows[0]).toMatchObject({ stock: 0, shortage: 1, recorded: false });
+  });
+
+  it('closes inventory to practice for explicit conflict migration, editing and batch changes', () => {
+    const subset = new Map([[coco.id, coco]]);
+    let inventory: BeadInventory = { legacy: stock(123, { brand: 'COCO', code: coco.code }) };
+    const read = () => buildPracticePlan([[coco.id, coco.id]], subset, inventory, true).rows[0];
+    expect(read()).toMatchObject({ stock: 0, shortage: 2, recorded: false });
+    inventory = assignLegacyInventory(inventory, 'legacy', coco.id);
+    expect(read()).toMatchObject({ stock: 123, shortage: 0, recorded: true });
+    inventory = updateBrandInventory(inventory, 'COCO', [coco.id], 1);
+    expect(read()).toMatchObject({ stock: 1, shortage: 1 });
+    inventory = updateBrandInventory(inventory, 'COCO', [coco.id], 1, 'delta');
+    expect(read()).toMatchObject({ stock: 2, shortage: 0 });
+    expect(getBrandInventory(inventory, 'COCO')[0].count).toBe(read().stock);
+    expect(inventory.legacy.count).toBe(2);
   });
 });

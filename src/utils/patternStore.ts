@@ -22,6 +22,12 @@ const PATTERN_STORE = 'patterns';
 const PREVIEW_STORE = 'pattern-previews';
 
 export type PatternSyncState = 'local-only' | 'pending' | 'synced' | 'failed';
+export type PatternCommunityVisibility = 'public' | 'private';
+
+export interface PatternCommunityPublication {
+  id: string;
+  visibility: PatternCommunityVisibility;
+}
 
 export interface PatternRecordSummary {
   id: string;
@@ -42,6 +48,7 @@ export interface PatternRecordSummary {
   hasLocalCopy: boolean;
   hasCloudCopy: boolean;
   status?: WorkStatus;
+  communityPost?: PatternCommunityPublication | null;
 }
 
 interface LocalPatternRecord extends PatternRecordSummary {
@@ -69,6 +76,7 @@ interface CloudPatternSummary {
   hasPreview?: boolean;
   previewRevision?: number | null;
   status?: WorkStatus;
+  communityPost?: PatternCommunityPublication | null;
 }
 
 interface CloudManifestResponse {
@@ -366,6 +374,7 @@ export async function savePatternRecord(input: SavePatternInput): Promise<SavePa
     hasLocalCopy: true,
     hasCloudCopy: previous?.hasCloudCopy ?? false,
     status: previous?.status ?? 0,
+    communityPost: previous?.communityPost ?? null,
     project,
   };
 
@@ -500,16 +509,20 @@ export async function getPatternProject(id: string, userId: string | null = null
 export async function getPatternHistory(userId: string | null): Promise<PatternRecordSummary[]> {
   let localRecords = await listLocal(userId);
   localRecords = await mapWithConcurrency(localRecords, 2, (record) => createAndStorePreview(record));
+  const localRecordsById = new Map(localRecords.map((record) => [record.id, record]));
   const merged = new Map<string, PatternRecordSummary>(localRecords.map((record) => [record.id, toSummary(record)]));
 
   if (userId) {
     const cloud = await apiGet<CloudPatternSummary[]>('/api/user-patterns');
     if (cloud.ok && Array.isArray(cloud.data)) {
       for (const remote of cloud.data) {
-    const local = merged.get(remote.id);
-    if (!Number.isInteger(remote.revision) || remote.revision < 1) continue;
-    const localHasUnsyncedTitle = local?.syncState === 'pending' || local?.syncState === 'failed';
-    merged.set(remote.id, {
+        const local = merged.get(remote.id);
+        const localRecord = localRecordsById.get(remote.id);
+        if (!Number.isInteger(remote.revision) || remote.revision < 1) continue;
+        const localHasUnsyncedTitle = local?.syncState === 'pending' || local?.syncState === 'failed';
+        const publication = remote.communityPost !== undefined ? remote.communityPost : local?.communityPost ?? null;
+        const status = remote.status ?? local?.status ?? 0;
+        merged.set(remote.id, {
           id: remote.id,
           userId,
           title: localHasUnsyncedTitle ? local!.title : remote.title,
@@ -528,8 +541,30 @@ export async function getPatternHistory(userId: string | null): Promise<PatternR
           hasLocalCopy: local?.hasLocalCopy ?? false,
           hasCloudCopy: true,
           // Publication state is committed by the Worker and must win over a stale local cache.
-          status: remote.status ?? local?.status ?? 0,
+          status,
+          communityPost: publication,
         });
+
+        // Keep the authoritative publication state in IndexedDB as well. Without
+        // this, editing a just-withdrawn work could reuse a stale local status and
+        // accidentally make the work public again on the next save.
+        if (localRecord && localRecord.userId === userId
+          && (localRecord.status !== status
+            || localRecord.communityPost?.id !== publication?.id
+            || localRecord.communityPost?.visibility !== publication?.visibility)) {
+          try {
+            await putLocal({
+              ...localRecord,
+              status,
+              communityPost: publication,
+              cloudRevision: remote.revision,
+              hasCloudCopy: true,
+            });
+          } catch {
+            // The merged response remains authoritative for this session even if
+            // the browser's optional metadata mirror is unavailable.
+          }
+        }
       }
     }
   }

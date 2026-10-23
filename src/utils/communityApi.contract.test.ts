@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getCommunityPublishErrorCode, publishCommunityPost } from './communityApi';
+import { clearApiToken, setApiToken } from './api';
+import { getCommunityPublishErrorCode, publishCommunityPost, reactToCommunityPost } from './communityApi';
 
 describe('community publish HTTP error contract (real API normalization and parser)', () => {
   const fetchMock = vi.fn();
@@ -8,12 +9,20 @@ describe('community publish HTTP error contract (real API normalization and pars
   beforeEach(() => {
     vi.stubEnv('VITE_WORKER_API_URL', 'https://worker.test');
     vi.stubGlobal('fetch', fetchMock);
-    vi.stubGlobal('localStorage', undefined);
-    vi.stubGlobal('sessionStorage', undefined);
+    for (const name of ['localStorage', 'sessionStorage']) {
+      const values = new Map<string, string>();
+      vi.stubGlobal(name, {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => values.set(key, value),
+        removeItem: (key: string) => values.delete(key),
+      });
+    }
     fetchMock.mockReset();
+    clearApiToken();
   });
 
   afterEach(() => {
+    clearApiToken();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
   });
@@ -49,5 +58,41 @@ describe('community publish HTTP error contract (real API normalization and pars
 
   it('never treats a successful response as an error', () => {
     expect(getCommunityPublishErrorCode({ ok: true, status: 201, error: 'WORK_ASSET_REQUIRED' })).toBeNull();
+  });
+
+  it.each([
+    ['favorite', true], ['favorite', false], ['like', true], ['like', false],
+  ] as const)('serializes the actual fetch request for %s active=%s', async (reaction, active) => {
+    const id = 'post_1234567890abcdef';
+    setApiToken('local-contract-token');
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true, data: { active } }), {
+      status: 200, headers: { 'Content-Type': 'application/json' },
+    }));
+    const result = await reactToCommunityPost(id, reaction, active);
+    expect(result).toMatchObject({ ok: true, status: 200, data: { active } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
+    const request = new Request(url, init);
+    expect(request.method).toBe(active ? 'PUT' : 'DELETE');
+    expect(new URL(request.url).pathname).toBe(`/api/community/posts/${reaction}`);
+    expect(new URL(request.url).searchParams.get('id')).toBe(id);
+    expect(request.headers.get('Authorization')).toBe('Bearer local-contract-token');
+    if (active) {
+      expect(request.headers.get('Content-Type')).toBe('application/json');
+      expect(await request.json()).toEqual({ id });
+    } else {
+      expect(await request.text()).toBe('');
+    }
+  });
+
+  it.each([true, false])('preserves backend rejection of an illegal post id, active=%s', async (active) => {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: false, message: 'Invalid community post id' }), {
+      status: 400, headers: { 'Content-Type': 'application/json' },
+    }));
+    const id = 'invalid&id=post_1234567890abcdef';
+    const result = await reactToCommunityPost(id, 'favorite', active);
+    expect(result).toMatchObject({ ok: false, status: 400, error: 'Invalid community post id' });
+    const url = fetchMock.mock.calls[0][0] as URL;
+    expect(url.searchParams.getAll('id')).toEqual([id]);
   });
 });

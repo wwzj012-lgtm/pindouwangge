@@ -36,7 +36,7 @@ interface ImageStudioModalProps {
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
   activePalette: BeadColor[];
-  onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement) => void;
+  onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement, diagnostics?: ConversionDiagnostics) => void;
 }
 
 interface PreciseRangeControlProps {
@@ -418,7 +418,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     }
     // The next image must opt in again; a prior crop/key cannot silently remove its background.
     setSettings(resetImageStudioBackgroundSettings(localSettings));
-    onApplyConversion(applied.grid, appliedImage);
+    onApplyConversion(applied.grid, appliedImage, applied.diagnostics);
     invalidateSession();
     handleClose();
   };

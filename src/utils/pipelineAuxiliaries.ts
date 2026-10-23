@@ -71,26 +71,39 @@ function quantizationProfile(mode: Exclude<PreprocessQuantizationMode, 'none'>):
   };
 }
 
-interface QuantizedLabCache {
-  values: Float32Array;
-  ready: Uint8Array;
+// Fixed storage (448 KiB), independent of image size or distinct colour count.
+const LAB_CACHE_CAPACITY = 16_384;
+
+interface ExactLabCache {
+  values: Float64Array;
+  keys: Uint32Array;
+}
+
+function createExactLabCache(): ExactLabCache {
+  return {
+    values: new Float64Array(LAB_CACHE_CAPACITY * 3),
+    keys: new Uint32Array(LAB_CACHE_CAPACITY),
+  };
 }
 
 function quantizedRgbKey(r: number, g: number, b: number): number {
   return ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
 }
 
-function ensureQuantizedLab(cache: QuantizedLabCache, r: number, g: number, b: number): number {
-  const key = quantizedRgbKey(r, g, b);
-  if (cache.ready[key] === 0) {
+function ensureExactLab(cache: ExactLabCache, r: number, g: number, b: number): number {
+  const key = (r << 16) | (g << 8) | b;
+  const slot = Math.imul(key, 0x9e3779b1) >>> 18;
+  const offset = slot * 3;
+  // Zero means empty; compare the complete RGB key before every hit. A hash
+  // collision only evicts an entry and must never substitute another colour.
+  if (cache.keys[slot] !== key + 1) {
     const lab = rgbToLab([r, g, b]);
-    const offset = key * 3;
     cache.values[offset] = lab[0];
     cache.values[offset + 1] = lab[1];
     cache.values[offset + 2] = lab[2];
-    cache.ready[key] = 1;
+    cache.keys[slot] = key + 1;
   }
-  return key * 3;
+  return offset;
 }
 
 function computeDetailMask(data: Uint8ClampedArray, width: number, height: number, alphaCutoff: number): Float32Array {
@@ -101,18 +114,23 @@ function computeDetailMask(data: Uint8ClampedArray, width: number, height: numbe
       const pIdx = idx * 4;
       if (data[pIdx + 3] < alphaCutoff) continue;
 
-      const lLeft = (data[(idx - 1) * 4] + data[(idx - 1) * 4 + 1] * 2 + data[(idx - 1) * 4 + 2]) / 4;
-      const lRight = (data[(idx + 1) * 4] + data[(idx + 1) * 4 + 1] * 2 + data[(idx + 1) * 4 + 2]) / 4;
-      const lUp = (data[(idx - width) * 4] + data[(idx - width) * 4 + 1] * 2 + data[(idx - width) * 4 + 2]) / 4;
-      const lDown = (data[(idx + width) * 4] + data[(idx + width) * 4 + 1] * 2 + data[(idx + width) * 4 + 2]) / 4;
+      // Invisible RGB must not create detail beside an otherwise flat fill.
+      const left = data[(idx - 1) * 4 + 3] >= alphaCutoff ? (idx - 1) * 4 : pIdx;
+      const right = data[(idx + 1) * 4 + 3] >= alphaCutoff ? (idx + 1) * 4 : pIdx;
+      const up = data[(idx - width) * 4 + 3] >= alphaCutoff ? (idx - width) * 4 : pIdx;
+      const down = data[(idx + width) * 4 + 3] >= alphaCutoff ? (idx + width) * 4 : pIdx;
+      const lLeft = (data[left] + data[left + 1] * 2 + data[left + 2]) / 4;
+      const lRight = (data[right] + data[right + 1] * 2 + data[right + 2]) / 4;
+      const lUp = (data[up] + data[up + 1] * 2 + data[up + 2]) / 4;
+      const lDown = (data[down] + data[down + 1] * 2 + data[down + 2]) / 4;
       const lumaGradient = Math.hypot(lRight - lLeft, lDown - lUp);
       const chromaGradient = Math.max(
-        Math.abs(data[(idx - 1) * 4] - data[(idx + 1) * 4]),
-        Math.abs(data[(idx - 1) * 4 + 1] - data[(idx + 1) * 4 + 1]),
-        Math.abs(data[(idx - 1) * 4 + 2] - data[(idx + 1) * 4 + 2]),
-        Math.abs(data[(idx - width) * 4] - data[(idx + width) * 4]),
-        Math.abs(data[(idx - width) * 4 + 1] - data[(idx + width) * 4 + 1]),
-        Math.abs(data[(idx - width) * 4 + 2] - data[(idx + width) * 4 + 2]),
+        Math.abs(data[left] - data[right]),
+        Math.abs(data[left + 1] - data[right + 1]),
+        Math.abs(data[left + 2] - data[right + 2]),
+        Math.abs(data[up] - data[down]),
+        Math.abs(data[up + 1] - data[down + 1]),
+        Math.abs(data[up + 2] - data[down + 2]),
       );
       detailMask[idx] = Math.max(0, Math.min(1, Math.max(lumaGradient / 35, chromaGradient / 55)));
     }
@@ -296,14 +314,9 @@ function quantizeBuffer(
   if (mode === 'cartoon') return stabilizeCartoonColors(data, alphaCutoff, normalizedStrength);
   const profile = quantizationProfile(mode);
   const mergeScale = normalizedStrength * profile.strengthScale;
-  // 4-bit/channel cache keeps the hot K-Means and raster passes lightweight;
-  // exact RGB values are still used for the final Lab→RGB reconstruction.
-  const labCache: QuantizedLabCache = {
-    values: new Float32Array(4096 * 3),
-    ready: new Uint8Array(4096),
-  };
+  const labCache = createExactLabCache();
   const cachedLab = (r: number, g: number, b: number): Lab => {
-    const offset = ensureQuantizedLab(labCache, r, g, b);
+    const offset = ensureExactLab(labCache, r, g, b);
     return [labCache.values[offset], labCache.values[offset + 1], labCache.values[offset + 2]];
   };
 
@@ -366,9 +379,12 @@ function quantizeBuffer(
       const detailX = Math.min(detailWidth - 1, Math.floor((x + 0.5) * detailWidth / width));
       const detailY = Math.min(detailHeight - 1, Math.floor((y + 0.5) * detailHeight / height));
       const detail = Math.min(1, Math.max(0, detailMask[detailY * detailWidth + detailX] ?? 0));
+      const merge = Math.max(0, Math.min(1, (profile.mergeBase - detail * profile.detailProtection) * mergeScale));
+      // Fully protected pixels retain their exact source bytes, without a
+      // negative blend extrapolation or an unnecessary Lab round trip.
+      if (merge === 0) continue;
       const sourceLab = cachedLab(data[offset], data[offset + 1], data[offset + 2]);
       const centroid = centroids[nearestCentroidIndex(sourceLab, centroids)];
-      const merge = Math.min(1, (profile.mergeBase - detail * profile.detailProtection) * mergeScale);
       const blendedLab: Lab = [
         sourceLab[0] * (1 - merge) + centroid.lab[0] * merge,
         sourceLab[1] * (1 - merge) + centroid.lab[1] * merge,
@@ -495,10 +511,7 @@ export function preprocessSourceImage(
   const processTotal = sampleWidth * sampleHeight;
   const denoised = new Uint8ClampedArray(processData.length);
   denoised.set(quantizedData);
-  const labCache: QuantizedLabCache = {
-    values: new Float32Array(4096 * 3),
-    ready: new Uint8Array(4096),
-  };
+  const labCache = createExactLabCache();
 
   // Keep detail analysis at source resolution. For very large sources, the
   // denoise and tone passes operate on the bounded work buffer instead.
@@ -513,7 +526,12 @@ export function preprocessSourceImage(
         let bSum = quantizedData[idx + 2] * 6;
         let weightSum = 6;
 
-        const centerLabOffset = ensureQuantizedLab(labCache, quantizedData[idx], quantizedData[idx + 1], quantizedData[idx + 2]);
+        const centerLabOffset = ensureExactLab(labCache, quantizedData[idx], quantizedData[idx + 1], quantizedData[idx + 2]);
+        // Neighbour lookups can evict the centre's slot; keep its exact Lab
+        // components locally throughout this bilateral filter calculation.
+        const centerL = labCache.values[centerLabOffset];
+        const centerA = labCache.values[centerLabOffset + 1];
+        const centerB = labCache.values[centerLabOffset + 2];
         for (let neighborIndex = 0; neighborIndex < 4; neighborIndex += 1) {
           const nIdx = neighborIndex === 0
             ? idx - 4
@@ -523,11 +541,11 @@ export function preprocessSourceImage(
                 ? idx - sampleWidth * 4
                 : idx + sampleWidth * 4;
           if (quantizedData[nIdx + 3] < alphaCutoff) continue;
-          const neighborLabOffset = ensureQuantizedLab(labCache, quantizedData[nIdx], quantizedData[nIdx + 1], quantizedData[nIdx + 2]);
+          const neighborLabOffset = ensureExactLab(labCache, quantizedData[nIdx], quantizedData[nIdx + 1], quantizedData[nIdx + 2]);
           const dE = Math.hypot(
-            labCache.values[centerLabOffset] - labCache.values[neighborLabOffset],
-            labCache.values[centerLabOffset + 1] - labCache.values[neighborLabOffset + 1],
-            labCache.values[centerLabOffset + 2] - labCache.values[neighborLabOffset + 2],
+            centerL - labCache.values[neighborLabOffset],
+            centerA - labCache.values[neighborLabOffset + 1],
+            centerB - labCache.values[neighborLabOffset + 2],
           );
 
           // 双边滤波思想：色差小于8才极轻微平滑（仅去除JPEG压缩伪影）

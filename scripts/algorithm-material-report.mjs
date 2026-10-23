@@ -31,7 +31,7 @@ const baseSettings = {
 const modes = {
   cartoon: {
     label: '卡通模式',
-    settings: { ...baseSettings, pipelineOverride: 'logo', dither: 'none', sharpening: 25, outlineBoost: true },
+    settings: { ...baseSettings, pipelineOverride: 'cartoon', dither: 'none', sharpening: 25, outlineBoost: true },
     suitability: '适合Q版插画、表情包和大色块卡通图；优先保持轮廓，抑制细碎噪点。',
   },
   photo: {

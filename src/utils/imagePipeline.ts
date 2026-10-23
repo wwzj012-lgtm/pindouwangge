@@ -1,6 +1,7 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
 import { consolidateStrayBeans } from './strayBeanConsolidation';
 import { projectCartoonInk } from './cartoonSampling';
+import { selectPerceptualPalette } from './perceptualPalette';
 import {
   classifyGridRegions,
   classifySourceRegions,
@@ -361,6 +362,9 @@ export function classifyImageColors(data: Uint8ClampedArray, width: number, heig
   const darkOutlineRatio = darkOutlineSamples / Math.max(1, analysedSamples);
   const cartoonDetected = analysedSamples > 80
     && effectiveColorCount > 5
+    // Richly shaded scenes also contain flat walls/clothing and dark edges.
+    // Keep their broad tonal range instead of collapsing them into flat inks.
+    && effectiveColorCount <= 32
     && flatRatio >= 0.78
     && strongEdgeRatio >= 0.025
     && darkOutlineRatio >= 0.006;
@@ -629,13 +633,42 @@ function selectPalette(pixels: GridPixel[], palette: PaletteEntry[], colorLimit:
   const normalizedColorLimit = normalizeColorLimit(colorLimit);
   if (normalizedColorLimit === 0 || palette.length <= normalizedColorLimit) return palette;
   const counts = new Map<string, number>();
+  const inkCounts = new Map<string, number>();
   for (const pixel of pixels) {
     if (pixel.alpha === 0) continue;
-    const winner = rankPaletteMatches(rgbToLab([pixel.r, pixel.g, pixel.b]), palette, algorithm)[0];
+    const source = rgbToLab([pixel.r, pixel.g, pixel.b]);
+    const winner = rankPaletteMatches(source, palette, algorithm)[0];
     counts.set(winner.entry.color.id, (counts.get(winner.entry.color.id) ?? 0) + 1);
+    if (source[0] <= 24 && winner.entry.lab[0] <= 28) {
+      inkCounts.set(winner.entry.color.id, (inkCounts.get(winner.entry.color.id) ?? 0) + 1);
+    }
   }
-  const ids = new Set(Array.from(counts.entries()).sort((first, second) => second[1] - first[1]).slice(0, normalizedColorLimit).map(([id]) => id));
-  return palette.filter((entry) => ids.has(entry.color.id));
+  const baselineIds = Array.from(counts.entries()).sort((first, second) => second[1] - first[1]).slice(0, normalizedColorLimit).map(([id]) => id);
+  if (counts.size <= normalizedColorLimit || normalizedColorLimit === 1) {
+    const ids = new Set(baselineIds);
+    return palette.filter(entry => ids.has(entry.color.id));
+  }
+  // Bounded weighted histogram, but reconstruct each bin from ALL its actual
+  // samples rather than arbitrarily keeping the first colour in that bin.
+  const bins = new Map<number, { weight: number; l: number; a: number; b: number }>();
+  for (const pixel of pixels) {
+    if (pixel.alpha === 0) continue;
+    const key = ((pixel.r >> 4) << 8) | ((pixel.g >> 4) << 4) | (pixel.b >> 4);
+    const lab = rgbToLab([pixel.r, pixel.g, pixel.b]);
+    const bin = bins.get(key) ?? { weight: 0, l: 0, a: 0, b: 0 };
+    bin.weight++; bin.l += lab[0]; bin.a += lab[1]; bin.b += lab[2];
+    bins.set(key, bin);
+  }
+  const samples = [...bins.entries()].sort((a, b) => a[0] - b[0]).map(([, bin]) => ({
+    lab: [bin.l / bin.weight, bin.a / bin.weight, bin.b / bin.weight] as Lab, weight: bin.weight,
+  }));
+  const ink = [...inkCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  const opaque = samples.reduce((total, sample) => total + sample.weight, 0);
+  // A recurring, genuinely source-dark tone is structural evidence. Keep its
+  // actual nearest bead, never invent a pure-black outline for a bright image.
+  const protectedIds = normalizedColorLimit >= 3 && ink && ink[1] >= Math.max(2, opaque * .002) ? [ink[0]] : [];
+  return selectPerceptualPalette(palette.filter(entry => counts.has(entry.color.id)), samples, normalizedColorLimit,
+    (source, entry) => paletteDistance(source, entry, algorithm), baselineIds, protectedIds);
 }
 
 function diagnosticForReplacement(
@@ -1198,7 +1231,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     )
     : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
   const targetPixels: GridPixel[] = [];
-  const representedInk = pipeline === 'cartoon' ? new Uint8Array(settings.width * settings.height) : null;
+  const representedInk = pipeline !== 'photo' ? new Uint8Array(settings.width * settings.height) : null;
   const protectedEmpty = new Uint8Array(settings.width * settings.height);
   const scaleX = sourceWidth / settings.width;
   const scaleY = sourceHeight / settings.height;
@@ -1259,8 +1292,11 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           linearG += srgbToLinear(g) * contentWeight;
           linearB += srgbToLinear(b) * contentWeight;
           const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-          const entry = dominant.get(key) ?? { weight: 0, rgb: [r, g, b], maxDetail: 0 };
+          const entry = dominant.get(key) ?? { weight: 0, rgb: [0, 0, 0], maxDetail: 0 };
           entry.weight += contentWeight;
+          entry.rgb[0] += r * contentWeight;
+          entry.rgb[1] += g * contentWeight;
+          entry.rgb[2] += b * contentWeight;
           entry.maxDetail = Math.max(entry.maxDetail, detail);
           dominant.set(key, entry);
         }
@@ -1283,7 +1319,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       // creates muddy intermediate colours and halo-like double contours in
       // flat character art.
       const rgb: Rgb = pipeline === 'logo' || pipeline === 'cartoon'
-        ? logoEntry?.rgb ?? [0, 0, 0]
+        ? logoEntry ? logoEntry.rgb.map(value => clampByte(value / logoEntry.weight)) as Rgb : [0, 0, 0]
         : [
           linearToSrgb(linearR / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearG / Math.max(weightedValid, 0.00001)),
@@ -1298,9 +1334,11 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   }
 
   if (representedInk && (sourceWidth > settings.width || sourceHeight > settings.height)) {
-    const cartoonInk = projectCartoonInk(data, sourceWidth, sourceHeight, settings.width, settings.height,
+    // The same source-connected stroke policy protects fine logo lettering.
+    // Photo mode keeps area sampling and never receives synthesized ink cells.
+    const sourceInk = projectCartoonInk(data, sourceWidth, sourceHeight, settings.width, settings.height,
       alphaCutoff, backgroundResult.mask, representedInk);
-    cartoonInk.forEach((rgb, index) => {
+    sourceInk.forEach((rgb, index) => {
       if (!rgb || targetPixels[index].alpha === 0) return;
       const adjusted = adjustColor(rgb, settings);
       targetPixels[index] = { r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 };

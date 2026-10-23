@@ -2556,12 +2556,13 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           settings={settings}
           setSettings={setSettings}
           activePalette={activePalette}
-          onApplyConversion={(newGrid, updatedImg) => {
+          onApplyConversion={(newGrid, updatedImg, diagnostics) => {
             invalidateImageRequest();
             if (updatedImg) {
               setSourceImage(updatedImg);
             }
             applyGridChange(newGrid, false);
+            setConversionDiagnostics(diagnostics ?? null);
           }}
         />
       )}

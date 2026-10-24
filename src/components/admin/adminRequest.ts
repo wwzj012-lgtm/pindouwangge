@@ -35,7 +35,8 @@ export function createAdminRequest({
       headers.set('Accept', 'application/json');
       const token = userToken();
       if (token && !headers.has('Authorization')) headers.set('Authorization', `Bearer ${token}`);
-      if (path.startsWith('/api/admin/') && path !== '/api/admin/session') {
+      const creatingSession = path === '/api/admin/session' && init.method?.toUpperCase() === 'POST';
+      if (path.startsWith('/api/admin/') && !creatingSession) {
         const adminSession = sessionToken();
         if (adminSession && !headers.has('X-Admin-Session')) headers.set('X-Admin-Session', adminSession);
       }

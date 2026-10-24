@@ -20,6 +20,11 @@ import {
   Trash2,
   Image as ImageIcon,
   Loader2,
+  Check,
+  Cloud,
+  RefreshCw,
+  Compass,
+  ShieldCheck,
 } from 'lucide-react';
 import './UserProfileModal.css';
 import { useAuth } from '../context/AuthContext';
@@ -38,6 +43,11 @@ import {
   deleteCloudExportedPatternAndLocal,
   deleteLocalExportedPatternCopy,
   getExportedPatternPreview,
+  normalizePatternTitle,
+  patternDeletionActions,
+  requiresExplicitCloudBinding,
+  retryPatternCloudSync,
+  renameExportedPattern,
   type ExportedPatternRecord,
 } from '../utils/patternHistory';
 import { formatChinaDate } from '../utils/dateUtils';
@@ -51,6 +61,8 @@ import {
 import { BeadInventoryPanel } from './BeadInventoryPanel';
 import { PatternConfirmDialog } from './PatternConfirmDialog';
 import { PatternPublicationDialog } from './PatternPublicationDialog';
+import { PatternPublishDialog } from './PatternPublishDialog';
+import { isPatternPublicationUnlocked, publishCommunityPattern, type CommunityPublicationMetadata } from '../utils/communityPatternPublication';
 
 export function splitProfilePatternSections(records: readonly ExportedPatternRecord[], currentUserId: string | null): {
   libraryRecords: ExportedPatternRecord[];
@@ -86,7 +98,8 @@ interface UserProfileModalProps {
   onOpenVipModal?: () => void;
   onSelectPattern?: (pattern: CommunityPattern) => void;
   onContinueEditing?: ContinueEditingPattern;
-  onPublishPattern?: (record: ExportedPatternRecord) => void;
+  onOpenCommunity?: () => void;
+  onOpenAdminPanel?: () => void;
 }
 
 // Helper thumbnail preview for saved pattern records
@@ -148,13 +161,37 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   onOpenVipModal,
   onSelectPattern,
   onContinueEditing,
-  onPublishPattern,
+  onOpenCommunity,
+  onOpenAdminPanel,
 }) => {
-  const { userProfile, isVip, isPro, currentUser } = useAuth();
-  const openLoginModal = useCallback(() => {
+  const { userProfile, isVip, isPro, currentUser, canAccessAdmin, refreshProfile } = useAuth();
+  const refreshProfileRef = useRef(refreshProfile);
+  refreshProfileRef.current = refreshProfile;
+  useEffect(() => {
+    if (!isOpen || !currentUser || typeof window === 'undefined') return;
+    const refresh = () => { void refreshProfileRef.current().catch(() => {}); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [isOpen, currentUser?.uid]);
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+  const operationEpochRef = useRef(0);
+  const actionLockRef = useRef<symbol | null>(null);
+  const publishLockRef = useRef<symbol | null>(null);
+  const closeProfile = useCallback(() => {
+    operationEpochRef.current += 1;
+    actionLockRef.current = null;
+    publishLockRef.current = null;
     onClose();
-    window.dispatchEvent(new Event('unauthorized'));
   }, [onClose]);
+  const isCurrentOperation = useCallback((epoch: number, userId: string | null): boolean => (
+    operationEpochRef.current === epoch && currentUserRef.current?.uid === userId
+  ), []);
+  const openLoginModal = useCallback(() => {
+    closeProfile();
+    window.dispatchEvent(new Event('unauthorized'));
+  }, [closeProfile]);
   const requireFormalLogin = useCallback((message = FORMAL_LOGIN_REQUIRED_MESSAGE): boolean => {
     const hasFormalLogin = Boolean(currentUser) && !isGuestAccount(currentUser) && !isGuestAccount(userProfile);
     if (hasFormalLogin) return true;
@@ -176,44 +213,73 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [savedPatterns, setSavedPatterns] = useState<ExportedPatternRecord[]>([]);
   const [loadingPatterns, setLoadingPatterns] = useState(false);
   const [selectedPatternForAction, setSelectedPatternForAction] = useState<ExportedPatternRecord | null>(null);
-  const [pendingDeletePattern, setPendingDeletePattern] = useState<ExportedPatternRecord | null>(null);
+  const [pendingDeletePattern, setPendingDeletePattern] = useState<{ record: ExportedPatternRecord; scope: 'local' | 'cloud' } | null>(null);
   const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
   const [publicationTarget, setPublicationTarget] = useState<ExportedPatternRecord | null>(null);
   const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
+  const [publishTarget, setPublishTarget] = useState<ExportedPatternRecord | null>(null);
+  const [publishError, setPublishError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionBusyId, setActionBusyId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState('');
   const editRequestRef = useRef(0);
+  const loadRequestRef = useRef(0);
+  const favoriteRequestRef = useRef(0);
   const continueEditingRef = useRef(onContinueEditing);
   continueEditingRef.current = onContinueEditing;
-  // Invalidate during the close/unmount commit, before a pending read resumes.
   useLayoutEffect(() => {
+    operationEpochRef.current += 1;
     editRequestRef.current += 1;
+    loadRequestRef.current += 1;
+    favoriteRequestRef.current += 1;
+    actionLockRef.current = null;
+    publishLockRef.current = null;
     setActionBusyId(null);
-    return () => { editRequestRef.current += 1; };
-  }, [isOpen, currentUser?.uid]);
+    setSavedPatterns([]);
+    setFavoritePosts([]);
+    setLoadingPatterns(false);
+    setLoadingFavorites(false);
+    setFavoritesError(null);
+    setActionMessage(null);
+    setEditingId(null);
+    setDraftTitle('');
+    setPendingDeletePattern(null);
+    setDeleteDialogError(null);
+    setPublishError(null);
+    setPublicationDialogError(null);
+    setPublishTarget(null);
+    setPublicationTarget(null);
+    setSelectedPatternForAction(null);
+    return () => { operationEpochRef.current += 1; };
+  }, [currentUser?.uid, isOpen]);
+
   const { libraryRecords, publishedRecords } = splitProfilePatternSections(savedPatterns, currentUser?.uid ?? null);
   const libraryPatternCount = libraryRecords.length;
   const publishedPatternCount = publishedRecords.length;
   const activePatternRecords = activeTab === 'works' ? publishedRecords : libraryRecords;
 
-  // Load Saved Patterns when modal opens or user changes
-  const loadSavedPatterns = async () => {
+  const loadSavedPatterns = useCallback(async (): Promise<void> => {
+    const epoch = operationEpochRef.current;
+    const userId = currentUserRef.current?.uid ?? null;
+    const request = ++loadRequestRef.current;
     setLoadingPatterns(true);
     try {
-      const list = await getUserExportedPatterns(currentUser?.uid || null);
+      const list = await getUserExportedPatterns(userId);
+      if (!isCurrentOperation(epoch, userId) || request !== loadRequestRef.current) return;
       setSavedPatterns(list.filter((record) => (record.status ?? 0) !== 2));
-    } catch {
-      // ignore
+    } catch (error) {
+      if (isCurrentOperation(epoch, userId) && request === loadRequestRef.current) {
+        setActionMessage(error instanceof Error ? error.message : '无法读取我的图库，请重试。');
+      }
     } finally {
-      setLoadingPatterns(false);
+      if (isCurrentOperation(epoch, userId) && request === loadRequestRef.current) setLoadingPatterns(false);
     }
-  };
+  }, [isCurrentOperation]);
 
   useEffect(() => {
-    if (isOpen) {
-      loadSavedPatterns();
-    }
-  }, [isOpen, currentUser]);
+    if (isOpen) void loadSavedPatterns();
+  }, [currentUser?.uid, isOpen, loadSavedPatterns]);
 
   const loadFavoritePosts = useCallback(async () => {
     if (!requireFormalLogin('请登录或注册后再查看喜欢列表。')) {
@@ -221,112 +287,214 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       setFavoritesError(FORMAL_LOGIN_REQUIRED_MESSAGE);
       return;
     }
-
     setLoadingFavorites(true);
     setFavoritesError(null);
+    const epoch = operationEpochRef.current;
+    const userId = currentUserRef.current?.uid ?? null;
+    const request = ++favoriteRequestRef.current;
+    const isCurrent = () => isCurrentOperation(epoch, userId) && request === favoriteRequestRef.current;
     try {
       const result = await listFavoriteCommunityPosts();
+      if (!isCurrent()) return;
       if (!result.ok || !result.data) {
         setFavoritePosts([]);
         setFavoritesError(displayFavoriteError(result.error));
         return;
       }
       setFavoritePosts(result.data.posts);
+    } catch (error) {
+      if (isCurrent()) setFavoritesError(error instanceof Error ? error.message : '无法读取喜欢列表');
     } finally {
-      setLoadingFavorites(false);
+      if (isCurrent()) setLoadingFavorites(false);
     }
-  }, [requireFormalLogin]);
-
+  }, [isCurrentOperation, requireFormalLogin]);
   useEffect(() => {
     if (isOpen && activeTab === 'likes') void loadFavoritePosts();
   }, [activeTab, isOpen, loadFavoritePosts]);
-
-  const handleOpenLikes = () => {
+  const handleOpenLikes = (): void => {
     if (activeTab === 'likes') void loadFavoritePosts();
     else setActiveTab('likes');
   };
-
-  // Actions for "我的图库"
-  // 1. 编辑 (Edit / Continue Editing)
-  const handleEditPattern = async (record: ExportedPatternRecord) => {
-    if (!requireFormalLogin('请登录或注册后再编辑个人图纸。')) return;
-    const request = ++editRequestRef.current;
-    setActionBusyId(record.id);
+  const beginAction = (recordId: string): { token: symbol; epoch: number; userId: string | null } | null => {
+    if (actionLockRef.current || publishLockRef.current) return null;
+    const token = Symbol(recordId);
+    const epoch = operationEpochRef.current;
+    const userId = currentUserRef.current?.uid ?? null;
+    actionLockRef.current = token;
+    // A refresh started before this mutation must not overwrite its result.
+    loadRequestRef.current += 1;
+    setLoadingPatterns(false);
+    setActionBusyId(recordId);
     setActionMessage(null);
+    return { token, epoch, userId };
+  };
+  const finishAction = (operation: { token: symbol; epoch: number; userId: string | null }): void => {
+    if (actionLockRef.current === operation.token) actionLockRef.current = null;
+    if (isCurrentOperation(operation.epoch, operation.userId)) setActionBusyId(null);
+  };
+
+  const handleEditPattern = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!requireFormalLogin('请登录或注册后再编辑个人图纸。')) return;
+    const operation = beginAction(record.id);
+    if (!operation) return;
+    const request = ++editRequestRef.current;
     try {
-      const project = await getPatternProject(record.id, currentUser?.uid || null);
-      if (request !== editRequestRef.current || !continueEditingRef.current) return;
+      const project = await getPatternProject(record.id, operation.userId);
+      if (!isCurrentOperation(operation.epoch, operation.userId) || request !== editRequestRef.current || !continueEditingRef.current) return;
       const accepted = await continueEditingRef.current(project);
-      if (request === editRequestRef.current && accepted !== false) onClose();
-    } catch (err) {
-      if (request === editRequestRef.current) setActionMessage('载入图纸项目失败，请重试');
+      if (isCurrentOperation(operation.epoch, operation.userId) && request === editRequestRef.current && accepted !== false) closeProfile();
+    } catch (error) {
+      if (isCurrentOperation(operation.epoch, operation.userId) && request === editRequestRef.current) setActionMessage(error instanceof Error ? error.message : '载入图纸项目失败，请重试。');
     } finally {
-      if (request === editRequestRef.current) setActionBusyId(null);
+      finishAction(operation);
     }
   };
 
-  // 3. 删除 (Delete pattern from 我的图库)
-  const requestDeletePattern = (record: ExportedPatternRecord) => {
-    if (record.hasCloudCopy && !requireFormalLogin('请登录或注册后再删除云端图纸。')) return;
+  const startRename = (record: ExportedPatternRecord): void => {
+    setEditingId(record.id);
+    setDraftTitle(record.title);
+    setActionMessage(null);
+  };
+  const cancelRename = (): void => { setEditingId(null); setDraftTitle(''); };
+  const handleRename = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!requireFormalLogin('请登录或注册后再重命名个人图纸。')) return;
+    let title: string;
+    try { title = normalizePatternTitle(draftTitle); } catch (error) { setActionMessage(error instanceof Error ? error.message : '图纸名称不合法。'); return; }
+    const operation = beginAction(record.id);
+    if (!operation) return;
+    try {
+      const updated = await renameExportedPattern(record, operation.userId, title);
+      if (!isCurrentOperation(operation.epoch, operation.userId)) return;
+      setSavedPatterns((items) => items.map((item) => item.id === record.id ? { ...item, title: updated.title, updatedAt: updated.updatedAt, syncState: updated.syncState } : item));
+      cancelRename();
+    } catch (error) {
+      if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage(error instanceof Error ? error.message : '重命名失败，请重试。');
+    } finally { finishAction(operation); }
+  };
+
+  const handleSyncToCurrentAccount = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!requireFormalLogin('请登录或注册后再同步个人图纸。')) return;
+    const operation = beginAction(record.id);
+    if (!operation || !operation.userId) return;
+    try {
+      await retryPatternCloudSync(record.id, operation.userId);
+      if (!isCurrentOperation(operation.epoch, operation.userId)) return;
+      await loadSavedPatterns();
+      if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage('已同步到当前账号的云端图库。');
+    } catch (error) {
+      if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage(error instanceof Error ? error.message : '云端同步失败，请重试。');
+    } finally { finishAction(operation); }
+  };
+
+  const requestDeletePattern = (record: ExportedPatternRecord, scope: 'local' | 'cloud'): void => {
+    if (!requireFormalLogin(scope === 'cloud' ? '请登录或注册后再删除云端图纸。' : '请登录或注册后再删除本机图纸。')) return;
     setSelectedPatternForAction(null);
     setDeleteDialogError(null);
-    setPendingDeletePattern(record);
+    setPendingDeletePattern({ record, scope });
+  };
+  const handleDeletePattern = async (pending: { record: ExportedPatternRecord; scope: 'local' | 'cloud' }): Promise<void> => {
+    const operation = beginAction(pending.record.id);
+    if (!operation) return;
+    setDeleteDialogError(null);
+    try {
+      if (pending.scope === 'cloud') await deleteCloudExportedPatternAndLocal(pending.record.id, operation.userId);
+      else await deleteLocalExportedPatternCopy(pending.record.id, operation.userId);
+      if (!isCurrentOperation(operation.epoch, operation.userId)) return;
+      setSavedPatterns((records) => records.flatMap((record) => record.id !== pending.record.id
+        ? [record]
+        : pending.scope === 'local' && record.hasCloudCopy
+          ? [{ ...record, hasLocalCopy: false, previewBlob: null }]
+          : []));
+      setPendingDeletePattern(null);
+      setActionMessage(pending.scope === 'cloud' ? '云端图库工程及本机副本已删除，关联发布已撤回。' : '已删除当前浏览器中的本机副本，云端工程与发布状态不变。');
+      await loadSavedPatterns();
+    } catch (error) {
+      if (isCurrentOperation(operation.epoch, operation.userId)) setDeleteDialogError(error instanceof Error ? error.message : '删除失败，请检查网络后重试。');
+    } finally { finishAction(operation); }
   };
 
-  const handleDeletePattern = async (record: ExportedPatternRecord) => {
+  const openPublishDialog = (record: ExportedPatternRecord): void => {
+    if (actionLockRef.current || publishLockRef.current) return;
+    if (!requireFormalLogin('请登录或注册后再发布作品。')) return;
+    setSelectedPatternForAction(null);
+    if (!isPatternPublicationUnlocked(record)) {
+      setActionMessage('完成图纸后解锁发布。');
+      return;
+    }
+    setPublishError(null);
+    setPublishTarget(record);
+  };
+  const handlePublish = async (metadata: CommunityPublicationMetadata): Promise<void> => {
+    const record = publishTarget;
+    const userId = currentUserRef.current?.uid ?? null;
+    if (!record || !userId || publishLockRef.current || actionLockRef.current) return;
+    if (!requireFormalLogin('请登录或注册后再发布作品。')) return;
+    if (!isPatternPublicationUnlocked(record)) { setPublishError('完成图纸后解锁发布。'); return; }
+    const operation = beginAction(record.id);
+    if (!operation) return;
+    const { token, epoch } = operation;
+    publishLockRef.current = token;
     setActionBusyId(record.id);
+    setPublishError(null);
+    setActionMessage(null);
     try {
-      if (record.hasCloudCopy) await deleteCloudExportedPatternAndLocal(record.id, currentUser?.uid || null);
-      else await deleteLocalExportedPatternCopy(record.id, currentUser?.uid || null);
-      setSavedPatterns(prev => prev.filter(p => p.id !== record.id));
-      setActionMessage('🗑️ 图纸已成功从【我的图库】删除');
-      setSelectedPatternForAction(null);
-      setPendingDeletePattern(null);
-      setDeleteDialogError(null);
-      setTimeout(() => setActionMessage(null), 2000);
-    } catch {
-      setDeleteDialogError('删除失败，请检查网络后重试。');
+      const result = await publishCommunityPattern({
+        record,
+        metadata,
+        currentUserId: userId,
+        isSessionCurrent: () => isCurrentOperation(epoch, userId),
+      });
+      if (!isCurrentOperation(epoch, userId)) return;
+      if (result.ok === false) { if (!result.stale) setPublishError(result.error); return; }
+      const publishedRecord = result.record;
+      setSavedPatterns((records) => {
+        const hasSyncedRecord = records.some((item) => item.id === publishedRecord.id);
+        return records.map((item) => item.id === publishedRecord.id || (!hasSyncedRecord && item.id === record.id) ? publishedRecord : item);
+      });
+      setPublishTarget(null);
+      setActionMessage(metadata.visibility === 'public' ? '作品已发布到社区，工程仍保留在我的图库。' : '作品已私密发布，不会出现在公开社区列表。');
+      void result.localMark.then((outcome) => {
+        if (outcome === 'warning' && isCurrentOperation(epoch, userId)) setActionMessage('已发布，图库本地状态更新失败，请刷新。');
+      });
     } finally {
-      setActionBusyId(null);
+      if (publishLockRef.current === token) publishLockRef.current = null;
+      finishAction(operation);
     }
   };
 
-  const handleSetPublicationVisibility = async (record: ExportedPatternRecord, visibility: CommunityPostVisibility) => {
-    if (!record.communityPost) return;
-    setActionBusyId(record.id);
+  const handleSetPublicationVisibility = async (record: ExportedPatternRecord, visibility: CommunityPostVisibility): Promise<void> => {
+    if (!record.communityPost || !requireFormalLogin('请登录或注册后再管理发布状态。')) return;
+    const operation = beginAction(record.id);
+    if (!operation) return;
     setPublicationDialogError(null);
     try {
       const result = await setCommunityPostVisibility(record.communityPost.id, visibility);
       if (!result.ok) throw new Error(result.error ?? '作品可见性更新失败');
+      if (!isCurrentOperation(operation.epoch, operation.userId)) return;
       setPublicationTarget(null);
       await loadSavedPatterns();
-      setActionMessage(visibility === 'public' ? '作品已公开，仍保留在我的图库。' : '作品已转为私密，仍保留在我的图库。');
-      setTimeout(() => setActionMessage(null), 2400);
+      if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage(visibility === 'public' ? '作品已公开，仍保留在我的图库。' : '作品已转为私密，仍保留在我的图库。');
     } catch (error) {
-      setPublicationDialogError(error instanceof Error ? error.message : '作品可见性更新失败，请重试');
-    } finally {
-      setActionBusyId(null);
-    }
+      if (isCurrentOperation(operation.epoch, operation.userId)) setPublicationDialogError(error instanceof Error ? error.message : '作品可见性更新失败，请重试');
+    } finally { finishAction(operation); }
   };
 
-  const handleWithdrawPublication = async (record: ExportedPatternRecord) => {
-    if (!record.communityPost) return;
-    setActionBusyId(record.id);
+  const handleWithdrawPublication = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!record.communityPost || !requireFormalLogin('请登录或注册后再撤回作品。')) return;
+    const operation = beginAction(record.id);
+    if (!operation) return;
     setPublicationDialogError(null);
     try {
       const result = await withdrawCommunityPost(record.communityPost.id);
       if (!result.ok) throw new Error(result.error ?? '撤回作品失败');
+      if (!isCurrentOperation(operation.epoch, operation.userId)) return;
       setPublicationTarget(null);
       await loadSavedPatterns();
-      setActionMessage('作品已从豆社撤回，工程仍保留在我的图库。');
-      setTimeout(() => setActionMessage(null), 2400);
+      if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage('作品已从豆社撤回，工程仍保留在我的图库。');
     } catch (error) {
-      setPublicationDialogError(error instanceof Error ? error.message : '撤回作品失败，请重试');
-    } finally {
-      setActionBusyId(null);
-    }
+      if (isCurrentOperation(operation.epoch, operation.userId)) setPublicationDialogError(error instanceof Error ? error.message : '撤回作品失败，请重试');
+    } finally { finishAction(operation); }
   };
-
   const worksCount = publishedPatternCount;
   const needsCommunityLogin = favoritesError === GUEST_COMMUNITY_MESSAGE;
 
@@ -344,7 +512,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const displayName = userProfile?.displayName || currentUser?.displayName || (currentUser ? '已登录用户' : '未登录用户');
 
   return (
-    <div className="profile-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
+    <div role="dialog" aria-modal="true" aria-label="个人中心" className="profile-overlay fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
       <ErrorBoundary fallbackTitle="个人中心界面加载遇到错误">
       <div className="profile-dialog relative w-full max-w-4xl bg-slate-50 border border-slate-200 rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[94vh] text-slate-800 duration-200">
         
@@ -354,7 +522,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
           {/* Top Right Close Button */}
           <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
             <button
-              onClick={onClose}
+              onClick={closeProfile}
               aria-label="关闭个人中心"
               className="p-1.5 bg-slate-100/80 hover:bg-slate-200 text-slate-500 hover:text-slate-900 rounded-xl transition-colors cursor-pointer"
             >
@@ -423,6 +591,17 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 <span><strong>{publishedPatternCount}</strong> 已发布</span>
                 <span><strong>{inventoryList.length}</strong> 库存色号</span>
               </div>
+
+              {currentUser && canAccessAdmin && (
+                <a href="/admin" onClick={onOpenAdminPanel ? (event) => {
+                  event.preventDefault(); closeProfile(); onOpenAdminPanel();
+                } : undefined}
+                  className="mt-3 inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-4 py-2 text-sm font-bold text-purple-800 transition-colors hover:bg-purple-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-600">
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                  管理后台
+                  <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                </a>
+              )}
 
             </div>
           </div>
@@ -566,6 +745,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                   </div>
                 </div>
                 <button
+                  disabled={Boolean(actionBusyId)}
                   onClick={loadSavedPatterns}
                   className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold flex items-center gap-1 cursor-pointer self-end sm:self-auto"
                 >
@@ -601,7 +781,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     {activeTab === 'works' ? '从我的图库发布作品后，会显示在这里，工程仍保留在图库。' : '在画板完成拼豆设计后，点击顶部【保存】即可存入【我的图库】。'}
                   </p>
                   <button
-                    onClick={onClose}
+                    onClick={closeProfile}
                     className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-slate-900 text-xs font-bold transition-all cursor-pointer"
                   >
                     前往画板创作
@@ -611,97 +791,45 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 /* Saved Pattern Cards Grid */
                 <div className="profile-card-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   {activePatternRecords.map(record => {
-                    const isBusy = actionBusyId === record.id;
+                    const isBusy = Boolean(actionBusyId);
                     const isPublished = isPublishedRecord(record);
-                    const canPublish = activeTab === 'library' && !isPublished && Boolean(onPublishPattern);
-                    const canManagePublication = isPublished && Boolean(record.communityPost);
+                    const deletionActions = patternDeletionActions(record);
+                    const canBindToCurrentAccount = requiresExplicitCloudBinding(record, currentUser?.uid ?? null);
+                    const canRetrySync = (record.syncState === 'failed' || record.syncState === 'pending') && record.userId === currentUser?.uid;
                     return (
-                      <div
-                        key={record.id}
-                        className="profile-pattern-card group bg-white border border-slate-200 hover:border-purple-500/80 rounded-2xl overflow-hidden flex flex-col transition-all hover:shadow-xl hover:shadow-purple-950/30 relative"
-                      >
-                        {/* Cover Preview Thumbnail */}
-                        <div
-                          className="cursor-pointer relative group-hover:opacity-95 transition-opacity"
-                          onClick={() => setSelectedPatternForAction(record)}
-                        >
+                      <article key={record.id} className="profile-pattern-card group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all hover:border-purple-500/80 hover:shadow-xl hover:shadow-purple-950/20">
+                        <div className="cursor-pointer relative transition-opacity group-hover:opacity-95" onClick={() => setSelectedPatternForAction(record)}>
                           <PatternCoverThumbnail record={record} userId={currentUser?.uid || null} />
-                          
-                          {/* Top Specs Pill */}
-                          <div className="absolute top-2 left-2 bg-white/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-bold text-purple-600 border border-slate-200">
-                            {record.width}×{record.height} 粒
-                          </div>
-                          <div className="absolute top-2 right-2 bg-white/85 backdrop-blur-md px-2 py-0.5 rounded-lg text-[10px] font-extrabold text-amber-700 border border-slate-200">
-                            {record.totalBeads} 粒
-                          </div>
+                          <div className="absolute top-2 left-2 rounded-lg border border-slate-200 bg-white/85 px-2 py-0.5 text-[10px] font-bold text-purple-600 backdrop-blur-md">{record.width}×{record.height} 粒</div>
+                          <div className="absolute top-2 right-2 rounded-lg border border-slate-200 bg-white/85 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 backdrop-blur-md">{record.totalBeads} 粒</div>
                         </div>
-
-                        {/* Card Info */}
-                        <div className="p-3.5 space-y-2 flex-1 flex flex-col justify-between">
+                        <div className="flex flex-1 flex-col justify-between space-y-2 p-3.5">
                           <div>
-                            <h4
-                              onClick={() => setSelectedPatternForAction(record)}
-                              className="text-xs font-extrabold text-slate-900 hover:text-purple-600 truncate cursor-pointer"
-                              title={record.title}
-                            >
-                              {record.title}
-                            </h4>
-                            <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
-                              <span>更新时间: {formatChinaDate(record.updatedAt)}</span>
-                               <span className={`font-medium ${record.communityPost?.visibility === 'private' ? 'text-amber-700' : 'text-purple-600'}`}>{publicationLabel(record)}</span>
-                            </div>
+                            {editingId === record.id ? (
+                              <div className="flex items-center gap-1">
+                                <input value={draftTitle} maxLength={200} autoFocus disabled={isBusy} onChange={(event) => setDraftTitle(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void handleRename(record); if (event.key === 'Escape') cancelRename(); }} aria-label="图纸名称" className="min-h-11 min-w-0 flex-1 rounded-xl border border-purple-300 px-2 text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-purple-200" />
+                                <button type="button" disabled={isBusy} onClick={() => void handleRename(record)} aria-label="保存图纸名称" className="grid h-11 w-11 place-items-center rounded-xl text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"><Check className="h-4 w-4" /></button>
+                                <button type="button" disabled={isBusy} onClick={cancelRename} aria-label="取消重命名" className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50"><X className="h-4 w-4" /></button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-1"><h4 onClick={() => setSelectedPatternForAction(record)} className="min-w-0 flex-1 cursor-pointer truncate text-xs font-extrabold text-slate-900 hover:text-purple-600" title={record.title}>{record.title}</h4><button type="button" disabled={isBusy} onClick={() => startRename(record)} aria-label="重命名图纸" className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button></div>
+                            )}
+                            <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-slate-500"><span>更新时间: {formatChinaDate(record.updatedAt)}</span><span className={record.communityPost?.visibility === 'private' ? 'font-medium text-amber-700' : 'font-medium text-purple-600'}>{publicationLabel(record)}</span></div>
+                            <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] font-bold"><span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600">{record.syncState === 'synced' ? '已同步云端' : record.syncState === 'pending' ? '等待同步' : record.syncState === 'failed' ? '同步失败' : '仅本机保存'}</span>{record.userId === null && <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-amber-800">未绑定账号</span>}</div>
+                            {record.syncError && <p className="mt-2 line-clamp-2 text-[10px] leading-4 text-rose-700">{record.syncError}</p>}
                           </div>
-
-                          {/* Action Buttons: [编辑], [发布], [删除] */}
-                           <div className={`pt-2 border-t border-slate-200/80 grid ${(canPublish || canManagePublication) ? 'grid-cols-3' : 'grid-cols-2'} gap-1.5 text-[11px] font-bold`}>
-                            {/* 编辑 */}
-                            <button
-                              disabled={isBusy}
-                              onClick={() => handleEditPattern(record)}
-                              className="profile-edit-button py-1.5 px-2 rounded-xl bg-purple-100/60 hover:bg-purple-600 text-purple-800 hover:text-slate-900 border border-purple-200/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                              title="编辑图纸（载入画板）"
-                            >
-                              <Pencil className="w-3 h-3 text-purple-600" />
-                              <span>编辑</span>
-                            </button>
-
-                            {canPublish && onPublishPattern && (
-                              <button
-                                disabled={isBusy}
-                                onClick={() => onPublishPattern(record)}
-                                className="py-1.5 px-2 rounded-xl bg-emerald-50/60 hover:bg-emerald-600 text-emerald-800 hover:text-slate-900 border border-emerald-700/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                                title="发布到社区"
-                              >
-                                <Sparkles className="w-3 h-3 text-emerald-700" />
-                                <span>发布</span>
-                              </button>
-                            )}
-
-                            {canManagePublication && (
-                              <button
-                                disabled={isBusy}
-                                onClick={() => setPublicationTarget(record)}
-                                className="py-1.5 px-2 rounded-xl bg-amber-50/70 hover:bg-amber-100 text-amber-800 border border-amber-200/80 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                                title="管理豆社可见性、撤回或重新公开"
-                              >
-                                <SlidersHorizontal className="w-3 h-3" />
-                                <span>发布管理</span>
-                              </button>
-                            )}
-
-                            {/* 删除 */}
-                            <button
-                              disabled={isBusy}
-                              onClick={() => requestDeletePattern(record)}
-                              className="py-1.5 px-2 rounded-xl bg-rose-50/60 hover:bg-rose-700 text-rose-700 hover:text-slate-900 border border-rose-200/50 flex items-center justify-center gap-1 transition-all cursor-pointer disabled:opacity-50"
-                              title="从我的图库删除"
-                            >
-                              <Trash2 className="w-3 h-3 text-rose-600" />
-                              <span>删除</span>
-                            </button>
+                          <div className="flex flex-wrap gap-1.5 border-t border-slate-200/80 pt-2 text-[11px] font-bold">
+                            <button disabled={isBusy} onClick={() => void handleEditPattern(record)} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-purple-200 bg-purple-50 px-2 text-purple-800 transition-colors hover:bg-purple-600 hover:text-white disabled:opacity-50"><Pencil className="h-3 w-3" />编辑</button>
+                            {!isPublished && <button disabled={isBusy} onClick={() => openPublishDialog(record)} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2 text-emerald-800 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"><Sparkles className="h-3 w-3" />发布</button>}
+                            {isPublished && record.communityPost && <button disabled={isBusy} onClick={() => setPublicationTarget(record)} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-2 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"><SlidersHorizontal className="h-3 w-3" />发布管理</button>}
+                            {isPublished && !record.communityPost && onOpenCommunity && <button disabled={isBusy} onClick={onOpenCommunity} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50 px-2 text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"><Compass className="h-3 w-3" />进入社区</button>}
+                            {canBindToCurrentAccount && <button disabled={isBusy} onClick={() => void handleSyncToCurrentAccount(record)} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-sky-200 bg-sky-50 px-2 text-sky-800 transition-colors hover:bg-sky-100 disabled:opacity-50"><Cloud className="h-3 w-3" />绑定当前账号</button>}
+                            {canRetrySync && <button disabled={isBusy} onClick={() => void handleSyncToCurrentAccount(record)} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-amber-200 bg-amber-50 px-2 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"><RefreshCw className={`h-3 w-3 ${isBusy ? 'animate-spin' : ''}`} />重试同步</button>}
+                            {deletionActions.includes('local') && <button disabled={isBusy} onClick={() => requestDeletePattern(record, 'local')} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-slate-200 px-2 text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"><Trash2 className="h-3 w-3" />删除本机副本</button>}
+                            {deletionActions.includes('cloud-and-local') && <button disabled={isBusy} onClick={() => requestDeletePattern(record, 'cloud')} className="inline-flex min-h-11 flex-1 items-center justify-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-2 text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-50"><Trash2 className="h-3 w-3" />{record.hasLocalCopy ? '删除云端及本机' : '删除云端记录'}</button>}
                           </div>
                         </div>
-                      </div>
+                      </article>
                     );
                   })}
                 </div>
@@ -756,47 +884,45 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                 <span>编辑图纸（载入画板继续制作）</span>
               </button>
 
-              <button
-                onClick={() => requestDeletePattern(selectedPatternForAction)}
-                className="w-full py-2.5 rounded-xl bg-rose-50/80 hover:bg-rose-800 text-rose-700 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-rose-200/80"
-              >
-                <Trash2 className="w-4 h-4 text-rose-600" />
-                <span>删除图库工程</span>
-              </button>
-
+              {patternDeletionActions(selectedPatternForAction).includes('local') && (
+                <button onClick={() => requestDeletePattern(selectedPatternForAction, 'local')} className="w-full min-h-11 rounded-xl border border-slate-200 bg-white text-xs font-bold text-slate-700 transition-colors hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700">
+                  删除本机副本
+                </button>
+              )}
+              {patternDeletionActions(selectedPatternForAction).includes('cloud-and-local') && (
+                <button onClick={() => requestDeletePattern(selectedPatternForAction, 'cloud')} className="w-full min-h-11 rounded-xl border border-rose-200 bg-rose-50 text-xs font-bold text-rose-700 transition-colors hover:bg-rose-100">
+                  {selectedPatternForAction.hasLocalCopy ? '删除云端及本机' : '删除云端记录'}
+                </button>
+              )}
               {isPublishedRecord(selectedPatternForAction) && selectedPatternForAction.communityPost && (
-                <button
-                  onClick={() => setPublicationTarget(selectedPatternForAction)}
-                  className="w-full py-2.5 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-amber-200/80"
-                >
-                  <SlidersHorizontal className="w-4 h-4" />
-                  <span>管理豆社发布状态</span>
-                </button>
+                <button onClick={() => setPublicationTarget(selectedPatternForAction)} className="w-full min-h-11 rounded-xl border border-amber-200 bg-amber-50 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100"><SlidersHorizontal className="mr-2 inline h-4 w-4" />管理豆社发布状态</button>
               )}
-              {!isPublishedRecord(selectedPatternForAction) && onPublishPattern && (
-                <button
-                  onClick={() => onPublishPattern(selectedPatternForAction)}
-                  className="w-full py-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center gap-2 transition-all cursor-pointer border border-emerald-200/80"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>发布到豆社</span>
-                </button>
+              {isPublishedRecord(selectedPatternForAction) && !selectedPatternForAction.communityPost && onOpenCommunity && (
+                <button onClick={onOpenCommunity} className="w-full min-h-11 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100"><Compass className="mr-2 inline h-4 w-4" />进入社区</button>
               )}
-            </div>
+              {!isPublishedRecord(selectedPatternForAction) && (
+                <button onClick={() => openPublishDialog(selectedPatternForAction)} className="w-full min-h-11 rounded-xl border border-emerald-200 bg-emerald-50 text-xs font-bold text-emerald-800 transition-colors hover:bg-emerald-100"><Sparkles className="mr-2 inline h-4 w-4" />发布到豆社</button>
+              )}            </div>
           </div>
         </div>
       )}
 
+      <PatternPublishDialog
+        record={publishTarget}
+        busy={Boolean(publishTarget && actionBusyId === publishTarget.id)}
+        error={publishError}
+        onClose={() => { if (!actionBusyId) { setPublishTarget(null); setPublishError(null); } }}
+        onSubmit={(metadata) => { void handlePublish(metadata); }}
+      />
       <PatternConfirmDialog
         isOpen={Boolean(pendingDeletePattern)}
         title="删除图库工程？"
         description={pendingDeletePattern
-          ? pendingDeletePattern.hasCloudCopy
-            ? `《${pendingDeletePattern.title}》将从图库和云端记录中删除；关联的豆社作品也会撤回。此操作与单独撤回不同。`
-            : `《${pendingDeletePattern.title}》只会从此浏览器删除本地副本；不会影响云端作品。`
-          : ''}
-        confirmLabel="确认删除"
-        busy={Boolean(pendingDeletePattern && actionBusyId === pendingDeletePattern.id)}
+          ? pendingDeletePattern.scope === 'cloud'
+            ? `《${pendingDeletePattern.record.title}》将从云端图库和本机副本中删除；关联的豆社作品也会撤回。`
+            : `《${pendingDeletePattern.record.title}》只会从此浏览器删除本机副本；不会影响云端作品或豆社发布。`
+          : ''}        confirmLabel="确认删除"
+        busy={Boolean(pendingDeletePattern && actionBusyId === pendingDeletePattern.record.id)}
         error={deleteDialogError}
         onClose={() => { if (!actionBusyId) { setPendingDeletePattern(null); setDeleteDialogError(null); } }}
         onConfirm={() => { if (pendingDeletePattern) void handleDeletePattern(pendingDeletePattern); }}
@@ -816,7 +942,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         onRepublish={() => {
           if (publicationTarget) {
             setPublicationTarget(null);
-            onPublishPattern?.(publicationTarget);
+            openPublishDialog(publicationTarget);
           }
         }}
       />

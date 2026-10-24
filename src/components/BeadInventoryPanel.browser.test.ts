@@ -38,7 +38,7 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
     plugins: [react(), tailwindcss(), {
       name: 'inventory-auth-fixture', enforce: 'pre',
       resolveId(id) { if (/[/\\]context[/\\]AuthContext(?:\.tsx?)?$/.test(id)) return '\0inventory-auth'; },
-      load(id) { if (id === '\0inventory-auth') return 'export const useAuth=()=>({currentUser:window.formalUser?{uid:"fixture",displayName:"测试"}:null,userProfile:null,isVip:true,isPro:false})'; },
+      load(id) { if (id === '\0inventory-auth') return 'export const useAuth=()=>({currentUser:window.formalUser?{uid:"fixture",displayName:"测试"}:null,userProfile:null,isVip:true,isPro:false,canAccessAdmin:false,refreshProfile:async()=>{}})'; },
     }, {
       name: 'practice-browser-check',
       resolveId(id) { if (id === '/__practice-check.js') return '\0practice-check'; },

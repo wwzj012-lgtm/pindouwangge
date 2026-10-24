@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ClipboardCopy, Copy, KeyRound, Trash2, Undo2 } from 'lucide-react';
 import { maskCardCode } from '../../utils/vipCodeUtils';
 import type { AdminRequest } from './adminRequest';
+import { adminLabel, adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
 import { CodeWriteLocks, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
@@ -41,7 +42,12 @@ function LogsPanel({ request }: { request: AdminRequest }) {
       if (query.operatorUid.trim()) params.set('operatorUid', query.operatorUid.trim()); if (query.level.trim()) params.set('level', query.level.trim());
       const result = await request<Paged<LogEntry>>('/api/admin/logs?' + params);
       if (!epoch.current.current(version)) return;
-      if (!result.ok || !result.data || !Array.isArray(result.data.items)) { setError(requestError(result, '读取日志')); return; }
+      if (!result.ok || !result.data || !Array.isArray(result.data.items) || !Number.isFinite(result.data.total) || result.data.total < 0) { setError(requestError(result, '读取日志')); return; }
+      const lastPage = adminPageCount(result.data.total);
+      if (query.page > lastPage) {
+        setQuery(current => current === query ? { ...current, page: lastPage } : current);
+        return; // Retain last successful snapshot until the effective last page is reread.
+      }
       setSnapshot({ ...result.data, page: query.page });
     } catch { if (epoch.current.current(version)) setError('日志读取失败，筛选输入和上次成功结果已保留。'); }
     finally { if (epoch.current.current(version)) setLoading(false); }
@@ -69,7 +75,7 @@ function LogsPanel({ request }: { request: AdminRequest }) {
       </> : <AdminEmptyState title="没有匹配日志" description="调整查询条件或重置后重试。" />}
     </div>
     <AdminDrawer open={Boolean(selected)} title="日志详情" description={selected ? dateText(selected.timestamp) : undefined} onClose={() => setSelected(null)} className="admin-log-drawer">
-      {selected && <><dl className="admin-detail-facts"><div><dt>分类 / 动作</dt><dd>{selected.type} · {selected.level ?? '未提供'}</dd></div><div><dt>操作者</dt><dd>{selected.operatorEmail ?? selected.operatorUid ?? '未提供'}</dd></div><div><dt>结果状态</dt><dd>{logOutcome(selected.type, selected.metadata, selected.resolvedAt)}</dd></div><div><dt>采集耗时</dt><dd>{logDuration(selected.metadata)}</dd></div>{selected.source && <div><dt>来源</dt><dd>{selected.source}</dd></div>}{selected.fingerprint && <div><dt>指纹</dt><dd className="admin-mono">{selected.fingerprint}</dd></div>}</dl><h2 className="admin-detail-title">内容与上下文</h2><pre className="admin-log-payload">{selected.type === 'admin' ? selected.details || '未提供' : selected.type === 'error' ? selected.message || '未提供' : JSON.stringify(selected.metadata ?? {}, null, 2)}</pre></>}
+      {selected && <><dl className="admin-detail-facts"><div><dt>分类 / 动作</dt><dd>{adminLabel(selected.type)} · {selected.level ?? '未提供'}</dd></div><div><dt>操作者</dt><dd>{selected.operatorEmail ?? selected.operatorUid ?? '未提供'}</dd></div><div><dt>结果状态</dt><dd>{logOutcome(selected.type, selected.metadata, selected.resolvedAt)}</dd></div><div><dt>采集耗时</dt><dd>{logDuration(selected.metadata)}</dd></div>{selected.source && <div><dt>来源</dt><dd>{selected.source}</dd></div>}{selected.fingerprint && <div><dt>指纹</dt><dd className="admin-mono">{selected.fingerprint}</dd></div>}</dl><h2 className="admin-detail-title">内容与上下文</h2><pre className="admin-log-payload">{selected.type === 'admin' ? selected.details || '未提供' : selected.type === 'error' ? selected.message || '未提供' : JSON.stringify(selected.metadata ?? {}, null, 2)}</pre></>}
     </AdminDrawer>
   </section>;
 }
@@ -97,8 +103,13 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
       if (query.memberType !== 'all') params.set('memberType', query.memberType); if (query.copied !== 'all') params.set('copied', query.copied); if (query.status !== 'all') params.set('status', query.status);
       const response = await request<CodePage>('/api/admin/codes?' + params);
       if (!epoch.current.current(version)) return;
-      if (!response.ok || !response.data || !Array.isArray(response.data.items)) { setError(requestError(response, '读取兑换码')); return; }
-      setSnapshot(response.data);
+      if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setError(requestError(response, '读取兑换码')); return; }
+      const lastPage = adminPageCount(response.data.total);
+      if (query.page > lastPage) {
+        setQuery(current => current === query ? { ...current, page: lastPage } : current);
+        return;
+      }
+      setSnapshot({ ...response.data, page: query.page });
     } catch { if (epoch.current.current(version)) setError('兑换码读取失败；查询和上次列表保留。'); }
     finally { if (epoch.current.current(version)) setLoading(false); }
   }, [query, request]);
@@ -108,7 +119,12 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
       const params = new URLSearchParams({ page: String(redemptionPage), limit: '20' }); if (query.search.trim()) params.set('code', query.search.trim());
       const response = await request<Paged<Redemption> & { stats?: { total: number; vip: number; pro: number } }>('/api/admin/code-redemptions?' + params);
       if (!redemptionEpoch.current.current(version)) return;
-      if (!response.ok || !response.data) { setRecordsError(requestError(response, '读取兑换记录')); return; }
+      if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setRecordsError(requestError(response, '读取兑换记录')); return; }
+      const lastPage = adminPageCount(response.data.total);
+      if (redemptionPage > lastPage) {
+        setRedemptionPage(current => current === redemptionPage ? lastPage : current);
+        return;
+      }
       setRecords({ ...response.data, page: redemptionPage });
     } catch { if (redemptionEpoch.current.current(version)) setRecordsError('兑换记录读取失败，旧记录保留。'); }
     finally { if (redemptionEpoch.current.current(version)) setRecordsLoading(false); }
@@ -153,7 +169,7 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
   const reviewRow = (code: VipCode, action: 'mark' | 'delete' | 'restore') => {
     if (locks.current.rowBusy(code.id)) return;
     const updates = action === 'mark' ? { copied: !code.copied } : action === 'delete' ? { deletePendingAt: Date.now() + 3 * 86_400_000 } : { deletePendingAt: null };
-    setReviewError(''); setReview({ kind: 'row', code, updates, label: action === 'mark' ? code.copied ? '取消发售标记' : '设置发售标记' : action === 'delete' ? '申请删除' : '撤销删除申请', impact: action === 'mark' ? '只改既有copied标记；不复制、不兑换、不代表支付收入。' : action === 'delete' ? '设置原三天删除等待标记，不直接删除；执行以服务端为准。' : '清空原删除等待标记，不改变兑换或发售状态。' });
+    setReviewError(''); setReview({ kind: 'row', code, updates, label: action === 'mark' ? code.copied ? '取消发售标记' : '设置发售标记' : action === 'delete' ? '申请删除' : '撤销删除申请', impact: action === 'mark' ? '只改既有发售标记；不复制、不兑换、不代表支付收入。' : action === 'delete' ? '设置原三天删除等待标记，不直接删除；执行以服务端为准。' : '清空原删除等待标记，不改变兑换或发售状态。' });
   };
   const operations = (code: VipCode) => {
     const busy = lockView.batch || lockView.rows.has(code.id), feedback = rowFeedback[code.id];

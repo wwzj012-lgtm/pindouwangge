@@ -3,6 +3,7 @@ import {
   deleteCloudPatternAndLocal,
   deleteLocalPatternCopy,
   getPatternHistory,
+  getLocalPatternSummary,
   getPatternPreview,
   getPatternProject as getPatternProjectFromStore,
   markPatternPublished as markPatternPublishedInStore,
@@ -79,9 +80,12 @@ function parseCompletionMetadata(value: unknown): PatternCompletionMetadata | nu
   return Object.keys(metadata).length > 0 ? metadata : null;
 }
 
-function readCompletionMetadata(userId: string | null): PatternCompletionMetadataMap {
+function readCompletionMetadata(userId: string | null, failClosed = false): PatternCompletionMetadataMap {
   const storage = browserStorage();
-  if (!storage) return {};
+  if (!storage) {
+    if (failClosed) throw new Error('无法读取图纸权益状态，请恢复浏览器存储后重试。');
+    return {};
+  }
   try {
     const parsed: unknown = JSON.parse(storage.getItem(completionMetadataKey(userId)) ?? '{}');
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
@@ -92,8 +96,22 @@ function readCompletionMetadata(userId: string | null): PatternCompletionMetadat
     }
     return result;
   } catch {
+    if (failClosed) throw new Error('无法读取图纸权益状态，请恢复浏览器存储后重试。');
     return {};
   }
+}
+
+function recordCompletionMetadata(
+  record: PatternRecordSummary,
+  userId: string | null,
+  scoped: PatternCompletionMetadataMap,
+  anonymous: PatternCompletionMetadataMap,
+): PatternCompletionMetadata | undefined {
+  if (record.userId === null) return anonymous[record.id];
+  if (record.userId !== userId) return undefined;
+  // A verified local record may be left bound by an older failed migration.
+  // Keep its anonymous rights readable until the scoped write can be retried.
+  return scoped[record.id] ?? (record.hasLocalCopy ? anonymous[record.id] : undefined);
 }
 
 function writeCompletionMetadata(userId: string | null, metadata: PatternCompletionMetadataMap): void {
@@ -160,13 +178,18 @@ export async function saveExportedPatternRecord(params: {
 
 export async function getUserExportedPatterns(userId: string | null): Promise<ExportedPatternRecord[]> {
   const records = await getPatternHistory(userId);
-  const metadata = readCompletionMetadata(userId);
-  return records.map(record => ({ ...record, ...metadata[record.id] }));
+  const metadata = readCompletionMetadata(userId, true);
+  const anonymous = userId === null ? metadata : readCompletionMetadata(null, true);
+  return records.map(record => ({ ...record, ...recordCompletionMetadata(record, userId, metadata, anonymous) }));
 }
 
 export async function getPatternProject(id: string, userId: string | null): Promise<EditablePatternProject> {
-  const metadata = readCompletionMetadata(userId)[id];
-  return { ...(await getPatternProjectFromStore(id, userId)), ...metadata, workId: id };
+  const project = await getPatternProjectFromStore(id, userId);
+  const local = await getLocalPatternSummary(id, userId);
+  const scoped = readCompletionMetadata(userId, true);
+  const anonymous = userId === null ? scoped : readCompletionMetadata(null, true);
+  const metadata = local ? recordCompletionMetadata(local, userId, scoped, anonymous) : scoped[id];
+  return { ...project, ...metadata, workId: id };
 }
 
 export interface LegacyPatternMarkInput {
@@ -215,11 +238,28 @@ export async function markLegacyByWorkKeys(
 }
 
 export async function retryPatternCloudSync(id: string, userId: string | null): Promise<ExportedPatternRecord> {
-  return retryPatternCloudSyncFromStore(id, userId);
+  const previous = await getLocalPatternSummary(id, userId);
+  if (!userId || !previous) throw new Error('图纸不存在或不属于当前账号');
+  const scoped = readCompletionMetadata(userId, true);
+  const metadata = recordCompletionMetadata(previous, userId, scoped, readCompletionMetadata(null, true));
+  if (metadata && (previous.userId === null || !scoped[id])) {
+    // Commit rights BEFORE binding identity. Quota failure leaves an unbound
+    // record retryable; already-bound partial migrations take this path too.
+    scoped[id] = metadata;
+    writeCompletionMetadata(userId, scoped);
+  }
+  const record = await retryPatternCloudSyncFromStore(id, userId);
+  if (record.userId !== userId) throw new Error('同步后的图纸不属于当前账号');
+  // An edit performed while syncing must win over old metadata, but missing
+  // rights after a known migration must never silently become LEGACY.
+  const latest = readCompletionMetadata(userId, true)[record.id];
+  if (metadata && !latest) throw new Error('图纸权益状态未保存，请恢复浏览器存储后重试。');
+  return { ...record, ...latest };
 }
 
-export function markExportedPatternPublished(id: string, userId: string): Promise<ExportedPatternRecord | null> {
-  return markPatternPublishedInStore(id, userId);
+export async function markExportedPatternPublished(id: string, userId: string, publication?: PatternCommunityPublication): Promise<ExportedPatternRecord | null> {
+  const record = await markPatternPublishedInStore(id, userId, publication);
+  return record ? { ...record, ...readCompletionMetadata(userId)[id] } : null;
 }
 
 export function getExportedPatternPreview(id: string, revision: number, userId: string | null): Promise<Blob | null> {

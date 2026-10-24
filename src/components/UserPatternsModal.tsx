@@ -23,7 +23,6 @@ import {
   deleteLocalExportedPatternCopy,
   getExportedPatternPreview,
   getPatternProject,
-  markExportedPatternPublished,
   getUserExportedPatterns,
   normalizePatternTitle,
   patternDeletionActions,
@@ -32,18 +31,16 @@ import {
   renameExportedPattern,
   type ExportedPatternRecord,
 } from '../utils/patternHistory';
-import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
 import {
-  publishCommunityPost,
   setCommunityPostVisibility,
   withdrawCommunityPost,
-  uploadCommunityAsset,
   type CommunityPostVisibility,
 } from '../utils/communityApi';
 import { PatternConfirmDialog } from './PatternConfirmDialog';
 import { PatternPublicationDialog } from './PatternPublicationDialog';
 import { formatChinaDate } from '../utils/dateUtils';
 import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
+import { isPatternPublicationUnlocked, publishCommunityPattern } from '../utils/communityPatternPublication';
 
 interface UserPatternsModalProps {
   isOpen: boolean;
@@ -118,25 +115,8 @@ function statusClass(status: ExportedPatternRecord['syncState']): string {
   return 'border-slate-600 bg-slate-800 text-slate-300';
 }
 
-type SavedCompletionStatus = 'DRAFT' | 'COMPLETED' | 'LEGACY';
-
-type CompletionAwareRecord = ExportedPatternRecord & {
-  completionStatus?: SavedCompletionStatus;
-  paidNonEmptyBeads?: number | null;
-};
-
 function isCompletionUnlocked(record: ExportedPatternRecord): boolean {
-  const completion = record as CompletionAwareRecord;
-  if (completion.completionStatus === 'LEGACY') return true;
-  // Records created before completion entitlements were introduced have no
-  // status field. Treat them as legacy so existing gallery works remain
-  // publishable instead of silently hiding the publish dialog.
-  if (completion.completionStatus === undefined) return true;
-  if (completion.completionStatus !== 'COMPLETED') return false;
-  const paidNonEmptyBeads = completion.paidNonEmptyBeads;
-  return Number.isSafeInteger(paidNonEmptyBeads)
-    && paidNonEmptyBeads >= 0
-    && record.totalBeads <= paidNonEmptyBeads;
+  return isPatternPublicationUnlocked(record);
 }
 
 export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
@@ -148,19 +128,25 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   initialPublishRecord = null,
 }) => {
   const { currentUser } = useAuth();
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
+  const sessionEpochRef = useRef(0);
   const { language } = useLanguage();
   const isEn = language === 'en';
   const [records, setRecords] = useState<ExportedPatternRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const editRequestRef = useRef(0);
+  const publishRequestRef = useRef<symbol | null>(null);
   const continueEditingRef = useRef(onContinueEditing);
   continueEditingRef.current = onContinueEditing;
   // Invalidate during the close/unmount commit, before a pending read resumes.
   useLayoutEffect(() => {
+    sessionEpochRef.current += 1;
     editRequestRef.current += 1;
+    publishRequestRef.current = null;
     setBusyId(null);
-    return () => { editRequestRef.current += 1; };
+    return () => { sessionEpochRef.current += 1; editRequestRef.current += 1; };
   }, [isOpen, currentUser?.uid]);
   const [message, setMessage] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -177,7 +163,6 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [pendingDelete, setPendingDelete] = useState<{ record: ExportedPatternRecord; scope: 'local' | 'cloud' } | null>(null);
   const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
   const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
-  const publishRequestRef = useRef(false);
 
   const loadPatterns = async (): Promise<void> => {
     setLoading(true);
@@ -404,7 +389,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     if (!publishTarget || !currentUser || busyId || publishRequestRef.current) return;
     const title = publishTitle.trim();
     const description = publishDescription.trim();
-    const tags: string[] = Array.from(new Set<string>(publishTags.map((tag) => tag.trim()).filter((tag) => tag.length > 0)));
+    const tags: string[] = Array.from(new Set<string>(publishTags.map((tag) => tag.trim()).filter((tag): tag is string => tag.length > 0)));
     if (title.length < 1 || title.length > 60) {
       setPublishError(isEn ? 'A work name must contain 1 to 60 characters.' : '作品名称需为 1 至 60 个字符。');
       return;
@@ -422,48 +407,29 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setPublishError(isEn ? 'Complete the pattern to unlock publishing.' : '完成图纸后解锁发布。');
       return;
     }
-    // Lock before any asynchronous sync, project read, or upload so double
-    // clicks cannot create duplicate assets or publish requests.
-    publishRequestRef.current = true;
+    const publishToken = Symbol(record.id);
+    const sessionEpoch = sessionEpochRef.current;
+    const isCurrentSession = () => sessionEpochRef.current === sessionEpoch && currentUserRef.current?.uid === currentUser.uid;
+    publishRequestRef.current = publishToken;
     setBusyId(record.id);
-    const publishRecord = record.hasCloudCopy && record.userId === currentUser.uid
-      ? record
-      : await ensureCloudSaved(record);
-    if (!publishRecord) {
-      publishRequestRef.current = false;
-      setBusyId(null);
-      return;
-    }
-    setBusyId(publishRecord.id);
     setMessage(null);
     setPublishError(null);
     try {
-      const metadata = { title, description, visibility: publishVisibility, tags, workId: publishRecord.id };
-      // Always publish a fresh lossless image with the full project snapshot,
-      // never a gallery thumbnail or a metadata-only reference to an old asset.
-      const project = await getPatternProject(publishRecord.id, currentUser.uid);
-      const snapshot = await renderCommunityPattern(project);
-      const upload = await uploadCommunityAsset(new File([snapshot], `${publishRecord.title}.png`, { type: 'image/png' }));
-      if (!upload.ok || !upload.data?.asset?.id) throw new Error(upload.error ?? '社区图片上传失败');
-      const published = await publishCommunityPost({ ...metadata, assetId: upload.data.asset.id });
-      if (!published.ok) throw new Error(published.error ?? '作品发布失败');
-      // Backend success is authoritative. A local persistence failure must not
-      // leave the dialog open or offer a second publish for the same work.
-      const publishedRecord: ExportedPatternRecord = {
-        ...publishRecord,
-        status: publishVisibility === 'public' ? 1 : 0,
-        ...(published.data?.post?.id ? {
-          communityPost: { id: published.data.post.id, visibility: publishVisibility },
-        } : {}),
-        hasCloudCopy: true,
-      };
+      const result = await publishCommunityPattern({
+        record,
+        metadata: { title, description, visibility: publishVisibility, tags },
+        currentUserId: currentUser.uid,
+        isSessionCurrent: isCurrentSession,
+      });
+      if (!isCurrentSession()) return;
+      if (result.ok === false) {
+        setPublishError(result.error);
+        return;
+      }
+      const publishedRecord = result.record;
       setRecords((current) => {
         const matchedSyncedRecord = current.some((item) => item.id === publishedRecord.id);
-        return current.map((item) => (
-          item.id === publishedRecord.id || (!matchedSyncedRecord && item.id === record.id)
-            ? publishedRecord
-            : item
-        ));
+        return current.map((item) => item.id === publishedRecord.id || (!matchedSyncedRecord && item.id === record.id) ? publishedRecord : item);
       });
       setPublishTarget(null);
       setPublishTitle('');
@@ -472,21 +438,16 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setMessage(publishVisibility === 'public'
         ? (isEn ? 'Published to the community. Open Community to view it. The project remains in My Library.' : '作品已发布到社区，可前往社区查看，工程仍保留在我的图库。')
         : (isEn ? 'Published privately. It will not appear in the public community list. The project remains in My Library.' : '作品已私密发布，不会出现在公开社区列表，工程仍保留在我的图库。'));
-      try {
-        await markExportedPatternPublished(publishRecord.id, currentUser.uid);
-      } catch {
-        setMessage(isEn
+      void result.localMark.then((outcome) => {
+        if (outcome === 'warning' && isCurrentSession()) setMessage(isEn
           ? 'Published, but the local library state could not be updated. Please refresh.'
           : '已发布，图库本地状态更新失败，请刷新');
-      }
-    } catch (error) {
-      setPublishError(error instanceof Error ? error.message : (isEn ? 'Unable to publish this work.' : '作品发布失败。'));
+      });
     } finally {
-      publishRequestRef.current = false;
-      setBusyId(null);
+      if (publishRequestRef.current === publishToken) publishRequestRef.current = null;
+      if (isCurrentSession()) setBusyId(null);
     }
   };
-
   const libraryRecords = records.filter((record) => record.status !== 2
     && (record.userId === null || record.userId === currentUser?.uid));
   const publishedRecords = currentUser
@@ -665,7 +626,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                           {isEn ? 'Publication settings' : '发布管理'}
                         </button>
                       )}
-                      {isCommunityPublished(record) && !record.communityPost && (
+                      {isCommunityPublished(record) && (
                         <button
                           onClick={onOpenCommunity}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-2 py-2 text-xs font-bold text-emerald-200 hover:bg-emerald-500/20"

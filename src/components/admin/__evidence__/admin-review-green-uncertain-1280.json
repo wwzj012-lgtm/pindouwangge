@@ -1,0 +1,169 @@
+{
+  "passed": true,
+  "scenario": "uncertain",
+  "viewportWidth": 1280,
+  "checks": [
+    "P2-2: first uncertain resource POST is blocked in its original confirmation",
+    "P2-2 RED: reopening review without any GET must not clear uncertain resource write",
+    "P2-2: reopened uncertain review cannot send a duplicate resource POST",
+    "P2-2: failed resource reread cannot unlock the editor",
+    "P2-2: moderation keeps original action and entity type",
+    "P2-2: moderation POST also remains blocked after reopening review",
+    "P2-2: successful content-summary GET cannot reconcile moderation-record scope",
+    "P2-2: remounting current operator does not reset scope uncertainty",
+    "P2-2: select the community content tab, not the same-named desktop sidebar entry",
+    "P2-2: failed moderation-record GET does not clear uncertainty",
+    "P2-2: select the community content tab, not the same-named desktop sidebar entry",
+    "P2-2: successful related moderation-record GET permits deliberate retry",
+    "P2-2: moderation has exactly original uncertain write and one reconciled deliberate retry",
+    "P2-2: successful related resource GET releases only its resource scope",
+    "P2-2: resources have no extra POST before successful scope reconciliation",
+    "current regression view has no horizontal viewport overflow",
+    "no browser/React runtime errors"
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets",
+      "method": "POST",
+      "body": {
+        "objectKey": "review/new.png",
+        "resourceType": "work",
+        "contentType": null,
+        "byteSize": 0,
+        "ownerUid": null,
+        "visibility": "private",
+        "status": "active",
+        "metadata": {}
+      }
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation",
+      "method": "POST",
+      "body": {
+        "entityType": "work",
+        "entityId": "work-1",
+        "action": "approve",
+        "reason": "",
+        "metadata": {}
+      }
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation",
+      "method": "POST",
+      "body": {
+        "entityType": "work",
+        "entityId": "work-1",
+        "action": "approve",
+        "reason": "",
+        "metadata": {}
+      }
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets",
+      "method": "POST",
+      "body": {
+        "objectKey": "review/new.png",
+        "resourceType": "work",
+        "contentType": null,
+        "byteSize": 0,
+        "ownerUid": null,
+        "visibility": "private",
+        "status": "active",
+        "metadata": {}
+      }
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    }
+  ],
+  "browserErrors": []
+}

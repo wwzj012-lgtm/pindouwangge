@@ -1,0 +1,49 @@
+{
+  "passed": false,
+  "scenario": "config",
+  "viewportWidth": 1280,
+  "checks": [
+    "P2-1: successful PUT retains the original configuration contract",
+    "P2-1: post-write 403 is visible while the old list is retained"
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags",
+      "method": "PUT",
+      "body": {
+        "key": "review.flag",
+        "enabled": false,
+        "description": "复核功能开关",
+        "config": {
+          "n": 2
+        }
+      }
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    }
+  ],
+  "browserErrors": [],
+  "error": "Error: P2-1 RED: post-write failed reread must leave old configuration row read-only\n    at assert (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-2iMqbC/admin.html?section=users:27107:25)\n    at runAdminReviewRegressionChecks (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-2iMqbC/admin.html?section=users:27202:9)"
+}

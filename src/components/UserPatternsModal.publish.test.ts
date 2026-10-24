@@ -225,7 +225,7 @@ describe('UserPatternsModal community publishing', () => {
     patternHistory.normalizePatternTitle.mockImplementation((value: string) => value.trim());
     patternHistory.patternDeletionActions.mockReturnValue([]);
     patternHistory.requiresExplicitCloudBinding.mockReturnValue(false);
-    communityApi.publishCommunityPost.mockResolvedValue({ ok: true });
+    communityApi.publishCommunityPost.mockImplementation(async (input) => ({ ok: true, data: { post: { id: 'post-default', visibility: input.visibility } } }));
     communityApi.uploadCommunityAsset.mockResolvedValue({ ok: true, data: { asset: { id: 'asset-default' } } });
     creditApi.apiQuoteCredits.mockResolvedValue({ ok: true, status: 200, data: { totalUnits: 3, points: 0.3 } });
     renderPreview.mockResolvedValue(new Blob(['preview'], { type: 'image/png' }));
@@ -271,7 +271,7 @@ describe('UserPatternsModal community publishing', () => {
     })));
 
     expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-retained', 'user-1');
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-retained', 'user-1', { id: 'post-default', visibility: 'public' });
     expect(buttonByText(tree, 'My Library (1)').props?.className).toContain('bg-sky-600');
     expect(textContent(tree)).toContain('Original work');
     expect(textContent(tree)).not.toContain('Private gallery');
@@ -328,7 +328,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(patternHistory.getPatternProject.mock.invocationCallOrder[0]).toBeLessThan(renderCommunityPattern.mock.invocationCallOrder[0]);
     expect(renderCommunityPattern.mock.invocationCallOrder[0]).toBeLessThan(communityApi.uploadCommunityAsset.mock.invocationCallOrder[0]);
     expect(communityApi.uploadCommunityAsset.mock.invocationCallOrder[0]).toBeLessThan(communityApi.publishCommunityPost.mock.invocationCallOrder[0]);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-id', 'user-1');
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-id', 'user-1', { id: 'post-default', visibility: 'public' });
   });
 
   it.each([
@@ -397,7 +397,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(patternHistory.getPatternProject).toHaveBeenCalledExactlyOnceWith('cloud-after-sync', 'user-1');
     expect(renderCommunityPattern).toHaveBeenCalledExactlyOnceWith(project);
     expect(communityApi.publishCommunityPost).toHaveBeenCalledWith(expect.objectContaining({ workId: 'cloud-after-sync', assetId: 'asset-default' }));
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-after-sync', 'user-1');
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-after-sync', 'user-1', { id: 'post-default', visibility: 'public' });
   });
 
   it('does not upload or publish when local cloud sync fails', async () => {
@@ -471,7 +471,7 @@ describe('UserPatternsModal community publishing', () => {
 
     expect(communityApi.uploadCommunityAsset).toHaveBeenCalledTimes(1);
     expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledExactlyOnceWith('cloud-mark', 'user-1');
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledExactlyOnceWith('cloud-mark', 'user-1', { id: 'post-default', visibility: 'public' });
     expect(textContent(tree)).toContain(isEn
       ? 'Published, but the local library state could not be updated. Please refresh.'
       : '已发布，图库本地状态更新失败，请刷新');
@@ -614,7 +614,7 @@ describe('UserPatternsModal community publishing', () => {
   });
 
   it('allows only one publish request while busy and disables close and cancel controls', async () => {
-    let resolvePublish: ((result: { ok: boolean }) => void) | undefined;
+    let resolvePublish: ((result: { ok: boolean; data: { post: { id: string; visibility: 'public' | 'private' } } }) => void) | undefined;
     communityApi.publishCommunityPost.mockImplementation(() => new Promise((resolve) => { resolvePublish = resolve; }));
     let tree = await openPublishDialog(initialRecord({ id: 'cloud-busy', userId: 'user-1', hasCloudCopy: true }));
     const confirm = buttonByText(tree, 'Confirm publish');
@@ -631,7 +631,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(buttonByText(tree, 'Cancel').props?.disabled).toBe(true);
     expect(findNode(tree, (node) => node.type === 'button' && node.props?.['aria-label'] === 'Close gallery').props?.disabled).toBe(true);
 
-    resolvePublish?.({ ok: true });
+    resolvePublish?.({ ok: true, data: { post: { id: 'post-default', visibility: 'public' } } });
     await flush();
   });
 });

@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useRef, type ReactNode } from 'react';
 import { CircleAlert, Inbox, Loader2, X } from 'lucide-react';
+import { adminErrorText } from './adminPresentation';
 
 type Tone = 'neutral' | 'success' | 'warning' | 'danger';
 interface ButtonProps {
@@ -40,7 +41,9 @@ export function AdminEmptyState({ title = '暂无数据', description, action }:
 }
 
 export function AdminErrorState({ title = '暂时无法加载', message, retry, busy = false }: { title?: string; message: string; retry?: () => void; busy?: boolean }) {
-  return <div className="admin-error" role="alert"><CircleAlert aria-hidden="true" /><div><h2>{title}</h2><p>{message}</p>
+  const text = adminErrorText(message);
+  return <div className="admin-error" role="alert"><CircleAlert aria-hidden="true" /><div><h2>{title}</h2><p>{text.summary}</p>
+    {text.detail && <details><summary>技术详情</summary><p className="admin-mono">{text.detail}</p></details>}
     {retry && <AdminButton onClick={retry} busy={busy}>重试</AdminButton>}</div></div>;
 }
 

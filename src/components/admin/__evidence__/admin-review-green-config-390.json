@@ -1,0 +1,73 @@
+{
+  "passed": true,
+  "scenario": "config",
+  "viewportWidth": 390,
+  "checks": [
+    "P2-1: successful PUT retains the original configuration contract",
+    "P2-1: post-write 403 is visible while the old list is retained",
+    "P2-1 RED: post-write failed reread must leave old configuration row read-only",
+    "P2-1: stale row cannot open another writable editor or PUT",
+    "P2-1: stale scope cannot create new configuration",
+    "P2-1: repeated 403 does not restore writing",
+    "P2-1: successful independent setting scope remains usable",
+    "P2-1: loading does not unlock the stale snapshot",
+    "P2-1: only successful current reread restores configuration writes",
+    "current regression view has no horizontal viewport overflow",
+    "no browser/React runtime errors"
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags",
+      "method": "PUT",
+      "body": {
+        "key": "review.flag",
+        "enabled": false,
+        "description": "复核功能开关",
+        "config": {
+          "n": 2
+        }
+      }
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    }
+  ],
+  "browserErrors": []
+}

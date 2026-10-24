@@ -193,6 +193,12 @@ async function getLocal(id: string): Promise<LocalPatternRecord | undefined> {
   return withStore(PATTERN_STORE, 'readonly', (store) => store.get(id));
 }
 
+/** A scoped, single-record read for metadata migration during explicit binding. */
+export async function getLocalPatternSummary(id: string, userId: string | null): Promise<PatternRecordSummary | null> {
+  const local = await getLocal(id);
+  return local && (local.userId === null || local.userId === userId) ? toSummary(local) : null;
+}
+
 function previewCacheKey(id: string, revision: number): string {
   return `${id}:${revision}`;
 }
@@ -609,7 +615,8 @@ export async function renamePatternRecord(
 ): Promise<PatternRecordSummary> {
   const title = normalizePatternTitle(nextTitle);
   const local = await getLocal(current.id);
-  if (local?.userId !== null && local?.userId !== userId) throw new Error('This local pattern belongs to another account');
+  if ((current.userId !== null && current.userId !== userId)
+    || (local && local.userId !== null && local.userId !== userId)) throw new Error('This local pattern belongs to another account');
   const localOnly = !userId || !current.hasCloudCopy;
   if (localOnly) {
     if (!local) throw new Error('Pattern is no longer available on this device');
@@ -644,17 +651,22 @@ export function requiresExplicitCloudBinding(record: PatternRecordSummary, curre
     && !record.hasCloudCopy;
 }
 
-export async function markPatternPublished(id: string, userId: string): Promise<PatternRecordSummary | null> {
+export async function markPatternPublished(id: string, userId: string, publication?: PatternCommunityPublication): Promise<PatternRecordSummary | null> {
   const local = await getLocal(id);
   if (!local || local.userId !== userId) return local ? toSummary(local) : null;
-  const updated: LocalPatternRecord = { ...local, status: 1 };
+  const communityPost = publication ?? local.communityPost;
+  const updated: LocalPatternRecord = {
+    ...local,
+    status: communityPost?.visibility === 'private' ? 0 : 1,
+    ...(communityPost ? { communityPost: { ...communityPost } } : {}),
+  };
   await putLocal(updated);
   return toSummary(updated);
 }
 
 export async function deleteLocalPatternCopy(id: string, userId: string | null): Promise<void> {
   const local = await getLocal(id);
-  if (local?.userId !== null && local?.userId !== userId) {
+  if (local && local.userId !== null && local.userId !== userId) {
     throw new Error('This local pattern belongs to another account');
   }
   if (local) await withStore(PATTERN_STORE, 'readwrite', (store) => store.delete(id));
@@ -664,7 +676,7 @@ export async function deleteLocalPatternCopy(id: string, userId: string | null):
 export async function deleteCloudPatternAndLocal(id: string, userId: string | null): Promise<void> {
   if (!userId) throw new Error('Sign in is required to delete a cloud pattern');
   const local = await getLocal(id);
-  if (local?.userId !== null && local?.userId !== userId) {
+  if (local && local.userId !== null && local.userId !== userId) {
     throw new Error('This local pattern belongs to another account');
   }
 

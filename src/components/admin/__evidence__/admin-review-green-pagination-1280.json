@@ -1,0 +1,141 @@
+{
+  "passed": true,
+  "scenario": "pagination",
+  "viewportWidth": 1280,
+  "checks": [
+    "P2-3 RED: shrinking code total must reread effective last page rather than hide pagination",
+    "P2-3: code last-page rows remain visible after shrink",
+    "P2-3: code page clamp preserves submitted filters",
+    "P2-3: redemption records reread last valid page too",
+    "P2-3: redemption clamp preserves its code filter",
+    "P2-3: shrinking logs reread last page with original type/operator/action filters",
+    "P2-3: logs no longer claim a false empty result",
+    "P2-3: obsolete page-two response cannot clamp or overwrite a newer filter result",
+    "P2-3: pagination and filter recovery perform no writes",
+    "current regression view has no horizontal viewport overflow",
+    "no browser/React runtime errors"
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=2&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=2&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/logs?type=admin&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/logs?type=admin&page=1&limit=20&operatorUid=review-user&level=review-action",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/logs?type=admin&page=2&limit=20&operatorUid=review-user&level=review-action",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/logs?type=admin&page=2&limit=20&operatorUid=review-user&level=review-action",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/logs?type=admin&page=1&limit=20&operatorUid=review-user&level=review-action",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20&search=%E6%9C%80%E6%96%B0%E7%AD%9B%E9%80%89",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E6%9C%80%E6%96%B0%E7%AD%9B%E9%80%89",
+      "method": "GET"
+    }
+  ],
+  "browserErrors": []
+}

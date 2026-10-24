@@ -3,6 +3,7 @@ import { Ban, ChevronLeft, ChevronRight, KeyRound, Plus, ShieldCheck, X } from '
 import { useAuth } from '../../context/AuthContext';
 import { AdminPasswordReset } from './AdminPasswordReset';
 import type { AdminRequest } from './adminRequest';
+import { adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, dateText, emptyUserQuery, memberLabel, membershipDraft, membershipPresentation, membershipProposal, requestError, returnedExpiry, userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery, type UserStatus } from './adminUserModel';
 
@@ -29,6 +30,7 @@ export function AdminUsers({ request }: { request: AdminRequest }) {
       const result = await request<UsersPage>('/api/admin/users?' + userQueryString(query));
       if (!epoch.current.current(version)) return;
       if (!result.ok || !result.data || !Array.isArray(result.data.items)) { setError(requestError(result, '读取用户列表')); return; }
+      if (query.page > adminPageCount(result.data.total, result.data.limit)) { setQuery(value => ({ ...value, page: adminPageCount(result.data!.total, result.data!.limit) })); return; }
       setSnapshot({ ...result.data, query: { ...query } });
     } catch { if (epoch.current.current(version)) setError('读取用户列表失败，请重试；输入和上次成功结果已保留。'); }
     finally { if (epoch.current.current(version)) setLoading(false); }
@@ -53,10 +55,10 @@ export function AdminUsers({ request }: { request: AdminRequest }) {
   return <section className="admin-users-page">
     <AdminToolbar actions={<AdminButton onClick={() => void load()} busy={loading}>刷新列表</AdminButton>}><h2>用户与会员</h2><p>账号限制与会员资格分开展示；查询仅在提交后生效。</p></AdminToolbar>
     <div className="admin-stage-panel admin-user-filters" role="search" aria-label="用户查询">
-      <label>搜索用户<input value={draft.search} maxLength={120} onChange={event => setDraft(current => ({ ...current, search: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); apply(); } }} placeholder="昵称、邮箱或 UID" /></label>
+      <label>搜索用户<input value={draft.search} maxLength={120} onChange={event => setDraft(current => ({ ...current, search: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); if (!loading) apply(); } }} placeholder="昵称、邮箱或 UID" /></label>
       <label>账号状态<select aria-label="账号状态筛选" value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value as UserStatus }))}><option value="all">所有状态</option><option value="active">正常</option><option value="suspended">暂停</option><option value="banned">封禁</option></select></label>
       <label>用户标签<select aria-label="用户标签筛选" value={draft.tag} onChange={event => setDraft(current => ({ ...current, tag: event.target.value }))}><option value="">所有标签</option>{tags.map(tag => <option key={tag.id} value={tag.key}>{tag.displayName}</option>)}</select></label>
-      <div className="admin-filter-actions"><AdminButton data-users-query variant="primary" onClick={apply}>查询</AdminButton><AdminButton data-users-reset onClick={reset}>重置</AdminButton></div>
+      <div className="admin-filter-actions"><AdminButton data-users-query disabled={loading} variant="primary" onClick={apply}>查询</AdminButton><AdminButton data-users-reset disabled={loading} onClick={reset}>重置</AdminButton></div>
     </div>
     {tagError && <AdminErrorState title="标签目录暂不可用" message={tagError} retry={() => void loadTags()} />}
     {error && <AdminErrorState title="未能更新用户列表" message={error + ' 上次成功列表及查询输入未丢弃。'} retry={() => void load()} busy={loading} />}
@@ -71,7 +73,7 @@ export function AdminUsers({ request }: { request: AdminRequest }) {
         </tr>)}</tbody></table></div>
         <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono">{user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p>最近活动：{user.lastActiveAt == null ? '接口未提供' : dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
       </>}
-      {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {Math.max(1, Math.ceil(snapshot.total / 20))} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= Math.ceil(snapshot.total / 20)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
+      {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {adminPageCount(snapshot.total, snapshot.limit)} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= adminPageCount(snapshot.total, snapshot.limit)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
     </div>
     <p className="admin-stage-footnote">列表接口不返回逐用户标签或最近活动时间。标签在详情读取后展示；不额外批量请求或伪造活动记录。</p>
     {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} resetEntry={resetEntry} />}
@@ -140,7 +142,7 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
         <section className="admin-detail-section"><h2>会员权益</h2><div className="admin-info-box"><p>当前接口付费字段：<strong>{view.paid}</strong></p><p>当前到期值：{view.expiry}</p>{detail.user.role === 'admin' && <p>Pro来自管理员角色，不代表付费Pro，也不会写回付费字段。</p>}{view.caveat && <p>{view.caveat}</p>}</div>
           <div className="admin-form-grid" key={formVersion}>
             <label>将提交的付费级别<select data-membership-type value={draft.type} disabled={disabled} onChange={event => setDraft(current => ({ ...current, type: Number(event.target.value) as 0 | 1 | 2 }))}>{draft.type === '' && <option value="">未提供，请选择</option>}<option value={0}>免费</option><option value={1}>VIP</option><option value={2}>商家 Pro</option></select></label>
-            <label>到期处理<select data-membership-expiry value={draft.expiry} disabled={disabled} onChange={event => setDraft(current => ({ ...current, expiry: event.target.value as MembershipDraft['expiry'] }))}><option value="keep">保留原到期值（不续期）</option>{draft.type === 0 ? <option value="lifetime">明确清空付费到期值</option> : <><option value="days">从本次确认时刻起设置天数</option><option value="lifetime">永久（提交null）</option></>}</select></label>
+            <label>到期处理<select data-membership-expiry value={draft.expiry} disabled={disabled} onChange={event => setDraft(current => ({ ...current, expiry: event.target.value as MembershipDraft['expiry'] }))}><option value="keep">保留原到期值（不续期）</option>{draft.type === 0 ? <option value="lifetime">明确清空付费到期值</option> : <><option value="days">从本次确认时刻起设置天数</option><option value="lifetime">永久（无到期时间）</option></>}</select></label>
             {draft.type !== 0 && draft.expiry === 'days' && <label>有效天数<select data-membership-days value={draft.days} disabled={disabled} onChange={event => setDraft(current => ({ ...current, days: event.target.value }))}>{['7','30','90','365'].map(value => <option key={value} value={value}>{value}天</option>)}</select></label>}
           </div>{proposal.error && proposal.changed && <p className="admin-field-error">{proposal.error}</p>}
           <AdminButton data-membership-review disabled={disabled || !proposal.updates} onClick={() => setConfirmation({ kind: 'membership', proposal: membershipProposal(detail.user, draft) })}>查看差异并确认</AdminButton>
@@ -160,7 +162,7 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
       </>}
     </AdminDrawer>
     <AdminConfirmDialog open={Boolean(confirmation)} title={confirmTitle} description={'对象：' + userLabel(user) + '（' + user.uid + '）。以下值将用于现有服务端接口。'} pending={busy} confirmLabel="确认提交" onClose={() => setConfirmation(null)} onConfirm={submitConfirmation}>
-      {confirmation?.kind === 'membership' && <div className="admin-change-summary" data-membership-confirm><p>当前接口级别：{memberLabel(confirmation.proposal.beforeType)}</p><p>当前到期：{confirmation.proposal.beforeExpiry === null ? 'null（空/永久，结合级别）' : dateText(confirmation.proposal.beforeExpiry)}</p><hr /><p>将提交级别：{confirmation.proposal.type === '' ? '未提供' : memberLabel(confirmation.proposal.type)}</p><p>将提交到期：{confirmation.proposal.expiry === null ? 'null（永久/免费清空）' : dateText(confirmation.proposal.expiry)}</p><p>member_expire：{String(confirmation.proposal.expiry)}</p><p>影响：覆盖该用户付费字段；不改变role或角色提供的Pro权益。</p>{view.caveat && <p>{view.caveat}</p>}</div>}
+      {confirmation?.kind === 'membership' && <div className="admin-change-summary" data-membership-confirm><p>当前接口级别：{memberLabel(confirmation.proposal.beforeType)}</p><p>当前到期：{confirmation.proposal.beforeExpiry === null ? 'null（空/永久，结合级别）' : dateText(confirmation.proposal.beforeExpiry)}</p><hr /><p>将提交级别：{confirmation.proposal.type === '' ? '未提供' : memberLabel(confirmation.proposal.type)}</p><p>将提交到期：{confirmation.proposal.expiry === null ? 'null（永久/免费清空）' : dateText(confirmation.proposal.expiry)}</p><p>member_expire：{String(confirmation.proposal.expiry)}</p><p>影响：覆盖该用户付费字段；不改变角色或角色提供的 Pro 权益。</p>{view.caveat && <p>{view.caveat}</p>}</div>}
       {confirmation?.kind === 'moderation' && <div className="admin-change-summary"><p>动作：{confirmation.payload.action === 'ban' ? '封禁账号' : confirmation.payload.action === 'suspend' ? '暂停账号' : '解除限制'}</p><p>原因：{confirmation.payload.reason || '解除限制'}</p><p>到期：{dateText(confirmation.payload.expiresAt)}</p><p>影响：请求服务端改变账号限制；不删除用户或图纸。</p></div>}
       {confirmation?.kind === 'tag' && <p>仅移除该用户与“{confirmation.name}”的标签关联，不删除标签目录。</p>}
       {error && <AdminErrorState message={error} />}

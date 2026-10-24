@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Sparkles,
   Image as ImageIcon,
@@ -12,8 +12,13 @@ import {
   Wand2,
   CheckCircle2,
   FilePlus2,
+  Heart,
+  Bookmark,
+  RefreshCw,
+  Users,
 } from 'lucide-react';
 import { consumeSelectedImageFile } from '../utils/imageFileSelection';
+import { listCommunityPosts, type CommunityPost } from '../utils/communityApi';
 
 export interface HeroExample {
   id: 'batiao-cat' | 'boss-xiaoxin' | 'spiderman' | 'chibi-character';
@@ -48,6 +53,12 @@ interface HomeViewProps {
   onOpenImportBlueprint: () => void;
 }
 
+const HOME_COMMUNITY_POST_LIMIT = 6;
+
+function formatCommunityCount(count: number): string {
+  return new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(count);
+}
+
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
   onStartPhotoToBead,
@@ -57,6 +68,39 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [vibeIndex, setVibeIndex] = useState(0);
   const [isVibeLoading, setIsVibeLoading] = useState(false);
+  const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>([]);
+  const [communityStatus, setCommunityStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [communityRequest, setCommunityRequest] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    setCommunityStatus('loading');
+    const loadPosts = async () => {
+      try {
+        const result = await listCommunityPosts();
+        if (!active) return;
+        if (!result.ok || !result.data) {
+          setCommunityStatus('error');
+          return;
+        }
+        setCommunityPosts(result.data.posts.slice(0, HOME_COMMUNITY_POST_LIMIT));
+        setCommunityStatus('ready');
+      } catch {
+        if (active) setCommunityStatus('error');
+      }
+    };
+    void loadPosts();
+    return () => { active = false; };
+  }, [communityRequest]);
+
+  const communityCreators = useMemo(() => {
+    const authors = new Map<string, CommunityPost['author']>();
+    for (const post of communityPosts) {
+      if (!authors.has(post.author.uid)) authors.set(post.author.uid, post.author);
+    }
+    return [...authors.values()];
+  }, [communityPosts]);
+
   const choosePhoto = () => photoInputRef.current?.click();
   const vibe = VIBE_PROMPTS[vibeIndex];
   const inspire = () => {
@@ -283,31 +327,85 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
 
-        {/* 4. COMMUNITY POPULAR & ACTIVE CREATORS */}
+        {/* Public feed and its creators; no global ranking is implied. */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 pt-2">
-          <section className="lg:col-span-3 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs flex flex-col justify-between gap-4">
-            <div>
+          <section aria-labelledby="home-community-title" aria-busy={communityStatus === 'loading'} className="min-w-0 lg:col-span-3 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs flex flex-col gap-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <div className="w-1.5 h-4 bg-pink-500 rounded-full" />
-                <h2 className="text-base font-black text-purple-950">社区作品</h2>
+                <h2 id="home-community-title" className="text-base font-black text-purple-950">社区作品</h2>
               </div>
-              <p className="mt-3 text-sm text-purple-600 leading-relaxed">公开作品、互动数据和创作者信息仅在豆社连接到真实社区服务后展示。</p>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('community')}
+                className="min-h-11 text-xs font-bold text-purple-600 hover:text-purple-800 flex items-center gap-0.5 cursor-pointer rounded-lg focus-visible:outline-2 focus-visible:outline-purple-600"
+              >
+                <span>前往豆社查看</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
             </div>
-            <button
-              onClick={() => onNavigateTab('community')}
-              className="self-start text-xs font-bold text-purple-600 hover:text-purple-800 flex items-center gap-0.5 cursor-pointer"
-            >
-              <span>前往豆社查看</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
+            {communityStatus === 'loading' ? (
+              <div role="status" className="py-12 flex items-center justify-center gap-2 text-sm text-purple-600">
+                <RefreshCw aria-hidden="true" className="h-4 w-4 motion-safe:animate-spin" />
+                正在加载社区作品…
+              </div>
+            ) : communityStatus === 'error' ? (
+              <div className="py-10 text-center">
+                <p role="alert" className="text-sm text-purple-700">社区作品加载失败，请稍后重试。</p>
+                <button type="button" onClick={() => setCommunityRequest(request => request + 1)} className="mt-3 min-h-11 inline-flex items-center gap-2 rounded-xl bg-purple-50 px-4 text-sm font-bold text-purple-700 hover:bg-purple-100 focus-visible:outline-2 focus-visible:outline-purple-600">
+                  <RefreshCw aria-hidden="true" className="h-4 w-4" />重新加载
+                </button>
+              </div>
+            ) : communityPosts.length === 0 ? (
+              <p role="status" className="py-12 text-center text-sm text-purple-600">暂无公开作品，去豆社分享你的第一份灵感吧。</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                {communityPosts.map(post => (
+                  <button key={post.id} type="button" onClick={() => onNavigateTab('community')} aria-label={`在豆社查看：${post.title || '未命名作品'}`} className="group min-w-0 overflow-hidden rounded-2xl border border-purple-100 bg-white text-left transition-shadow duration-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-purple-600">
+                    <div className="relative aspect-square bg-purple-50 flex items-center justify-center">
+                      <ImageIcon aria-hidden="true" className="absolute h-8 w-8 text-purple-300" />
+                      <img src={post.imageUrl} alt={post.title || '社区作品'} loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="relative h-full w-full object-contain" />
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <h3 className="truncate text-sm font-bold text-purple-950">{post.title || '未命名作品'}</h3>
+                      <p className="truncate text-xs text-purple-600">{post.author.displayName || '社区创作者'}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-purple-600">
+                        <span className="inline-flex items-center gap-1"><Heart aria-hidden="true" className="h-3.5 w-3.5" />{formatCommunityCount(post.likeCount)} 点赞</span>
+                        <span className="inline-flex items-center gap-1"><Bookmark aria-hidden="true" className="h-3.5 w-3.5" />{formatCommunityCount(post.favoriteCount)} 收藏</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
           </section>
 
-          <aside className="lg:col-span-1 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs">
+          <aside aria-labelledby="home-creators-title" className="min-w-0 lg:col-span-1 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs">
             <div className="flex items-center gap-2">
-              <div className="w-1.5 h-4 bg-pink-500 rounded-full" />
-              <h2 className="text-base font-black text-purple-950">创作者榜单</h2>
+              <Users aria-hidden="true" className="h-4 w-4 text-pink-500" />
+              <h2 id="home-creators-title" className="text-base font-black text-purple-950">社区创作者</h2>
             </div>
-            <p className="mt-3 text-xs text-purple-500 leading-relaxed">榜单需要真实的聚合数据支持，当前暂不展示排名或关注数。</p>
+            <p className="mt-3 text-xs text-purple-600 leading-relaxed">来自当前展示作品的创作者，去豆社发现更多灵感。</p>
+            {communityStatus !== 'ready' ? (
+              <p className="mt-4 text-xs text-purple-600">{communityStatus === 'loading' ? '正在加载创作者…' : '创作者暂时无法加载，请重试作品列表。'}</p>
+            ) : communityCreators.length === 0 ? (
+              <p className="mt-4 text-xs text-purple-600">有公开作品后，创作者会展示在这里。</p>
+            ) : (
+              <ul className="mt-4 space-y-2">
+                {communityCreators.map(author => (
+                  <li key={author.uid}>
+                    <button type="button" onClick={() => onNavigateTab('community')} aria-label={`去豆社发现创作者：${author.displayName || '社区创作者'}`} className="flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl p-2 text-left hover:bg-purple-50 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-purple-600">
+                      <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-purple-100 text-sm font-bold text-purple-700">
+                        {(author.displayName || '豆').slice(0, 1)}
+                        {author.photoUrl && <img src={author.photoUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="absolute inset-0 h-full w-full object-cover" />}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-bold text-purple-900">{author.displayName || '社区创作者'}</span>
+                      <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-purple-400" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </aside>
         </div>
 

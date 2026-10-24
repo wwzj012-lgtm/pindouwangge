@@ -67,7 +67,6 @@ import {
   markLegacyByWorkKeys,
   saveExportedPatternRecord,
   type EditablePatternProject,
-  type ExportedPatternRecord,
 } from './utils/patternHistory';
 import { validateStoredProject } from './utils/patternGridCodec';
 import { communityDraft } from './utils/communityPatternSnapshot';
@@ -283,9 +282,7 @@ const LargeCanvasView = lazy(() =>
 const AssemblyWorkspace = lazy(() =>
   import('./components/AssemblyWorkspace').then(({ AssemblyWorkspace: Component }) => ({ default: Component })),
 );
-const UserPatternsModal = lazy(() =>
-  import('./components/UserPatternsModal').then(({ UserPatternsModal: Component }) => ({ default: Component })),
-);
+
 const SmartBeadReducerModal = lazy(() =>
   import('./components/SmartBeadReducerModal').then(({ SmartBeadReducerModal: Component }) => ({ default: Component })),
 );
@@ -617,8 +614,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [isUserProfileModalOpen, setIsUserProfileModalOpen] = useState(false);
   const [profileInitialTab, setProfileInitialTab] = useState<'library' | 'inventory'>('library');
   const [isAccountManagementModalOpen, setIsAccountManagementModalOpen] = useState(false);
-  const [isUserPatternsModalOpen, setIsUserPatternsModalOpen] = useState(false);
-  const [initialPublishRecord, setInitialPublishRecord] = useState<ExportedPatternRecord | null>(null);
   const [isVipModalOpen, setIsVipModalOpen] = useState(false);
   const [draftSourceKey, setDraftSourceKey] = useState(createDraftId);
   // Billing origin is explicit: blank/manual canvases and imported grids are
@@ -750,22 +745,11 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return false;
   }, [hasFormalLogin]);
 
-  const openUserPatternsModal = useCallback(() => {
+  const openProfileLibrary = useCallback(() => {
     if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
-    setIsUserPatternsModalOpen(true);
+    setProfileInitialTab('library');
+    setIsUserProfileModalOpen(true);
   }, [isEn, requireFormalLogin]);
-
-  const openPublishFromProfile = useCallback((record: ExportedPatternRecord) => {
-    if (!requireFormalLogin(isEn ? 'Sign in before publishing.' : '请先登录后再发布作品。')) return;
-    setIsUserProfileModalOpen(false);
-    setInitialPublishRecord(record);
-    setIsUserPatternsModalOpen(true);
-  }, [isEn, requireFormalLogin]);
-
-  useEffect(() => {
-    if (!hasFormalLogin) setIsUserPatternsModalOpen(false);
-  }, [hasFormalLogin]);
-
   // Open login modal on 401 unauthorized event
   useEffect(() => {
     const handleUnauthorized = () => {
@@ -1983,9 +1967,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
     setCurrentTab('studio');
     setTimeout(() => {
-      openUserPatternsModal();
+      openProfileLibrary();
     }, 100);
-  }, [isEn, openUserPatternsModal, requireFormalLogin]);
+  }, [isEn, openProfileLibrary, requireFormalLogin]);
 
   const handleRemixPattern = (pattern: CommunityPattern) => {
     if (pattern.project) {
@@ -2069,10 +2053,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onOpenAnnouncements={announcement.store.openHistory}
           hasUnreadAnnouncements={announcement.hasUnread}
           onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
-          onOpenPatternsModal={openUserPatternsModal}
+          onOpenPatternsModal={openProfileLibrary}
           onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onOpenUserProfileModal={() => {setProfileInitialTab('library');setIsUserProfileModalOpen(true);}}
+          onOpenUserProfileModal={openProfileLibrary}
           onOpenVipModal={() => setIsVipModalOpen(true)}
           onClearCanvas={handleClearCanvas}
           currentTab={currentTab}
@@ -2090,10 +2074,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onOpenAnnouncements={announcement.store.openHistory}
           hasUnreadAnnouncements={announcement.hasUnread}
           onOpenSmartReduceModal={() => setIsSmartReduceModalOpen(true)}
-          onOpenPatternsModal={openUserPatternsModal}
+          onOpenPatternsModal={openProfileLibrary}
           onOpenPaletteModal={() => setIsPaletteModalOpen(true)}
           onOpenAuthModal={() => setIsAuthModalOpen(true)}
-          onOpenUserProfileModal={() => {setProfileInitialTab('library');setIsUserProfileModalOpen(true);}}
+          onOpenUserProfileModal={openProfileLibrary}
           onOpenVipModal={() => setIsVipModalOpen(true)}
           onClearCanvas={handleClearCanvas}
           currentTab={currentTab}
@@ -2273,7 +2257,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               openExportModal={openExportModal}
               isConverting={isConverting}
               isEn={isEn}
-              onOpenPatternsModal={openUserPatternsModal}
+              onOpenPatternsModal={openProfileLibrary}
               onConsolidateStrayBeads={handleConsolidateStrayBeads}
             />
           ) : (
@@ -2342,7 +2326,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               openSmartReduce={openSmartReduce}
               isConverting={isConverting}
               isEn={isEn}
-              onOpenPatternsModal={openUserPatternsModal}
+              onOpenPatternsModal={openProfileLibrary}
               onOpenGuideModal={() => setIsGuideModalOpen(true)}
               onOpenVipModal={() => setIsVipModalOpen(true)}
             />
@@ -2367,13 +2351,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         <MobileBottomNav
           currentTab={currentTab}
           setCurrentTab={guardedSetCurrentTab}
-          onOpenProfile={() => {
-            if (currentUser) {
-              setIsUserProfileModalOpen(true);
-            } else {
-              setIsAuthModalOpen(true);
-            }
-          }}
+          onOpenProfile={openProfileLibrary}
           isEn={isEn}
         />
       )}
@@ -2500,7 +2478,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         zIndex={isImportBlueprintOpen ? 90 : undefined}
         onClose={() => setIsAuthModalOpen(false)}
         onOpenAdminPanel={() => window.location.assign('/admin')}
-        onOpenPatternsModal={openUserPatternsModal}
+        onOpenPatternsModal={openProfileLibrary}
       />
 
       <UserProfileModal
@@ -2508,10 +2486,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         isOpen={isUserProfileModalOpen}
         onClose={() => setIsUserProfileModalOpen(false)}
         onOpenAccountManagement={() => setIsAccountManagementModalOpen(true)}
+        onOpenAdminPanel={() => window.location.assign('/admin')}
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onSelectPattern={handleRemixPattern}
         onContinueEditing={handleRestorePattern}
-        onPublishPattern={openPublishFromProfile}
+        onOpenCommunity={() => {
+          if (!publicFeatureFlags['public.community']) {
+            showDisabledFeature('社区');
+            return;
+          }
+          setIsUserProfileModalOpen(false);
+          setCurrentTab('community');
+        }}
       />
 
       <AccountManagementModal
@@ -2519,28 +2505,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         onClose={() => setIsAccountManagementModalOpen(false)}
         onOpenVipModal={() => setIsVipModalOpen(true)}
       />
-
-      {isUserPatternsModalOpen && hasFormalLogin && (
-        <DeferredFeatureBoundary label="我的图库" surface="modal" onDismiss={() => { setIsUserPatternsModalOpen(false); setInitialPublishRecord(null); }}>
-          <Suspense fallback={<DeferredFeatureModalLoading label="我的图库" />}>
-            <UserPatternsModal
-              isOpen={isUserPatternsModalOpen}
-              onClose={() => { setIsUserPatternsModalOpen(false); setInitialPublishRecord(null); }}
-              onContinueEditing={handleRestorePattern}
-              onOpenCommunity={() => {
-                if (!publicFeatureFlags['public.community']) {
-                  showDisabledFeature('社区');
-                  return;
-                }
-                setIsUserPatternsModalOpen(false);
-                setCurrentTab('community');
-              }}
-              onOpenAuthModal={() => setIsAuthModalOpen(true)}
-              initialPublishRecord={initialPublishRecord}
-            />
-          </Suspense>
-        </DeferredFeatureBoundary>
-      )}
 
       <VipPrivilegesModal
         isOpen={isVipModalOpen}

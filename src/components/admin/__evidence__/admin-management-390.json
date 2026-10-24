@@ -1,0 +1,355 @@
+{
+  "checks": [
+    "ordinary signed-out visitor sees Chinese sign-in state",
+    "signed-out visitor has no management shell",
+    "ordinary unauthorized user sees Chinese denial",
+    "denied user never sees user-management data",
+    "access checks perform no writes",
+    "denied view: no horizontal page overflow",
+    "valid existing session shows normal management UI",
+    "existing reset entry remains present",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "users: no horizontal page overflow",
+    "mobile menu is semantic modal",
+    "Escape closes mobile menu",
+    "announcement audience is Chinese",
+    "announcement pagination sends page two",
+    "failed announcement read is not a new empty success",
+    "failed announcement snapshot cannot paginate",
+    "shrinking total returns from out-of-range page",
+    "field exists",
+    "field exists",
+    "danger confirmation defaults to cancel",
+    "review alone does not write",
+    "cancel review preserves draft",
+    "closing dirty editor requires discard confirmation",
+    "cancel discard returns to editor",
+    "rapid repeated confirmation produces one write",
+    "pending confirmation disables cancel/close/confirm",
+    "announcement labels preserve original API values",
+    "successful write has visible Chinese feedback",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "redemption codes: no horizontal page overflow",
+    "field exists",
+    "code generation requires separate confirmation",
+    "cancel code generation retains quantity",
+    "confirmed generation sends only the frozen existing code contract",
+    "copying generated codes performs no sale-mark write",
+    "code delete keeps existing three-day waiting semantics",
+    "cancelled code deletion never writes",
+    "color-card status is Chinese",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "color cards: no horizontal page overflow",
+    "metadata delete requires scoped confirmation",
+    "cancelled deletion never writes",
+    "resource visibility and status are Chinese",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "assets: no horizontal page overflow",
+    "existing resource metadata null is retained",
+    "field exists",
+    "Chinese resource editor preserves visibility and JSON null API contract",
+    "community discloses missing content evidence",
+    "moderation action is Chinese",
+    "action option label differs from submitted raw value",
+    "field exists",
+    "Chinese moderation submits unchanged action/type values",
+    "report status is Chinese",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "field exists",
+    "Chinese report action submits original status",
+    "known English role display name is mapped to Chinese",
+    "permission codes remain technical identifiers with Chinese labels",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "roles: no horizontal page overflow",
+    "field exists",
+    "invalid JSON blocks configuration review",
+    "field exists",
+    "unknown write outcome tells operator to verify first",
+    "unknown write cannot be blindly resubmitted",
+    "unknown write preserves editor input",
+    "failed content read marks old results unconfirmed",
+    "unconfirmed stale row cannot be mutated",
+    "explicit successful refresh restores row editing",
+    "initial failed read does not claim community is empty",
+    "community tab announces its selected state",
+    "visible filter has accessible name",
+    "visible filter has accessible name",
+    "reports: no horizontal page overflow",
+    "browser has no React/runtime errors",
+    "selected tab has a distinct painted state in reduced-motion mode"
+  ],
+  "browserErrors": [],
+  "viewportWidth": 390,
+  "writeCount": 6,
+  "selectedTabs": [
+    {
+      "label": "社区内容",
+      "selected": "false",
+      "className": "admin-button admin-button--secondary flex min-h-11 shrink-0 items-center gap-2 px-4 text-sm admin-muted",
+      "background": "rgb(255, 255, 255)"
+    },
+    {
+      "label": "举报处理",
+      "selected": "true",
+      "className": "admin-button admin-button--secondary flex min-h-11 shrink-0 items-center gap-2 px-4 text-sm border-b-2 admin-final-active",
+      "background": "rgb(231, 243, 240)"
+    },
+    {
+      "label": "审核记录",
+      "selected": "false",
+      "className": "admin-button admin-button--secondary flex min-h-11 shrink-0 items-center gap-2 px-4 text-sm admin-muted",
+      "background": "rgb(255, 255, 255)"
+    }
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/users?page=1&limit=20&status=all",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/user-tags",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements?page=2&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements?page=2&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements?page=2&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/announcements",
+      "method": "POST"
+    },
+    {
+      "path": "/api/admin/announcements?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/generate-codes",
+      "method": "POST"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/content-moderation",
+      "method": "POST"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/reports?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/reports",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/admin/reports?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/roles",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/permissions",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/admin-user-roles",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/roles/permissions?roleId=role-1",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/system-settings?page=1&limit=100",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/feature-flags",
+      "method": "PUT"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/community-content?type=work&page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/reports?page=1&limit=20",
+      "method": "GET"
+    }
+  ],
+  "note": "Synthetic API only; no production requests, credentials, secrets or writes."
+}

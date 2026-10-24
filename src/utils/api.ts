@@ -47,6 +47,15 @@ export const SIGNUP_REQUEST_OPTIONS: Readonly<ApiRequestOptions> = {
 const SESSION_TOKEN_KEY = 'beadgrid_worker_jwt';
 const ADMIN_SESSION_TOKEN_KEY = 'beadgrid_admin_session';
 const ADMIN_SESSION_ENDPOINT = '/api/admin/session';
+let userSessionGeneration = 0;
+let adminSessionGeneration = 0;
+
+interface RequestCredentials {
+  token: string | null;
+  userGeneration: number;
+  adminToken?: string | null;
+  adminGeneration?: number;
+}
 
 interface AdminSessionResponse {
   token: string;
@@ -93,6 +102,7 @@ export function setAdminSessionToken(token: string): void {
     clearAdminSession();
     return;
   }
+  adminSessionGeneration += 1;
   try {
     getSessionStorage()?.setItem(ADMIN_SESSION_TOKEN_KEY, normalizedToken);
   } catch {
@@ -102,6 +112,7 @@ export function setAdminSessionToken(token: string): void {
 }
 
 export function clearAdminSession(): void {
+  adminSessionGeneration += 1;
   removeAdminSession(getSessionStorage());
 }
 
@@ -118,6 +129,7 @@ export function hasAdminSession(): boolean {
 }
 
 export function setApiToken(token: string, persist = true): void {
+  userSessionGeneration += 1;
   const persistentStorage = getLocalStorage();
   const sessionStorage = getSessionStorage();
   const targetStorage = persist ? persistentStorage : sessionStorage;
@@ -132,6 +144,7 @@ export function setApiToken(token: string, persist = true): void {
 }
 
 export function clearApiToken(): void {
+  userSessionGeneration += 1;
   removeApiToken(getLocalStorage());
   removeApiToken(getSessionStorage());
 }
@@ -143,6 +156,33 @@ export function getApiToken(): string | null {
       ?? null;
   } catch {
     return null;
+  }
+}
+
+function captureRequestCredentials(includeAdmin = false): RequestCredentials {
+  return {
+    token: getApiToken(),
+    userGeneration: userSessionGeneration,
+    ...(includeAdmin ? { adminToken: getAdminSessionToken(), adminGeneration: adminSessionGeneration } : {}),
+  };
+}
+
+function handleAuthenticationFailure(status: number, credentials: RequestCredentials, jsonPath?: string): void {
+  const clearUser = status === 401 && jsonPath !== '/api/auth/signin' && jsonPath !== '/api/auth/signup';
+  const clearAdmin = jsonPath?.startsWith('/api/admin/') && jsonPath !== ADMIN_SESSION_ENDPOINT
+    && (status === 401 || status === 403);
+  if (!clearUser && !clearAdmin) return;
+  // Compare both the actual stored credentials and the local generation: a
+  // logout/re-login or re-unlock can reuse the same token. No credentials leave
+  // this check. Clearing storage and dispatching the event stay synchronous.
+  if (credentials.userGeneration !== userSessionGeneration || credentials.token !== getApiToken()) return;
+  if (credentials.adminGeneration !== undefined && (
+    credentials.adminGeneration !== adminSessionGeneration || credentials.adminToken !== getAdminSessionToken()
+  )) return;
+  if (clearAdmin) clearAdminSession();
+  if (clearUser) {
+    clearApiToken();
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('unauthorized'));
   }
 }
 
@@ -267,13 +307,14 @@ async function apiRequestOnce<T>(
 
   try {
     const headers = new Headers({ Accept: 'application/json' });
-    const token = getApiToken();
+    const credentials = captureRequestCredentials(path.startsWith('/api/admin/'));
+    const token = credentials.token;
     if (token) headers.set('Authorization', `Bearer ${token}`);
     if (path === ADMIN_SESSION_ENDPOINT && adminUnlockSecret) {
       // The manually entered secret is sent once to exchange it for a short-lived session.
       headers.set('X-Worker-Secret', adminUnlockSecret);
     } else if (path.startsWith('/api/admin/')) {
-      const adminSession = getAdminSessionToken();
+      const adminSession = credentials.adminToken;
       if (adminSession) headers.set('X-Admin-Session', adminSession);
     }
     if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
@@ -285,19 +326,7 @@ async function apiRequestOnce<T>(
       body: method === 'POST' || method === 'PUT' ? JSON.stringify(body ?? {}) : undefined,
       signal: controller.signal,
     });
-    if (response.status === 401) {
-      if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT) {
-        clearAdminSession();
-      }
-      if (path !== '/api/auth/signin' && path !== '/api/auth/signup') {
-        clearApiToken();
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('unauthorized'));
-        }
-      }
-    } else if (path.startsWith('/api/admin/') && path !== ADMIN_SESSION_ENDPOINT && response.status === 403) {
-      clearAdminSession();
-    }
+    handleAuthenticationFailure(response.status, credentials, path);
     const contentType = response.headers.get('Content-Type') ?? '';
     if (!contentType.toLowerCase().includes('application/json')) {
       return {
@@ -409,14 +438,12 @@ export async function apiPostBlob<T>(
   const timeoutId = globalThis.setTimeout(() => controller.abort(), normalizedTimeout(timeoutMs));
   try {
     const headers = new Headers({ Accept: 'application/json', 'Content-Type': contentType });
-    const token = getApiToken();
+    const credentials = captureRequestCredentials();
+    const token = credentials.token;
     if (token) headers.set('Authorization', `Bearer ${token}`);
     // Browsers set Content-Length for a known-size Blob; script code may not set that forbidden header.
     const response = await fetch(url, { method: 'POST', headers, body, signal: controller.signal });
-    if (response.status === 401) {
-      clearApiToken();
-      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('unauthorized'));
-    }
+    handleAuthenticationFailure(response.status, credentials);
     const contentTypeHeader = response.headers.get('Content-Type') ?? '';
     if (!contentTypeHeader.toLowerCase().includes('application/json')) {
       return { ok: false, status: response.status, error: `后端返回了非 JSON 响应 (${response.status})` };
@@ -470,15 +497,11 @@ export async function apiGetBlob(path: string, params?: Record<string, string>, 
   const timeoutId = globalThis.setTimeout(() => controller.abort(), normalizedTimeout(timeoutMs));
   try {
     const headers = new Headers({ Accept: 'image/webp, image/png, image/jpeg' });
-    const token = getApiToken();
+    const credentials = captureRequestCredentials();
+    const token = credentials.token;
     if (token) headers.set('Authorization', `Bearer ${token}`);
     const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
-    if (response.status === 401) {
-      clearApiToken();
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('unauthorized'));
-      }
-    }
+    handleAuthenticationFailure(response.status, credentials);
     const type = response.headers.get('Content-Type')?.split(';', 1)[0]?.toLowerCase();
     if (!response.ok || (type !== 'image/webp' && type !== 'image/png' && type !== 'image/jpeg')) {
       return { ok: false, status: response.status, error: `预览图不可用 (${response.status})` };

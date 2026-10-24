@@ -1,20 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import {
   X,
   User,
   Lock,
   Mail,
-  Zap,
   KeyRound,
   Crown,
-  Store,
   LogOut,
   ShieldCheck,
   AlertTriangle,
-  HardDrive,
-  Info,
   Loader2,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { type AuthSessionPersistence, useAuth } from '../context/AuthContext';
 import {
@@ -31,6 +26,7 @@ interface AuthModalProps {
   zIndex?: number;
   onClose: () => void;
   onOpenAdminPanel?: () => void;
+  // Retained for caller compatibility; the legacy gallery entry has been removed.
   onOpenPatternsModal?: () => void;
   onOpenVipModal?: () => void;
 }
@@ -46,10 +42,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   zIndex,
   onClose,
   onOpenAdminPanel,
-  onOpenPatternsModal,
-  onOpenVipModal,
 }) => {
-  const { currentUser, userProfile, loading: authLoading, isVip, isPro, memberType, isAdmin, redeemVipCode, setLocalCustomUser, logoutUser } = useAuth();
+  const { currentUser, userProfile, loading: authLoading, isVip, isPro, isAdmin, canAccessAdmin, redeemVipCode, setLocalCustomUser, logoutUser } = useAuth();
 
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
   const [email, setEmail] = useState('');
@@ -61,6 +55,40 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [redeemMsg, setRedeemMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [structuredError, setStructuredError] = useState<LocalizedError | null>(null);
+  const redeemInputRef = useRef<HTMLInputElement>(null);
+  const loginInputRef = useRef<HTMLInputElement>(null);
+  const operationRef = useRef(0);
+  const pendingOperationRef = useRef(false);
+  const openGenerationRef = useRef(0);
+  const latestUidRef = useRef(currentUser?.uid);
+  // Match the existing App guest gate locally; AuthContext permissions stay unchanged.
+  const hasFormalLogin = Boolean(currentUser) && ![currentUser, userProfile].some(account => {
+    const value = account as unknown as Record<string, unknown> | null;
+    return value?.authProvider === 'guest' || value?.auth_provider === 'guest' || value?.provider === 'guest';
+  });
+  const canRedeem = hasFormalLogin && Boolean(userProfile);
+
+  // Logout itself changes identity. Its close belongs to this opening, not to
+  // the identity-sensitive generation used for redemption feedback below.
+  useLayoutEffect(() => {
+    openGenerationRef.current += 1;
+    return () => { openGenerationRef.current += 1; };
+  }, [isOpen]);
+  useLayoutEffect(() => { latestUidRef.current = currentUser?.uid; }, [currentUser?.uid]);
+
+  useEffect(() => {
+    operationRef.current += 1;
+    pendingOperationRef.current = false;
+    setRedeemCodeInput('');
+    setRedeemMsg(null);
+    setStructuredError(null);
+    setIsSubmitting(false);
+    setPassword('');
+    if (isOpen && !authLoading) {
+      (canRedeem ? redeemInputRef : loginInputRef).current?.focus();
+    }
+    return () => { operationRef.current += 1; };
+  }, [isOpen, authLoading, canRedeem, currentUser?.uid]);
 
   const parseAuthError = (error: unknown): LocalizedError => {
     const details = error && typeof error === 'object' ? error as Record<string, unknown> : {};
@@ -214,27 +242,55 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleRedeem = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canRedeem || pendingOperationRef.current || !redeemCodeInput.trim()) return;
+    const operation = operationRef.current;
+    pendingOperationRef.current = true;
     setRedeemMsg(null);
-    if (!redeemCodeInput.trim()) return;
-
     setIsSubmitting(true);
-    const res = await redeemVipCode(redeemCodeInput);
-    setIsSubmitting(false);
-
-    setRedeemMsg({ text: res.message, isError: !res.success });
-    if (res.success) {
-      setRedeemCodeInput('');
+    try {
+      const res = await redeemVipCode(redeemCodeInput.trim());
+      if (operation !== operationRef.current) return;
+      setRedeemMsg({ text: res.message, isError: !res.success });
+      if (res.success) setRedeemCodeInput('');
+    } catch {
+      if (operation === operationRef.current) {
+        setRedeemMsg({ text: '兑换失败，请检查网络后重试', isError: true });
+      }
+    } finally {
+      if (operation === operationRef.current) {
+        pendingOperationRef.current = false;
+        setIsSubmitting(false);
+      }
     }
   };
 
   const handleSignOut = async () => {
-    await logoutUser();
+    if (pendingOperationRef.current) return;
+    const operation = operationRef.current;
+    const opening = openGenerationRef.current;
+    const uid = currentUser?.uid;
+    pendingOperationRef.current = true;
+    setIsSubmitting(true);
+    setRedeemMsg(null);
+    try {
+      await logoutUser();
+      if (opening === openGenerationRef.current && (!latestUidRef.current || latestUidRef.current === uid)) onClose();
+    } catch {
+      if (operation === operationRef.current) {
+        setRedeemMsg({ text: '退出失败，请稍后重试', isError: true });
+      }
+    } finally {
+      if (operation === operationRef.current) {
+        pendingOperationRef.current = false;
+        setIsSubmitting(false);
+      }
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div role="dialog" aria-modal="true" aria-label="用户登录与账号" style={zIndex === undefined ? undefined : { zIndex }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fadeIn">
+    <div role="dialog" aria-modal="true" aria-label={canRedeem ? '会员兑换' : '用户登录与账号'} style={zIndex === undefined ? undefined : { zIndex }} className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-4 overflow-y-auto animate-fadeIn">
       <div className="relative w-full max-w-md bg-[#FAF9FD] border border-purple-200/80 rounded-3xl shadow-2xl shadow-purple-900/10 overflow-hidden flex flex-col max-h-[92vh] text-slate-800">
         {/* Header */}
         <div className="px-5 py-4 bg-gradient-to-r from-purple-100/70 via-slate-50 to-purple-50/50 border-b border-purple-200/70 flex items-center justify-between shrink-0">
@@ -243,8 +299,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <Crown className="w-5 h-5 text-amber-500 fill-amber-500/20" />
             </div>
             <div>
-              <h3 className="text-base font-extrabold text-slate-800 tracking-tight">用户账号与 PRO 智能权限</h3>
-              <p className="text-xs text-slate-500">登录账号管理个人作品与 VIP 核心算法权限</p>
+              <h3 className="text-base font-extrabold text-slate-800 tracking-tight">{canRedeem ? '会员兑换' : '登录与注册'}</h3>
+              <p className="text-xs text-slate-500">{canRedeem ? '使用激活码兑换会员权益' : '登录后继续会员兑换与创作'}</p>
             </div>
           </div>
           <button
@@ -263,123 +319,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="text-xs font-bold text-slate-800">✨ 正在安全加载用户账号与 VIP 权益...</div>
               <div className="text-[11px] text-slate-500">请稍等，正在同步云端身份鉴权数据</div>
             </div>
-          ) : currentUser && userProfile ? (
-            /* Logged-In Account Info & VIP Manager */
+          ) : canRedeem ? (
             <div className="space-y-4">
-              <div className="bg-purple-50/60 border border-purple-100 rounded-2xl p-3.5 flex items-center justify-between shadow-xs">
-                <div className="flex items-center gap-3">
-                  {userProfile.photoURL ? (
-                    <img
-                      src={userProfile.photoURL}
-                      alt="Avatar"
-                      className="w-10 h-10 rounded-full border border-purple-200 object-cover shadow-xs"
-                    />
-                  ) : (
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-600 to-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
-                      {userProfile.displayName?.[0] || 'U'}
-                    </div>
-                  )}
-                  <div>
-                    <div className="font-bold text-slate-800 text-sm flex items-center gap-1.5">
-                      <span>{userProfile.displayName || '拼豆玩家'}</span>
-                      {isAdmin && (
-                        <span className="text-[10px] bg-rose-100 text-rose-700 border border-rose-200 px-1.5 py-0.2 rounded font-bold">
-                          管理员
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-xs text-slate-500 font-mono">{userProfile.email}</div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleSignOut}
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer min-h-[44px] min-w-[44px] flex items-center justify-center"
-                  title="退出登录"
-                >
-                  <LogOut className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* VIP / Pro Membership Status Card */}
-              <div className={`p-4 rounded-2xl border relative overflow-hidden ${
-                isPro
-                  ? 'bg-gradient-to-r from-amber-50 via-amber-100/40 to-amber-50 border-amber-300 text-amber-900 shadow-sm'
-                  : isVip
-                  ? 'bg-gradient-to-r from-purple-50 via-indigo-50/50 to-purple-50 border-purple-200 text-purple-900 shadow-sm'
-                  : 'bg-slate-50 border-slate-200 text-slate-700'
-              }`}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2 font-bold text-sm">
-                    {isPro ? (
-                      <>
-                        <Crown className="w-4 h-4 fill-amber-500 text-amber-500" />
-                        <Store className="w-4 h-4 text-amber-600" />
-                        <span className="font-black text-amber-800">商家Pro 会员卡</span>
-                      </>
-                    ) : isVip ? (
-                      <>
-                        <Crown className="w-4 h-4 fill-purple-600 text-purple-600" />
-                        <span className="font-bold text-purple-800">普通VIP 会员卡</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 text-slate-400" />
-                        <span>免费体验账号</span>
-                      </>
-                    )}
-                  </div>
-
-                  {isPro ? (
-                    <span className="text-[10px] bg-gradient-to-r from-amber-400 to-amber-500 text-slate-900 font-black px-2 py-0.5 rounded-full shadow-xs">
-                      商用图纸创作者
-                    </span>
-                  ) : isVip ? (
-                    <span className="text-[10px] bg-purple-100 text-purple-700 border border-purple-200 font-bold px-2 py-0.5 rounded-full">
-                      手工爱好者会员
-                    </span>
-                  ) : (
-                    <span className="text-[10px] bg-slate-200/80 text-slate-600 px-2 py-0.5 rounded-full">
-                      基础免费模式
-                    </span>
-                  )}
-                </div>
-
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  {isPro
-                    ? '核心权益：900×900超大画布、3D立体拆解分层、自定义店铺专属水印、采购Excel导出一应俱全！'
-                    : isVip
-                    ? '核心权益：去除防盗水印、400×400画布、200张批量图纸处理、无水印高分辨率导出！'
-                    : '目前支持基础 100×100 画布与强水印导出一览。通过下述激活码即可解锁更多高级功能。'}
-                </p>
-
-                {(isVip || isPro) && (
-                  <div className="mt-2.5 pt-2 border-t border-purple-100 text-[11px] font-mono text-purple-700 flex items-center justify-between">
-                    <span>会员到期时间:</span>
-                    <span className="font-bold text-purple-800">
-                      {isAdmin || userProfile.role === 'admin'
-                        ? '永久有效'
-                        : (userProfile.member_expire || userProfile.vipExpireAt)
-                        ? formatChinaDate(userProfile.member_expire || userProfile.vipExpireAt, false)
-                        : '永久有效'}
-                    </span>
-                  </div>
-                )}
-              </div>
-
               {/* Redeem Code Form */}
-              <form onSubmit={handleRedeem} className="space-y-2 pt-1">
-                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+              <form onSubmit={handleRedeem} aria-label="会员激活码兑换" className="space-y-3 rounded-2xl border border-purple-100 bg-white p-4 shadow-xs">
+                <label htmlFor="membership-redeem-code" className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                   <KeyRound className="w-3.5 h-3.5 text-amber-500" />
                   <span>兑换 VIP 激活码</span>
                 </label>
                 <div className="flex gap-2">
                   <input
+                    ref={redeemInputRef}
+                    id="membership-redeem-code"
                     type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    disabled={isSubmitting}
                     value={redeemCodeInput}
                     onChange={e => setRedeemCodeInput(e.target.value.toUpperCase())}
-                    placeholder="输入 16位卡密 (如: TB-7D29FK8S7G-4A)"
-                    className="flex-1 px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs text-slate-800 uppercase font-mono placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 min-h-[44px]"
+                    placeholder="输入会员激活码"
+                    className="min-w-0 flex-1 px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs text-slate-800 uppercase font-mono placeholder:text-slate-400 focus:bg-white focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 min-h-[44px]"
                   />
                   <button
                     type="submit"
@@ -397,7 +356,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </button>
                 </div>
                 {redeemMsg && (
-                  <div className={`text-xs p-2.5 rounded-xl ${
+                  <div role={redeemMsg.isError ? 'alert' : 'status'} className={`text-xs p-2.5 rounded-xl ${
                     redeemMsg.isError
                       ? 'bg-rose-50 text-rose-700 border border-rose-200'
                       : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -407,27 +366,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 )}
               </form>
 
-              {/* User Pattern History Entry Button */}
-              {onOpenPatternsModal && (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onClose();
-                      onOpenPatternsModal();
-                    }}
-                    className="w-full py-2.5 px-3 bg-purple-50/80 hover:bg-purple-100 border border-purple-200 text-purple-700 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all shadow-xs active:scale-95 min-h-[44px]"
-                  >
-                    <ImageIcon className="w-4 h-4 text-purple-600" />
-                    <span>查看我的可编辑图纸记录</span>
-                  </button>
-                </div>
-              )}
+              <p className="text-xs text-slate-600 leading-relaxed">
+                当前会员：{isPro ? '商家 Pro' : isVip ? 'VIP 会员' : '标准用户'}
+                {(isVip || isPro) && userProfile && (
+                  <span className="block mt-1">
+                    到期时间：{isAdmin || userProfile.role === 'admin'
+                      ? '永久有效'
+                      : (userProfile.member_expire || userProfile.vipExpireAt)
+                        ? formatChinaDate(userProfile.member_expire || userProfile.vipExpireAt, false)
+                        : '永久有效'}
+                  </span>
+                )}
+              </p>
 
               {/* Admin Button if Admin */}
-              {isAdmin && onOpenAdminPanel && (
+              {canAccessAdmin && onOpenAdminPanel && (
                 <div className="pt-2">
                   <button
+                    type="button"
+                    disabled={isSubmitting}
                     onClick={() => {
                       onClose();
                       onOpenAdminPanel();
@@ -435,10 +392,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     className="w-full py-2.5 px-3 bg-gradient-to-r from-rose-50 via-purple-50 to-rose-50 border border-rose-200 hover:border-rose-300 text-rose-700 font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all min-h-[44px]"
                   >
                     <ShieldCheck className="w-4 h-4 text-rose-600" />
-                    <span>进入后台系统 (账号管理与生成兑换码)</span>
+                    <span>进入管理后台</span>
                   </button>
                 </div>
               )}
+              <button
+                type="button"
+                onClick={handleSignOut}
+                disabled={isSubmitting}
+                className="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 flex items-center justify-center gap-2 transition-colors"
+              >
+                <LogOut className="w-4 h-4" />
+                退出登录
+              </button>
             </div>
           ) : (
             /* Sign In / Sign Up Form */
@@ -505,6 +471,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <input
                         type="text"
                         name="username"
+                        ref={loginInputRef}
+                        aria-label="手机号 / 邮箱 / 账号"
                         autoComplete={AUTH_AUTOCOMPLETE.username}
                         value={email}
                         onChange={e => setEmail(e.target.value)}
@@ -525,6 +493,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       <input
                         type="password"
                         name="password"
+                        aria-label="登录密码"
                         autoComplete={mode === 'signin'
                           ? AUTH_AUTOCOMPLETE.signinPassword
                           : AUTH_AUTOCOMPLETE.signupPassword}

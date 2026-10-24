@@ -1,0 +1,46 @@
+{
+  "passed": false,
+  "scenario": "pagination",
+  "viewportWidth": 1280,
+  "checks": [],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=1&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/codes?page=2&limit=20&search=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/code-redemptions?page=1&limit=20&code=%E7%AD%9B%E9%80%89%E6%A0%87%E8%AF%86",
+      "method": "GET"
+    }
+  ],
+  "browserErrors": [],
+  "error": "Error: P2-3 RED: shrinking code total must reread effective last page rather than hide pagination\n    at assert (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-DjxprV/admin.html?section=users:27107:25)\n    at runAdminReviewRegressionChecks (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-DjxprV/admin.html?section=users:27300:9)"
+}

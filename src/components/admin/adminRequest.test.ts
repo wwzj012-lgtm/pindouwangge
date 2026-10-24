@@ -24,6 +24,14 @@ describe('admin request contract and recovery', () => {
     expect(new Headers(init?.headers).has('X-Admin-Session')).toBe(false);
     expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
   });
+  it('sends the existing second credential on GET session status, including when cookies are unavailable', async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ success: true, data: { authenticated: true } }));
+    await createAdminRequest({ ...dependencies, fetcher })('/api/admin/session');
+    const init = fetcher.mock.calls[0][1];
+    expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer synthetic-user-token');
+    expect(new Headers(init?.headers).get('X-Admin-Session')).toBe('synthetic-admin-token');
+  });
   it('preserves explicitly provided authorization headers', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response({ success: true }));
     await createAdminRequest({ ...dependencies, fetcher })('/api/admin/users', { headers: { Authorization: 'Bearer custom', 'X-Admin-Session': 'custom-admin' } });

@@ -1,0 +1,131 @@
+{
+  "note": "Offline real Chrome DOM; no production requests; red captured before implementation; green after repairs",
+  "records": [
+    {
+      "stage": "red",
+      "scenario": "config",
+      "width": 1280,
+      "passed": false,
+      "checks": 2,
+      "writes": 1,
+      "errors": 0,
+      "failure": "Error: P2-1 RED: post-write failed reread must leave old configuration row read-only",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-config-1280.json"
+    },
+    {
+      "stage": "red",
+      "scenario": "config",
+      "width": 390,
+      "passed": false,
+      "checks": 2,
+      "writes": 1,
+      "errors": 0,
+      "failure": "Error: P2-1 RED: post-write failed reread must leave old configuration row read-only",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-config-390.json"
+    },
+    {
+      "stage": "red",
+      "scenario": "uncertain",
+      "width": 1280,
+      "passed": false,
+      "checks": 1,
+      "writes": 1,
+      "errors": 0,
+      "failure": "Error: P2-2 RED: reopening review without any GET must not clear uncertain resource write",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-uncertain-1280.json"
+    },
+    {
+      "stage": "red",
+      "scenario": "uncertain",
+      "width": 390,
+      "passed": false,
+      "checks": 1,
+      "writes": 1,
+      "errors": 0,
+      "failure": "Error: P2-2 RED: reopening review without any GET must not clear uncertain resource write",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-uncertain-390.json"
+    },
+    {
+      "stage": "red",
+      "scenario": "pagination",
+      "width": 1280,
+      "passed": false,
+      "checks": 0,
+      "writes": 0,
+      "errors": 0,
+      "failure": "Error: P2-3 RED: shrinking code total must reread effective last page rather than hide pagination",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-pagination-1280.json"
+    },
+    {
+      "stage": "red",
+      "scenario": "pagination",
+      "width": 390,
+      "passed": false,
+      "checks": 0,
+      "writes": 0,
+      "errors": 0,
+      "failure": "Error: P2-3 RED: shrinking code total must reread effective last page rather than hide pagination",
+      "evidence": "src/components/admin/__evidence__/admin-review-red-pagination-390.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "config",
+      "width": 1280,
+      "passed": true,
+      "checks": 11,
+      "writes": 1,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-config-1280.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "config",
+      "width": 390,
+      "passed": true,
+      "checks": 11,
+      "writes": 1,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-config-390.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "uncertain",
+      "width": 1280,
+      "passed": true,
+      "checks": 17,
+      "writes": 4,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-uncertain-1280.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "uncertain",
+      "width": 390,
+      "passed": true,
+      "checks": 17,
+      "writes": 4,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-uncertain-390.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "pagination",
+      "width": 1280,
+      "passed": true,
+      "checks": 11,
+      "writes": 0,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-pagination-1280.json"
+    },
+    {
+      "stage": "green",
+      "scenario": "pagination",
+      "width": 390,
+      "passed": true,
+      "checks": 11,
+      "writes": 0,
+      "errors": 0,
+      "evidence": "src/components/admin/__evidence__/admin-review-green-pagination-390.json"
+    }
+  ]
+}

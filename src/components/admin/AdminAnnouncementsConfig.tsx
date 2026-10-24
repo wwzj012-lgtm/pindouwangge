@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
+import { adminLabel, adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { ContentDrawer, parseJsonDraft, useContentWrite } from './AdminContentFlow';
 import { LatestRequest, dateText } from './adminUserModel';
@@ -32,61 +33,80 @@ function AnnouncementEditor({ form, setForm, close, save, busy }: { form: Announ
       <label className="admin-final-check"><input type="checkbox" checked={form.pinned} disabled={busy} onChange={e=>setForm((f:AnnouncementForm)=>({...f,pinned:e.target.checked}))}/>置顶公告</label>
       {timeError&&<p className="admin-field-error" role="alert">{timeError}</p>}
       <div className="admin-filter-actions"><AdminButton onClick={()=>setPreview(!preview)}>编辑 / 预览</AdminButton><AdminButton data-announcement-review variant="primary" disabled={busy||!form.title.trim()||!form.content.trim()||Boolean(timeError)} onClick={save}>复核内容变更</AdminButton></div>
-      {preview&&<article className="admin-final-preview"><h3>{form.title}</h3><p>{form.content}</p><small>{form.audience} · {statusLabel(form.status)}</small></article>}
+      {preview&&<article className="admin-final-preview"><h3>{form.title}</h3><p>{form.content}</p><small>{adminLabel(form.audience)} · {statusLabel(form.status)}</small></article>}
     </div>
   </ContentDrawer>;
 }
 function AnnouncementsPanel({request}:{request:AdminRequest}) {
-  const [snapshot,setSnapshot]=useState<Paginated<Announcement>|null>(null),[page,setPage]=useState(1),[status,setStatus]=useState('all');
+  const [snapshot,setSnapshot]=useState<(Paginated<Announcement> & { page: number })|null>(null),[page,setPage]=useState(1),[status,setStatus]=useState('all');
   const [loading,setLoading]=useState(false),[error,setError]=useState(''),[form,setForm]=useState<AnnouncementForm|null>(null),[before,setBefore]=useState<Announcement|null>(null);
   const epoch=useRef(new LatestRequest()),write=useContentWrite(request);
-  const load=useCallback(async()=>{const version=epoch.current.next();setLoading(true);setError('');
-    try {const params=new URLSearchParams({page:String(page),limit:String(PAGE_SIZE)});if(status!=='all')params.set('status',status);const result=await request<Paginated<Announcement>>('/api/admin/announcements?'+params);if(!epoch.current.current(version))return;if(!result.ok||!result.data){setError((result.status===403?'读取公告被服务端拒绝（403）：':'公告读取失败：')+(result.error??'请重试'));return;}setSnapshot(result.data);}
+  const load=useCallback(async()=>{const ticket=write.beginRead('/api/admin/announcements');const version=epoch.current.next();setLoading(true);setError('');
+    try {const params=new URLSearchParams({page:String(page),limit:String(PAGE_SIZE)});if(status!=='all')params.set('status',status);const result=await request<Paginated<Announcement>>('/api/admin/announcements?'+params);if(!epoch.current.current(version))return;if(!result.ok||!result.data||!Array.isArray(result.data.items)||!Number.isFinite(result.data.total)){setError((result.status===403?'读取公告被服务端拒绝（403）：':'公告读取失败：')+(result.error??'请重试'));return;}if(page>adminPageCount(result.data.total)){setPage(adminPageCount(result.data.total));return;}setSnapshot({...result.data,page});write.readSucceeded(ticket);}
     catch {if(epoch.current.current(version))setError('读取失败，原列表保留。');}finally {if(epoch.current.current(version))setLoading(false);}
-  },[request,page,status]);
+  },[request,page,status,write.beginRead,write.readSucceeded]);
   useEffect(()=>{void load();return()=>epoch.current.invalidate();},[load]);
   const save=()=>{if(!form)return;const publishAt=parseInputTime(form.publishAt),expireAt=parseInputTime(form.expireAt);const payload={...(form.id?{id:form.id}:{}),title:form.title.trim(),body:form.content.trim(),content:form.content.trim(),status:form.status,publishAt,expireAt,audience:form.audience,pinned:form.pinned};
     write.review({path:'/api/admin/announcements',method:form.id?'PUT':'POST',body:payload,before,title:form.id?'保存公告内容':'创建公告草稿',object:form.title+' · '+(form.id??'新草稿'),impact:'只提交上述内容/时间/受众；保存保留既有状态。定时安排沿服务端规则，发布/撤回另行复核。',done:async()=>{setForm(null);await load();}});
   };
   const publish=(item:Announcement,enabled:boolean)=>write.review({path:'/api/admin/announcements/publish',method:'POST',body:{id:item.id,publish:enabled},before:{status:item.status},after:{id:item.id,publish:enabled},title:enabled?'发布公告':'撤回公告',object:item.title+' · '+item.id,impact:'修改这个公告的发布状态与站内可见性，受众和时间规则以服务端为准。',done:load});
   return <section><AdminToolbar actions={<><AdminButton busy={loading} disabled={write.busy} onClick={()=>void load()}>刷新公告</AdminButton><AdminButton data-announcement-new disabled={write.busy} variant="primary" onClick={()=>{setBefore(null);setForm(emptyAnnouncement());}}><Plus aria-hidden="true"/>新建草稿</AdminButton></>}><h2>站内公告</h2><p>内容编辑、预览与发布/撤回分别复核，不以保存冒充发布。</p></AdminToolbar>
-    <div className="admin-module-tabs" role="group" aria-label="公告状态">{['all','draft','scheduled','published','withdrawn'].map(value=><AdminButton key={value} disabled={write.busy} variant={status===value?'primary':'secondary'} onClick={()=>{setStatus(value);setPage(1);}}>{value==='all'?'全部':statusLabel(value)}</AdminButton>)}</div>
-    {error&&<AdminErrorState message={error} retry={()=>void load()} busy={loading}/>} {write.success&&<p className="admin-success-message" role="status">{write.success}</p>}
-    <div className="admin-stage-panel" aria-busy={loading}>{!snapshot?loading?<AdminLoading/>:<AdminEmptyState title="尚无成功读取结果"/>:snapshot.items.length?<><div className="admin-table-scroll"><table className="admin-stage-table" aria-label="公告列表"><thead><tr><th>标题 / 摘要</th><th>发布状态</th><th>时间 / 受众</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(item=><tr key={item.id}><td><strong>{item.title}</strong><small className="admin-final-excerpt">{item.body}</small></td><td><AdminBadge>{statusLabel(item.status)}</AdminBadge></td><td>{dateText(item.publishAt)}<small>截止 {dateText(item.expireAt)} · {item.audience}</small></td><td><div className="admin-final-actions"><AdminButton data-announcement-edit={item.id} disabled={write.busy} onClick={()=>{setBefore(item);setForm({id:item.id,title:item.title,content:item.body,status:item.status,publishAt:toInputTime(item.publishAt),expireAt:toInputTime(item.expireAt),audience:item.audience??'all',pinned:item.pinned??item.isPinned??false});}}>编辑内容</AdminButton><AdminButton data-announcement-publish={item.id} disabled={write.busy} onClick={()=>publish(item,item.status!=='published')}>{item.status==='published'?'撤回':'发布'}</AdminButton><AdminButton iconOnly variant="danger" aria-label="删除公告" disabled={write.busy} onClick={()=>write.review({path:'/api/admin/announcements?id='+encodeURIComponent(item.id),method:'DELETE',before:item,title:'删除公告',object:item.title+' · '+item.id,impact:'删除指定公告记录，无法通过此界面恢复；不会删除其它公告。',done:load})}><Trash2 aria-hidden="true"/></AdminButton></div></td></tr>)}</tbody></table></div><Pager page={page} total={snapshot.total} busy={loading||write.busy} change={setPage}/></>:<AdminEmptyState title="暂无匹配公告"/>}</div>
+    <div className="admin-module-tabs" role="group" aria-label="公告状态">{['all','draft','scheduled','published','withdrawn'].map(value=><AdminButton key={value} disabled={write.busy} aria-pressed={status===value} variant={status===value?'primary':'secondary'} onClick={()=>{setStatus(value);setPage(1);}}>{value==='all'?'全部':statusLabel(value)}</AdminButton>)}</div>
+    {loading&&snapshot&&<p role="status" className="admin-result-caption">正在更新公告，暂时保留上次成功结果…</p>}{error&&snapshot&&<p className="admin-result-caption">当前为上次成功读取的第 {snapshot.page} 页，筛选条件尚未确认。</p>}{error&&<AdminErrorState message={error} retry={()=>void load()} busy={loading}/>} {write.success&&<p className="admin-success-message" role="status">{write.success}</p>}
+    <div className="admin-stage-panel" aria-busy={loading}>{!snapshot?loading?<AdminLoading/>:<AdminEmptyState title="尚无成功读取结果"/>:snapshot.items.length?<><div className="admin-table-scroll"><table className="admin-stage-table" aria-label="公告列表"><thead><tr><th>标题 / 摘要</th><th>发布状态</th><th>时间 / 受众</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(item=><tr key={item.id}><td><strong>{item.title}</strong><small className="admin-final-excerpt">{item.body}</small></td><td><AdminBadge>{statusLabel(item.status)}</AdminBadge></td><td>{dateText(item.publishAt)}<small>截止 {dateText(item.expireAt)} · {adminLabel(item.audience)}</small></td><td><div className="admin-final-actions"><AdminButton data-announcement-edit={item.id} disabled={loading||write.busy||Boolean(error)} onClick={()=>{setBefore(item);setForm({id:item.id,title:item.title,content:item.body,status:item.status,publishAt:toInputTime(item.publishAt),expireAt:toInputTime(item.expireAt),audience:item.audience??'all',pinned:item.pinned??item.isPinned??false});}}>编辑内容</AdminButton><AdminButton data-announcement-publish={item.id} disabled={loading||write.busy||Boolean(error)} onClick={()=>publish(item,item.status!=='published')}>{item.status==='published'?'撤回':'发布'}</AdminButton><AdminButton iconOnly variant="danger" aria-label="删除公告" disabled={loading||write.busy||Boolean(error)} onClick={()=>write.review({path:'/api/admin/announcements?id='+encodeURIComponent(item.id),method:'DELETE',before:item,title:'删除公告',object:item.title+' · '+item.id,impact:'删除指定公告记录，无法通过此界面恢复；不会删除其它公告。',done:load})}><Trash2 aria-hidden="true"/></AdminButton></div></td></tr>)}</tbody></table></div><Pager page={snapshot.page} total={snapshot.total} busy={loading||write.busy||Boolean(error)} change={setPage}/></>:<AdminEmptyState title={error?"读取未成功，请重试":"暂无匹配公告"}/>}</div>
     {form&&<AnnouncementEditor form={form} setForm={setForm} close={()=>setForm(null)} save={save} busy={write.busy}/>}
     {write.confirmation}
   </section>;
 }
-function ConfigEditor({kind,initial,close,save,busy}:{kind:'flag'|'setting';initial?:FeatureFlag|SystemSetting;close:()=>void;save:(body:Record<string,unknown>)=>void;busy:boolean}) {
+function ConfigEditor({kind,initial,close,save,busy,readOnly=false}:{kind:'flag'|'setting';initial?:FeatureFlag|SystemSetting;close:()=>void;save:(body:Record<string,unknown>)=>void;busy:boolean;readOnly?:boolean}) {
   const isFlag=kind==='flag',flag=initial&&'enabled'in initial?initial:null,setting=initial&&'value'in initial?initial:null;
   const [key,setKey]=useState(initial?.key??''),[description,setDescription]=useState(initial?.description??''),[enabled,setEnabled]=useState(flag?.enabled??false);
   const [raw,setRaw]=useState(()=>JSON.stringify(flag?flag.config:setting?setting.value:{},null,2)??'{}');
-  const parsed=parseJsonDraft(raw),keyError=!KEY_PATTERN.test(key)?'key仅支持小写字母开头及原有数字/点/连字符/下划线格式。':'';
+  const parsed=parseJsonDraft(raw),keyError=!KEY_PATTERN.test(key)?'配置标识仅支持小写字母开头及原有数字/点/连字符/下划线格式。':'';
   return <ContentDrawer title={(initial?'编辑':'新建')+(isFlag?'功能开关':'系统参数')} description="JSON错误内联；复核前后字段、作用范围，再冻结提交。不会新增服务端功能。" busy={busy} onClose={close}>
-    <div className="admin-final-fields"><label>配置key<input value={key} maxLength={80} disabled={Boolean(initial)||busy} onChange={e=>setKey(e.target.value)}/></label>{keyError&&<p className="admin-field-error">{keyError}</p>}<label>说明<input value={description} maxLength={500} disabled={busy} onChange={e=>setDescription(e.target.value)}/></label>
-    {isFlag&&<label className="admin-final-check"><input type="checkbox" checked={enabled} disabled={busy} onChange={e=>setEnabled(e.target.checked)}/>启用（提交既有enabled字段）</label>}
-    <label>JSON值<textarea data-config-json value={raw} disabled={busy} spellCheck={false} onChange={e=>setRaw(e.target.value)}/></label>
+    <div className="admin-final-fields"><label>配置标识<input value={key} maxLength={80} disabled={Boolean(initial)||busy||readOnly} onChange={e=>setKey(e.target.value)}/></label>{keyError&&<p className="admin-field-error">{keyError}</p>}<label>说明<input value={description} maxLength={500} disabled={busy||readOnly} onChange={e=>setDescription(e.target.value)}/></label>
+    {isFlag&&<label className="admin-final-check"><input type="checkbox" checked={enabled} disabled={busy||readOnly} onChange={e=>setEnabled(e.target.checked)}/>启用此功能开关</label>}
+    <label>JSON值<textarea data-config-json value={raw} disabled={busy||readOnly} spellCheck={false} onChange={e=>setRaw(e.target.value)}/></label>
     {parsed.error&&<p className="admin-field-error" role="alert" data-json-error>{parsed.error}</p>}
-    <AdminButton data-config-review variant="primary" disabled={busy||Boolean(keyError)||Boolean(parsed.error)} onClick={()=>save(isFlag?{key,enabled,description,config:parsed.value}:{key,description,value:parsed.value})}>复核保存差异</AdminButton></div>
+    <AdminButton data-config-review variant="primary" disabled={busy||readOnly||Boolean(keyError)||Boolean(parsed.error)} onClick={()=>save(isFlag?{key,enabled,description,config:parsed.value}:{key,description,value:parsed.value})}>复核保存差异</AdminButton></div>
   </ContentDrawer>;
 }
+type ConfigKind = 'flag' | 'setting';
+type ConfigReadState = 'unread' | 'loading' | 'ready' | 'stale';
+const configPath = (kind: ConfigKind) => kind === 'flag' ? '/api/admin/feature-flags' : '/api/admin/system-settings';
 function ConfigPanel({request}:{request:AdminRequest}) {
-  const [tab,setTab]=useState<'flag'|'setting'>('flag'),[flags,setFlags]=useState<FeatureFlag[]|null>(null),[settings,setSettings]=useState<SystemSetting[]|null>(null);
-  const [search,setSearch]=useState(''),[loading,setLoading]=useState(false),[errors,setErrors]=useState(''),[editor,setEditor]=useState<{kind:'flag'|'setting';initial?:FeatureFlag|SystemSetting}|null>(null);
-  const epoch=useRef(new LatestRequest()),write=useContentWrite(request);
-  const load=useCallback(async()=>{const id=epoch.current.next();setLoading(true);setErrors('');try {
-    const [f,s]=await Promise.all([request<{items:FeatureFlag[]}>('/api/admin/feature-flags?page=1&limit=100'),request<{items:SystemSetting[]}>('/api/admin/system-settings?page=1&limit=100')]);if(!epoch.current.current(id))return;
-    const messages:string[]=[];if(f.ok&&f.data)setFlags(f.data.items);else messages.push('读取开关'+(f.status===403?'被拒绝（403）':'失败')+'：'+(f.error??'请重试'));if(s.ok&&s.data)setSettings(s.data.items);else messages.push('读取参数'+(s.status===403?'被拒绝（403）':'失败')+'：'+(s.error??'请重试'));setErrors(messages.join(' '));
-  }catch{if(epoch.current.current(id))setErrors('配置读取失败，原数据保留。');}finally{if(epoch.current.current(id))setLoading(false);}},[request]);
+  const [tab,setTab]=useState<ConfigKind>('flag'),[flags,setFlags]=useState<FeatureFlag[]|null>(null),[settings,setSettings]=useState<SystemSetting[]|null>(null);
+  const [search,setSearch]=useState(''),[loading,setLoading]=useState(false),[errors,setErrors]=useState(''),[editor,setEditor]=useState<{kind:ConfigKind;initial?:FeatureFlag|SystemSetting}|null>(null);
+  const [readState,setReadState]=useState<Record<ConfigKind,ConfigReadState>>({flag:'unread',setting:'unread'});
+  const epoch=useRef(new LatestRequest());
+  const write=useContentWrite(request,{canWrite:scope=>!loading && (scope===configPath('flag')?readState.flag==='ready':scope===configPath('setting')&&readState.setting==='ready')});
+  const load=useCallback(async()=>{
+    const id=epoch.current.next();
+    const flagTicket=write.beginRead(configPath('flag')),settingTicket=write.beginRead(configPath('setting'));
+    setLoading(true);setErrors('');setReadState({flag:'loading',setting:'loading'});
+    try {
+      const [f,s]=await Promise.all([request<{items:FeatureFlag[]}>(configPath('flag')+'?page=1&limit=100'),request<{items:SystemSetting[]}>(configPath('setting')+'?page=1&limit=100')]);
+      if(!epoch.current.current(id))return;
+      const messages:string[]=[],next:Record<ConfigKind,ConfigReadState>={flag:'stale',setting:'stale'};
+      if(f.ok&&Array.isArray(f.data?.items)){setFlags(f.data.items);next.flag='ready';write.readSucceeded(flagTicket);}
+      else messages.push('读取开关'+(f.status===403?'被拒绝（403）':'失败')+'：'+(f.error??'返回的列表无效，请重试'));
+      if(s.ok&&Array.isArray(s.data?.items)){setSettings(s.data.items);next.setting='ready';write.readSucceeded(settingTicket);}
+      else messages.push('读取参数'+(s.status===403?'被拒绝（403）':'失败')+'：'+(s.error??'返回的列表无效，请重试'));
+      setReadState(next);setErrors(messages.join(' '));
+    }catch{if(epoch.current.current(id)){setReadState({flag:'stale',setting:'stale'});setErrors('配置读取失败，原数据仅供参考；成功刷新前不可写入。');}}
+    finally{if(epoch.current.current(id))setLoading(false);}
+  },[request,write.beginRead,write.readSucceeded]);
   useEffect(()=>{void load();return()=>epoch.current.invalidate();},[load]);
   const current=tab==='flag'?flags:settings;
+  const writable=(kind:ConfigKind)=>!loading&&!write.busy&&readState[kind]==='ready';
   const visible=useMemo(()=>(current??[]).filter(item=>(item.key+' '+item.description).toLowerCase().includes(search.toLowerCase())),[current,search]);
-  return <section><AdminToolbar actions={<><AdminButton busy={loading} onClick={()=>void load()}>刷新配置</AdminButton><AdminButton data-config-new disabled={write.busy} onClick={()=>setEditor({kind:tab})}>新建配置</AdminButton></>}><h2>平台开关与参数</h2><p>只维护现有配置；搜索范围为当前已读取的各类最多100条，不冒充全库查询。</p></AdminToolbar>
-    <div className="admin-module-tabs"><AdminButton variant={tab==='flag'?'primary':'secondary'} onClick={()=>setTab('flag')}>功能开关</AdminButton><AdminButton variant={tab==='setting'?'primary':'secondary'} onClick={()=>setTab('setting')}>系统参数</AdminButton></div>
-    <div className="admin-stage-panel" role="search"><label>当前列表搜索<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索key或说明"/></label></div>
-    {errors&&<AdminErrorState message={errors} retry={()=>void load()} busy={loading}/>} {write.success&&<p className="admin-success-message" role="status">{write.success}</p>}
-    <div className="admin-stage-panel">{current===null?loading?<AdminLoading/>:<AdminEmptyState title="尚无成功读取结果"/>:visible.length?<div className="admin-table-scroll"><table className="admin-stage-table" aria-label="配置列表"><thead><tr><th>key</th><th>说明 / 更新</th><th>当前读取值</th><th>操作</th></tr></thead><tbody>{visible.map(item=><tr key={item.key}><td className="admin-mono">{item.key}</td><td>{item.description||'未提供'}<small>{dateText(item.updatedAt)}</small></td><td>{'enabled'in item?<AdminBadge tone={item.enabled?'success':'neutral'}>{item.enabled?'启用':'关闭'}</AdminBadge>:<span className="admin-mono admin-final-excerpt">{JSON.stringify(item.value)}</span>}</td><td><AdminButton data-config-edit={item.key} disabled={write.busy} onClick={()=>setEditor({kind:tab,initial:item})}>编辑</AdminButton></td></tr>)}</tbody></table></div>:<AdminEmptyState title="没有匹配配置"/>}</div>
-    {editor&&<ConfigEditor kind={editor.kind} initial={editor.initial} close={()=>setEditor(null)} busy={write.busy} save={body=>write.review({path:editor.kind==='flag'?'/api/admin/feature-flags':'/api/admin/system-settings',method:'PUT',body,before:editor.initial,title:'保存配置',object:String(body.key),impact:'更新这个现有开关/参数及JSON值；具体生效范围以服务端应用该key的逻辑为准，不增加新功能或权限。',done:async()=>{setEditor(null);await load();}})}/>}
+  return <section><AdminToolbar actions={<><AdminButton busy={loading} disabled={write.busy} onClick={()=>void load()}>刷新配置</AdminButton><AdminButton data-config-new disabled={!writable(tab)} onClick={()=>{if(writable(tab))setEditor({kind:tab});}}>新建配置</AdminButton></>}><h2>平台开关与参数</h2><p>只维护现有配置；搜索范围为当前已读取的各类最多100条，不冒充全库查询。</p></AdminToolbar>
+    <div className="admin-module-tabs"><AdminButton variant={tab==='flag'?'primary':'secondary'} aria-pressed={tab==='flag'} onClick={()=>setTab('flag')}>功能开关</AdminButton><AdminButton variant={tab==='setting'?'primary':'secondary'} aria-pressed={tab==='setting'} onClick={()=>setTab('setting')}>系统参数</AdminButton></div>
+    <div className="admin-stage-panel" role="search"><label>当前列表搜索<input value={search} onChange={e=>setSearch(e.target.value)} placeholder="搜索配置标识或说明"/></label></div>
+    {errors&&<AdminErrorState message={errors} retry={()=>void load()} busy={loading||write.busy}/>} {write.success&&<p className="admin-success-message" role="status">{write.success}</p>}
+    {readState[tab]!=='ready'&&<p role="status" className="admin-result-caption">{loading?'正在刷新；已有配置暂时只读。':'当前配置快照未确认，成功刷新前不可编辑或新增。'}</p>}
+    <div className="admin-stage-panel" aria-busy={loading}>{current===null?loading?<AdminLoading/>:<AdminEmptyState title="尚无成功读取结果"/>:visible.length?<div className="admin-table-scroll"><table className="admin-stage-table" aria-label="配置列表"><thead><tr><th>配置标识</th><th>说明 / 更新</th><th>当前读取值</th><th>操作</th></tr></thead><tbody>{visible.map(item=><tr key={item.key}><td className="admin-mono">{item.key}</td><td>{item.description||'未提供'}<small>{dateText(item.updatedAt)}</small></td><td>{'enabled'in item?<AdminBadge tone={item.enabled?'success':'neutral'}>{item.enabled?'启用':'关闭'}</AdminBadge>:<span className="admin-mono admin-final-excerpt">{JSON.stringify(item.value)}</span>}</td><td><AdminButton data-config-edit={item.key} disabled={!writable(tab)} onClick={()=>{if(writable(tab))setEditor({kind:tab,initial:item});}}>编辑</AdminButton></td></tr>)}</tbody></table></div>:<AdminEmptyState title={readState[tab]==='ready'?'没有匹配配置':'尚无可确认的读取结果'}/>}</div>
+    {editor&&<ConfigEditor kind={editor.kind} initial={editor.initial} close={()=>setEditor(null)} busy={write.busy} readOnly={!writable(editor.kind)} save={body=>{if(!writable(editor.kind))return;write.review({path:configPath(editor.kind),method:'PUT',body,before:editor.initial,title:'保存配置',object:String(body.key),impact:'更新这个现有开关/参数及JSON值；具体生效范围以服务端应用该标识的逻辑为准，不增加新功能或权限。',done:async()=>{setEditor(null);await load();}});}}/>}
     {write.confirmation}
   </section>;
 }

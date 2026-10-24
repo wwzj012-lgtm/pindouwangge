@@ -1,0 +1,42 @@
+{
+  "passed": false,
+  "scenario": "uncertain",
+  "viewportWidth": 1280,
+  "checks": [
+    "P2-2: first uncertain resource POST is blocked in its original confirmation"
+  ],
+  "requests": [
+    {
+      "path": "/api/admin/session",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/dashboard",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/color-cards?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets?page=1&limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/admin/storage-assets",
+      "method": "POST",
+      "body": {
+        "objectKey": "review/new.png",
+        "resourceType": "work",
+        "contentType": null,
+        "byteSize": 0,
+        "ownerUid": null,
+        "visibility": "private",
+        "status": "active",
+        "metadata": {}
+      }
+    }
+  ],
+  "browserErrors": [],
+  "error": "Error: P2-2 RED: reopening review without any GET must not clear uncertain resource write\n    at assert (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-9YV68c/admin.html?section=users:27107:25)\n    at runAdminReviewRegressionChecks (file:///C:/Users/Plout/AppData/Local/Temp/admin-management-9YV68c/admin.html?section=users:27233:9)"
+}

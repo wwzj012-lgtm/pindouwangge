@@ -12,6 +12,9 @@ export interface UserProfile {
   vipExpireAt: number | null;
   freeTrialUsed?: boolean;
   role: 'user' | 'admin';
+  /** Server-computed navigation capability; independent of membership benefits. */
+  canAccessAdmin?: boolean;
+  authProvider?: 'firebase' | 'password' | 'guest';
   createdAt: number;
   updatedAt: number;
 }

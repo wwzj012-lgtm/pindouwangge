@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAdminRequest } from './adminRequest';
+import { createAdminRequest, createAdminBlobRequest } from './adminRequest';
 
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 const dependencies = { userToken: () => 'synthetic-user-token', sessionToken: () => 'synthetic-admin-token' };
@@ -80,5 +80,28 @@ describe('admin request contract and recovery', () => {
   it('retains legacy unwrapped payload support', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response([{ uid: 'synthetic' }]));
     expect(await createAdminRequest({ ...dependencies, fetcher })('/api/admin/users')).toMatchObject({ ok: true, data: [{ uid: 'synthetic' }] });
+  });
+});
+
+
+describe('admin authenticated binary previews', () => {
+  it('sends both credentials as headers, rejects JSON and never exposes credentials in the URL', async () => {
+    const fetcher=vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1,2]),{headers:{'Content-Type':'image/png'}}));
+    const result=await createAdminBlobRequest({...dependencies,fetcher})('/api/admin/community-posts/asset?id=post_test');
+    expect(result.ok).toBe(true);expect(await result.data?.arrayBuffer()).toEqual(new Uint8Array([1,2]).buffer);
+    expect(fetcher.mock.calls[0][0]).toBe('/api/admin/community-posts/asset?id=post_test');
+    const init=fetcher.mock.calls[0][1]; expect(init?.credentials).toBe('include');
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer synthetic-user-token');
+    expect(new Headers(init?.headers).get('X-Admin-Session')).toBe('synthetic-admin-token');
+    fetcher.mockResolvedValue(response({success:false,message:'denied'},403));
+    expect(await createAdminBlobRequest({...dependencies,fetcher})('/api/admin/community-posts/asset?id=x')).toMatchObject({ok:false,status:403,error:'denied'});
+    fetcher.mockResolvedValue(response({success:true},200));
+    expect(await createAdminBlobRequest({...dependencies,fetcher})('/api/admin/community-posts/asset?id=x')).toMatchObject({ok:false,status:200});
+  });
+  it('fails closed on missing credentials or external/non-admin preview paths', async()=>{
+    const fetcher=vi.fn<typeof fetch>();
+    expect(await createAdminBlobRequest({...dependencies,fetcher,userToken:()=>null})('/api/admin/community-posts/asset?id=x')).toMatchObject({ok:false,status:401});
+    expect(await createAdminBlobRequest({...dependencies,fetcher})('https://evil.test/image')).toMatchObject({ok:false,status:400});
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });

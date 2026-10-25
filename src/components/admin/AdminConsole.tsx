@@ -6,8 +6,10 @@ import { AdminUsersRoles } from './AdminUsersRoles';
 import { AdminLogsCodes } from './AdminLogsCodes';
 import { AdminAnnouncementsConfig } from './AdminAnnouncementsConfig';
 import { AdminContentResources } from './AdminContentResources';
+import { AdminPaletteResources, type AdminAssetPreviewRequest } from './AdminPaletteResources';
+import { AdminCommunityPosts } from './AdminCommunityPosts';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
-import { createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
+import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -134,6 +136,11 @@ function AdminConsoleSession(_props: { key?: string }) {
     return () => { observer.disconnect(); edits.current.clear(); };
   }, [access]);
   const section = currentMenu(activeSection);
+  const previewRequest = useMemo(() => createAdminBlobRequest(), []);
+  const assetPreviewRequest = useCallback<AdminAssetPreviewRequest>(async path => {
+    const result = await previewRequest(path);
+    return { ok: result.ok, status: result.status, blob: result.data, error: result.error };
+  }, [previewRequest]);
   const fetchAdmin = useMemo(() => createAdminRequest(), []);
   const adminRequest = useCallback(async <T,>(path: string, init?: RequestInit): Promise<AdminApiResult<T>> => {
     const requestGeneration = generation.current;
@@ -234,7 +241,8 @@ function AdminConsoleSession(_props: { key?: string }) {
   const module = activeSection === 'users' || activeSection === 'roles' ? <AdminUsersRoles mode={activeSection} request={moduleRequest} />
     : activeSection === 'logs' || activeSection === 'codes' ? <AdminLogsCodes mode={activeSection} request={moduleRequest} />
     : activeSection === 'announcements' || activeSection === 'config' ? <AdminAnnouncementsConfig mode={activeSection} request={moduleRequest} />
-    : activeSection === 'colors-assets' || activeSection === 'community' ? <AdminContentResources mode={activeSection} request={moduleRequest} /> : null;
+    : activeSection === 'colors-assets' ? <AdminContentResources mode={activeSection} request={moduleRequest} resourcesPanel={<AdminPaletteResources request={moduleRequest} previewRequest={assetPreviewRequest} readOnly />} />
+    : activeSection === 'community' ? <AdminCommunityPosts request={moduleRequest} previewRequest={previewRequest} /> : null;
   return <div className="admin-root">
     <a className="admin-skip-link" href="#admin-main">跳到主要内容</a>
     <aside className="admin-sidebar"><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></aside>

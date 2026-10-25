@@ -12,6 +12,21 @@ export class CodeWriteLocks {
   endBatch(): void { this.batch = false; }
   snapshot() { return { batch: this.batch, rows: new Set(this.rows) }; }
 }
+
+export function codeSaleRowClassName(copied: boolean | undefined): string {
+  return copied ? 'admin-code-row--sale-marked' : '';
+}
+
+export function codeSaleLabel(copied: boolean | undefined): string {
+  return copied ? '已标记发售' : '未标记发售';
+}
+
+export function codeWriteFeedback(label: string, rereadSucceeded: boolean): { success?: string; warning?: string } {
+  return rereadSucceeded
+    ? { success: label + '已确认。' }
+    : { warning: label + '已提交，但列表刷新失败；当前仍显示旧状态，请刷新确认。' };
+}
+
 export interface GenerationDraft { days: number; memberType: 1 | 2; count: number; channel: string; }
 export function freezeGeneration(draft: GenerationDraft) {
   if (draft.days === 7 && draft.memberType !== 1) throw new Error('7天体验卡仅支持普通VIP。');

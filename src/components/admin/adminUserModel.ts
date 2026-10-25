@@ -4,13 +4,28 @@ export interface AdminTag { id: string; key: string; displayName: string; colorH
 export interface AdminUser {
   uid: string; email: string; displayName?: string; role?: 'user' | 'admin';
   member_type?: MemberType; memberType?: MemberType; member_expire?: number | null; memberExpire?: number | null;
-  createdAt?: number; updatedAt?: number; tags?: AdminTag[]; lastActiveAt?: number | null;
+  createdAt?: number; updatedAt?: number; tags?: AdminTag[]; lastActiveAt?: number | null; authProvider?: string;
   moderation?: { status?: 'active' | 'suspended' | 'banned'; expiresAt?: number | null; reason?: string };
 }
 export interface UserDetail {
   user: AdminUser; tags: AdminTag[]; notes: { id: string; content: string; authorUid?: string | null; createdAt: number }[];
   moderation: { status: 'active' | 'suspended' | 'banned'; reason: string; expiresAt?: number | null };
-  aggregates?: { works?: number }; workCount?: number;
+  aggregates?: { works?: number | null; publicPosts?: number | null }; workCount?: number;
+  credits?: { availableUnits: number; heldUnits: number; unitsPerPoint: number; updatedAt: number } | null;
+  recentActivity?: { at: number; source: string } | null; activityScope?: string;
+}
+export function userOverview(detail: UserDetail) {
+  const credits = detail.credits;
+  const points = (units: number) => credits && Number.isSafeInteger(units) && units >= 0 && Number.isSafeInteger(credits.unitsPerPoint) && credits.unitsPerPoint > 0 ? String(units / credits.unitsPerPoint) + ' 积分' : '未提供';
+  const count = (value: number | null | undefined) => Number.isSafeInteger(value) && value! >= 0 ? String(value) : '未提供';
+  const source = detail.recentActivity?.source === 'work_updated' ? '图纸更新' : detail.recentActivity?.source === 'public_post_published' ? '公开帖发布' : '活动';
+  return {
+    available: credits ? points(credits.availableUnits) : '未提供（无积分账户记录或数据未接入）',
+    held: credits ? points(credits.heldUnits) : '未提供',
+    works: count(detail.aggregates?.works ?? detail.workCount), posts: count(detail.aggregates?.publicPosts),
+    activity: detail.recentActivity ? dateText(detail.recentActivity.at) + ' · ' + source : '未提供',
+    provider: detail.user.authProvider === 'password' ? '邮箱密码' : detail.user.authProvider === 'guest' ? '游客' : detail.user.authProvider === 'firebase' ? 'Firebase' : '未提供',
+  };
 }
 export interface UserQuery { search: string; status: UserStatus; tag: string; page: number; }
 export const emptyUserQuery = (): UserQuery => ({ search: '', status: 'all', tag: '', page: 1 });

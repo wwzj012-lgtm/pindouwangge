@@ -265,6 +265,15 @@ describe('UserPatternsModal community publishing', () => {
     }
   });
 
+  it('keeps normal saved-pattern publishing available from My Library', async () => {
+    const tree = await openPublishDialog(initialRecord({ id: 'normal-library-publish' }));
+
+    expect(buttonByText(tree, 'Confirm publish')).toBeDefined();
+    expect(textContent(tree)).toContain('Original work');
+    expect(communityApi.uploadCommunityAsset).not.toHaveBeenCalled();
+    expect(communityApi.publishCommunityPost).not.toHaveBeenCalled();
+  });
+
   it('keeps a newly published project in the selected library and preserves the community entry', async () => {
     let tree = await confirmPublish(await openPublishDialog(initialRecord({
       id: 'cloud-retained', userId: 'user-1', hasCloudCopy: true,

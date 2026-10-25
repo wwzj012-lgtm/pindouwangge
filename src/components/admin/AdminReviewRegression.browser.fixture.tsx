@@ -17,6 +17,7 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
   let holdFlags = false, releaseFlags: (() => void) | undefined;
   let codesTotal = 21, recordsTotal = 21, logsTotal = 21;
   let holdCodePageTwo = false, releaseCodePageTwo: (() => void) | undefined;
+  const post = {id:'post_0123456789abcdef',title:'复核社区',publishedAt:1,withdrawnAt:null,visibility:'public',publiclyVisible:true,author:{uid:'target'},work:null,publicationToken:'review-publication',moderation:{state:'visible',version:0,reason:''}};
   const now = 1_793_000_000_000;
   globalThis.fetch = async (input, init) => {
     const path = String(input), method = init?.method ?? 'GET', body = init?.body ? JSON.parse(String(init.body)) : undefined;
@@ -38,6 +39,8 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
     if (endpoint === '/api/admin/system-settings') return response(paged([{ key: 'review.setting', description: '独立系统参数', value: null }]));
     if (endpoint === '/api/admin/color-cards') return response(paged([]));
     if (endpoint === '/api/admin/storage-assets') return response(paged([{ id: 'asset-1', objectKey: 'review/existing.png', resourceType: 'work', contentType: 'image/png', byteSize: 1, visibility: 'private', status: 'active', ownerUid: 'target', metadata: null }]), storageStatus);
+    if (endpoint === '/api/admin/community-posts') return response(paged([post]));
+    if (endpoint === '/api/admin/community-posts/detail') return response({post,asset:null,snapshot:null,audit:[]},moderationStatus);
     if (endpoint === '/api/admin/community-content') return response(paged([{ id: 'work-1', entityType: 'work', title: '复核图纸', authorUid: 'target', status: 'published' }]));
     if (endpoint === '/api/admin/content-moderation') return response(paged([]), moderationStatus);
     if (endpoint === '/api/admin/codes') {
@@ -97,48 +100,28 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
       assert(!configEdit().disabled && !button('新建配置').disabled, 'P2-1: only successful current reread restores configuration writes');
     }
     if (scenario === 'uncertain') {
-      await mount('colors-assets'); await click('资源元数据'); await click('登记资源');
-      const fields = top().querySelectorAll<HTMLInputElement>('input');
-      await change(fields[0], 'review/new.png'); await change(fields[1], 'work');
-      await click('保存'); networkWrite = true; await click('确认提交');
-      assert(button('确认提交').disabled && writes().length === 1, 'P2-2: first uncertain resource POST is blocked in its original confirmation');
-      await click('取消'); await click('保存');
-      assert(button('确认提交').disabled, 'P2-2 RED: reopening review without any GET must not clear uncertain resource write');
-      await click('确认提交'); assert(writes().length === 1, 'P2-2: reopened uncertain review cannot send a duplicate resource POST');
-      await click('取消'); storageStatus = 403;
-      await click('刷新', document.body);
-      assert(button('保存').disabled, 'P2-2: failed resource reread cannot unlock the editor');
-      // Remounting and reading another module must not be treated as resource reconciliation.
-      networkWrite = false; await mount('community');
-      await click(innerWidth < 768 ? '记录审核动作' : '审核'); await click('记录审核');
+      await mount('community'); await click(innerWidth < 768 ? '查看详情' : '详情');
+      await click('下架帖子'); await change(top().querySelector('textarea')!, 'review reason');
       networkWrite = true; await click('确认提交');
-      assert(writes().at(-1)?.body.action === 'approve' && writes().at(-1)?.body.entityType === 'work', 'P2-2: moderation keeps original action and entity type');
-      await click('取消'); await click('记录审核');
-      assert(button('确认提交').disabled, 'P2-2: moderation POST also remains blocked after reopening review');
+      assert(button('确认提交').disabled && writes().length === 1, 'P2-2: unknown takedown blocks immediate duplicate confirmation');
+      assert(writes()[0].path === '/api/admin/community-posts/takedown' && writes()[0].body.expectedPublicationToken === 'review-publication', 'P2-2: uncertainty uses real endpoint and observed publication token');
       await click('取消');
-      await click('刷新', document.body); // community-content GET, not content-moderation GET.
-      await click('记录审核'); assert(button('确认提交').disabled, 'P2-2: successful content-summary GET cannot reconcile moderation-record scope');
-      await click('取消'); await click('关闭新增内容审核动作');
-      await mount('community'); // A new component instance still has no moderation-record GET.
-      await click(innerWidth < 768 ? '记录审核动作' : '审核'); await click('记录审核');
-      assert(button('确认提交').disabled, 'P2-2: remounting current operator does not reset scope uncertainty');
-      await click('取消'); await click('关闭新增内容审核动作');
-      moderationStatus = 403; await click('审核记录'); await click('刷新');
-      await click('社区内容', document.querySelector('.admin-main')!); assert(button('社区内容', document.querySelector('.admin-main')!).getAttribute('aria-pressed') === 'true', 'P2-2: select the community content tab, not the same-named desktop sidebar entry'); await click(innerWidth < 768 ? '记录审核动作' : '审核'); await click('记录审核');
-      assert(button('确认提交').disabled, 'P2-2: failed moderation-record GET does not clear uncertainty');
-      await click('取消'); await click('关闭新增内容审核动作');
-      moderationStatus = 200; await click('审核记录'); await click('社区内容', document.querySelector('.admin-main')!); assert(button('社区内容', document.querySelector('.admin-main')!).getAttribute('aria-pressed') === 'true', 'P2-2: select the community content tab, not the same-named desktop sidebar entry');
-      await click(innerWidth < 768 ? '记录审核动作' : '审核'); await click('记录审核');
-      assert(!button('确认提交').disabled, 'P2-2: successful related moderation-record GET permits deliberate retry');
+      await click('下架帖子'); await change(top().querySelector('textarea')!, 'review reason');
+      assert(button('确认提交').disabled, 'P2-2: closing/reopening confirmation does not clear unknown result');
+      await click('确认提交'); assert(writes().length === 1, 'P2-2: reopened unknown action cannot be blindly resubmitted');
+      await click('取消'); await click('刷新', document.body);
+      await click('下架帖子'); await change(top().querySelector('textarea')!, 'review reason');
+      assert(button('确认提交').disabled, 'P2-2: list refresh is not detail evidence reconciliation');
+      await click('取消');
+      moderationStatus = 403; await mount('community'); await click(innerWidth < 768 ? '查看详情' : '详情');
+      assert(mainText().includes('详情读取失败') && !Array.from(document.querySelectorAll('button')).some(b=>b.textContent?.includes('下架帖子')), 'P2-2: remount plus failed detail cannot unlock unknown write');
+      moderationStatus = 200; await click(innerWidth < 768 ? '查看详情' : '详情');
+      await click('下架帖子'); await change(top().querySelector('textarea')!, 'deliberate reconciled retry');
+      assert(!button('确认提交').disabled, 'P2-2: only successful related detail reread permits deliberate retry');
       networkWrite = false; await click('确认提交');
-      assert(writes().filter(item => item.path === '/api/admin/content-moderation').length === 2, 'P2-2: moderation has exactly original uncertain write and one reconciled deliberate retry');
-      await mount('colors-assets'); // color-card GET is unrelated to resource scope.
-      storageStatus = 200; await click('资源元数据'); await click('登记资源');
-      const retryFields = top().querySelectorAll<HTMLInputElement>('input');
-      await change(retryFields[0], 'review/new.png'); await change(retryFields[1], 'work'); await click('保存');
-      assert(!button('确认提交').disabled, 'P2-2: successful related resource GET releases only its resource scope');
-      await click('确认提交');
-      assert(writes().filter(item => item.path === '/api/admin/storage-assets').length === 2, 'P2-2: resources have no extra POST before successful scope reconciliation');
+      assert(writes().length === 2 && writes().every(r=>r.path === '/api/admin/community-posts/takedown'), 'P2-2: exactly uncertain write plus one deliberate reconciled retry');
+      await mount('colors-assets'); await click('真实资源文件');
+      assert(mainText().includes('删除暂时关闭'), 'P2-2: high-risk resource delete remains explicitly disabled rather than faking recovery');
     }
     if (scenario === 'pagination') {
       await mount('codes'); await change(document.querySelector('[data-code-search]')!, '筛选标识'); await click('查询');

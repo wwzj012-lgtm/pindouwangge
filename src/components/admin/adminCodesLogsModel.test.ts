@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CodeWriteLocks, freezeGeneration, logDates, logDuration, logOutcome } from './adminCodesLogsModel';
+import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome } from './adminCodesLogsModel';
 import { verifyCardChecksum } from '../../utils/vipCodeUtils';
 
 describe('per-code frontend write scope', () => {
@@ -9,6 +9,18 @@ describe('per-code frontend write scope', () => {
   it('blocks generation while any row writes', () => { const locks = new CodeWriteLocks(); locks.beginRow('a'); expect(locks.beginBatch()).toBe(false); });
   it('generation blocks row writes and duplicate batches', () => { const locks = new CodeWriteLocks(); expect(locks.beginBatch()).toBe(true); expect(locks.beginRow('a')).toBe(false); expect(locks.beginBatch()).toBe(false); });
   it('releases a failed generation batch for explicit retry', () => { const locks = new CodeWriteLocks(); locks.beginBatch(); locks.endBatch(); expect(locks.any()).toBe(false); expect(locks.beginBatch()).toBe(true); });
+});
+describe('sale marker presentation and reread feedback', () => {
+  it('uses a dedicated yellow-row class only for the real copied marker', () => {
+    expect(codeSaleRowClassName(true)).toBe('admin-code-row--sale-marked');
+    expect(codeSaleRowClassName(false)).toBe('');
+    expect(codeSaleLabel(true)).toBe('已标记发售');
+    expect(codeSaleLabel(false)).toBe('未标记发售');
+  });
+  it('does not claim a write is confirmed until the list reread succeeds', () => {
+    expect(codeWriteFeedback('设置发售标记', true)).toEqual({ success: '设置发售标记已确认。' });
+    expect(codeWriteFeedback('设置发售标记', false).warning).toContain('当前仍显示旧状态，请刷新确认');
+  });
 });
 describe('unchanged generation rules and frozen submission', () => {
   it('retains original PV generator and checksum for seven-day VIP', () => { const result = freezeGeneration({ days:7, memberType:1, count:2, channel:'淘宝旗舰店' }); expect(result.codes).toHaveLength(2); expect(result.codes.every(c=>c.code.startsWith('PVTB-')&&verifyCardChecksum(c.code)&&c.days===7&&c.member_type===1)).toBe(true); });

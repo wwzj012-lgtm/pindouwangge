@@ -159,6 +159,18 @@ export function getApiToken(): string | null {
   }
 }
 
+/** Opaque revision, including logout/re-login with the same token. */
+export function getApiSessionGeneration(): number {
+  return userSessionGeneration;
+}
+
+/** Keep credentials inside a closure; never use bearer tokens as cache keys. */
+export function captureApiSessionGuard(): () => boolean {
+  const generation = userSessionGeneration;
+  const token = getApiToken();
+  return () => generation === userSessionGeneration && token === getApiToken();
+}
+
 function captureRequestCredentials(includeAdmin = false): RequestCredentials {
   return {
     token: getApiToken(),

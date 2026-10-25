@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LatestRequest, SYSTEM_ROLE_MINIMUMS, emptyUserQuery, membershipDraft, membershipPresentation, membershipProposal, permissionDelta, returnedExpiry, userQueryString, type AdminUser } from './adminUserModel';
+import { userOverview, LatestRequest, SYSTEM_ROLE_MINIMUMS, emptyUserQuery, membershipDraft, membershipPresentation, membershipProposal, permissionDelta, returnedExpiry, userQueryString, type AdminUser } from './adminUserModel';
 
 const now = 1_800_000_000_000;
 const vip: AdminUser = { uid: 'test', email: 'test@example.invalid', role: 'user', member_type: 1, member_expire: now + 90 * 86_400_000 };
@@ -33,4 +33,22 @@ describe('existing role protection and exact differences', () => {
   it('keeps the approved system role minimums unchanged', () => { expect(SYSTEM_ROLE_MINIMUMS).toEqual({ operations: ['dashboard.read'], content_moderator: ['community.read','community.moderate'], read_only: ['dashboard.read'] }); });
   it('lists exact added and removed permission codes', () => { expect(permissionDelta(['dashboard.read','users.read'], ['dashboard.read','roles.read'])).toEqual({ added: ['roles.read'], removed: ['users.read'] }); });
   it('does not invent a delta from reordering or duplicates', () => { expect(permissionDelta(['b','a'], ['a','b','a'])).toEqual({ added: [], removed: [] }); });
+});
+
+describe('user operations overview truthfulness', () => {
+  const detail = { user: vip, tags: [], notes: [], moderation: { status: 'active' as const, reason: '' } };
+  it('keeps missing statistics unknown and real zero visible', () => {
+    expect(userOverview(detail).works).toBe('未提供');
+    expect(userOverview({...detail, aggregates:{works:0,publicPosts:0}}).posts).toBe('0');
+    expect(userOverview(detail).available).toContain('未提供');
+  });
+  it('uses the returned credit unit scale without inventing a balance', () => {
+    const view = userOverview({...detail,credits:{availableUnits:12345,heldUnits:200,unitsPerPoint:100,updatedAt:1}});
+    expect(view.available).toBe('123.45 积分');expect(view.held).toBe('2 积分');
+    expect(userOverview({...detail, credits:{availableUnits:1,heldUnits:0,unitsPerPoint:0,updatedAt:1}}).available).toBe('未提供');
+  });
+  it('does not infer activity from account edits or a historical signup method', () => {
+    expect(userOverview(detail).activity).toBe('未提供');expect(userOverview(detail).provider).toBe('未提供');
+    expect(userOverview({...detail,user:{...vip,authProvider:'guest'}}).provider).toBe('游客');
+  });
 });

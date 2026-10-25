@@ -8,6 +8,7 @@ export interface AdminApiResult<T> {
 }
 
 export type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<AdminApiResult<T>>;
+export type AdminBlobRequest = (path: string, signal?: AbortSignal) => Promise<AdminApiResult<Blob>>;
 
 interface RequestDependencies {
   fetcher?: typeof fetch;
@@ -64,6 +65,43 @@ export function createAdminRequest({
     } finally {
       globalThis.clearTimeout(timer);
       init.signal?.removeEventListener('abort', cancel);
+    }
+  };
+}
+
+/** Authenticated binary read for admin-only image endpoints; never parses JSON as an image. */
+export function createAdminBlobRequest({
+  fetcher = globalThis.fetch,
+  userToken = getApiToken,
+  sessionToken = getAdminSessionToken,
+  timeoutMs = 15_000,
+}: RequestDependencies = {}): AdminBlobRequest {
+  return async (path, signal) => {
+    if (!path.startsWith('/api/admin/')) return { ok: false, status: 400, error: '后台图片路径无效。' };
+    const user = userToken(), session = sessionToken();
+    if (!user) return { ok: false, status: 401, error: '后台会话凭证不可用，请重新进入后台。' };
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    let timedOut = false;
+    const timer = globalThis.setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+    if (signal?.aborted) controller.abort();
+    else signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const response = await fetcher(path, {
+        method: 'GET', credentials: 'include', signal: controller.signal,
+        headers: { Accept: 'image/png, image/webp, image/jpeg', Authorization: `Bearer ${user}`, ...(session ? { 'X-Admin-Session': session } : {}) },
+      });
+      const contentType = response.headers.get('Content-Type')?.split(';', 1)[0]?.toLowerCase() ?? '';
+      if (!response.ok || !['image/png', 'image/webp', 'image/jpeg'].includes(contentType)) {
+        const payload = await response.json().catch(() => null) as { message?: unknown } | null;
+        return { ok: false, status: response.status, error: typeof payload?.message === 'string' ? payload.message : `预览不可用（${response.status}）。` };
+      }
+      return { ok: true, status: response.status, data: await response.blob() };
+    } catch {
+      return { ok: false, status: 0, error: timedOut ? '预览请求超时，请重试。' : signal?.aborted ? '预览请求已取消。' : '无法读取预览，请检查网络后重试。' };
+    } finally {
+      globalThis.clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
     }
   };
 }

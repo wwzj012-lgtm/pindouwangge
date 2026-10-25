@@ -5,7 +5,7 @@ import type { AdminRequest } from './adminRequest';
 import { adminLabel, adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
-import { CodeWriteLocks, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
+import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
 
 type Mode = 'logs' | 'codes';
 type LogKind = 'admin' | 'user' | 'error';
@@ -91,26 +91,27 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
   const [generation, setGeneration] = useState<GenerationDraft>({ days: 30, memberType: 1, count: 1, channel: '' });
   const [generationForm, setGenerationForm] = useState(0), [review, setReview] = useState<Review | null>(null), [reviewError, setReviewError] = useState('');
   const [result, setResult] = useState<{ codes: string[]; confirmed?: number } | null>(null), [copiedAll, setCopiedAll] = useState(false), [copyAllError, setCopyAllError] = useState('');
-  const [rowFeedback, setRowFeedback] = useState<Record<string, { error?: string; success?: string }>>({});
+  const [rowFeedback, setRowFeedback] = useState<Record<string, { error?: string; success?: string; warning?: string }>>({});
   const [lockView, setLockView] = useState({ batch: false, rows: new Set<string>() });
   const [closeResult, setCloseResult] = useState(false);
   const epoch = useRef(new LatestRequest()), redemptionEpoch = useRef(new LatestRequest()), locks = useRef(new CodeWriteLocks());
-  const loadCodes = useCallback(async () => {
+  const loadCodes = useCallback(async (): Promise<boolean> => {
     const version = epoch.current.next(); setLoading(true); setError('');
     try {
       const params = new URLSearchParams({ page: String(query.page), limit: '20' });
       if (query.search.trim()) params.set('search', query.search.trim()); if (query.channel.trim()) params.set('channel', query.channel.trim());
       if (query.memberType !== 'all') params.set('memberType', query.memberType); if (query.copied !== 'all') params.set('copied', query.copied); if (query.status !== 'all') params.set('status', query.status);
       const response = await request<CodePage>('/api/admin/codes?' + params);
-      if (!epoch.current.current(version)) return;
-      if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setError(requestError(response, '读取兑换码')); return; }
+      if (!epoch.current.current(version)) return false;
+      if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setError(requestError(response, '读取兑换码')); return false; }
       const lastPage = adminPageCount(response.data.total);
       if (query.page > lastPage) {
         setQuery(current => current === query ? { ...current, page: lastPage } : current);
-        return;
+        return false;
       }
       setSnapshot({ ...response.data, page: query.page });
-    } catch { if (epoch.current.current(version)) setError('兑换码读取失败；查询和上次列表保留。'); }
+      return true;
+    } catch { if (epoch.current.current(version)) setError('兑换码读取失败；查询和上次列表保留。'); return false; }
     finally { if (epoch.current.current(version)) setLoading(false); }
   }, [query, request]);
   const loadRedemptions = useCallback(async () => {
@@ -145,10 +146,10 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     try {
       const response = await request('/api/admin/update-code', { method: 'POST', body: JSON.stringify({ codeId: value.code.id, updates: value.updates }) });
       if (!response.ok) { setRowFeedback(previous => ({ ...previous, [value.code.id]: { error: requestError(response, value.label) } })); return; }
-      setSnapshot(previous => previous ? { ...previous, items: previous.items.map(code => code.id === value.code.id ? { ...code, ...value.updates } : code) } : previous);
-      setRowFeedback(previous => ({ ...previous, [value.code.id]: { success: value.label + '已确认。' } }));
+      const rereadSucceeded = await loadCodes();
+      setRowFeedback(previous => ({ ...previous, [value.code.id]: codeWriteFeedback(value.label, rereadSucceeded) }));
     } catch { setRowFeedback(previous => ({ ...previous, [value.code.id]: { error: value.label + '失败；原状态保留，可明确重试。' } })); }
-    finally { locks.current.endRow(value.code.id); syncLocks(); if (!locks.current.any()) void loadCodes(); }
+    finally { locks.current.endRow(value.code.id); syncLocks(); }
   };
   const confirm = async () => {
     if (!review) return;
@@ -175,9 +176,9 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     const busy = lockView.batch || lockView.rows.has(code.id), feedback = rowFeedback[code.id];
     return <div className="admin-code-actions"><div>
       <AdminButton data-code-copy={code.id} iconOnly aria-label="复制兑换码" disabled={busy} onClick={() => void copyCode(code)}><Copy aria-hidden="true" /></AdminButton>
-      <AdminButton data-code-mark={code.id} disabled={busy} busy={lockView.rows.has(code.id)} onClick={() => reviewRow(code, 'mark')}><KeyRound aria-hidden="true" />{code.copied ? '取消标记' : '发售标记'}</AdminButton>
+      <AdminButton data-code-mark={code.id} className={code.copied ? 'admin-code-mark-button--active' : ''} disabled={busy} busy={lockView.rows.has(code.id)} onClick={() => reviewRow(code, 'mark')}><KeyRound aria-hidden="true" />{code.copied ? '取消发售标记' : '标记为发售'}</AdminButton>
       <AdminButton data-code-delete={code.id} iconOnly variant="danger" aria-label={code.deletePendingAt ? '撤销删除申请' : '申请删除'} disabled={busy} onClick={() => reviewRow(code, code.deletePendingAt ? 'restore' : 'delete')}>{code.deletePendingAt ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}</AdminButton>
-    </div>{feedback?.error && <p className="admin-field-error" role="alert" data-code-feedback={code.id}>{feedback.error}</p>}{feedback?.success && <p className="admin-code-feedback" role="status" data-code-feedback={code.id}>{feedback.success}</p>}</div>;
+    </div>{feedback?.error && <p className="admin-field-error" role="alert" data-code-feedback={code.id}>{feedback.error}</p>}{feedback?.success && <p className="admin-code-feedback" role="status" data-code-feedback={code.id}>{feedback.success}</p>}{feedback?.warning && <p className="admin-code-feedback admin-code-feedback--pending" role="status" data-code-feedback={code.id}>{feedback.warning}</p>}</div>;
   };
   const anyWrite = lockView.batch || lockView.rows.size > 0;
   return <section>
@@ -202,7 +203,7 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     </div>
     <section className="admin-stage-panel" aria-busy={loading}><h2 className="admin-detail-title">兑换码列表</h2>{loading && snapshot && <p role="status" className="admin-result-caption">正在读取，旧列表保留…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
-        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} data-code-row={code.id}><td><span className="admin-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td>{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td>{code.copied ? '有发售标记' : '无发售标记'}{code.deletePendingAt && <small>删除等待至 {dateText(code.deletePendingAt)}</small>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
+        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} className={codeSaleRowClassName(code.copied)} data-code-row={code.id}><td><span className="admin-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td>{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td className="admin-code-sale-cell"><AdminBadge tone={code.copied ? 'warning' : 'neutral'}>{codeSaleLabel(code.copied)}</AdminBadge>{code.copied && <small>仅表示发售标记，不代表真实付款</small>}{code.deletePendingAt && <><AdminBadge tone="danger">删除等待</AdminBadge><small>至 {dateText(code.deletePendingAt)}</small></>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
         <Pager page={snapshot.page ?? query.page} total={snapshot.total} loading={loading || anyWrite || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
       </> : <AdminEmptyState title="没有匹配兑换码" description="调整已提交筛选或重置后重试。" />}
     </section>

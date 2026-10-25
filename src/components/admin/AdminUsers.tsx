@@ -5,7 +5,7 @@ import { AdminPasswordReset } from './AdminPasswordReset';
 import type { AdminRequest } from './adminRequest';
 import { adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
-import { LatestRequest, dateText, emptyUserQuery, memberLabel, membershipDraft, membershipPresentation, membershipProposal, requestError, returnedExpiry, userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery, type UserStatus } from './adminUserModel';
+import { LatestRequest, userOverview, dateText, emptyUserQuery, memberLabel, membershipDraft, membershipPresentation, membershipProposal, requestError, returnedExpiry, userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery, type UserStatus } from './adminUserModel';
 
 const statusLabel = (status?: string) => status === 'banned' ? '已封禁' : status === 'suspended' ? '已暂停' : status === 'active' ? '正常' : '未提供';
 function StatusBadge({ status }: { status?: string }) { return <AdminBadge tone={status === 'banned' ? 'danger' : status === 'suspended' ? 'warning' : status === 'active' ? 'success' : 'neutral'}>{statusLabel(status)}</AdminBadge>; }
@@ -13,6 +13,10 @@ interface UsersPage { items: AdminUser[]; total: number; limit: number; offset: 
 interface Snapshot extends UsersPage { query: UserQuery; }
 
 export function AdminUsers({ request }: { request: AdminRequest }) {
+  const { currentUser } = useAuth();
+  return currentUser ? <AdminUsersForAccount key={currentUser.uid} request={request} /> : null;
+}
+function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string }) {
   const { currentUser } = useAuth();
   const [resetUser, setResetUser] = useState<AdminUser | null>(null);
   const [draft, setDraft] = useState(emptyUserQuery);
@@ -91,7 +95,8 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
   const [busy, setBusy] = useState(false), [needsRead, setNeedsRead] = useState(false), [success, setSuccess] = useState('');
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null), [closeConfirm, setCloseConfirm] = useState(false);
   const [formVersion, setFormVersion] = useState(0);
-  const epoch = useRef(new LatestRequest()), writing = useRef(false), initial = useRef(true);
+  const epoch = useRef(new LatestRequest()), writing = useRef(false), initial = useRef(true), alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   const read = useCallback(async (): Promise<boolean> => {
     const version = epoch.current.next(); setLoading(true); setError('');
     try {
@@ -112,12 +117,13 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
     if (writing.current || needsRead) return; writing.current = true; setBusy(true); setError(''); setSuccess('');
     try {
       const result = await request(path, init);
+      if (!alive.current) return;
       if (!result.ok) { setError(requestError(result, message)); return; }
       reset(); setConfirmation(null); setSuccess(message + '已成功。');
-      if (!(await read())) { setNeedsRead(true); setSuccess(message + '已成功，但详情刷新失败；请重试读取，不要重复提交。'); }
-      onChanged();
-    } catch { setError(message + '失败，输入保持不变，可重试。'); }
-    finally { writing.current = false; setBusy(false); }
+      if (!(await read()) && alive.current) { setNeedsRead(true); setSuccess(message + '已成功，但详情刷新失败；请重试读取，不要重复提交。'); }
+      if (alive.current) onChanged();
+    } catch { if (alive.current) setError(message + '失败，输入保持不变，可重试。'); }
+    finally { writing.current = false; if (alive.current) setBusy(false); }
   };
   const submitConfirmation = () => {
     if (!confirmation || !detail) return;
@@ -138,7 +144,8 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
       {success && <p className="admin-success-message" role="status">{success}</p>}
       {error && <AdminErrorState title="操作尚未完成" message={error} retry={() => void read()} busy={busy || loading} />}
       {!detail ? loading ? <AdminLoading label="正在读取用户详情…" /> : <AdminEmptyState title="无法读取该用户" description="接口未返回详情；不会按列表信息编造。" /> : <>
-        <section className="admin-detail-section"><h2>概况</h2><dl className="admin-detail-facts"><div><dt>账号</dt><dd>{detail.user.email}</dd></div><div><dt>UID</dt><dd className="admin-mono">{detail.user.uid}</dd></div><div><dt>账号状态</dt><dd><StatusBadge status={detail.moderation.status} /></dd></div><div><dt>角色有效权益</dt><dd>{view.effective}</dd></div><div><dt>创建时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div><div><dt>图纸数量</dt><dd>{detail.aggregates?.works ?? detail.workCount ?? '—'}</dd></div><div><dt>最近活动</dt><dd>{dateText(detail.user.lastActiveAt)}（未提供时不推断）</dd></div></dl><div className="admin-reset-entry">{resetEntry(detail.user, disabled)}</div></section>
+        <UserOperationsOverview detail={detail} />
+        <section className="admin-detail-section"><h2>账号安全</h2><div className="admin-reset-entry">{resetEntry(detail.user, disabled)}</div></section>
         <section className="admin-detail-section"><h2>会员权益</h2><div className="admin-info-box"><p>当前接口付费字段：<strong>{view.paid}</strong></p><p>当前到期值：{view.expiry}</p>{detail.user.role === 'admin' && <p>Pro来自管理员角色，不代表付费Pro，也不会写回付费字段。</p>}{view.caveat && <p>{view.caveat}</p>}</div>
           <div className="admin-form-grid" key={formVersion}>
             <label>将提交的付费级别<select data-membership-type value={draft.type} disabled={disabled} onChange={event => setDraft(current => ({ ...current, type: Number(event.target.value) as 0 | 1 | 2 }))}>{draft.type === '' && <option value="">未提供，请选择</option>}<option value={0}>免费</option><option value={1}>VIP</option><option value={2}>商家 Pro</option></select></label>
@@ -169,4 +176,23 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
     </AdminConfirmDialog>
     <AdminConfirmDialog open={closeConfirm} title="放弃未保存编辑？" description={'对象：' + userLabel(user) + '。关闭会丢弃尚未提交的权益、备注或限制输入。'} confirmLabel="放弃并关闭" onClose={() => setCloseConfirm(false)} onConfirm={onClose} />
   </>;
+}
+
+export function UserOperationsOverview({ detail }: { detail: UserDetail }) {
+  const summary = userOverview(detail), membership = membershipPresentation(detail.user);
+  return <section className="admin-detail-section" aria-label="用户详情运营总览"><h2>用户详情运营总览</h2>
+    <dl className="admin-detail-facts">
+      <div><dt>账号</dt><dd>{detail.user.email}</dd></div><div><dt>UID</dt><dd className="admin-mono">{detail.user.uid}</dd></div>
+      <div><dt>可用积分（只读）</dt><dd data-user-credit-balance>{summary.available}</dd></div>
+      <div><dt>冻结积分（只读）</dt><dd>{summary.held}</dd></div>
+      <div><dt>积分账户更新时间</dt><dd>{dateText(detail.credits?.updatedAt)}</dd></div>
+      <div><dt>图纸数（未删除）</dt><dd>{summary.works}</dd></div><div><dt>公开社区帖数</dt><dd>{summary.posts}</dd></div>
+      <div><dt>最近内容活动</dt><dd>{summary.activity}</dd></div>
+      <div><dt>会员有效权益</dt><dd>{membership.effective}</dd></div><div><dt>付费级别 / 到期</dt><dd>{membership.paid} / {membership.expiry}</dd></div>
+      <div><dt>账号限制</dt><dd><StatusBadge status={detail.moderation.status} />{detail.moderation.reason && <p>{detail.moderation.reason}</p>}<p>限制到期：{detail.moderation.expiresAt == null ? '无到期时间' : dateText(detail.moderation.expiresAt)}</p></dd></div>
+      <div><dt>注册方式 / 当前认证来源</dt><dd>{summary.provider}</dd></div>
+      <div><dt>注册时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div>
+    </dl>
+    <p className="admin-stage-footnote">{detail.activityScope || '活动统计口径未提供。'}；当前认证来源不代表历史注册方式。积分仅展示账户记录，不触发结算或调整。</p>
+  </section>;
 }

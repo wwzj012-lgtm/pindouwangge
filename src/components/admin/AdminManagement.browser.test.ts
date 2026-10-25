@@ -34,7 +34,7 @@ it.skipIf(!browser).each([1280, 390])('verifies current admin Chinese and manage
         builder.onResolve({ filter: /utils\/api$/ }, () => ({ path: 'api', namespace: 'offline-admin' }));
         builder.onLoad({ filter: /.*/, namespace: 'offline-admin' }, (args: any) => ({ contents: args.path === 'auth'
           ? 'export const useAuth = () => globalThis.__adminFixtureAuth;'
-          : 'export const getApiToken=()=>null;export const getAdminSessionToken=()=>null;export const clearAdminSession=()=>{};export const setAdminSessionToken=()=>{};' }));
+          : 'export const getApiToken=()=>"fixture-user";export const getAdminSessionToken=()=>"fixture-admin";export const clearAdminSession=()=>{};export const setAdminSessionToken=()=>{};' }));
         builder.onLoad({ filter: /\.css$/ }, () => ({ contents: '', loader: 'text' }));
       } }],
     });
@@ -45,7 +45,7 @@ it.skipIf(!browser).each([1280, 390])('verifies current admin Chinese and manage
     const script = bundle.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
     const page = join(working, 'admin.html');
     writeFileSync(page, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none';">
+      <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob:; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none';">
       <style>body{margin:0}*{box-sizing:border-box}${css}</style><body><div id="root"></div><script>${script}</script></body></html>`);
     const harness = join(working, 'harness.html');
     writeFileSync(harness, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><body style="margin:0;overflow:hidden"><iframe title="后台离线验证" style="display:block;width:${width}px;height:100vh;border:0" src="${pathToFileURL(page).href}?section=users"></iframe><pre hidden id="result">pending</pre></body></html>`);

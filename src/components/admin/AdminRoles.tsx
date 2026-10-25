@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useAuth } from '../../context/AuthContext';
 import type { AdminRequest } from './adminRequest';
-import { adminRoleLabel, adminPermissionLabel } from './adminPresentation';
+import { AdminPermissionTree } from './AdminPermissionTree';
+import { adminRoleLabel } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, SYSTEM_ROLE_MINIMUMS, dateText, permissionDelta, requestError } from './adminUserModel';
+import { unknownGrantedCodes } from './adminPermissionTreeModel';
 
 interface Role { id: string; code: string; displayName: string; description: string; system: boolean; permissionCount: number; }
 interface Permission { id: string; code: string; displayName: string; description: string; }
@@ -14,6 +17,7 @@ type Pending = { kind: 'save'; role: Role; codes: string[]; added: string[]; rem
   | { kind: 'select'; id: string } | { kind: 'reload' };
 
 export function AdminRoles({ request }: { request: AdminRequest }) {
+  const { currentUser } = useAuth();
   const [roles, setRoles] = useState<Role[]>([]), [permissions, setPermissions] = useState<Permission[] | null>(null);
   const [assignments, setAssignments] = useState<Assignment[] | null>(null), [selectedId, setSelectedId] = useState('');
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -28,7 +32,7 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
   const current = selection?.id === selectedId ? selection : null;
   const delta = permissionDelta(current?.before ?? [], current?.codes ?? []);
   const dirty = delta.added.length > 0 || delta.removed.length > 0;
-  const locked = role?.code === 'super_admin' ? permissions?.map(p => p.code) ?? [] : SYSTEM_ROLE_MINIMUMS[role?.code ?? ''] ?? [];
+  const locked = role?.code === 'super_admin' ? permissions?.map(p => p.code) ?? [] : role?.system ? SYSTEM_ROLE_MINIMUMS[role.code] ?? [] : [];
 
   const load = useCallback(async () => {
     const version = epoch.current.next(); setLoading(true); setCatalogError(''); setAssignmentError('');
@@ -69,6 +73,7 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
   const retryPermissions = () => { if (dirty) setPending({ kind: 'reload' }); else void readPermissions(); };
   const assigned = assignments?.some(item => item.userUid === uid.trim() && item.roleId === assignmentRoleId) || confirmedGrants.has(uid.trim() + ':' + assignmentRoleId);
   const grantRole = roles.find(item => item.id === assignmentRoleId);
+  const selfTarget = uid.trim() !== '' && uid.trim() === currentUser?.uid;
   const confirm = async () => {
     if (!pending || writing.current) return;
     if (pending.kind === 'select') { setSelectedId(pending.id); setPending(null); return; }
@@ -89,7 +94,10 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
   };
   const saveReview = () => {
     if (!role || !current || !dirty || role.code === 'super_admin' || busy || permissionLoading || !permissions) return;
+    const missingLocked = locked.filter(code => !permissions.some(permission => permission.code === code));
+    if (missingLocked.length > 0) { setActionError('服务端最低权限目录未完整返回；本次不保存，避免覆盖真实授权。'); return; }
     if (locked.some(code => !current.codes.has(code))) { setActionError('系统最低权限必须保留；不会自动补造授权。'); return; }
+    if (unknownGrantedCodes(permissions, current.codes).length > 0) { setActionError('角色包含目录外授权，当前目录不完整；本次不保存，避免误删或提交未知编码。'); return; }
     setActionError(''); setPending({ kind: 'save', role, codes: [...current.codes].sort(), ...delta });
   };
   return <section className="admin-roles-page">
@@ -100,20 +108,27 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
     <div className="admin-roles-layout"><aside className="admin-stage-panel admin-role-list" aria-label="后台角色列表"><h2>角色列表</h2>
       {roles.length ? roles.map(item => <button type="button" key={item.id} data-role-select={item.id} className="admin-role-choice" aria-pressed={selectedId === item.id} disabled={busy} onClick={() => choose(item.id)}><strong>{adminRoleLabel(item.code,item.displayName)}</strong><small className="admin-mono">{item.code}</small><small>目录返回 {item.permissionCount} 项权限{item.system ? ' · 系统角色' : ''}</small></button>) : loading ? <AdminLoading label="正在读取角色…" /> : <AdminEmptyState title="暂无可读取角色" />}
     </aside><section className="admin-stage-panel admin-role-permissions"><AdminToolbar actions={<><AdminButton onClick={retryPermissions} disabled={!role || busy || permissionLoading}>重读权限</AdminButton><AdminButton data-role-save variant="primary" disabled={!role || !current || !permissions || !dirty || busy || permissionLoading || role.code === 'super_admin'} onClick={saveReview}>保存权限</AdminButton></>}><h2>{role ? adminRoleLabel(role.code,role.displayName) : '选择角色'}</h2><p>{role?.description && /[\u3400-\u9fff]/u.test(role.description) ? role.description : '具体能力以服务端配置为准。'}</p></AdminToolbar>
-      {role?.code === 'super_admin' && <p className="admin-info-box">超级管理员角色只读，必须保留全部权限，不可削权。</p>}
-      {role?.code !== 'super_admin' && locked.length > 0 && <p className="admin-info-box">系统最低授权：{locked.join('、')}。这些选项不可取消。</p>}
+      {role?.code === 'super_admin' && <p className="admin-info-box">超级管理员角色只读，必须保留全部目录权限，不可削权。</p>}
+      {role?.code !== 'super_admin' && locked.length > 0 && <p className="admin-info-box">系统最低授权共 {locked.length} 项，已在树中锁定不可取消。</p>}
+      {role?.code !== 'super_admin' && locked.some(code => !permissions?.some(permission => permission.code === code)) && <p className="admin-warning" role="alert">服务端最低权限目录项未完整返回；为避免覆盖或降权，当前不能保存角色配置。</p>}
       {permissionError && <AdminErrorState title="角色权限未更新" message={permissionError} retry={retryPermissions} busy={permissionLoading || busy} />}
-      {permissionLoading ? <AdminLoading label="正在读取所选角色权限…" /> : current && permissions ? <div className="admin-permission-grid">{permissions.map(permission => <label className="admin-permission-option" key={permission.id}><input data-permission-code={permission.code} type="checkbox" checked={current.codes.has(permission.code)} disabled={busy || role?.code === 'super_admin' || locked.includes(permission.code)} onChange={event => setSelection(value => { if (!value || value.id !== selectedId) return value; const codes = new Set(value.codes); if (event.target.checked) codes.add(permission.code); else codes.delete(permission.code); return { ...value, codes }; })} /><span><strong>{adminPermissionLabel(permission.code,permission.displayName)}</strong><small className="admin-mono">{permission.code}</small>{locked.includes(permission.code) && <small>系统最低授权</small>}</span></label>)}</div> : <AdminEmptyState title="尚无可编辑的权限明细" description="必须读取目录与该角色的实际配置，不会把目录当作已授权。" />}
+      {permissionLoading ? <AdminLoading label="正在读取所选角色权限…" /> : current && permissions ? <AdminPermissionTree
+        permissions={permissions}
+        selectedCodes={current.codes}
+        lockedCodes={locked}
+        disabled={busy || role?.code === 'super_admin' || !role}
+        onChange={codes => setSelection(value => value?.id === selectedId ? { ...value, codes } : value)}
+      /> : <AdminEmptyState title="尚无可编辑的权限明细" description="必须读取目录与该角色的实际配置，不会把目录当作已授权。" />}
       {dirty && <p className="admin-result-caption" role="status">未保存：新增 {delta.added.length} 项 / 移除 {delta.removed.length} 项。保存前将列出具体差异。</p>}
     </section></div>
     <section className="admin-stage-panel"><AdminToolbar><h2>管理员账号角色</h2><p>只管理指定UID的后台角色关系，不改写旧角色字段或会员资格。</p></AdminToolbar>
       {assignmentError && <AdminErrorState title="账号角色读取失败" message={assignmentError + ' 其它已读取目录仍可使用。'} retry={() => void load()} busy={loading} />}
-      <form className="admin-role-grant-form" key={formVersion} onSubmit={event => { event.preventDefault(); if (uid.trim() && grantRole && !assigned && !busy) { setActionError(''); setPending({ kind: 'grant', uid: uid.trim(), role: grantRole }); } }}>
+      <form className="admin-role-grant-form" key={formVersion} onSubmit={event => { event.preventDefault(); if (uid.trim() && grantRole && !assigned && !busy && !selfTarget) { setActionError(''); setPending({ kind: 'grant', uid: uid.trim(), role: grantRole }); } }}>
         <label>目标用户UID<input data-role-user value={uid} maxLength={128} disabled={busy} onChange={event => setUid(event.target.value)} placeholder="输入现有用户UID" /></label>
         <label>后台角色<select data-role-assignment value={assignmentRoleId} disabled={busy || !roles.length} onChange={event => setAssignmentRoleId(event.target.value)}>{roles.map(item => <option key={item.id} value={item.id}>{adminRoleLabel(item.code,item.displayName)}</option>)}</select></label>
-        <AdminButton data-role-grant type="submit" variant="primary" disabled={busy || !uid.trim() || !grantRole || Boolean(assigned)}>查看授权并确认</AdminButton>
-      </form>{assigned && <p className="admin-stage-footnote">服务端列表或本次已成功请求表明该关系已存在，不重复授予。</p>}
-      {assignments === null ? loading ? <AdminLoading label="正在读取账号角色…" /> : <AdminEmptyState title="尚无成功读取结果" /> : assignments.length ? <div className="admin-assignment-table-wrap"><table className="admin-stage-table" aria-label="管理员账号角色"><thead><tr><th>用户UID</th><th>后台角色</th><th>授予时间</th><th>操作</th></tr></thead><tbody>{assignments.map(item => <tr key={item.userUid + ':' + item.roleId}><td className="admin-mono">{item.userUid}</td><td><AdminBadge>{adminRoleLabel(item.roleCode,item.roleName)}</AdminBadge><small className="admin-mono">{item.roleCode}</small></td><td>{dateText(item.assignedAt)}</td><td><AdminButton data-role-revoke={item.userUid + ':' + item.roleId} variant="danger" disabled={busy || confirmedRevocations.has(item.userUid + ':' + item.roleId)} onClick={() => { setActionError(''); setPending({ kind: 'revoke', assignment: item }); }}>撤销此角色</AdminButton></td></tr>)}</tbody></table></div> : <AdminEmptyState title="暂无管理员角色关系" description="授予前将再次确认目标UID与角色。" />}
+        <AdminButton data-role-grant type="submit" variant="primary" disabled={busy || !uid.trim() || !grantRole || Boolean(assigned) || selfTarget}>查看授权并确认</AdminButton>
+      </form>{selfTarget && <p className="admin-field-error" role="alert">不能为当前登录账号自行授予或提升后台角色。</p>}{assigned && <p className="admin-stage-footnote">服务端列表或本次已成功请求表明该关系已存在，不重复授予。</p>}
+      {assignments === null ? loading ? <AdminLoading label="正在读取账号角色…" /> : <AdminEmptyState title="尚无成功读取结果" /> : assignments.length ? <div className="admin-assignment-table-wrap"><table className="admin-stage-table" aria-label="管理员账号角色"><thead><tr><th>用户UID</th><th>后台角色</th><th>授予时间</th><th>操作</th></tr></thead><tbody>{assignments.map(item => <tr key={item.userUid + ':' + item.roleId}><td className="admin-mono">{item.userUid}</td><td><AdminBadge>{adminRoleLabel(item.roleCode,item.roleName)}</AdminBadge><small className="admin-mono">{item.roleCode}</small></td><td>{dateText(item.assignedAt)}</td><td><AdminButton data-role-revoke={item.userUid + ':' + item.roleId} variant="danger" disabled={busy || confirmedRevocations.has(item.userUid + ':' + item.roleId) || item.userUid === currentUser?.uid} title={item.userUid === currentUser?.uid ? '不能撤销当前账号自己的后台角色' : undefined} onClick={() => { setActionError(''); setPending({ kind: 'revoke', assignment: item }); }}>撤销此角色</AdminButton>{item.userUid === currentUser?.uid && <small className="admin-muted">当前账号 · 防自锁</small>}</td></tr>)}</tbody></table></div> : <AdminEmptyState title="暂无管理员角色关系" description="授予前将再次确认目标UID与角色。" />}
     </section>
     <AdminConfirmDialog open={Boolean(pending)} title={pending?.kind === 'save' ? '确认角色权限差异' : pending?.kind === 'grant' ? '确认授予后台角色' : pending?.kind === 'revoke' ? '确认撤销后台角色' : '放弃未保存权限？'} description={pending?.kind === 'save' ? adminRoleLabel(pending.role.code,pending.role.displayName) + '（' + pending.role.code + '）' : pending?.kind === 'grant' ? '目标UID：' + pending.uid + '；角色：' + adminRoleLabel(pending.role.code,pending.role.displayName) : pending?.kind === 'revoke' ? '目标UID：' + pending.assignment.userUid + '；角色：' + adminRoleLabel(pending.assignment.roleCode,pending.assignment.roleName) : '取消会保留当前选择，确认才切换或重读。'} confirmLabel="确认操作" pending={busy} onClose={() => { if (!writing.current) setPending(null); }} onConfirm={() => void confirm()}>
       {pending?.kind === 'save' && <div className="admin-change-summary"><p>新增：{pending.added.join('、') || '无'}</p><p>移除：{pending.removed.join('、') || '无'}</p><p>影响：更新该角色的权限集合；不改变其它角色，不把目录当作当前操作者权限范围。</p></div>}

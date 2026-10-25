@@ -217,10 +217,16 @@ export async function runAdminPasswordResetChecks() {
   await click('完成并关闭');
 
   const detail = Array.from(document.querySelectorAll<HTMLButtonElement>('[data-user-open="target-user"]')).find(visible)!;
+  const targetDetailOpen = () => {
+    const drawer = top();
+    return drawer.matches('[role="dialog"].admin-user-drawer')
+      && drawer.querySelector('[data-user-reset-password="target-user"]') !== null
+      && drawer.querySelector('[data-user-note]') !== null;
+  };
   await flush(() => detail.click());
-  assert(top().textContent?.includes('概况'), 'current user detail drawer opened');
+  assert(targetDetailOpen(), 'current user detail drawer opened');
   await click('重置密码'); assert(top().textContent?.includes('重置用户密码'), 'detail reset entry opens current reset UI');
-  await click('取消'); assert(top().textContent?.includes('概况'), 'cancel returns to original user detail');
+  await click('取消'); assert(targetDetailOpen(), 'cancel returns to original user detail');
   const note = top().querySelector<HTMLTextAreaElement>('[data-user-note]')!;
   await flush(() => {
     note.focus();

@@ -1,11 +1,16 @@
 import type { ApiResult } from './api';
-import { apiDelete, apiGet, apiPost, apiPostBlob, apiPublicUrl, apiPut } from './api';
+import { apiDelete, apiGet, apiPost, apiPostBlob, apiPublicUrl, apiPut, captureApiSessionGuard } from './api';
+import { invalidateCommunityFeed } from './communityFeedEvents';
 
 export interface CommunityPost {
   id: string;
   assetId: string;
   imageUrl: string;
   title: string;
+  /** Optional only for legacy callers; normalized API responses always contain tags. */
+  tags?: string[];
+  description?: string;
+  visibility?: CommunityPostVisibility;
   workId?: string | null;
   publishedAt: number;
   author: {
@@ -80,6 +85,9 @@ function publicAssetUrl(assetId: string): string {
 function normalizePost(post: CommunityPostResponse): CommunityPost {
   return {
     ...post,
+    tags: Array.isArray(post.tags)
+      ? [...new Set(post.tags.filter((tag): tag is string => typeof tag === 'string').map((tag) => tag.trim()).filter(Boolean))]
+      : [],
     imageUrl: publicAssetUrl(post.assetId),
     author: { ...post.author, photoUrl: post.author.photoUrl || null },
   };
@@ -157,12 +165,21 @@ export function publishCommunityPost(
   legacyAssetId?: string,
   legacyWorkId?: string,
 ): Promise<CommunityPublishResult> {
+  const isSessionCurrent = captureApiSessionGuard();
+  const complete = (result: CommunityPublishResult): CommunityPublishResult => {
+    const post = result.data?.post;
+    if (result.ok && typeof post?.id === 'string' && post.id.length > 0
+      && (post.visibility === 'public' || post.visibility === 'private') && isSessionCurrent()) {
+      invalidateCommunityFeed();
+    }
+    return result;
+  };
   if (typeof inputOrTitle === 'string') {
     return apiPost<CommunityPublishResult['data']>('/api/community/posts', {
       title: inputOrTitle,
       assetId: legacyAssetId ?? '',
       ...(legacyWorkId ? { workId: legacyWorkId } : {}),
-    });
+    }).then(complete);
   }
   const input = inputOrTitle;
   return apiPost<CommunityPublishResult['data']>('/api/community/posts', {
@@ -174,19 +191,30 @@ export function publishCommunityPost(
     },
     ...(input.workId ? { workId: input.workId } : {}),
     ...(input.assetId ? { assetId: input.assetId } : {}),
-  });
+  }).then(complete);
 }
 
-export function setCommunityPostVisibility(
+export async function setCommunityPostVisibility(
   postId: string,
   visibility: CommunityPostVisibility,
 ): Promise<ApiResult<CommunityPublicationMutationResult>> {
-  return apiPut<CommunityPublicationMutationResult>('/api/community/posts/visibility', {
+  const isSessionCurrent = captureApiSessionGuard();
+  const result = await apiPut<CommunityPublicationMutationResult>('/api/community/posts/visibility', {
     id: postId,
     visibility,
   });
+  if (result.ok && result.data?.id === postId && result.data.visibility === visibility && isSessionCurrent()) {
+    invalidateCommunityFeed();
+  }
+  return result;
 }
 
-export function withdrawCommunityPost(postId: string): Promise<ApiResult<CommunityPublicationMutationResult>> {
-  return apiDelete<CommunityPublicationMutationResult>('/api/community/posts', { id: postId });
+export async function withdrawCommunityPost(postId: string): Promise<ApiResult<CommunityPublicationMutationResult>> {
+  const isSessionCurrent = captureApiSessionGuard();
+  const result = await apiDelete<CommunityPublicationMutationResult>('/api/community/posts', { id: postId });
+  if (result.ok && result.data?.withdrawn === true
+    && (result.data.id === undefined || result.data.id === postId) && isSessionCurrent()) {
+    invalidateCommunityFeed();
+  }
+  return result;
 }

@@ -217,7 +217,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     className="group relative aspect-square min-w-0 cursor-pointer overflow-hidden rounded-2xl border border-white/30 bg-purple-900/50 text-left shadow-inner outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white"
                     title={`转换示例：${example.name}`}
                   >
-                    <img src={example.url} alt={example.name} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                    <img src={example.url} alt={example.name} decoding="async" fetchPriority={example.id === 'batiao-cat' ? 'high' : 'low'} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
                     <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-2 text-[11px] font-bold text-white">
                       示例：{example.name}
                     </span>
@@ -364,7 +364,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <button key={post.id} type="button" onClick={() => onNavigateTab('community')} aria-label={`在豆社查看：${post.title || '未命名作品'}`} className="group min-w-0 overflow-hidden rounded-2xl border border-purple-100 bg-white text-left transition-shadow duration-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-purple-600">
                     <div className="relative aspect-square bg-purple-50 flex items-center justify-center">
                       <ImageIcon aria-hidden="true" className="absolute h-8 w-8 text-purple-300" />
-                      <img src={post.imageUrl} alt={post.title || '社区作品'} loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="relative h-full w-full object-contain" />
+                      <img src={post.imageUrl} alt={post.title || '社区作品'} loading="lazy" decoding="async" fetchPriority="low" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="relative h-full w-full object-contain" />
                     </div>
                     <div className="p-3 space-y-2">
                       <h3 className="truncate text-sm font-bold text-purple-950">{post.title || '未命名作品'}</h3>
@@ -397,7 +397,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     <button type="button" onClick={() => onNavigateTab('community')} aria-label={`去豆社发现创作者：${author.displayName || '社区创作者'}`} className="flex min-h-11 w-full min-w-0 items-center gap-3 rounded-xl p-2 text-left hover:bg-purple-50 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-purple-600">
                       <span className="relative flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-purple-100 text-sm font-bold text-purple-700">
                         {(author.displayName || '豆').slice(0, 1)}
-                        {author.photoUrl && <img src={author.photoUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="absolute inset-0 h-full w-full object-cover" />}
+                        {author.photoUrl && <img src={author.photoUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="absolute inset-0 h-full w-full object-cover" />}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm font-bold text-purple-900">{author.displayName || '社区创作者'}</span>
                       <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-purple-400" />

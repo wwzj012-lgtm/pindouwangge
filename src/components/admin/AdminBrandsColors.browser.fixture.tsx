@@ -115,8 +115,9 @@ export async function runAdminBrandsColorsChecks() {
   assert(document.querySelector('[role=alert]') && button('新增颜色').disabled, 'failed read is explicit and blocks stale writes');
   failRead = false; await click(button('刷新目录'));
   const beforeReadonly = writes.length;
-  await flush(() => root.render(<div className="admin-root" style={{ padding: 16 }}><AdminBrandsColors request={request} readOnly /></div>));
+  await flush(() => root.render(<div className="admin-root" style={{ padding: 16 }}><AdminBrandsColors request={request} readOnly operatorUid="read-only-fixture" /></div>));
   assert(ariaButton('新增品牌').disabled && button('编辑品牌').disabled && button('新增颜色').disabled, 'read-only account has no write actions');
+  assert(text().includes('read-only-fixture') && text().includes('colors.read') && text().includes('colors.write'), 'read-only account shows the effective brand permissions');
   assert(writes.length === beforeReadonly, 'read-only rendering sends no writes');
   assert(document.documentElement.scrollWidth <= innerWidth + 1, 'responsive page has no horizontal overflow');
   assert(browserErrors.length === 0, 'browser recorded no runtime errors');

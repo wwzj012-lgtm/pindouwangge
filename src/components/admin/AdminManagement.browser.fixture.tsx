@@ -14,9 +14,9 @@ export async function runAdminManagementChecks() {
   const assert = (value: unknown, label: string) => { if (!value) throw new Error(label); checks.push(label); };
   const auth = { currentUser: { uid: 'operator', email: 'operator@example.invalid', displayName: '测试管理员', role: 'user' } as Record<string, unknown> | null };
   (globalThis as any).__adminFixtureAuth = auth;
-  const requests: { path: string; method: string; body: any }[] = [];
+  const requests: { path: string; method: string; body: any; headers: Headers }[] = [];
   let sessionStatus = 200, readStatus = 200, writeStatus: number | 'network' = 200;
-  let creditsRead = true, creditsAdjust = true, capabilityUid: string | null = null;
+  let creditsRead = true, creditsAdjust = true, colorsRead = true, colorsWrite = true, capabilityUid: string | null = null;
   let loseBrandResponse = false, brandReceiptVisible = false;
   const brandReceipts = new Map<string, { operationId: string; brandCode: string; version: number; colorId: null; action: string }>();
   const brandCatalog = [{ code: 'MARD', name: 'MARD 测试品牌', builtin: true, enabled: true, protected: true, version: 1, colorCount: 1, colors: [{ id: 'MARD_A1', code: 'A1', name: '测试浅黄', hex: '#FAF4C8', screenReferenceOnly: false }] }];
@@ -41,10 +41,10 @@ export async function runAdminManagementChecks() {
   globalThis.fetch = async (input, init) => {
     const path = String(input), method = init?.method ?? 'GET', body = init?.body ? JSON.parse(String(init.body)) : undefined;
     if (!path.startsWith('/api/admin/') && path !== '/api/brands/catalog') throw new Error('Unexpected external request');
-    requests.push({ path, method, body });
+    requests.push({ path, method, body, headers: new Headers(init?.headers) });
     const url = new URL(path, 'https://offline.invalid'), endpoint = url.pathname;
     if (endpoint === '/api/admin/session') return response({ authenticated: sessionStatus === 200 }, sessionStatus);
-    if (endpoint === '/api/admin/capabilities') return response({ operatorUid: capabilityUid ?? auth.currentUser?.uid, capabilities: { 'colors.read': true, 'colors.write': true, 'credits.read': creditsRead, 'credits.adjust': creditsAdjust } });
+    if (endpoint === '/api/admin/capabilities') return response({ operatorUid: capabilityUid ?? auth.currentUser?.uid, capabilities: { 'colors.read': colorsRead, 'colors.write': colorsWrite, 'credits.read': creditsRead, 'credits.adjust': creditsAdjust } });
     if (method !== 'GET') {
       if (holdWrite) await new Promise<void>(resolve => { releaseWrite = resolve; });
       if (endpoint === '/api/admin/brands' && method === 'POST' && loseBrandResponse) {
@@ -256,6 +256,9 @@ export async function runAdminManagementChecks() {
 
   await mount('brands-alias', 'colors-assets');
   assert(Boolean(document.querySelector('[data-admin-module="brands"]')) && text().includes('MARD 测试品牌'), 'legacy colors URL opens the single real brand entry');
+  assert(new URL(window.location.href).searchParams.get('section') === 'brands', 'legacy colors URL is canonicalized to the brand management section');
+  const capabilityRequest = requests.filter(item => item.path === '/api/admin/capabilities').at(-1)!;
+  assert(capabilityRequest.headers.get('Authorization') === 'Bearer fixture-user' && capabilityRequest.headers.get('X-Admin-Session') === 'fixture-admin', 'AdminConsole capability probe uses the active user and admin session');
   assert(document.querySelectorAll('.admin-sidebar [data-admin-section="brands"]').length === 1 && !document.querySelector('[data-admin-section="colors-assets"]'), 'no duplicate color-card navigation remains');
   ensureNames(); noOverflow('brand catalog');
   const beforeBrandWrite = writes().length;
@@ -271,6 +274,36 @@ export async function runAdminManagementChecks() {
   await click('核对结果 / 重试同一操作');
   assert(text().includes('操作已确认保存') && text().includes('已恢复品牌') && !text().includes('模块连接失败'), 'confirmed matching brand receipt clears stale shell notice after successful catalog reread');
   assert(writes().length === beforeBrandWrite + 1 && brandCatalog.filter(item => item.code === 'RECOVERED').length === 1, 'brand receipt recovery performs no repeat mutation or creation');
+  const recoveredMutation = requests.filter(item => item.path === '/api/admin/brands' && item.method === 'POST').at(-1)!;
+  assert(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(recoveredMutation.body.operationId), 'AdminConsole brand create sends a stable UUID operationId');
+  assert(recoveredMutation.headers.get('Authorization') === 'Bearer fixture-user' && recoveredMutation.headers.get('X-Admin-Session') === 'fixture-admin', 'AdminConsole brand write sends the user and admin session credentials');
+
+  const writesBeforeReadOnlyBrand = writes().length;
+  colorsWrite = false;
+  await mount('brands-read-only', 'colors-assets');
+  assert(Boolean(document.querySelector('.admin-brands')) && text().includes('colors.read') && text().includes('colors.write') && text().includes('联系角色授权人'), 'read-only operator sees explicit server permission state and next step');
+  assert(button('新增品牌').disabled && button('编辑品牌').disabled && button('新增颜色').disabled, 'server colors.write=false keeps every brand mutation disabled');
+  assert(button('编辑颜色 A1').disabled && button('删除颜色 A1').disabled, 'server colors.write=false disables child color edits and deletes');
+  await click('新增品牌');
+  assert(!document.querySelector('.admin-brand-editor') && writes().length === writesBeforeReadOnlyBrand, 'read-only brand entry cannot be turned into a write through the browser');
+
+  colorsRead = false; colorsWrite = true;
+  const brandsReadsBeforeDenied = requests.filter(item => item.path === '/api/admin/brands' && item.method === 'GET').length;
+  await mount('brands-no-read', 'colors-assets');
+  assert(text().includes('无品牌读取权限') && !document.querySelector('.admin-brands'), 'missing colors.read never mounts the brand catalog UI');
+  assert(requests.filter(item => item.path === '/api/admin/brands' && item.method === 'GET').length === brandsReadsBeforeDenied, 'missing colors.read does not fetch brand data');
+
+  colorsRead = true; colorsWrite = true; writeStatus = 403; loseBrandResponse = false;
+  await mount('brands-write-rejected', 'brands');
+  await click('新增品牌');
+  const rejectedFields = top().querySelectorAll<HTMLInputElement>('input:not([type="checkbox"])');
+  await change(rejectedFields[0], 'DENIED'); await change(rejectedFields[1], '权限拒绝测试');
+  await click('保存品牌');
+  assert(top().textContent?.includes('服务端拒绝了本次测试请求') && top().textContent?.includes('HTTP 403'), 'write failure displays API error and HTTP status in the editor');
+  const rejectedMutation = requests.filter(item => item.path === '/api/admin/brands' && item.method === 'POST').at(-1)!;
+  assert(/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(rejectedMutation.body.operationId), 'rejected brand write still has an idempotency operationId');
+  assert(rejectedMutation.headers.get('Authorization') === 'Bearer fixture-user' && rejectedMutation.headers.get('X-Admin-Session') === 'fixture-admin', 'AdminConsole mutation forwards both credentials to the same-origin API gateway');
+  writeStatus = 200;
   loseBrandResponse = false;
   await mountLegacyColors();
   assert(text().includes('正常') && !text().includes('active'), 'color-card status is Chinese');

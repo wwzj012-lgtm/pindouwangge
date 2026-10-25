@@ -7,12 +7,12 @@ import { BRAND_CODE_PATTERN, brandDeleteReason, colorValidation, filterBrandColo
 import { refreshBrandCatalog } from '../../data/brandCatalog';
 import './AdminBrandsColors.css';
 
-export interface AdminBrandsColorsProps { request: AdminRequest; readOnly?: boolean }
+export interface AdminBrandsColorsProps { request: AdminRequest; readOnly?: boolean; operatorUid?: string }
 type Editor = { kind: 'brand'; brand?: ManagedBrand } | { kind: 'color'; brand: ManagedBrand; color?: ManagedBrandColor };
 type Deletion = { brand: ManagedBrand; color?: ManagedBrandColor };
 interface PendingOperation { path: string; init: RequestInit; id: string }
 
-export function AdminBrandsColors({ request, readOnly = false }: AdminBrandsColorsProps) {
+export function AdminBrandsColors({ request, readOnly = false, operatorUid }: AdminBrandsColorsProps) {
   const [catalog, setCatalog] = useState<ManagedBrandCatalog | null>(null);
   const [selected, setSelected] = useState('MARD');
   const [brandSearch, setBrandSearch] = useState(''), [colorSearch, setColorSearch] = useState('');
@@ -61,7 +61,9 @@ export function AdminBrandsColors({ request, readOnly = false }: AdminBrandsColo
       if (reconciling || response.ok || response.status === 0 || response.status >= 500 || (response.status >= 200 && response.status < 300)) {
         setUnknown(operation); setWriteError('操作结果尚未确认。请核对回执或重试同一操作，不要重新创建。');
       } else {
-        setUnknown(null); setWriteError(response.error || '操作未完成。');
+        setUnknown(null); setWriteError(response.error
+          ? `${response.error}（HTTP ${response.status}）`
+          : response.status > 0 ? `操作未完成（HTTP ${response.status}）。` : '操作未完成。');
         if (response.status === 409 || response.status === 404) { setEditor(null); setDeletion(null); await load(); }
       }
     } catch { setUnknown(operation); setWriteError('连接中断，操作可能已经保存。请核对结果。'); }
@@ -116,7 +118,7 @@ export function AdminBrandsColors({ request, readOnly = false }: AdminBrandsColo
     {unknown && <div className="admin-brand-message" role="status"><p>待核对操作：<code>{unknown.id}</code></p><p>核对前暂停其他写入，请勿刷新页面后重复新建。</p><AdminButton busy={busy} onClick={() => void reconcile()} disabled={readOnly}>核对结果 / 重试同一操作</AdminButton></div>}</>;
   return <section className="admin-brands" aria-label="品牌与子颜色管理" aria-busy={loading || busy}>
     <div className="admin-brand-heading"><div><p className="admin-brand-eyebrow">COLOR LIBRARY</p><h2>品牌与颜色</h2><p>管理实际用于新转换的品牌目录。历史图纸始终保留自己的颜色快照。</p></div><AdminButton onClick={() => void load()} busy={loading} disabled={busy || Boolean(unknown)}><RefreshCw aria-hidden="true" />刷新目录</AdminButton></div>
-    {readOnly && <p className="admin-brand-message">当前账号只有读取权限。</p>}
+    {readOnly && <p className="admin-brand-message" aria-label="品牌权限状态">当前操作者 {operatorUid || '当前账号'} 已确认 colors.read，但缺少 colors.write；新增、编辑、删除操作已禁用。请联系角色授权人申请品牌管理权限。</p>}
     {loadError && <AdminErrorState message={loadError} retry={() => void load()} busy={loading} />}
     {!editor && !deletion && mutationNotice}
     {success && <p className="admin-brand-message admin-brand-message--success" role="status">{success}</p>}

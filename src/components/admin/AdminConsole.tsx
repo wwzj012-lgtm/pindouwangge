@@ -69,6 +69,12 @@ export function sumAdminMetrics(a: unknown, b: unknown): number | undefined { re
 export function resolveAdminSection(value: string | null): SectionId { if (value === 'colors-assets') return 'brands'; return MENU_ITEMS.some(item => item.id === value) ? value as SectionId : 'dashboard'; }
 export function adminAccessFailure(status: number, signedIn: boolean): AccessState { return status === 403 ? 'forbidden' : status === 401 ? signedIn ? 'session-required' : 'signed-out' : 'unavailable'; }
 const currentMenu = (id: SectionId) => MENU_ITEMS.find(item => item.id === id)!;
+function normalizeLegacySectionUrl() {
+  const url = new URL(window.location.href);
+  if (url.searchParams.get('section') !== 'colors-assets') return;
+  url.searchParams.set('section', 'brands');
+  window.history.replaceState(window.history.state, '', url);
+}
 
 function Sidebar({ active, navigate, returnToApp }: { active: SectionId; navigate: (id: SectionId) => void; returnToApp: () => void }) {
   return <>
@@ -243,8 +249,10 @@ function AdminConsoleSession(_props: { key?: string }) {
     } finally { if (version === generation.current) setChecking(false); }
   }, [adminRequest, loadDashboard, signedIn]);
   useEffect(() => { void verifySession(); return () => { generation.current++; }; }, [verifySession]);
+  useEffect(() => { normalizeLegacySectionUrl(); }, []);
   useEffect(() => {
     const popstate = () => {
+      normalizeLegacySectionUrl();
       const next = resolveAdminSection(new URLSearchParams(window.location.search).get('section'));
       const dirty = hasDirtyEdits();
       if (dirty) setPendingAction({ kind: 'navigate', section: next, fromHistory: true });
@@ -303,7 +311,7 @@ function AdminConsoleSession(_props: { key?: string }) {
       : <AdminErrorState title="无积分读取权限" message="当前操作者缺少 credits.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
     : activeSection === 'brands' ? capabilityError ? <AdminErrorState title="权限尚未确认" message={capabilityError} retry={() => void loadCapabilities()} busy={capabilityLoading} />
       : !capabilities ? <AdminLoading label="正在确认品牌管理权限…" />
-      : capabilities.capabilities['colors.read'] ? <AdminBrandsColors request={moduleRequest} readOnly={!capabilities.capabilities['colors.write']} />
+      : capabilities.capabilities['colors.read'] ? <AdminBrandsColors request={moduleRequest} readOnly={!capabilities.capabilities['colors.write']} operatorUid={capabilities.operatorUid} />
       : <AdminErrorState title="无品牌读取权限" message="当前操作者缺少 colors.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
     : activeSection === 'resources' ? <AdminPaletteResources request={moduleRequest} previewRequest={assetPreviewRequest} readOnly />
     : activeSection === 'community' ? <AdminCommunityPosts request={moduleRequest} previewRequest={previewRequest} /> : null;

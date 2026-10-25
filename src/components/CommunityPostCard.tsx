@@ -23,11 +23,11 @@ export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pend
   return (
     <article aria-label={post.title} className="group flex min-w-0 flex-col overflow-hidden rounded-3xl border border-purple-200/90 bg-white shadow-sm transition-shadow duration-200 hover:shadow-lg">
       <button type="button" onClick={() => onOpen(post)} aria-label={`查看作品：${post.title}`} className={`relative block aspect-4/3 w-full overflow-hidden bg-purple-50/50 ${focus}`}>
-        <img src={post.imageUrl} alt={post.title} loading="lazy" className="h-full w-full object-contain [image-rendering:pixelated]" />
+        <img src={post.imageUrl} alt={post.title} loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-contain [image-rendering:pixelated]" />
       </button>
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-2 flex min-w-0 items-center gap-2 text-xs font-bold text-purple-900">
-          {post.author.photoUrl ? <img src={post.author.photoUrl} alt="" className="h-6 w-6 rounded-full border border-purple-200 object-cover" />
+          {post.author.photoUrl ? <img src={post.author.photoUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-6 w-6 rounded-full border border-purple-200 object-cover" />
             : <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700">{post.author.displayName.slice(0, 1).toUpperCase() || '豆'}</span>}
           <span className="min-w-0 truncate">{post.author.displayName}</span>
         </div>

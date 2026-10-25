@@ -442,7 +442,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
 
             <div className="flex flex-col sm:flex-row gap-5 items-start">
               <div className="w-full sm:w-1/2 aspect-square rounded-2xl overflow-hidden bg-purple-50 border border-purple-200 relative shrink-0">
-                <img src={originalPreview ?? selectedPattern.imageUrl} alt={selectedPattern.title} className="w-full h-full object-contain [image-rendering:pixelated]" />
+                <img src={originalPreview ?? selectedPattern.imageUrl} alt={selectedPattern.title} decoding="async" fetchPriority="high" className="w-full h-full object-contain [image-rendering:pixelated]" />
                 <span className="absolute bottom-3 left-3 bg-black/70 text-white font-mono text-[10px] px-2.5 py-1 rounded-md">
                   {publishedLabel(selectedPattern.publishedAt)}
                 </span>
@@ -456,7 +456,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               <div className="min-w-0 flex-1 space-y-3">
                 <div className="flex items-center gap-2">
                   {selectedPattern.author.photoUrl ? (
-                    <img src={selectedPattern.author.photoUrl} alt={selectedPattern.author.displayName} className="w-7 h-7 rounded-full object-cover border" />
+                    <img src={selectedPattern.author.photoUrl} alt={selectedPattern.author.displayName} loading="lazy" decoding="async" fetchPriority="low" className="w-7 h-7 rounded-full object-cover border" />
                   ) : (
                     <span className="w-7 h-7 rounded-full bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center text-xs font-black">
                       {selectedPattern.author.displayName.slice(0, 1).toUpperCase() || '豆'}

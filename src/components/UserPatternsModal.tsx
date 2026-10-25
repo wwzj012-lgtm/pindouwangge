@@ -68,30 +68,61 @@ function communityStatusLabel(record: ExportedPatternRecord, isEn: boolean): str
 
 function PatternCover({ record, userId }: { record: ExportedPatternRecord; userId: string | null }): React.ReactElement {
   const [url, setUrl] = useState<string | null>(null);
+  const coverRef = useRef<HTMLDivElement>(null);
+  const [isNearViewport, setIsNearViewport] = useState(Boolean(record.previewBlob));
+  const [previewFailed, setPreviewFailed] = useState(false);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
 
   useEffect(() => {
+    if (isNearViewport || record.previewBlob || !record.hasPreview || !record.cloudRevision) return;
+    const target = coverRef.current;
+    if (!target || typeof IntersectionObserver === 'undefined') {
+      setIsNearViewport(true);
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      setIsNearViewport(true);
+      observer.disconnect();
+    }, { rootMargin: '300px 0px' });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [isNearViewport, record.cloudRevision, record.hasPreview, record.previewBlob]);
+
+  useEffect(() => {
+    if (!isNearViewport && !record.previewBlob) return;
     let active = true;
     let objectUrl: string | null = null;
-    const blob = record.previewBlob
-      ? Promise.resolve(record.previewBlob)
-      : record.hasPreview && record.cloudRevision
-      ? getExportedPatternPreview(record.id, record.cloudRevision, userId)
-      : Promise.resolve(null);
-    void blob.then((preview) => {
-      if (!preview || !active) return;
+    setUrl(null);
+    setPreviewFailed(false);
+    void Promise.resolve().then(() => record.previewBlob
+      ?? (record.hasPreview && record.cloudRevision
+        ? getExportedPatternPreview(record.id, record.cloudRevision, userId)
+        : null)).then((preview) => {
+      if (!active) return;
+      if (!preview) {
+        setPreviewFailed(Boolean(record.hasPreview));
+        return;
+      }
       objectUrl = URL.createObjectURL(preview);
       setUrl(objectUrl);
+    }).catch(() => {
+      if (active) setPreviewFailed(true);
     });
     return () => {
       active = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [record.id, record.previewBlob, record.hasPreview, record.cloudRevision, userId]);
+  }, [isNearViewport, previewAttempt, record.id, record.previewBlob, record.hasPreview, record.cloudRevision, userId]);
 
   return (
-    <div className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-slate-950">
+    <div ref={coverRef} className="relative aspect-[4/3] w-full shrink-0 overflow-hidden bg-slate-950">
       {url ? (
-        <img src={url} alt="" className="h-full w-full object-contain [image-rendering:pixelated]" />
+        <img src={url} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-contain [image-rendering:pixelated]" />
+      ) : previewFailed ? (
+        <button type="button" onClick={() => setPreviewAttempt(attempt => attempt + 1)} className="flex h-full min-h-11 w-full items-center justify-center gap-2 text-sm text-slate-300 hover:text-white">
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />预览加载失败，点击重试
+        </button>
       ) : (
         <div className="flex h-full w-full items-center justify-center text-slate-600">
           <Image className="h-7 w-7" />

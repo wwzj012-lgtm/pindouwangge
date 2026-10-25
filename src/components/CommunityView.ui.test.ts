@@ -97,12 +97,17 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
   });
 
   it('uses one primary card CTA, one favorite and one like; image/title use the same opener', () => {
-    const onOpen = vi.fn(), onReaction = vi.fn(), value = post('1', ['人物', '游戏']);
+    const onOpen = vi.fn(), onReaction = vi.fn(), base = post('1', ['人物', '游戏']);
+    const value = { ...base, author: { ...base.author, photoUrl: '/avatar.png' } };
     const tree = CommunityPostCard({ post: value, pending: false, onOpen, onReaction });
     const buttons = nodes(tree).filter(node => node.type === 'button');
+    const images = nodes(tree).filter(node => node.type === 'img');
     expect(buttons).toHaveLength(5);
     expect(buttons.filter(node => text(node).trim() === '查看图纸')).toHaveLength(1);
     expect(buttons.filter(node => String(node.props['aria-label']).startsWith('收藏：'))).toHaveLength(1);
+    expect(images).toHaveLength(2);
+    expect(images.every(node => node.props.loading === 'lazy' && node.props.decoding === 'async' && node.props.fetchPriority === 'low')).toBe(true);
+    expect(buttons[0]!.props.className).toContain('aspect-4/3');
     expect(text(tree)).toContain('#人物#游戏');
     for (const node of buttons.filter(node => node.props['aria-pressed'] === undefined)) node.props.onClick();
     expect(onOpen).toHaveBeenCalledTimes(3);

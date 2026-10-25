@@ -1,6 +1,8 @@
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AdminConsole } from './AdminConsole';
+import { AdminContentResources } from './AdminContentResources';
+import { createAdminRequest } from './adminRequest';
 
 /** Real current components, synthetic API only; never import production credentials. */
 export async function runAdminManagementChecks() {
@@ -14,6 +16,10 @@ export async function runAdminManagementChecks() {
   (globalThis as any).__adminFixtureAuth = auth;
   const requests: { path: string; method: string; body: any }[] = [];
   let sessionStatus = 200, readStatus = 200, writeStatus: number | 'network' = 200;
+  let creditsRead = true, creditsAdjust = true, capabilityUid: string | null = null;
+  let loseBrandResponse = false, brandReceiptVisible = false;
+  const brandReceipts = new Map<string, { operationId: string; brandCode: string; version: number; colorId: null; action: string }>();
+  const brandCatalog = [{ code: 'MARD', name: 'MARD 测试品牌', builtin: true, enabled: true, protected: true, version: 1, colorCount: 1, colors: [{ id: 'MARD_A1', code: 'A1', name: '测试浅黄', hex: '#FAF4C8', screenReferenceOnly: false }] }];
   let announcementTotal = 21, holdWrite = false, releaseWrite: (() => void) | undefined;
   let copied = '';
   let codeCopied = false; let roleCodes = ['dashboard.read']; let hasGridSnapshot = false; let corruptPreview = false;
@@ -34,12 +40,18 @@ export async function runAdminManagementChecks() {
   const page = (items: unknown[], total = items.length, offset = 0) => ({ items, total, limit: 20, offset });
   globalThis.fetch = async (input, init) => {
     const path = String(input), method = init?.method ?? 'GET', body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    if (!path.startsWith('/api/admin/')) throw new Error('Unexpected external request');
+    if (!path.startsWith('/api/admin/') && path !== '/api/brands/catalog') throw new Error('Unexpected external request');
     requests.push({ path, method, body });
     const url = new URL(path, 'https://offline.invalid'), endpoint = url.pathname;
     if (endpoint === '/api/admin/session') return response({ authenticated: sessionStatus === 200 }, sessionStatus);
+    if (endpoint === '/api/admin/capabilities') return response({ operatorUid: capabilityUid ?? auth.currentUser?.uid, capabilities: { 'colors.read': true, 'colors.write': true, 'credits.read': creditsRead, 'credits.adjust': creditsAdjust } });
     if (method !== 'GET') {
       if (holdWrite) await new Promise<void>(resolve => { releaseWrite = resolve; });
+      if (endpoint === '/api/admin/brands' && method === 'POST' && loseBrandResponse) {
+        brandCatalog.push({ code: body.brandCode, name: body.name, builtin: false, enabled: true, protected: false, version: 1, colorCount: 0, colors: [] });
+        brandReceipts.set(body.operationId, { operationId: body.operationId, brandCode: body.brandCode, version: 1, colorId: null, action: 'createBrand' });
+        throw new Error('fixture committed brand but response was lost');
+      }
       if (writeStatus === 'network') throw new Error('offline write result unknown');
       if ((endpoint.endsWith('/takedown') || endpoint.endsWith('/restore')) && writeStatus < 400) {
         communityPost = { ...communityPost, moderation: { state: endpoint.endsWith('/takedown') ? 'hidden' : 'visible', version: communityPost.moderation.version + 1, reason: body.reason } };
@@ -52,6 +64,12 @@ export async function runAdminManagementChecks() {
     }
     if (readStatus !== 200 && endpoint !== '/api/admin/dashboard') return response({}, readStatus);
     if (endpoint === '/api/admin/dashboard') return response({ overview: {}, telemetry: { errorCodes: [] }, trends: { days7: {} } });
+    const creditAccount = { uid: 'target', email: 'target@example.invalid', displayName: '测试积分用户', availableUnits: 123, heldUnits: 10, version: 2, unitsPerPoint: 10 };
+    if (endpoint === '/api/admin/credits/accounts') return response(page([creditAccount]));
+    if (endpoint === '/api/admin/credits/account') return response({ account: creditAccount });
+    if (endpoint === '/api/admin/credits/ledger') return response(page([]));
+    if (endpoint === '/api/admin/brands' || endpoint === '/api/brands/catalog') return response({ items: brandCatalog });
+    if (endpoint === '/api/admin/brands/mutations') return response(brandReceiptVisible ? brandReceipts.get(url.searchParams.get('id')!) : { status: 'pending' });
     if (endpoint === '/api/admin/announcements') return response(page([announcement], announcementTotal));
     if (endpoint === '/api/admin/color-cards') return response(page([card]));
     if (endpoint === '/api/admin/color-swatches') return response(page([{ id: 'swatch-1', cardId: card.id, colorCode: 'A01', displayName: '樱花粉', hex: '#FF0088', rgb: { r: 255, g: 0, b: 136 }, sortOrder: 0 }]));
@@ -120,6 +138,10 @@ export async function runAdminManagementChecks() {
     history.replaceState({}, '', '?section=' + section);
     root.render(<AdminConsole key={key} />);
   });
+  // Preserve legacy metadata CRUD safety coverage without a second production
+  // brand navigation entry. Current brand CRUD has its own worker-owned suite.
+  const legacyRequest = createAdminRequest();
+  const mountLegacyColors = async () => flush(() => root.render(<div className="admin-root"><main className="admin-main"><AdminContentResources mode="colors-assets" request={legacyRequest} /></main></div>));
   const noOverflow = (label: string) => assert(document.documentElement.scrollWidth <= innerWidth + 1, label + ': no horizontal page overflow');
   const ensureNames = () => {
     for (const field of Array.from(document.querySelectorAll<HTMLElement>('.admin-main input, .admin-main select, .admin-main textarea'))) {
@@ -208,7 +230,49 @@ export async function runAdminManagementChecks() {
   await click('取消');
   assert(writes().length === beforeGeneration + 1, 'cancelled code deletion never writes');
 
-  await mount('colors', 'colors-assets');
+  const creditReads = () => requests.filter(item => item.path.startsWith('/api/admin/credits/')).length;
+  const creditsBeforeDenied = creditReads(), writesBeforeCredits = writes().length;
+  creditsRead = false; creditsAdjust = true;
+  await mount('credits-denied', 'credits');
+  assert(text().includes('无积分读取权限') && !document.querySelector('.admin-credits'), 'credits.read denial prevents mounting the actual credit component');
+  assert(creditReads() === creditsBeforeDenied, 'adjust permission alone never loads credit account data');
+  creditsRead = true; creditsAdjust = false;
+  await mount('credits-read-only', 'credits');
+  assert(Boolean(document.querySelector('.admin-credits')) && text().includes('测试积分用户'), 'credits.read mounts the actual component and real account endpoint');
+  await flush(() => document.querySelector<HTMLButtonElement>('[data-credit-user="target"]')!.click());
+  assert(text().includes('当前为只读权限') && !document.querySelector('form[aria-label="填写积分调整"]'), 'read-only server capability reaches canAdjust without guessing role');
+  ensureNames(); noOverflow('read-only credits');
+  creditsAdjust = true;
+  await mount('credits-adjust', 'credits');
+  await flush(() => document.querySelector<HTMLButtonElement>('[data-credit-user="target"]')!.click());
+  assert(Boolean(document.querySelector('form[aria-label="填写积分调整"]')), 'credits.adjust exposes the actual adjustment form');
+  assert(writes().length === writesBeforeCredits, 'credit navigation and capability checks perform no writes');
+  ensureNames(); noOverflow('adjustable credits');
+  capabilityUid = 'different-operator';
+  const beforeWrongOperator = creditReads();
+  await mount('credits-wrong-operator', 'credits');
+  assert(text().includes('权限尚未确认') && !document.querySelector('.admin-credits') && creditReads() === beforeWrongOperator, 'cross-operator capability response cannot mount or read credit data');
+  capabilityUid = null;
+
+  await mount('brands-alias', 'colors-assets');
+  assert(Boolean(document.querySelector('[data-admin-module="brands"]')) && text().includes('MARD 测试品牌'), 'legacy colors URL opens the single real brand entry');
+  assert(document.querySelectorAll('.admin-sidebar [data-admin-section="brands"]').length === 1 && !document.querySelector('[data-admin-section="colors-assets"]'), 'no duplicate color-card navigation remains');
+  ensureNames(); noOverflow('brand catalog');
+  const beforeBrandWrite = writes().length;
+  await click('新增品牌');
+  const brandFields = top().querySelectorAll<HTMLInputElement>('input:not([type="checkbox"])');
+  await change(brandFields[0], 'RECOVERED'); await change(brandFields[1], '已恢复品牌');
+  loseBrandResponse = true;
+  await click('保存品牌');
+  assert(text().includes('模块连接失败') && top().textContent?.includes('待核对操作'), 'lost brand write response displays shared connection notice and module recovery barrier');
+  await click('核对结果 / 重试同一操作');
+  assert(text().includes('模块连接失败') && button('保存品牌').disabled, 'unconfirmed brand receipt preserves connection notice and unknown write lock');
+  brandReceiptVisible = true;
+  await click('核对结果 / 重试同一操作');
+  assert(text().includes('操作已确认保存') && text().includes('已恢复品牌') && !text().includes('模块连接失败'), 'confirmed matching brand receipt clears stale shell notice after successful catalog reread');
+  assert(writes().length === beforeBrandWrite + 1 && brandCatalog.filter(item => item.code === 'RECOVERED').length === 1, 'brand receipt recovery performs no repeat mutation or creation');
+  loseBrandResponse = false;
+  await mountLegacyColors();
   assert(text().includes('正常') && !text().includes('active'), 'color-card status is Chinese');
   ensureNames(); noOverflow('color cards');
   const beforeDelete = writes().length;
@@ -224,7 +288,7 @@ export async function runAdminManagementChecks() {
   assert(!Array.from(document.querySelectorAll('.admin-builtin-palettes button')).some(b=>/新增|删除|编辑/.test(b.textContent??'')), 'builtin directory has no mutating controls');
   await click('色卡配置');
   assert(Boolean(button('新建色卡')), 'custom color card CRUD remains available after builtin lookup');
-  await click('真实资源文件');
+  await mount('real-resources', 'resources');
   assert(text().includes('KV 对象存在') && text().includes('跨存储操作不保证原子性'), 'resource tab reads actual object availability and declares deletion safety limit');
   assert(requests.some(item=>item.path.startsWith('/api/admin/community-assets?')), 'resource tab uses real resource endpoint');
   await click('预览资源 asset_0123456789abcdef');
@@ -252,6 +316,9 @@ export async function runAdminManagementChecks() {
   const writesBeforeReview = writes().length;
   await click('下架帖子');
   assert(writes().length === writesBeforeReview && top().textContent?.includes('expectedVersion') === false, 'takedown opens confirmation without an early write');
+  const communityReason = top().querySelector<HTMLTextAreaElement>('textarea')!;
+  assert(getComputedStyle(communityReason.closest('label')!).display === 'grid' && communityReason.clientHeight >= 100 && parseFloat(getComputedStyle(communityReason).borderTopWidth) >= 1, 'actual community portal reason retains grid label, multiline height and border');
+  assert(communityReason.getBoundingClientRect().width >= top().querySelector('.admin-dialog-body')!.clientWidth - 50, 'actual community portal reason fills available width');
   assert(button('确认提交').disabled, 'empty moderation reason blocks submission');
   await change(top().querySelector('textarea')!, '  fixture moderation reason  ');
   await click('确认提交');
@@ -301,7 +368,7 @@ export async function runAdminManagementChecks() {
   assert((top().querySelector('[data-config-json]') as HTMLTextAreaElement).value === 'null', 'unknown write preserves editor input');
   writeStatus = 200;
 
-  await mount('read-failure', 'colors-assets'); readStatus = 403;
+  await mountLegacyColors(); readStatus = 403;
   await click('刷新');
   assert(text().includes('当前结果未更新'), 'failed content read marks old results unconfirmed');
   assert(button(innerWidth < 768 ? '编辑' : '编辑色卡').disabled, 'unconfirmed stale row cannot be mutated');

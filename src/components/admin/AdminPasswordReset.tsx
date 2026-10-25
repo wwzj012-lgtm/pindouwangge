@@ -86,10 +86,10 @@ export function AdminPasswordReset({ user, currentUserUid, request, onClose }: {
       if (mounted.current) setCopyMessage('已复制，请安全转交并及时清理剪贴板。');
     } catch { if (mounted.current) setCopyMessage('复制失败，请手动选择临时密码复制。'); }
   };
-  return <div ref={surface} data-admin-sensitive data-admin-password-reset>
+  return <>
     <AdminDrawer open title="重置用户密码" description={userLabel(user) + ' · ' + user.email + ' · UID：' + user.uid}
       className="admin-user-drawer" pending={busy} onClose={close}>
-      {result ? <section data-password-reset-result>
+      <div ref={surface} data-admin-sensitive data-admin-password-reset>{result ? <section data-password-reset-result>
         <p className="admin-success-message" role="status">{result.notice}</p>
         {result.temporaryPassword && <div className="admin-info-box" data-admin-sensitive>
           <h3>临时密码 · 仅本次展示</h3><p>关闭或离开后不再显示，请现在记录并安全转交。</p>
@@ -115,13 +115,14 @@ export function AdminPasswordReset({ user, currentUserUid, request, onClose }: {
         {error && <AdminErrorState title="密码重置尚未确认" message={error} />}
         <div className="admin-final-actions"><AdminButton onClick={close} disabled={busy}>取消</AdminButton>
           <AdminButton variant="danger" disabled={busy || self} onClick={() => { const message = validate(); setError(message); if (!message) { attempted.current = false; setReview(true); } }}><KeyRound aria-hidden="true" />核对目标并继续</AdminButton></div>
-      </>}
+      </>}</div>
     </AdminDrawer>
-    <AdminConfirmDialog open={review} title="确认重置此用户密码？" description={'目标：' + userLabel(user) + ' · ' + user.email + ' · UID：' + user.uid}
+    <AdminConfirmDialog open={review} title="确认重置此用户密码？" description="请核对目标账号与重置方式。确认摘要不会展示密码内容。"
+      subject={userLabel(user) + ' · ' + user.email + ' · UID：' + user.uid} impact="立即替换登录密码，并撤销该用户现有登录会话。此操作不可撤销。" reason={mode === 'random' ? '随机生成临时密码，仅本次展示' : '指定新密码，密码内容不进入确认摘要'}
       pending={busy} confirmDisabled={Boolean(error)} confirmLabel="确认重置密码" onClose={() => { if (!writing.current) { setReview(false); setError(''); } }} onConfirm={() => void submit()}>
       <div className="admin-change-summary"><p>方式：{mode === 'random' ? '随机生成临时密码' : '指定新密码（不展示密码内容）'}</p>
         <p>影响：立即替换登录密码，并撤销该用户现有登录会话。此操作不可撤销。</p></div>
       {error && <><AdminErrorState title="密码重置尚未确认" message={error} /><AdminButton disabled={busy} onClick={() => { setReview(false); setError(''); }}>返回设置并重新核对</AdminButton></>}
     </AdminConfirmDialog>
-  </div>;
+  </>;
 }

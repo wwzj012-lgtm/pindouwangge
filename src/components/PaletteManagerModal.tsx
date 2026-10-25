@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { X, Plus, Check, Search, Palette, Trash2, RotateCcw, Pipette } from 'lucide-react';
 import { BeadColor, BrandKey } from '../types';
-import { BRAND_PALETTES, BRAND_NAMES, hexToRgb } from '../data/palettes';
+import { hexToRgb } from '../data/palettes';
+import { useBrandCatalog } from '../hooks/useBrandCatalog';
 
 interface PaletteManagerModalProps {
   isOpen: boolean;
@@ -43,11 +44,12 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
   const [newName, setNewName] = useState('');
   const [newHex, setNewHex] = useState('#FF4081');
   const [showAddCustom, setShowAddCustom] = useState(false);
+  const catalog = useBrandCatalog();
 
   if (!isOpen) return null;
 
-  const resolvedBrand: BrandKey = BRAND_PALETTES[brand] ? brand : 'MARD';
-  const resolvedBrandPalette = BRAND_PALETTES[resolvedBrand] || BRAND_PALETTES.MARD;
+  const resolvedBrand = brand;
+  const resolvedBrandPalette = catalog.status === 'ready' ? catalog.palettes[brand] : undefined;
   const hasScreenReferenceColors = resolvedBrand === 'MARD_291' || activePalette.some(color => color.screenReferenceOnly);
 
   const handleToggleColor = (id: string) => {
@@ -61,7 +63,8 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
   };
 
   const handleResetToDefault = () => {
-    setActivePalette([...resolvedBrandPalette]);
+    if (!resolvedBrandPalette?.length) return;
+    setActivePalette(resolvedBrandPalette.map(color => ({ ...color, rgb: [...color.rgb] })));
   };
 
   const handleDeleteCustomColor = (id: string) => {
@@ -105,7 +108,7 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
             </div>
             <div className="min-w-0">
               <h3 className="font-bold text-xs sm:text-base text-slate-100 truncate">
-                拼豆色卡管理 ({BRAND_NAMES[resolvedBrand]})
+                拼豆色卡管理 ({catalog.names[resolvedBrand] ?? resolvedBrand})
               </h3>
               <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                 只使用自己拥有的颜色，转换时会自动匹配已选中的色卡！
@@ -154,6 +157,8 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
               </button>
               <button
                 onClick={handleResetToDefault}
+                disabled={!resolvedBrandPalette?.length}
+                title={!resolvedBrandPalette?.length ? '目录不可用或品牌已停用，保留当前颜色快照' : '使用当前品牌目录重置颜色'}
                 className="bg-slate-800 hover:bg-slate-700 text-amber-400 px-2.5 py-1.5 rounded-xl border border-slate-700 flex items-center gap-1 cursor-pointer transition-colors text-xs"
               >
                 <RotateCcw className="w-3 h-3" />

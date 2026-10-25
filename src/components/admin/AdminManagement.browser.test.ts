@@ -19,6 +19,7 @@ it.skipIf(!browser).each([1280, 390])('verifies current admin Chinese and manage
   const tailwind = createRequire(require.resolve('@tailwindcss/vite'));
   const { compile } = tailwind('@tailwindcss/node');
   const { Scanner } = tailwind('@tailwindcss/oxide');
+  const componentStyles = new Map<string, string>();
   try {
     const bundle = await build({
       absWorkingDir: projectRoot, bundle: true, write: false, platform: 'browser', format: 'iife', jsx: 'automatic',
@@ -35,13 +36,16 @@ it.skipIf(!browser).each([1280, 390])('verifies current admin Chinese and manage
         builder.onLoad({ filter: /.*/, namespace: 'offline-admin' }, (args: any) => ({ contents: args.path === 'auth'
           ? 'export const useAuth = () => globalThis.__adminFixtureAuth;'
           : 'export const getApiToken=()=>"fixture-user";export const getAdminSessionToken=()=>"fixture-admin";export const clearAdminSession=()=>{};export const setAdminSessionToken=()=>{};' }));
-        builder.onLoad({ filter: /\.css$/ }, () => ({ contents: '', loader: 'text' }));
+        builder.onLoad({ filter: /\.css$/ }, (args: any) => {
+          componentStyles.set(args.path, readFileSync(args.path, 'utf8'));
+          return { contents: '', loader: 'text' };
+        });
       } }],
     });
     // Compile the real utility layer, not an approximation of responsive classes.
     const compiler = await compile('@import "tailwindcss";', { base: projectRoot, onDependency: () => {} });
     const scanner = new Scanner({ sources: [{ base: projectRoot, pattern: 'src/components/admin/**/*.tsx', negated: false }] });
-    const css = compiler.build(scanner.scan()) + '\n' + readFileSync(join(projectRoot, 'src/components/admin/admin.css'), 'utf8');
+    const css = compiler.build(scanner.scan()) + '\n' + Array.from(componentStyles.values()).join('\n');
     const script = bundle.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
     const page = join(working, 'admin.html');
     writeFileSync(page, `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

@@ -6,7 +6,9 @@ export type BrandKey =
   | 'ARTKAL_MINI'
   | 'PERLER'
   | 'HAMA'
-  | 'CUSTOM';
+  | 'CUSTOM'
+  // Persisted directory codes are stable identifiers, including deleted brands in old snapshots.
+  | (string & {});
 
 export interface BeadColor {
   id: string;

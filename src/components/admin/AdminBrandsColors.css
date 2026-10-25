@@ -1,0 +1,31 @@
+.admin-brands { --brand-surface: var(--admin-surface, #fff); --brand-muted: var(--admin-text-muted, #73716b); --brand-line: var(--admin-border, #e9e7e1); color: var(--admin-text, #292821); }
+.admin-brand-heading, .admin-brand-detail-heading, .admin-brand-sidebar-title, .admin-brand-colors-toolbar, .admin-brand-actions, .admin-brand-pagination, .admin-brand-title { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.admin-brand-heading { margin-bottom:24px; align-items:flex-start; }
+.admin-brand-heading h2 { margin:2px 0 8px; font-size:26px; letter-spacing:-.04em; font-weight:650; }
+.admin-brand-heading p, .admin-brand-detail-heading p { color:var(--brand-muted); font-size:13px; line-height:1.7; }
+.admin-brand-heading .admin-brand-eyebrow { font-size:10px; font-weight:700; letter-spacing:.18em; color:var(--admin-text-muted, #73716b); }
+.admin-brand-layout { display:grid; grid-template-columns:minmax(0,1fr); border:1px solid var(--brand-line); border-radius:16px; overflow:hidden; background:var(--brand-surface); }
+.admin-brand-sidebar { padding:20px; border-bottom:1px solid var(--brand-line); min-width:0; }
+.admin-brand-sidebar-title { margin-bottom:16px; }
+.admin-brand-sidebar-title h3 { font-size:14px; font-weight:650; }.admin-brand-sidebar-title h3 span { color:var(--brand-muted); margin-left:6px; font-weight:400; }
+.admin-brand-search { display:flex; align-items:center; gap:8px; border:1px solid var(--brand-line); border-radius:9px; padding:0 12px; min-width:0; background:var(--brand-surface); }
+.admin-brand-search svg { width:16px; height:16px; flex-shrink:0; color:var(--brand-muted); }
+.admin-brand-search input { width:100%; min-width:0; min-height:44px; background:transparent; border:0; outline:0; font-size:13px; color:inherit; }
+.admin-brand-search:focus-within { outline:2px solid var(--admin-accent, #84764e); outline-offset:2px; }
+.admin-brand-list { display:grid; gap:6px; margin-top:12px; max-height:330px; overflow:auto; }
+.admin-brand-list button { display:flex; justify-content:space-between; align-items:center; text-align:left; border:1px solid transparent; border-radius:10px; padding:12px; gap:8px; min-height:64px; transition:background 150ms,border-color 150ms; }
+.admin-brand-list button[aria-current] { background:var(--admin-surface-alt, #f5f3ea); border-color:var(--brand-line); }.admin-brand-list button:hover { background:var(--admin-surface-alt, #f5f3ea); }
+.admin-brand-list strong { display:block; font-size:13px; word-break:break-word; }.admin-brand-list small { display:block; margin-top:4px; font-size:10px; color:var(--brand-muted); }
+.admin-brand-count { font-variant-numeric:tabular-nums; text-align:right; font-size:17px; }.admin-brand-count small { display:inline; margin-left:3px; }
+.admin-brand-detail { min-width:0; padding:20px; }.admin-brand-detail-heading { align-items:flex-start; padding-bottom:20px; border-bottom:1px solid var(--brand-line); margin-bottom:20px; }.admin-brand-detail-heading h3 { font-size:20px; font-weight:650; word-break:break-word; }.admin-brand-title { justify-content:flex-start; gap:8px; margin-bottom:8px; }
+.admin-brand-colors-toolbar { margin-bottom:12px; }.admin-brand-colors-toolbar .admin-brand-search { flex:1; min-width:180px; }
+.admin-brand-muted { font-size:12px; color:var(--brand-muted); line-height:1.7; margin:10px 0; }
+.admin-brand-color-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(145px,1fr)); gap:14px; margin-top:18px; }
+.admin-brand-color { border:1px solid var(--brand-line); border-radius:12px; min-width:0; overflow:hidden; background:var(--brand-surface); }.admin-brand-swatch { height:72px; border-bottom:1px solid var(--brand-line); }
+.admin-brand-color-copy { display:flex; flex-direction:column; gap:4px; padding:12px 12px 4px; }.admin-brand-color-copy strong { font-size:14px; overflow-wrap:anywhere; }.admin-brand-color-copy span { font-size:12px; color:var(--brand-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.admin-brand-color-copy code { font-size:11px; color:var(--brand-muted); }.admin-brand-color-copy small { font-size:10px; color:var(--brand-muted); }
+.admin-brand-color-actions { display:flex; justify-content:flex-end; padding:0 4px 4px; }.admin-brand-color-actions .admin-button { min-width:44px; min-height:44px; }
+.admin-brand-pagination { margin-top:20px; font-size:12px; color:var(--brand-muted); }.admin-brand-pagination>div { display:flex; gap:8px; }
+.admin-brand-message { padding:12px 14px; border:1px solid var(--admin-border, #e9e7e1); background:var(--admin-surface-alt, #f7f5eb); border-radius:10px; font-size:12px; line-height:1.8; margin:12px 0; overflow-wrap:anywhere; }.admin-brand-message--error { color:var(--admin-danger, #9f352c); }.admin-brand-message--success { color:var(--admin-success, #37664e); }
+.admin-brand-form { display:grid; gap:18px; }.admin-brand-form>label { display:grid; gap:8px; font-size:13px; font-weight:550; }.admin-brand-form input:not([type=checkbox]):not([type=color]) { width:100%; min-width:0; min-height:44px; border:1px solid var(--admin-border, #e9e7e1); background:var(--admin-surface, #fff); border-radius:8px; padding:10px 12px; color:inherit; }.admin-brand-form input:disabled { opacity:.6; }.admin-brand-form input:focus-visible, .admin-brands button:focus-visible { outline:2px solid var(--admin-accent, #84764e); outline-offset:2px; }.admin-brand-form .admin-brand-checkbox { display:flex; align-items:center; gap:10px; min-height:44px; }.admin-brand-checkbox input { width:18px; height:18px; accent-color:#716442; }.admin-brand-hex-input { display:flex; align-items:center; gap:10px; }.admin-brand-hex-input input[type=color] { width:48px; height:44px; padding:3px; border:1px solid var(--admin-border, #e9e7e1); border-radius:8px; }.admin-brand-form .admin-brand-actions { justify-content:flex-end; margin-top:6px; }
+@media(min-width:900px) { .admin-brand-layout { grid-template-columns:248px minmax(0,1fr); }.admin-brand-sidebar { border-bottom:0; border-right:1px solid var(--brand-line); }.admin-brand-list { max-height:75vh; }.admin-brand-detail { padding:26px; } }
+@media(prefers-reduced-motion:reduce) { .admin-brand-list button { transition:none; } }

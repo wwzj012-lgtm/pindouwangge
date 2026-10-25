@@ -12,7 +12,9 @@ import {
   SymmetryMode,
   CanvasBackdrop,
 } from './types';
-import { BRAND_NAMES, BRAND_PALETTES } from './data/palettes';
+import { BRAND_PALETTES as INITIAL_PALETTES } from './data/palettes';
+import { useBrandCatalog } from './hooks/useBrandCatalog';
+import { getBrandCatalogSnapshot, paletteForNewConversion, refreshBrandCatalog } from './data/brandCatalog';
 import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
@@ -436,6 +438,9 @@ interface StudioAppProps {
 }
 
 function StudioApp({ initialTab = 'home' }: StudioAppProps) {
+  const brandCatalog = useBrandCatalog();
+  const BRAND_PALETTES = brandCatalog.palettes;
+  const BRAND_NAMES = brandCatalog.names;
   const { language } = useLanguage();
   const { currentUser, userProfile, creditSummary, refreshCreditSummary, isVip, isPro } = useAuth();
   const isDesktop = useIsDesktop();
@@ -458,8 +463,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [publicFeatureFlagsLoaded, setPublicFeatureFlagsLoaded] = useState(false);
   const canAccessAssembly = ASSEMBLY_DEV_MODE || publicFeatureFlags['public.assembly'] || (ASSEMBLY_ADMIN_BYPASS && userProfile?.role === 'admin');
   const [brand, setBrand] = useState<BrandKey>('MARD');
-  const [activePalette, setActivePalette] = useState<BeadColor[]>(BRAND_PALETTES.MARD);
+  const [activePalette, setActivePalette] = useState<BeadColor[]>(INITIAL_PALETTES.MARD);
   const restoredPaletteRef = useRef<{ brand: BrandKey; palette: BeadColor[] } | null>(null);
+  const previousPaletteBrandRef = useRef<BrandKey>('MARD');
   const [isConverting, setIsConverting] = useState<boolean>(false);
   const [conversionDiagnostics, setConversionDiagnostics] = useState<ConversionDiagnostics | null>(null);
 
@@ -564,7 +570,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Editing Tool State
   const [activeTool, setActiveTool] = useState<ToolType>('pencil');
-  const [selectedColor, setSelectedColor] = useState<BeadColor | null>(BRAND_PALETTES.MARD[0]);
+  const [selectedColor, setSelectedColor] = useState<BeadColor | null>(INITIAL_PALETTES.MARD[0]);
   const [highlightColorIds, setHighlightColorIds] = useState<string[]>([]);
   const [completedColorIds, setCompletedColorIds] = useState<string[]>([]);
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
@@ -1092,34 +1098,43 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   const largeCanvasPaletteOptions = useMemo(
     () => (Object.keys(BRAND_PALETTES) as BrandKey[]).map(id => ({ id, label: BRAND_NAMES[id] ?? id })),
-    [],
+    [BRAND_PALETTES, BRAND_NAMES],
   );
 
   // Sync palette when brand changes
   useEffect(() => {
-    const brandColors = restoredPaletteRef.current?.brand === brand
-      ? restoredPaletteRef.current.palette
-      : BRAND_PALETTES[brand] || BRAND_PALETTES.MARD;
+    setSelectedColor(previous => activePalette.find(color => color.id === previous?.id) ?? activePalette[0] ?? null);
+  }, [activePalette]);
+
+  useEffect(() => {
+    if (restoredPaletteRef.current?.brand === brand) {
+      previousPaletteBrandRef.current = brand;
+      return; // Catalog refreshes must never recolor a restored work.
+    }
+    if (brandCatalog.status !== 'ready' || !BRAND_PALETTES[brand]?.length) return;
+    const changedBrand = previousPaletteBrandRef.current !== brand;
+    previousPaletteBrandRef.current = brand;
+    // An existing draft also owns its palette. Apply catalog edits only to a new conversion/brand selection.
+    if (!changedBrand && gridRef.current.some(row => row.some(cell => cell !== null))) return;
     restoredPaletteRef.current = null;
-    setActivePalette(brandColors);
+    const brandColors = BRAND_PALETTES[brand];
+    setActivePalette(previous => changedBrand ? brandColors : paletteForNewConversion(brandColors, previous, brand));
     if (!selectedColor || !brandColors.some(c => c.id === selectedColor.id)) {
       setSelectedColor(brandColors[0]);
     }
-  }, [brand]);
+  }, [brand, BRAND_PALETTES, brandCatalog.status]);
 
   // SettingsPanel and imported projects store the selected brand on settings.
   // Normalize that value into the App-level brand so conversion, palette maps,
   // large-canvas rendering, and export all consume the same palette.
   useEffect(() => {
     const requestedBrand = settings.brand;
-    const resolvedBrand: BrandKey = requestedBrand && BRAND_PALETTES[requestedBrand]
-      ? requestedBrand
-      : 'MARD';
-    if (brand !== resolvedBrand) setBrand(resolvedBrand);
-    if (settings.brand !== resolvedBrand) {
-      setSettings(previous => ({ ...previous, brand: resolvedBrand }));
+    if (requestedBrand && requestedBrand !== brand
+      && (BRAND_PALETTES[requestedBrand] || restoredPaletteRef.current?.brand === requestedBrand)) {
+      restoredPaletteRef.current = restoredPaletteRef.current?.brand === requestedBrand ? restoredPaletteRef.current : null;
+      setBrand(requestedBrand);
     }
-  }, [settings.brand, brand]);
+  }, [settings.brand, brand, BRAND_PALETTES]);
 
   const commitGridHistory = useCallback((currentGrid: GridSnapshot, nextGrid: GridSnapshot) => {
     const nextHistoryState = commitHistorySnapshot(
@@ -1212,8 +1227,17 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
-    (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[], requestToken = beginImageRequest()) => {
+    async (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[], requestToken = beginImageRequest()) => {
+      await refreshBrandCatalog();
       if (!isCurrentImageRequest(requestToken)) return;
+      const latestCatalog = getBrandCatalogSnapshot();
+      const availablePalette = latestCatalog.palettes[currentSettings.brand];
+      if (latestCatalog.status !== 'ready' || !availablePalette?.length) {
+        setImageLoadMessage('品牌目录不可用，或该品牌已禁用/删除。请选择可用品牌后再转换；已有图纸与颜色快照保留。');
+        finishImageRequest(requestToken);
+        return;
+      }
+      const livePalette = paletteForNewConversion(availablePalette, currentPalette, currentSettings.brand);
       setIsConverting(true);
       setTimeout(() => {
         if (!isCurrentImageRequest(requestToken)) return;
@@ -1230,10 +1254,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
         try {
           const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
-          const conversion = imageToGridWithDiagnostics(img, effectiveSettings, currentPalette);
+          const conversion = imageToGridWithDiagnostics(img, effectiveSettings, livePalette);
           const newGrid = conversion.grid;
 
           if (isCurrentImageRequest(requestToken)) {
+            restoredPaletteRef.current = null;
+            setActivePalette(livePalette);
             setIsImageDerivedPattern(true);
             applyGridChange(newGrid, false);
             setCompletedColorIds([]);
@@ -1385,8 +1411,15 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       .catch(error => request.reject(error instanceof Error ? error : new Error('无法处理预览图片')));
   }, [largeCanvasStudioRequest]);
 
-  const handleConvertLargeCanvasImage = useCallback((file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
+  const handleConvertLargeCanvasImage = useCallback(async (file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
+    await refreshBrandCatalog();
+    const latestCatalog = getBrandCatalogSnapshot();
     return new Promise((resolve, reject) => {
+      const availablePalette = latestCatalog.palettes[settings.brand];
+      if (latestCatalog.status !== 'ready' || !availablePalette?.length) {
+        reject(new Error('品牌目录不可用，或该品牌已禁用/删除，请选择可用品牌。')); return;
+      }
+      const livePalette = paletteForNewConversion(availablePalette, activePalette, settings.brand);
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('无法读取图片'));
       reader.onload = event => {
@@ -1402,7 +1435,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             const height = Math.max(1, Math.min(100, Math.round(gridH)));
             const modeSettings = getLargeCanvasModeSettings(mode);
             const frameSettings = { ...settings, ...modeSettings, width, height, keepAspectRatio: false };
-            const result = imageToGridWithDiagnostics(img, frameSettings, activePalette);
+            const result = imageToGridWithDiagnostics(img, frameSettings, livePalette);
+            restoredPaletteRef.current = null;
+            setActivePalette(livePalette);
             // This stays in the active frame only; LargeCanvasView deliberately omits it from localStorage.
             resolve({ grid: result.grid, sourceImageDataUrl: imageUrl });
           } catch (error) {
@@ -1725,6 +1760,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       boardSize: settings.boardSize,
       brand,
       grid,
+      customPalette: activePalette,
       createdAt: new Date().toISOString(),
     };
 
@@ -1742,18 +1778,25 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     try {
       const project: ProjectData = JSON.parse(jsonStr);
       if (project.grid && Array.isArray(project.grid)) {
+        const importedBrand = project.brand || 'MARD';
+        // Old exports without a snapshot use their original bundled palette, never today's live catalog.
+        const importedPalette = project.customPalette ?? INITIAL_PALETTES[importedBrand];
+        if (!importedPalette?.length) throw new Error('工程文件缺少品牌颜色快照');
+        const importedSettings = { ...settings, brand: importedBrand,
+          width: project.width || project.grid[0].length, height: project.height || project.grid.length,
+          boardSize: project.boardSize || 29 };
+        validateStoredProject({ version: 2, name: project.name || '导入的拼豆项目', brand: importedBrand, palette: importedPalette,
+          grid: project.grid, width: importedSettings.width, height: importedSettings.height,
+          boardSize: importedSettings.boardSize, settings: importedSettings, createdAt: Date.parse(project.createdAt) });
         beginNewCompletionDraft();
         invalidateImageRequest();
         setActivePatternId(null);
         setCompletedColorIds([]);
         setProjectName(project.name || '导入的拼豆项目');
-        setBrand(project.brand || 'MARD');
-        setSettings(s => ({
-          ...s,
-          width: project.width || project.grid[0].length,
-          height: project.height || project.grid.length,
-          boardSize: project.boardSize || 29,
-        }));
+        restoredPaletteRef.current = { brand: importedBrand, palette: importedPalette };
+        setBrand(importedBrand);
+        setActivePalette(importedPalette);
+        setSettings(importedSettings);
         applyGridChange(project.grid, false);
       }
     } catch {
@@ -2040,6 +2083,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   return (
     <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+      {(brandCatalog.status !== 'ready' || !BRAND_PALETTES[brand]) && <div role={brandCatalog.status === 'error' ? 'alert' : 'status'} className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950">
+        {brandCatalog.status === 'loading' ? '正在读取品牌目录，暂不可开始新转换。' : brandCatalog.status === 'error'
+          ? `品牌目录不可用：${brandCatalog.error} 新转换暂停，已有图纸颜色快照保留。`
+          : '当前图纸品牌已禁用或删除，颜色快照保留；请另选品牌后开始新转换。'}
+        {brandCatalog.status === 'error' && <button type="button" className="ml-3 underline" onClick={() => void brandCatalog.refresh()}>重新读取品牌</button>}
+      </div>}
       {isDesktop ? (
         <Header
           projectName={projectName}
@@ -2128,7 +2177,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             <LargeCanvasView
               ref={largeCanvasViewRef}
               paletteMap={paletteMap}
-              brandName={BRAND_NAMES[brand]}
+              brandName={BRAND_NAMES[brand] ?? brand}
               paletteOptions={largeCanvasPaletteOptions}
               selectedPaletteId={brand}
               onChangePalette={paletteId => {
@@ -2170,7 +2219,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           <Suspense fallback={<DeferredFeaturePageLoading label="立体拼豆" />}>
             <AssemblyWorkspace
               paletteMap={paletteMap}
-              brandName={BRAND_NAMES[brand]}
+              brandName={BRAND_NAMES[brand] ?? brand}
             />
           </Suspense>
         </DeferredFeatureBoundary>

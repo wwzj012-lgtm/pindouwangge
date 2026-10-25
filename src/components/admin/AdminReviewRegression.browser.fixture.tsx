@@ -120,7 +120,7 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
       assert(!button('确认提交').disabled, 'P2-2: only successful related detail reread permits deliberate retry');
       networkWrite = false; await click('确认提交');
       assert(writes().length === 2 && writes().every(r=>r.path === '/api/admin/community-posts/takedown'), 'P2-2: exactly uncertain write plus one deliberate reconciled retry');
-      await mount('colors-assets'); await click('真实资源文件');
+      await mount('resources');
       assert(mainText().includes('删除暂时关闭'), 'P2-2: high-risk resource delete remains explicitly disabled rather than faking recovery');
     }
     if (scenario === 'pagination') {

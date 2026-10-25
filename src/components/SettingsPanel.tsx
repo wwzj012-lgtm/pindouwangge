@@ -17,7 +17,8 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { BrandKey, ConvertSettings, DitherMode } from '../types';
-import { BOARD_PRESETS, getBrandOptions } from '../data/palettes';
+import { BOARD_PRESETS } from '../data/palettes';
+import { useBrandCatalog } from '../hooks/useBrandCatalog';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
 import { resetBackgroundRemovalForNewImage } from '../utils/imageStudioControls';
 import { canvasLimitForMembership } from '../utils/communityPatternAccess';
@@ -48,7 +49,9 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const { isVip, isPro } = useAuth();
   const { language } = useLanguage();
   const isEn = language === 'en';
-  const brandOptions = getBrandOptions(isEn);
+  const brandCatalog = useBrandCatalog();
+  const brandOptions = Object.keys(brandCatalog.palettes).map(key => ({ key,
+    name: key === 'CUSTOM' && isEn ? 'Custom Palette' : brandCatalog.names[key] }));
   const clarityEnabled = settings.sharpening > 0;
   const containerClassName = variant === 'sheet'
     ? 'w-full max-w-none bg-transparent text-purple-950 px-0 py-0 flex flex-col h-auto overflow-visible space-y-5 text-xs select-none shadow-none'
@@ -366,9 +369,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span className="text-[10px] text-purple-600 font-medium">{isEn ? 'Selected Palette' : '选用拼豆色卡'}</span>
           <select
             value={settings.brand}
+            disabled={brandCatalog.status !== 'ready'}
             onChange={e => updateSetting('brand', e.target.value as BrandKey)}
             className="w-full bg-purple-50/80 border border-purple-200 rounded-xl px-2.5 py-1.5 text-purple-950 text-xs outline-none focus:ring-2 focus:ring-purple-400/30 cursor-pointer font-bold"
           >
+            {!brandOptions.some(option => option.key === settings.brand) && <option value={settings.brand} disabled>{settings.brand} · 当前图纸快照</option>}
             {brandOptions.map(({ key, name }) => (
               <option key={key} value={key}>
                 {name}

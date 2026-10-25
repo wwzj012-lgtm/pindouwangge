@@ -1,10 +1,18 @@
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { adminAccessFailure, formatAdminMetric, resolveAdminSection, sumAdminMetrics } from './AdminConsole';
+import { adminAccessFailure, formatAdminMetric, parseAdminCapabilities, resolveAdminSection, sumAdminMetrics } from './AdminConsole';
 import { AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading } from './AdminPrimitives';
 
 describe('admin shell state boundaries', () => {
+  it('accepts only explicit server capability booleans for the authenticated operator', () => {
+    const capabilities = { 'credits.read': true, 'credits.adjust': false, 'colors.read': true, 'colors.write': false };
+    expect(parseAdminCapabilities({ operatorUid: 'operator', capabilities }, 'operator')?.capabilities).toEqual(capabilities);
+    expect(parseAdminCapabilities({ operatorUid: 'other', capabilities }, 'operator')).toBeNull();
+    expect(parseAdminCapabilities({ operatorUid: 'operator', role: 'admin', isVip: true }, 'operator')).toBeNull();
+    expect(parseAdminCapabilities({ operatorUid: 'operator', capabilities: { ...capabilities, 'credits.adjust': 'true' } }, 'operator')).toBeNull();
+    expect(parseAdminCapabilities({ operatorUid: 'operator', capabilities: { 'credits.read': true } }, 'operator')).toBeNull();
+  });
   it('retains real zero and formats only finite numeric statistics', () => {
     expect(formatAdminMetric(0)).toBe('0'); expect(formatAdminMetric(1234)).toBe('1,234');
     for (const value of [undefined, null, NaN, Infinity, '20']) expect(formatAdminMetric(value)).toBe('—');
@@ -14,7 +22,8 @@ describe('admin shell state boundaries', () => {
     expect(sumAdminMetrics(undefined, 1)).toBeUndefined(); expect(sumAdminMetrics(1, NaN)).toBeUndefined();
   });
   it('accepts all nine existing module identifiers', () => {
-    for (const section of ['dashboard', 'users', 'roles', 'logs', 'codes', 'announcements', 'config', 'colors-assets', 'community']) expect(resolveAdminSection(section)).toBe(section);
+    for (const section of ['dashboard', 'users', 'roles', 'logs', 'codes', 'credits', 'announcements', 'config', 'brands', 'resources', 'community']) expect(resolveAdminSection(section)).toBe(section);
+    expect(resolveAdminSection('colors-assets')).toBe('brands');
   });
   it('rejects unknown module identifiers rather than treating them as authorized routes', () => {
     expect(resolveAdminSection(null)).toBe('dashboard'); expect(resolveAdminSection('../users')).toBe('dashboard'); expect(resolveAdminSection('invented')).toBe('dashboard');

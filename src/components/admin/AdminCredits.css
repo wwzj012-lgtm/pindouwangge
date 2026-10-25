@@ -1,0 +1,31 @@
+.admin-credits { display:grid; gap:20px; min-width:0; color:var(--admin-text, #25382d); }
+.admin-credits h2,.admin-credits h3 { margin:0 0 8px; }
+.admin-credits p { margin:8px 0; line-height:1.6; overflow-wrap:anywhere; }
+.admin-credits header>p,.admin-credits small { color:var(--admin-muted, #66736a); }
+.admin-credits-filters { display:flex; flex-wrap:wrap; align-items:end; gap:12px; }
+.admin-credits label { display:grid; gap:6px; font-size:13px; font-weight:600; min-width:0; }
+.admin-credits-filters label:first-child { flex:1 1 200px; }
+.admin-credits input,.admin-credits select,.admin-credits textarea { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:10px 12px; background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:44px; }
+.admin-credits input:focus-visible,.admin-credits select:focus-visible,.admin-credits textarea:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
+.admin-credits-columns { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr); gap:20px; align-items:start; }
+.admin-credits-card { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px; min-width:0; background:var(--admin-surface,#fff); }
+.admin-credits-table { max-width:100%; overflow-x:auto; }
+.admin-credits table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }
+.admin-credits td,.admin-credits th { padding:12px 8px; border-bottom:1px solid var(--admin-border,#d7e0d9); vertical-align:top; overflow-wrap:anywhere; }
+.admin-credits th { font-weight:600; white-space:nowrap; }
+.admin-credits small { display:block; margin-top:4px; overflow-wrap:anywhere; font-size:12px; }
+.admin-credits fieldset { border:0; padding:0; margin:12px 0 0; display:grid; gap:12px; }
+.admin-credits fieldset:disabled { opacity:.65; }
+.admin-credits fieldset legend { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.admin-credits-balances { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.admin-credits-balances div { background:var(--admin-background,#f2f6f3); padding:14px; border-radius:8px; }
+.admin-credits-balances dt { font-size:13px; }
+.admin-credits-balances dd { margin:8px 0 0; font-size:24px; font-variant-numeric:tabular-nums; }
+.admin-credits-heading { display:flex; align-items:start; justify-content:space-between; gap:12px; }
+.admin-credits-recovery { padding:16px; border:1px solid #b58e37; background:var(--admin-warning-surface,#fff9eb); border-radius:10px; }
+.admin-credits-recovery .admin-button { margin:4px 8px 4px 0; }
+.admin-credits-pagination { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:8px; padding-top:12px; font-size:12px; }
+.admin-credits [role=alert] { color:var(--admin-danger,#a02c2c); }
+.admin-credits [data-credit-success] { padding:12px; border:1px solid #81a88b; border-radius:8px; }
+@media (max-width:900px) { .admin-credits-columns { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:520px) { .admin-credits-card { padding:12px; } .admin-credits-filters>label { flex:1 1 100%; } .admin-credits-heading { flex-wrap:wrap; } .admin-credits-balances dd { font-size:20px; } }

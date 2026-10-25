@@ -156,9 +156,11 @@ export async function runAdminPasswordResetChecks() {
   await custom(); await click('核对目标并继续');
   hold = true;
   const confirm = button('确认重置密码');
+  confirm.focus();
   await flush(() => { confirm.click(); confirm.click(); });
   assert(writes().length === initialWrites + 1, 'double click sends exactly one request');
   assert(button('确认重置密码').disabled && button('取消').disabled, 'pending confirmation and cancellation disabled');
+  assert(top().contains(document.activeElement), 'pending password reset keeps focus inside top dialog after submit is disabled');
   const beforeEscape = document.querySelectorAll('[role="dialog"]').length;
   await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   assert(document.querySelectorAll('[role="dialog"]').length === beforeEscape, 'pending escape cannot dismiss');

@@ -42,7 +42,7 @@ export function useContentWrite(request: AdminRequest, options?: { canWrite: (sc
     } catch { recovery.markUncertain(pending.path); uncertainScope.current = contentScope(pending.path); setError(uncertainMessage + ' 输入与待提交快照保留。'); }
     finally { lock.current = false; setBusy(false); }
   };
-  const confirmation = <>{!pending && error && <AdminErrorState title="操作结果提醒" message={error} />}<AdminConfirmDialog open={Boolean(pending)} title={pending?.title ?? '复核变更'} description={pending ? '对象：' + pending.object + '。参数在打开确认时冻结。' : ''} confirmLabel="确认提交" confirmDisabled={Boolean(pending && (recovery.isUncertain(pending.path) || !canWrite(pending.path)))} pending={busy} onClose={() => { if (!lock.current) setPending(null); }} onConfirm={() => void confirm()}>
+  const confirmation = <>{!pending && error && <AdminErrorState title="操作结果提醒" message={error} />}<AdminConfirmDialog open={Boolean(pending)} title={pending?.title ?? '复核变更'} description="参数在打开确认时冻结，请核对变更前后的值。" subject={pending?.object} impact={pending?.impact} confirmLabel="确认提交" confirmDisabled={Boolean(pending && (recovery.isUncertain(pending.path) || !canWrite(pending.path)))} pending={busy} onClose={() => { if (!lock.current) setPending(null); }} onConfirm={() => void confirm()}>
     {pending && <><p className="admin-final-impact">作用范围：{pending.impact}</p><div className="admin-final-diff"><section><h3>变更前 / 读取值</h3><pre>{JSON.stringify(pending.before ?? '新建 / 未提供', null, 2)}</pre></section><section><h3>将提交值</h3><pre data-content-frozen>{JSON.stringify(pending.after ?? '删除指定记录', null, 2)}</pre></section></div></>}
     {error && <AdminErrorState title="实际操作未完成" message={error} />}
   </AdminConfirmDialog></>;

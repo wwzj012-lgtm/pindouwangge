@@ -34,6 +34,8 @@ import { createPressRepeatController, type PressRepeatController } from '../util
 import { SymmetryAxisControls, type WorkspaceEditingActions } from './SymmetryAxisControls';
 
 interface ToolbarProps {
+  onOpenBackgroundCleanup?: () => void;
+  canCleanupBackground?: boolean;
   editorActions?: WorkspaceEditingActions;
   activeTool: ToolType;
   setActiveTool: (tool: ToolType) => void;
@@ -77,6 +79,8 @@ const buttonBase = 'inline-flex min-h-8 items-center justify-center gap-1 rounde
 const iconButton = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-purple-800 transition-colors hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-35';
 
 export const Toolbar: React.FC<ToolbarProps> = ({
+  onOpenBackgroundCleanup,
+  canCleanupBackground = false,
   editorActions,
   activeTool,
   setActiveTool,
@@ -302,6 +306,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           {openMenu === 'assist' && (
             <div id="toolbar-assist-menu" role="menu" className="absolute left-0 top-full mt-1 grid min-w-[220px] gap-1.5 rounded-xl border border-purple-200 bg-white p-2 shadow-lg">
               <button type="button" onClick={onClearOuterBackground} className={`${buttonBase} w-full justify-start border-rose-100 bg-white text-rose-700 hover:bg-rose-50`}><Scissors className="h-3.5 w-3.5" />{isEn ? 'Clear edge background' : '清除边缘背景'}</button>
+              {onOpenBackgroundCleanup && <button type="button" onClick={() => { closeMenu(); onOpenBackgroundCleanup(); }} disabled={!canCleanupBackground}
+                className={`${buttonBase} min-h-11 w-full justify-start border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100`}>
+                <Scissors className="h-3.5 w-3.5" />{isEn ? 'Preview residual cleanup' : '清理残点（先预览）'}
+              </button>}
               <button type="button" onClick={() => { setActiveTool('replace'); closeMenu(); }} aria-pressed={activeTool === 'replace'} className={`${buttonBase} w-full justify-start ${activeTool === 'replace' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-100 bg-white text-purple-800 hover:bg-purple-50'}`}><RefreshCw className="h-3.5 w-3.5" />{isEn ? 'Replace color (R)' : '替换全图此色'}</button>
               {hasImage && (
                 <div className="rounded-lg border border-purple-100 bg-purple-50/50 p-1">

@@ -41,6 +41,7 @@ import { DesktopWorkspace } from './components/desktop/DesktopWorkspace';
 import { PatternDetailsUnlockContext } from './components/StatsPanel';
 import { MobileWorkspace } from './components/mobile/MobileWorkspace';
 import { useIsDesktop } from './hooks/useIsDesktop';
+import { useBackgroundCleanup } from './hooks/useBackgroundCleanup';
 import { PaletteManagerModal } from './components/PaletteManagerModal';
 import { ExportModal } from './components/ExportModal';
 import { ColorReplaceModal } from './components/ColorReplaceModal';
@@ -505,6 +506,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Source Image element reference
   const [sourceImage, setSourceImage] = useState<HTMLImageElement | null>(null);
+  const [subjectCropSource, setSubjectCropSource] = useState<{ image: HTMLImageElement; savedPercent: number } | null>(null);
   const imageRequestGateRef = useRef(createImageRequestGate());
   const [largeCanvasStudioRequest, setLargeCanvasStudioRequest] = useState<LargeCanvasStudioRequest | null>(null);
   const [largeCanvasStudioSettings, setLargeCanvasStudioSettings] = useState<ConvertSettings>(() => ({ ...settings }));
@@ -1198,6 +1200,14 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return commitGridHistory(startGrid, gridRef.current);
   }, [commitGridHistory]);
 
+  const backgroundCleanup = useBackgroundCleanup({
+    grid,
+    context: [settings, activePalette, sourceImage, activePatternId, currentTab, isPracticeMode, isStudioModalOpen, isImportBlueprintOpen],
+    enabled: !isPracticeMode && !isConverting && !isStudioModalOpen && !isImportBlueprintOpen,
+    onBeforeOpen: finishHistoryTransaction,
+    onApply: applyGridChange,
+  });
+
   // Handle Undo / Redo
   const handleUndo = useCallback(() => {
     const nextHistoryState = getUndoState(historyRef.current, historyIndexRef.current);
@@ -1228,11 +1238,11 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
     async (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[], requestToken = beginImageRequest()) => {
-      await refreshBrandCatalog();
+      const catalogRefreshed = await refreshBrandCatalog();
       if (!isCurrentImageRequest(requestToken)) return;
       const latestCatalog = getBrandCatalogSnapshot();
       const availablePalette = latestCatalog.palettes[currentSettings.brand];
-      if (latestCatalog.status !== 'ready' || !availablePalette?.length) {
+      if (!catalogRefreshed || latestCatalog.status !== 'ready' || !availablePalette?.length) {
         setImageLoadMessage('品牌目录不可用，或该品牌已禁用/删除。请选择可用品牌后再转换；已有图纸与颜色快照保留。');
         finishImageRequest(requestToken);
         return;
@@ -1308,6 +1318,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           if (!isCurrentImageRequest(requestToken)) return;
           const safeSettings = resetBackgroundRemovalForNewImage(settings);
           setSourceImage(img);
+          setSubjectCropSource(null);
           setProjectName(file.name.replace(/\.[^/.]+$/, ''));
           setSettings(safeSettings);
           convertImageToGrid(img, safeSettings, activePalette, requestToken);
@@ -1339,6 +1350,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       if (!isCurrentImageRequest(requestToken)) return;
       setActivePatternId(null);
       setSourceImage(img);
+      setSubjectCropSource(null);
       setProjectName(name);
       const presetSettings = { ...resetBackgroundRemovalForNewImage(settings), width: 79, height: 44 };
       setSettings(presetSettings);
@@ -1412,11 +1424,11 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   }, [largeCanvasStudioRequest]);
 
   const handleConvertLargeCanvasImage = useCallback(async (file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
-    await refreshBrandCatalog();
+    const catalogRefreshed = await refreshBrandCatalog();
     const latestCatalog = getBrandCatalogSnapshot();
     return new Promise((resolve, reject) => {
       const availablePalette = latestCatalog.palettes[settings.brand];
-      if (latestCatalog.status !== 'ready' || !availablePalette?.length) {
+      if (!catalogRefreshed || latestCatalog.status !== 'ready' || !availablePalette?.length) {
         reject(new Error('品牌目录不可用，或该品牌已禁用/删除，请选择可用品牌。')); return;
       }
       const livePalette = paletteForNewConversion(availablePalette, activePalette, settings.brand);
@@ -1454,6 +1466,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const handleOpenLargeCanvasFrame = useCallback((frame: LargeCanvasFrame) => {
     if (!frame.beanResult?.length || !frame.beanResult[0]?.length) return;
     invalidateImageRequest();
+    setSubjectCropSource(null);
     setActivePatternId(null);
     setProjectName(frame.title);
     setSettings(current => ({ ...current, width: frame.rect.width, height: frame.rect.height, keepAspectRatio: false }));
@@ -1462,16 +1475,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (frame.sourceImageDataUrl) {
       setIsImageDerivedPattern(true);
       const image = new Image();
-      image.onload = () => setSourceImage(image);
+      image.onload = () => { setSourceImage(image); setSubjectCropSource(null); };
       image.src = frame.sourceImageDataUrl;
     } else {
       setIsImageDerivedPattern(false);
       setSourceImage(null);
+      setSubjectCropSource(null);
     }
   }, [applyGridChange, invalidateImageRequest]);
 
   // Handle Reference Image Upload (for manual tracing / reference only)
   const handleReferenceImageUpload = useCallback((file: File) => {
+    setSubjectCropSource(null);
     const reader = new FileReader();
     reader.onload = evt => {
       if (evt.target?.result) {
@@ -1479,6 +1494,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           setSourceImage(img);
+          setSubjectCropSource(null);
         };
         img.src = evt.target.result as string;
       }
@@ -1530,7 +1546,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
-    if (isPracticeMode) return;
+    if (isPracticeMode || backgroundCleanup.preview) return;
     if (x < 0 || x >= settings.width || y < 0 || y >= settings.height) return;
     const currentGrid = gridRef.current;
 
@@ -1583,7 +1599,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Shape creation handler from GridCanvas (Line / Rectangle / Circle)
   const handleApplyShape = (points: { x: number; y: number }[]) => {
-    if (isPracticeMode || !selectedColor || points.length === 0) return;
+    if (isPracticeMode || backgroundCleanup.preview || !selectedColor || points.length === 0) return;
     const colorId = selectedColor.id;
     const newGrid = gridRef.current.map(row => [...row]);
 
@@ -1792,6 +1808,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         invalidateImageRequest();
         setActivePatternId(null);
         setCompletedColorIds([]);
+        setSourceImage(null);
+        setSubjectCropSource(null);
         setProjectName(project.name || '导入的拼豆项目');
         restoredPaletteRef.current = { brand: importedBrand, palette: importedPalette };
         setBrand(importedBrand);
@@ -1860,6 +1878,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setActivePalette(project.palette);
     setSettings(restoredSettings);
     setSourceImage(null);
+    setSubjectCropSource(null);
     setConversionDiagnostics(null);
     // A loaded work is its own undo baseline, never an edit of another work.
     historyTransactionRef.current = null;
@@ -2089,6 +2108,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           : '当前图纸品牌已禁用或删除，颜色快照保留；请另选品牌后开始新转换。'}
         {brandCatalog.status === 'error' && <button type="button" className="ml-3 underline" onClick={() => void brandCatalog.refresh()}>重新读取品牌</button>}
       </div>}
+      {brandCatalog.status === 'ready' && brandCatalog.backgroundError && <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
+        品牌目录更新失败，已有图纸与颜色快照保留；新转换需重新读取成功后才能开始。
+        <button type="button" className="ml-3 underline" disabled={brandCatalog.refreshing} onClick={() => void brandCatalog.refresh()}>重新读取品牌</button>
+      </div>}
       {isDesktop ? (
         <Header
           projectName={projectName}
@@ -2245,6 +2268,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             <PatternDetailsUnlockContext.Provider value={isPatternUnlocked}>
             {isDesktop ? (
             <DesktopWorkspace
+              backgroundCleanup={backgroundCleanup}
               editorActions={editorActions}
               completionSummary={completionSummary}
               grid={grid}
@@ -2311,6 +2335,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             />
           ) : (
             <MobileWorkspace
+              backgroundCleanup={backgroundCleanup}
               editorActions={editorActions}
               completionSummary={completionSummary}
               grid={grid}
@@ -2566,14 +2591,16 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           isOpen={isStudioModalOpen}
           onClose={() => setIsStudioModalOpen(false)}
           sourceImage={sourceImage}
+          originalSource={subjectCropSource}
           settings={settings}
           setSettings={setSettings}
           activePalette={activePalette}
-          onApplyConversion={(newGrid, updatedImg, diagnostics) => {
+          onApplyConversion={(newGrid, updatedImg, diagnostics, subjectCrop) => {
             invalidateImageRequest();
             if (updatedImg) {
               setSourceImage(updatedImg);
             }
+            setSubjectCropSource(subjectCrop ? { image: subjectCrop.originalImage, savedPercent: subjectCrop.savedPercent } : null);
             applyGridChange(newGrid, false);
             setConversionDiagnostics(diagnostics ?? null);
           }}

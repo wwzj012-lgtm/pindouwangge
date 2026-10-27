@@ -1,4 +1,6 @@
 import React from 'react';
+import type { BackgroundCleanupController } from '../../hooks/useBackgroundCleanup';
+import { BackgroundCleanupPanel } from '../BackgroundCleanupPanel';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop, ConvertSettings } from '../../types';
 import { Toolbar } from '../Toolbar';
 import { SettingsPanel } from '../SettingsPanel';
@@ -9,6 +11,7 @@ import type { ConversionDiagnostics } from '../../utils/imagePipeline';
 import { Sparkles } from 'lucide-react';
 
 export interface DesktopWorkspaceProps {
+  backgroundCleanup?: BackgroundCleanupController;
   editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
   // Canvas & Grid State
@@ -84,6 +87,7 @@ export interface DesktopWorkspaceProps {
 }
 
 export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
+  backgroundCleanup,
   editorActions,
   completionSummary,
   grid,
@@ -181,6 +185,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
           canvasBackdrop={canvasBackdrop}
           setCanvasBackdrop={setCanvasBackdrop}
           onClearOuterBackground={handleClearOuterBackground}
+          onOpenBackgroundCleanup={backgroundCleanup?.open}
+          canCleanupBackground={backgroundCleanup?.canOpen ?? false}
           hasImage={sourceImage !== null}
           showOverlay={showOverlay}
           overlayOpacity={overlayOpacity}
@@ -209,7 +215,10 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
 
         {/* Center Main Canvas Viewport */}
         <main className="flex-1 h-full relative min-w-0 bg-slate-100 flex flex-col overflow-hidden">
+          {backgroundCleanup?.preview && <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />}
+          <div className="relative min-h-0 flex-1">
           <GridCanvas
+            cleanupPreview={backgroundCleanup?.preview}
             symmetryAxes={editorActions?.axes}
             onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
             interactionProfile="desktop"
@@ -244,6 +253,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             onReferenceImageUpload={handleReferenceImageUpload}
             onResetCanvas={handleResetCurrentCanvas}
           />
+          </div>
 
           {/* Loading Animation Overlay */}
           {isConverting && (

@@ -18,7 +18,7 @@ import { BeadColor, ConvertSettings, DitherMode } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { imageToGridWithDiagnostics } from '../utils/colorUtils';
 import type { ConversionDiagnostics } from '../utils/imagePipeline';
-import { smartCropSubject } from '../utils/cropUtils';
+import { suggestSubjectBounds, type SubjectBoundsRect } from '../utils/subjectBounds';
 import {
   IMAGE_STUDIO_PREVIEW_DEBOUNCE_MS,
   buildTransformedImageCanvas,
@@ -27,6 +27,7 @@ import {
   nextImageStudioOperationToken,
   resetImageStudioBackgroundSettings,
   stepImageStudioControl,
+  transformedImageDimensions,
 } from '../utils/imageStudioControls';
 
 interface ImageStudioModalProps {
@@ -36,7 +37,9 @@ interface ImageStudioModalProps {
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
   activePalette: BeadColor[];
-  onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement, diagnostics?: ConversionDiagnostics) => void;
+  originalSource?: { image: HTMLImageElement; savedPercent: number } | null;
+  onApplyConversion: (newGrid: (string | null)[][], updatedImage?: HTMLImageElement, diagnostics?: ConversionDiagnostics,
+    subjectCrop?: { originalImage: HTMLImageElement; savedPercent: number } | null) => void;
 }
 
 interface PreciseRangeControlProps {
@@ -46,6 +49,17 @@ interface PreciseRangeControlProps {
   max: number;
   suffix?: string;
   onValueChange: (value: number) => void;
+}
+
+interface SubjectCropPreview {
+  previewUrl: string;
+  image: HTMLImageElement;
+  fullImage: HTMLImageElement;
+  bounds: SubjectBoundsRect;
+  sourceWidth: number;
+  sourceHeight: number;
+  savedPercent: number;
+  mayExcludeDecorations: boolean;
 }
 
 const PreciseRangeControl: React.FC<PreciseRangeControlProps> = ({
@@ -77,6 +91,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   settings,
   setSettings,
   activePalette,
+  originalSource = null,
   onApplyConversion,
 }) => {
   const { language } = useLanguage();
@@ -93,10 +108,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   const [currentImg, setCurrentImg] = useState<HTMLImageElement | null>(sourceImage);
   const [originalImg, setOriginalImg] = useState<HTMLImageElement | null>(null);
   const [cropSavedPercent, setCropSavedPercent] = useState<number | null>(null);
+  const [subjectCropPreview, setSubjectCropPreview] = useState<SubjectCropPreview | null>(null);
+  const [cropMessage, setCropMessage] = useState<string | null>(null);
+  const [subjectCropApplied, setSubjectCropApplied] = useState(false);
 
   const [previewGrid, setPreviewGrid] = useState<(string | null)[][]>([]);
   const [conversionDiagnostics, setConversionDiagnostics] = useState<ConversionDiagnostics | null>(null);
   const [isCalculating, setIsCalculating] = useState<boolean>(false);
+  const [isCropAnalyzing, setIsCropAnalyzing] = useState(false);
   const [activeMobileTab, setActiveMobileTab] = useState<'preview' | 'settings'>('preview');
   const [activePreviewPane, setActivePreviewPane] = useState<'source' | 'pattern'>('source');
   const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -105,12 +124,15 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   const previewTokenRef = useRef(0);
   const cropOperationTokenRef = useRef(0);
   const cropPendingRef = useRef(false);
+  const applyPendingRef = useRef(false);
+  const originalTransformRef = useRef<{ rotation: number; flipH: boolean; aspectRatio: number; height: number } | null>(null);
 
   const invalidateSession = () => {
     sessionTokenRef.current += 1;
     previewTokenRef.current += 1;
     cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
     cropPendingRef.current = false;
+    applyPendingRef.current = false;
     return sessionTokenRef.current;
   };
 
@@ -119,9 +141,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     onClose();
   };
 
-  const createAppliedImage = (canvas: HTMLCanvasElement): Promise<HTMLImageElement | null> => {
+  const createImageFromDataUrl = (source: string): Promise<HTMLImageElement | null> => {
     try {
-      const source = canvas.toDataURL('image/png');
       const image = new Image();
       return new Promise((resolve) => {
         image.onload = () => resolve(image);
@@ -131,6 +152,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     } catch {
       return Promise.resolve(null);
     }
+  };
+
+  const createAppliedImage = (canvas: HTMLCanvasElement): Promise<HTMLImageElement | null> => {
+    try { return createImageFromDataUrl(canvas.toDataURL('image/png')); }
+    catch { return Promise.resolve(null); }
   };
 
   // Palette map lookup
@@ -147,8 +173,20 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       setPreviewSettings(safeSettings);
       setPickedChromaColor(null);
       setCurrentImg(sourceImage);
-      setOriginalImg(null);
-      setCropSavedPercent(null);
+      setRotation(0);
+      setFlipH(false);
+      setIsCalculating(false);
+      setIsCropAnalyzing(false);
+      setOriginalImg(originalSource?.image ?? null);
+      const originalWidth = originalSource?.image.naturalWidth || originalSource?.image.width || 0;
+      const originalHeight = originalSource?.image.naturalHeight || originalSource?.image.height || 0;
+      originalTransformRef.current = originalSource && originalWidth > 0
+        ? { rotation: 0, flipH: false, aspectRatio: originalHeight / originalWidth, height: safeSettings.height }
+        : null;
+      setCropSavedPercent(originalSource?.savedPercent ?? null);
+      setSubjectCropApplied(Boolean(originalSource));
+      setSubjectCropPreview(null);
+      setCropMessage(null);
       setConversionDiagnostics(null);
     } else {
       invalidateSession();
@@ -156,7 +194,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     return () => {
       invalidateSession();
     };
-  }, [isOpen, settings, sourceImage]);
+  }, [isOpen, settings, sourceImage, originalSource]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -235,7 +273,31 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
 
   if (!isOpen || !sourceImage) return null;
 
-  // Smart Crop Subject Handler
+  const dimensionsImage = currentImg || sourceImage;
+  const dimensions = transformedImageDimensions(
+    dimensionsImage.naturalWidth || dimensionsImage.width,
+    dimensionsImage.naturalHeight || dimensionsImage.height, rotation,
+  );
+  const dimensionsImageWidth = dimensions?.width ?? 0;
+  const dimensionsImageHeight = dimensions?.height ?? 0;
+
+  const handleRotate = () => {
+    cancelSubjectCropPreview();
+    const nextRotation = (rotation + 90) % 360;
+    const nextDimensions = transformedImageDimensions(
+      dimensionsImage.naturalWidth || dimensionsImage.width,
+      dimensionsImage.naturalHeight || dimensionsImage.height, nextRotation,
+    );
+    setRotation(nextRotation);
+    if (nextDimensions) setLocalSettings(current => ({
+      ...current,
+      height: current.keepAspectRatio
+        ? Math.max(10, Math.round(current.width * nextDimensions.height / nextDimensions.width))
+        : current.height,
+    }));
+  };
+
+  // Suggest a crop for preview only. Nothing is changed until the user accepts it.
   const handleSmartCrop = async () => {
     const activeImage = currentImg || sourceImage;
     if (!activeImage) return;
@@ -244,37 +306,73 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     const cropToken = nextImageStudioOperationToken(cropOperationTokenRef.current);
     cropOperationTokenRef.current = cropToken;
     cropPendingRef.current = true;
-    setIsCalculating(true);
-    let cropSucceeded = false;
+    setIsCropAnalyzing(true);
+    setCropMessage(null);
     try {
-      const result = await smartCropSubject(activeImage, 0.03);
+      const transformed = buildTransformedImageCanvas(activeImage, rotation, flipH);
+      if (!transformed) throw new Error(isEn ? 'Unable to inspect the source image.' : '无法读取原图，请检查图片后重试。');
+      const bounds = suggestSubjectBounds(transformed.getContext('2d', { willReadFrequently: true })!
+        .getImageData(0, 0, transformed.width, transformed.height));
       if (!isOpen || sessionToken !== sessionTokenRef.current || !isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) return;
-      if (!result) {
-        alert('未检测到可裁切的明显空白/黑白背景，或主体已紧凑填充整个画布。');
+      if (!bounds.hasSuggestion) {
+        setCropMessage(isEn ? 'No reliable subject crop was found. The original composition is unchanged.'
+          : '未找到足够可靠的主体范围，原图构图保持不变。可改用手动裁剪或保留完整构图。');
         return;
       }
-
-      if (!originalImg) {
-        setOriginalImg(activeImage);
-      }
-      setCurrentImg(result.croppedImage);
-      setCropSavedPercent(result.savedPixelRatioPercent);
-
-      // Adjust localSettings height ratio automatically
-      const newRatio = result.croppedCanvas.height / result.croppedCanvas.width;
-      setLocalSettings(s => ({
-        ...s,
-        height: Math.max(10, Math.round(s.width * newRatio)),
-      }));
-      cropSucceeded = true;
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = bounds.pixelBounds.width; cropCanvas.height = bounds.pixelBounds.height;
+      const context = cropCanvas.getContext('2d');
+      if (!context) throw new Error(isEn ? 'Unable to prepare the crop preview.' : '无法生成裁剪预览。');
+      context.drawImage(transformed, bounds.pixelBounds.x, bounds.pixelBounds.y, bounds.pixelBounds.width, bounds.pixelBounds.height,
+        0, 0, bounds.pixelBounds.width, bounds.pixelBounds.height);
+      const previewUrl = cropCanvas.toDataURL('image/png');
+      const image = await createImageFromDataUrl(previewUrl);
+      if (!image) throw new Error(isEn ? 'Unable to decode the crop preview.' : '裁剪预览解码失败，请重试。');
+      const fullImage = await createAppliedImage(transformed);
+      if (!fullImage) throw new Error(isEn ? 'Unable to preserve the complete image.' : '无法保留完整原图，请重试。');
+      if (!isOpen || sessionToken !== sessionTokenRef.current || !isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) return;
+      setSubjectCropPreview({ previewUrl, image, fullImage, bounds: bounds.pixelBounds, sourceWidth: transformed.width,
+        sourceHeight: transformed.height, savedPercent: Math.round((1 - bounds.coverage) * 100),
+        mayExcludeDecorations: bounds.mayExcludeDecorations });
     } catch {
-      // The finally block clears loading only for the current crop operation.
+      if (isOpen && sessionToken === sessionTokenRef.current && isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current))
+        setCropMessage(isEn ? 'The crop preview could not be created. The original image is unchanged.' : '裁剪预览生成失败，原图没有改变，请重试。');
     } finally {
       if (isOpen && sessionToken === sessionTokenRef.current && isImageStudioOperationCurrent(cropToken, cropOperationTokenRef.current)) {
         cropPendingRef.current = false;
-        if (!cropSucceeded) setIsCalculating(false);
+        setIsCropAnalyzing(false);
       }
     }
+  };
+
+  const cancelSubjectCropPreview = () => {
+    cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
+    cropPendingRef.current = false;
+    setSubjectCropPreview(null);
+    setIsCropAnalyzing(false);
+  };
+
+  const acceptSubjectCrop = () => {
+    if (!subjectCropPreview || cropPendingRef.current) return;
+    const activeImage = currentImg || sourceImage;
+    if (!activeImage) return;
+    if (!originalImg) {
+      setOriginalImg(subjectCropPreview.fullImage);
+      originalTransformRef.current = { rotation: 0, flipH: false,
+        aspectRatio: subjectCropPreview.sourceHeight / subjectCropPreview.sourceWidth, height: localSettings.height };
+    }
+    setCurrentImg(subjectCropPreview.image);
+    // Rotation/flip were baked into the accepted preview canvas; reset the
+    // controls so the preview and final conversion use the same composition.
+    setRotation(0); setFlipH(false);
+    setCropSavedPercent(subjectCropPreview.savedPercent);
+    setSubjectCropApplied(true);
+    if (localSettings.keepAspectRatio) {
+      const nextHeight = Math.max(10, Math.round(localSettings.width * subjectCropPreview.bounds.height / subjectCropPreview.bounds.width));
+      setLocalSettings(current => ({ ...current, height: nextHeight }));
+    }
+    setSubjectCropPreview(null);
+    setCropMessage(null);
   };
 
   const handleRestoreOriginal = () => {
@@ -283,8 +381,22 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
       cropPendingRef.current = false;
       previewTokenRef.current += 1;
       setCurrentImg(originalImg);
+      if (originalTransformRef.current) {
+        setRotation(originalTransformRef.current.rotation);
+        setFlipH(originalTransformRef.current.flipH);
+        if (localSettings.keepAspectRatio) {
+          const nextHeight = Math.max(10, Math.round(localSettings.width * originalTransformRef.current.aspectRatio));
+          setLocalSettings(current => ({ ...current, height: nextHeight }));
+        } else {
+          setLocalSettings(current => ({ ...current, height: originalTransformRef.current?.height ?? current.height }));
+        }
+      }
+      originalTransformRef.current = null;
       setOriginalImg(null);
       setCropSavedPercent(null);
+      setSubjectCropApplied(false);
+      setSubjectCropPreview(null);
+      setCropMessage(null);
       setIsCalculating(false);
     }
   };
@@ -395,6 +507,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
   };
 
   const handleApply = async () => {
+    if (subjectCropPreview || isCropAnalyzing || applyPendingRef.current) return;
     if (cropPendingRef.current) {
       cropOperationTokenRef.current = nextImageStudioOperationToken(cropOperationTokenRef.current);
       cropPendingRef.current = false;
@@ -407,6 +520,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     if (!activeImage || isCalculating) return;
     const canvas = buildTransformedImageCanvas(activeImage, rotation, flipH);
     if (!canvas || sessionToken !== sessionTokenRef.current) return;
+    applyPendingRef.current = true;
+    try {
     const applied = imageToGridWithDiagnostics(canvas, localSettings, activePalette || []);
     if (sessionToken !== sessionTokenRef.current) return;
     setIsCalculating(true);
@@ -418,9 +533,16 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
     }
     // The next image must opt in again; a prior crop/key cannot silently remove its background.
     setSettings(resetImageStudioBackgroundSettings(localSettings));
-    onApplyConversion(applied.grid, appliedImage, applied.diagnostics);
+    onApplyConversion(applied.grid, appliedImage, applied.diagnostics,
+      subjectCropApplied && originalImg ? { originalImage: originalImg, savedPercent: cropSavedPercent ?? 0 } : null);
     invalidateSession();
     handleClose();
+    } finally {
+      if (sessionToken === sessionTokenRef.current) {
+        applyPendingRef.current = false;
+        setIsCalculating(false);
+      }
+    }
   };
 
   return (
@@ -493,12 +615,14 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 {isEn ? 'Smart Presets:' : '智能预设:'}
               </span>
               <button
-                onClick={handleSmartCrop}
-                className="px-2.5 py-1.5 rounded-lg bg-teal-600 border border-teal-600 text-white font-semibold hover:bg-teal-700 cursor-pointer transition-colors text-[11px] sm:text-xs flex items-center gap-1.5"
-                title={isEn ? 'Automatically auto crop blank or black/white borders to focus 100% resolution on subject' : '自动检测并裁切掉大面积空黑/白边框，将像素100%集中在核心主角上，显著提升图纸清晰度并减少拼豆数量'}
+                type="button"
+                onClick={() => { setActivePreviewPane('source'); void handleSmartCrop(); }}
+                disabled={isCalculating || Boolean(originalImg)}
+                className="px-2.5 py-1.5 rounded-lg bg-teal-600 border border-teal-600 text-white font-semibold hover:bg-teal-700 disabled:opacity-50 cursor-pointer transition-colors text-[11px] sm:text-xs flex items-center gap-1.5"
+                title={isEn ? 'Preview a subject-priority crop. Nothing changes until you confirm.' : '先预览主体优先裁剪；确认后才应用，不会覆盖原图'}
               >
                 <Crop className="w-3.5 h-3.5" />
-                <span>{isEn ? 'Smart Subject Auto Crop' : '智能主体自动裁剪'}</span>
+                <span>{isEn ? 'Subject-first preview' : '主体优先（预览）'}</span>
               </button>
               <button
                 onClick={autoDetectAndRemoveBackground}
@@ -554,9 +678,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   <Sparkles className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
                   <span>
                     {isEn ? (
-                      <>Successfully cropped <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> of blank border! Grid resolution is now 100% focused on subject.</>
+                      <>Subject-first crop applied: <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> less surrounding area. You can restore the complete composition.</>
                     ) : (
-                      <>已成功裁切掉 <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong> 的无效边框背景！图纸分辨率已100%集中于核心主角，清晰度显著提升且大幅省豆！</>
+                      <>已应用主体优先裁剪：主体周围区域减少 <strong className="text-amber-300 font-mono text-sm">{cropSavedPercent}%</strong>。可随时恢复完整构图。</>
                     )}
                   </span>
                 </div>
@@ -567,6 +691,29 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   {isEn ? '↩️ Restore Full Image' : '↩️ 恢复完整原图'}
                 </button>
               </div>
+            )}
+
+            {cropMessage && <div role="status" className="shrink-0 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">{cropMessage}</div>}
+
+            {subjectCropPreview && (
+              <section aria-label={isEn ? 'Subject-priority crop preview' : '主体优先裁剪预览'} className="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
+                <div className="flex min-w-0 items-center gap-3">
+                  <img src={subjectCropPreview.previewUrl} alt={isEn ? 'Proposed crop' : '建议裁剪结果'} className="h-24 w-24 shrink-0 rounded-lg border border-indigo-200 bg-white object-contain p-1" />
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-bold">{isEn ? 'Preview before applying' : '先看裁剪结果，再决定是否应用'}</p>
+                    <p>{subjectCropPreview.sourceWidth}×{subjectCropPreview.sourceHeight} → {subjectCropPreview.bounds.width}×{subjectCropPreview.bounds.height} · {isEn ? 'aspect ratio preserved' : '保持原比例，不拉伸'}</p>
+                    <p>{isEn ? 'Planned bead grid' : '预计图纸尺寸'}：{localSettings.width}×{localSettings.keepAspectRatio
+                      ? Math.max(10, Math.round(localSettings.width * subjectCropPreview.bounds.height / subjectCropPreview.bounds.width))
+                      : localSettings.height}</p>
+                    <p>{isEn ? `Removes ${subjectCropPreview.savedPercent}% of the surrounding area.` : `减少 ${subjectCropPreview.savedPercent}% 主体周围区域，让主体占用更多拼豆网格。`}</p>
+                    {subjectCropPreview.mayExcludeDecorations && <p className="font-semibold text-amber-700">{isEn ? 'Detached decorations may be excluded. Review the outline on the original image.' : '部分边缘装饰或散点可能被裁掉，请检查原图上的蓝框。'}</p>}
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-col gap-1.5 sm:flex-row">
+                  <button type="button" className="min-h-9 rounded-lg border border-indigo-300 bg-white px-3 font-semibold text-indigo-800 hover:bg-indigo-100" onClick={cancelSubjectCropPreview}>{isEn ? 'Keep full composition' : '取消，保留完整构图'}</button>
+                  <button type="button" disabled={isCalculating || isCropAnalyzing} className="min-h-9 rounded-lg bg-indigo-600 px-3 font-bold text-white hover:bg-indigo-700 disabled:opacity-50" onClick={acceptSubjectCrop}>{isEn ? 'Use this crop' : '确认主体优先'}</button>
+                </div>
+              </section>
             )}
 
             <div className="grid grid-cols-2 gap-1 rounded-lg border border-slate-200 bg-white p-1 xl:hidden shrink-0">
@@ -589,21 +736,23 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                   </span>
                   <div className="flex items-center gap-1">
                     <button
-                      onClick={() => setRotation(r => (r + 90) % 360)}
-                      className="p-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                      onClick={handleRotate}
+                      disabled={isCalculating}
+                      className="p-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 cursor-pointer"
                       title={isEn ? 'Rotate 90°' : '旋转 90 度'}
                     >
                       <RotateCw className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => setFlipH(f => !f)}
-                      className="p-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 cursor-pointer"
+                      onClick={() => { cancelSubjectCropPreview(); setFlipH(f => !f); }}
+                      disabled={isCalculating}
+                      className="p-1.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 cursor-pointer"
                       title={isEn ? 'Horizontal Flip' : '水平镜像翻转'}
                     >
                       <FlipHorizontal className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => setIsPickingColor(p => !p)}
+                      onClick={() => { cancelSubjectCropPreview(); setIsPickingColor(p => !p); }}
                       className={`p-1 px-2 rounded flex items-center gap-1 text-[11px] cursor-pointer transition-colors ${
                         isPickingColor
                           ? 'bg-rose-600 text-white animate-pulse'
@@ -618,13 +767,19 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 </div>
 
                 <div className="flex-1 min-h-[300px] xl:min-h-0 flex items-center justify-center overflow-hidden bg-slate-100 rounded-lg border border-slate-200 p-2 relative">
-                  <canvas
-                    ref={imageCanvasRef}
-                    onClick={handleCanvasClick}
-                    className={`max-w-full max-h-full object-contain rounded outline outline-1 outline-slate-500 ${
-                      isPickingColor ? 'cursor-crosshair ring-2 ring-rose-500' : ''
-                    }`}
-                  />
+                  <div className="relative inline-flex max-w-full max-h-full">
+                    <canvas
+                      ref={imageCanvasRef}
+                      onClick={handleCanvasClick}
+                      className={`block max-w-full max-h-full object-contain rounded outline outline-1 outline-slate-500 ${
+                        isPickingColor ? 'cursor-crosshair ring-2 ring-rose-500' : ''
+                      }`}
+                    />
+                    {subjectCropPreview && <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full" viewBox={`0 0 ${subjectCropPreview.sourceWidth} ${subjectCropPreview.sourceHeight}`} preserveAspectRatio="none">
+                      <path d={`M0 0H${subjectCropPreview.sourceWidth}V${subjectCropPreview.sourceHeight}H0Z M${subjectCropPreview.bounds.x} ${subjectCropPreview.bounds.y}h${subjectCropPreview.bounds.width}v${subjectCropPreview.bounds.height}h-${subjectCropPreview.bounds.width}Z`} fill="#0f172a" fillOpacity=".46" fillRule="evenodd" />
+                      <rect x={subjectCropPreview.bounds.x} y={subjectCropPreview.bounds.y} width={subjectCropPreview.bounds.width} height={subjectCropPreview.bounds.height} fill="#38bdf8" fillOpacity=".08" stroke="#0284c7" strokeWidth={Math.max(2, subjectCropPreview.sourceWidth / 500)} strokeDasharray={`${Math.max(6, subjectCropPreview.sourceWidth / 90)} ${Math.max(4, subjectCropPreview.sourceWidth / 180)}`} />
+                    </svg>}
+                  </div>
                   {isPickingColor && (
                     <div className="absolute top-2 left-2 bg-rose-600/90 text-white text-[11px] px-2 py-1 rounded-md shadow backdrop-blur pointer-events-none">
                       {isEn ? 'Click any pixel on image to remove color' : '点击图像上的任何背景位置以直接扣除该颜色'}
@@ -740,7 +895,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                       setLocalSettings(s => ({
                         ...s,
                         width: newW,
-                        height: s.keepAspectRatio && sourceImage ? Math.round((newW * (sourceImage.naturalHeight || sourceImage.height)) / (sourceImage.naturalWidth || sourceImage.width)) : s.height
+                        height: s.keepAspectRatio && dimensionsImageWidth > 0 && dimensionsImageHeight > 0
+                          ? Math.max(10, Math.round((newW * dimensionsImageHeight) / dimensionsImageWidth)) : s.height
                       }));
                     }}
                     className="w-full bg-white border border-slate-300 text-slate-900 font-mono rounded px-2 py-1.5 text-xs outline-none focus:border-teal-500"
@@ -758,7 +914,8 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                       setLocalSettings(s => ({
                         ...s,
                         height: newH,
-                        width: s.keepAspectRatio && sourceImage ? Math.round((newH * (sourceImage.naturalWidth || sourceImage.width)) / (sourceImage.naturalHeight || sourceImage.height)) : s.width
+                        width: s.keepAspectRatio && dimensionsImageWidth > 0 && dimensionsImageHeight > 0
+                          ? Math.max(10, Math.round((newH * dimensionsImageWidth) / dimensionsImageHeight)) : s.width
                       }));
                     }}
                     className="w-full bg-white border border-slate-300 text-slate-900 font-mono rounded px-2 py-1.5 text-xs outline-none focus:border-teal-500"
@@ -848,19 +1005,9 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 )}
               </label>
 
-              <button
-                type="button"
-                onClick={handleSmartCrop}
-                className="w-full py-2 px-3 rounded-lg bg-teal-50 border border-teal-300 text-teal-800 text-xs font-bold hover:bg-teal-100 cursor-pointer flex items-center justify-between transition-colors group"
-              >
-                <span className="flex items-center gap-2">
-                  <Crop className="w-4 h-4 text-sky-400 group-hover:rotate-12 transition-transform" />
-                  <span>{isEn ? 'Smart Subject Auto Crop' : '智能主体自动裁剪'}</span>
-                </span>
-                <span className="text-[10px] text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/40">
-                  {isEn ? 'Boost Detail' : '提升清晰度'}
-                </span>
-              </button>
+              <p className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-2 text-[11px] leading-relaxed text-sky-800">
+                {isEn ? 'Subject-priority framing is available from the preview tool above. Background removal stays separate.' : '主体优先裁剪请使用上方“主体优先（预览）”；背景移除是独立步骤，不会自动开启。'}
+              </p>
 
               <div className="grid grid-cols-2 gap-1.5">
                 <button
@@ -984,10 +1131,11 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
           </button>
           <button
             onClick={handleApply}
-            className="flex-1 sm:flex-initial px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 truncate"
+            disabled={isCalculating || isCropAnalyzing || Boolean(subjectCropPreview)}
+            className="flex-1 sm:flex-initial px-3.5 sm:px-6 py-2 sm:py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold shadow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-colors active:scale-95 truncate"
           >
             <Check className="w-4 h-4 shrink-0" />
-            <span className="truncate">{isEn ? 'Generate Preview · Free' : '生成预览 · 免费'}</span>
+            <span className="truncate">{subjectCropPreview ? (isEn ? 'Confirm or cancel crop first' : '请先确认或取消裁剪预览') : (isEn ? 'Generate Preview · Free' : '生成预览 · 免费')}</span>
           </button>
         </div>
       </div>

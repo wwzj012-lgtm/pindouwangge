@@ -38,4 +38,14 @@ describe('ImageStudioModal responsive layout', () => {
       'localSettings.ditherStrength', 'localSettings.colorLimit',
     ]) expect(source).toContain(control);
   });
+
+  it('requires an explicit crop preview/confirm step and never auto-applies subject bounds', () => {
+    expect(source).toContain("setActivePreviewPane('source'); void handleSmartCrop()");
+    expect(source).toContain('setSubjectCropPreview({ previewUrl, image, fullImage, bounds: bounds.pixelBounds');
+    expect(source).toContain('onClick={cancelSubjectCropPreview}');
+    expect(source).toContain('onClick={acceptSubjectCrop}');
+    expect(source).toContain('subjectCropPreview || isCropAnalyzing');
+    expect(source).toContain('subjectCropApplied && originalImg');
+    expect(source).toContain('onApplyConversion(applied.grid, appliedImage, applied.diagnostics,');
+  });
 });

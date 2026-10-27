@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rgbToLab } from './imagePipeline';
 import { preprocessSourceImage, type PreprocessQuantizationMode } from './pipelineAuxiliaries';
+import { analyzeSourceStrokes } from './sourceSampling';
 
 type Rgba = [number, number, number, number];
 
@@ -30,6 +31,23 @@ const modes: Array<[PreprocessQuantizationMode, number]> = [
 ];
 
 describe('source preprocessing colour fidelity', () => {
+  it.each(['cartoon', 'logo'] as const)('%s carries real pale stroke support through colour merging and denoising at strength 28', mode => {
+    const width = 100, height = 100;
+    const data = raster(width, height, (x, y) => x >= 43 && x < 46 && y >= 10 && y < 90
+      ? [234, 234, 234, 255] : [255, 255, 255, 255]);
+    const structure = analyzeSourceStrokes(data, width, height, 10, 10, 128, new Uint8Array(width * height));
+    expect(structure.mask[40 * width + 44]).toBe(1);
+    const result = preprocessSourceImage(data, width, height, 128, mode, 28, structure.mask);
+    expect([...result.sampleData.slice((40 * width + 44) * 4, (40 * width + 44) * 4 + 4)]).toEqual([234, 234, 234, 255]);
+    expect(result.detailMask[40 * width + 44]).toBe(1);
+    expect(structure.mask[40 * width + 20]).toBe(0);
+    // The same setting still merges ordinary unprotected near-white fills.
+    if (mode === 'cartoon') {
+      const ordinary = preprocessSourceImage(data, width, height, 128, mode, 28);
+      expect(ordinary.sampleData[(40 * width + 44) * 4]).toBe(255);
+    }
+  });
+
   it('photo preserves fully protected source colours without bright or saturated halos', () => {
     // More distinct colours than the photo profile has centroids. Every pixel has
     // a strong neighbour, so centroid approximation must never extrapolate it.

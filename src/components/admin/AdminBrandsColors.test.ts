@@ -57,21 +57,22 @@ describe('live brand directory', () => {
     const count = staticCatalog(); count.items[0].colorCount++; invalid.push(count);
     for (const candidate of invalid) { expect(isManagedBrandCatalog(candidate)).toBe(false); expect(() => projectBrandCatalog(candidate)).toThrow(); }
   });
-  it('fails visibly on a read error and retains last data only for labels, never reports stale catalog ready', async () => {
+  it('retains a ready directory on background failure but returns failure to block fresh conversions', async () => {
     vi.resetModules(); const store = await import('../../data/brandCatalog');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(Response.json({ success: true, data: staticCatalog() }))
       .mockRejectedValueOnce(new Error('directory unavailable')));
-    await store.refreshBrandCatalog(); expect(store.getBrandCatalogSnapshot().status).toBe('ready');
+    expect(await store.refreshBrandCatalog()).toBe(true); expect(store.getBrandCatalogSnapshot().status).toBe('ready');
     const previous = store.getBrandCatalogSnapshot().palettes;
-    await store.refreshBrandCatalog();
-    expect(store.getBrandCatalogSnapshot().status).toBe('error');
-    expect(store.getBrandCatalogSnapshot().error).toContain('directory unavailable');
+    expect(await store.refreshBrandCatalog()).toBe(false);
+    expect(store.getBrandCatalogSnapshot().status).toBe('ready');
+    expect(store.getBrandCatalogSnapshot().error).toBe('');
+    expect(store.getBrandCatalogSnapshot().backgroundError).toContain('directory unavailable');
     expect(store.getBrandCatalogSnapshot().palettes).toBe(previous);
   });
   it('does not invent a static fallback when the system directory has not been connected', async () => {
     vi.resetModules(); const store = await import('../../data/brandCatalog');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ success: false, message: 'not connected' }, { status: 404 })));
-    await store.refreshBrandCatalog(); expect(store.getBrandCatalogSnapshot().status).toBe('error');
+    expect(await store.refreshBrandCatalog()).toBe(false); expect(store.getBrandCatalogSnapshot().status).toBe('error');
     expect(store.getBrandCatalogSnapshot().palettes).toEqual({});
   });
 });

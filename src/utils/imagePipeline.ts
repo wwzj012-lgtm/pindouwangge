@@ -1,6 +1,7 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
 import { consolidateStrayBeans } from './strayBeanConsolidation';
 import { projectCartoonInk } from './cartoonSampling';
+import { clusterCellColors, cellForeground, resolveCellForeground, enclosedSourceWhite, sourceHasTransparency, type CellColorBin, type CellForeground } from './sourceSampling';
 import { selectPerceptualPalette } from './perceptualPalette';
 import {
   classifyGridRegions,
@@ -1201,7 +1202,13 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const override = settings.pipelineOverride ?? 'auto';
   const requestedPipeline = override === 'auto' ? detected.pipeline : override;
   const pipeline: ConversionPipeline = requestedPipeline;
-  const quantizationMode: PreprocessQuantizationMode = settings.kmeansClustering === false
+  // One consistent premultiplied-light regime for genuinely alpha-bearing
+  // sources; fully opaque inputs retain A's display-colour averaging.
+  // Less than one output cell of missing alpha cannot switch every opaque
+  // interior cell's colour regime because of an isolated transparent speck.
+  const linearPhoto = pipeline === 'photo' && sourceHasTransparency(data, sourceWidth * sourceHeight,
+    sourceWidth * sourceHeight / (settings.width * settings.height));
+  const quantizationMode: PreprocessQuantizationMode = settings.kmeansClustering === false && pipeline !== 'photo'
     ? 'none'
     : pipeline;
 
@@ -1211,7 +1218,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     sourceHeight,
     alphaCutoff,
     quantizationMode,
-    settings.quantizationStrength ?? 55,
+    settings.kmeansClustering === false && pipeline === 'photo' ? 0 : settings.quantizationStrength ?? 55,
   );
   const sourceRegions = classifySourceRegions(preprocessed.detailMask, sourceWidth, sourceHeight);
   const sampleData = preprocessed.sampleData ?? preprocessed.denoised;
@@ -1230,7 +1237,11 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       alphaCutoff,
     )
     : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
+  const sourceWhite = pipeline === 'photo' ? null
+    : enclosedSourceWhite(data, sourceWidth, sourceHeight, alphaCutoff, backgroundResult.mask);
+  const protectedCounters = new Map<number, Rgb>();
   const targetPixels: GridPixel[] = [];
+  const cellCandidates: Array<CellForeground | null> = [];
   const representedInk = pipeline !== 'photo' ? new Uint8Array(settings.width * settings.height) : null;
   const protectedEmpty = new Uint8Array(settings.width * settings.height);
   const scaleX = sourceWidth / settings.width;
@@ -1243,13 +1254,18 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       const endY = (gridY + 1) * scaleY;
       let total = 0;
       let valid = 0;
-      let linearR = 0;
-      let linearG = 0;
-      let linearB = 0;
+      let sampleR = 0;
+      let sampleG = 0;
+      let sampleB = 0;
+      let linearR = 0, linearG = 0, linearB = 0;
+      let centerR = 0, centerG = 0, centerB = 0, centerWeight = 0;
+      let centerWhiteWeight = 0;
+      let whiteR = 0, whiteG = 0, whiteB = 0, whiteWeight = 0;
       let weightedValid = 0;
       let backgroundWeight = 0;
       let opaqueWeight = 0;
-      const dominant = new Map<number, { weight: number; rgb: Rgb; maxDetail: number }>();
+      const dominant = new Map<number, CellColorBin & { maxDetail: number }>();
+      const original = new Map<number, CellColorBin>();
       for (let y = Math.floor(startY); y < Math.min(sourceHeight, Math.ceil(endY)); y += 1) {
         const verticalWeight = Math.max(0, Math.min(y + 1, endY) - Math.max(y, startY));
         for (let x = Math.floor(startX); x < Math.min(sourceWidth, Math.ceil(endX)); x += 1) {
@@ -1266,14 +1282,23 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
           opaqueWeight += weight;
           const alphaWeight = weight * data[offset + 3] / 255;
           valid += alphaWeight;
+          if (sourceWhite?.[sourceIndex]) {
+            whiteWeight += alphaWeight;
+            whiteR += data[offset] * alphaWeight; whiteG += data[offset + 1] * alphaWeight;
+            whiteB += data[offset + 2] * alphaWeight;
+          }
           const sampleX = Math.min(sampleWidth - 1, Math.floor((x + 0.5) * sampleScaleX));
           const sampleY = Math.min(sampleHeight - 1, Math.floor((y + 0.5) * sampleScaleY));
           const sampleOffset = (sampleY * sampleWidth + sampleX) * 4;
-          const r = sampleData[sampleOffset];
-          const g = sampleData[sampleOffset + 1];
-          const b = sampleData[sampleOffset + 2];
           const detail = sourceRegions.detailProtection[sourceIndex] ?? 0;
-          const contentWeight = pipeline === 'cartoon' ? alphaWeight : contentAwareSampleWeight(
+          // Alpha and edge colour must refer to the same source footprint.
+          // Flat interiors retain the existing quantized work-buffer colour;
+          // source-supported details recover colour lost before sampling.
+          const protection = pipeline === 'photo' ? (sampleData[sampleOffset + 3] < alphaCutoff ? 1 : detail) : 0;
+          const r = sampleData[sampleOffset] + (data[offset] - sampleData[sampleOffset]) * protection;
+          const g = sampleData[sampleOffset + 1] + (data[offset + 1] - sampleData[sampleOffset + 1]) * protection;
+          const b = sampleData[sampleOffset + 2] + (data[offset + 2] - sampleData[sampleOffset + 2]) * protection;
+          const contentWeight = pipeline !== 'logo' ? alphaWeight : contentAwareSampleWeight(
             alphaWeight,
             x,
             y,
@@ -1288,23 +1313,50 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
             sourceRegions.edgeMagnitude[sourceIndex] ?? 0,
           );
           weightedValid += contentWeight;
-          linearR += srgbToLinear(r) * contentWeight;
-          linearG += srgbToLinear(g) * contentWeight;
-          linearB += srgbToLinear(b) * contentWeight;
+          sampleR += r * contentWeight;
+          sampleG += g * contentWeight;
+          sampleB += b * contentWeight;
+          if (pipeline === 'photo') {
+            linearR += srgbToLinear(r) * contentWeight;
+            linearG += srgbToLinear(g) * contentWeight;
+            linearB += srgbToLinear(b) * contentWeight;
+          }
+          const localX = (x + 0.5 - startX) / scaleX, localY = (y + 0.5 - startY) / scaleY;
           const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
-          const entry = dominant.get(key) ?? { weight: 0, rgb: [0, 0, 0], maxDetail: 0 };
+          const entry = dominant.get(key) ?? { weight: 0, rgb: [0, 0, 0], maxDetail: 0,
+            area: 0, x: 0, y: 0, xx: 0, yy: 0 };
           entry.weight += contentWeight;
           entry.rgb[0] += r * contentWeight;
           entry.rgb[1] += g * contentWeight;
           entry.rgb[2] += b * contentWeight;
           entry.maxDetail = Math.max(entry.maxDetail, detail);
+          entry.area += alphaWeight;
+          entry.x += localX * alphaWeight; entry.y += localY * alphaWeight;
+          entry.xx += localX * localX * alphaWeight; entry.yy += localY * localY * alphaWeight;
           dominant.set(key, entry);
+          if (pipeline !== 'photo') {
+            if (localX >= 0.375 && localX <= 0.625 && localY >= 0.375 && localY <= 0.625) {
+              centerWeight += alphaWeight;
+              if (sourceWhite?.[sourceIndex]) centerWhiteWeight += alphaWeight;
+              centerR += data[offset] * alphaWeight; centerG += data[offset + 1] * alphaWeight;
+              centerB += data[offset + 2] * alphaWeight;
+            }
+            const rawKey = ((data[offset] >> 4) << 8) | ((data[offset + 1] >> 4) << 4) | (data[offset + 2] >> 4);
+            const raw = original.get(rawKey) ?? { weight: 0, rgb: [0, 0, 0] as Rgb,
+              area: 0, x: 0, y: 0, xx: 0, yy: 0 };
+            raw.weight += alphaWeight; raw.area += alphaWeight;
+            for (let c = 0; c < 3; c++) raw.rgb[c] += data[offset + c] * alphaWeight;
+            raw.x += localX * alphaWeight; raw.y += localY * alphaWeight;
+            raw.xx += localX * localX * alphaWeight; raw.yy += localY * localY * alphaWeight;
+            original.set(rawKey, raw);
+          }
         }
       }
       if (valid / Math.max(total, 0.00001) < 0.35) {
         const targetIndex = gridY * settings.width + gridX;
         if (backgroundWeight > 0 || opaqueWeight / Math.max(total, 0.00001) < 0.2) protectedEmpty[targetIndex] = 1;
         targetPixels.push({ r: 0, g: 0, b: 0, alpha: 0 });
+        cellCandidates.push(null);
         continue;
       }
       const dominantEntries = Array.from(dominant.values());
@@ -1314,23 +1366,63 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       const dominantCandidates = eligibleDominant.length > 0 ? eligibleDominant : dominantEntries;
       const logoEntry = dominantCandidates
         .sort((first, second) => second.weight - first.weight)[0];
+      const clustered = pipeline === 'photo' ? null : clusterCellColors(dominant.values())[0];
+      const normalRgb = logoEntry ? logoEntry.rgb.map(value => clampByte(value / logoEntry.weight)) as Rgb : [0, 0, 0] as Rgb;
+      let shapeRgb = clustered && Math.max(...normalRgb) > 64
+        ? clustered.rgb.map(value => clampByte(value / clustered.weight)) as Rgb : normalRgb;
+      const centerRgb: Rgb = centerWeight ? [centerR / centerWeight, centerG / centerWeight, centerB / centerWeight] : normalRgb;
+      const near = (a: Rgb, b: Rgb) => Math.max(...a.map((v, c) => Math.abs(v - b[c]))) <= 8;
+      // A source-white centre is negative space, even when surrounding ink
+      // occupies several nearby colours. Do not fill it by combining their votes.
+      if (near(centerRgb, normalRgb)) shapeRgb = normalRgb;
+      const candidate = pipeline === 'photo' ? null : cellForeground(clusterCellColors(original.values()), valid);
+      cellCandidates.push(candidate && !near(centerRgb, candidate.background) ? candidate : null);
+      // Coverage of an existing closed source hole vetoes ink aggregation.
+      // This does not synthesize a white bridge or a missing target-grid hole.
+      const sourceWhiteCoverage = whiteWeight / Math.max(total, 0.00001);
+      // Source-majority negative space must not depend on the work buffer
+      // still being white: content weighting can already have selected ink.
+      if (sourceWhiteCoverage > 0.5 || (Math.min(...normalRgb) >= 235 && sourceWhiteCoverage >= 0.35
+        && centerWhiteWeight / Math.max(centerWeight, 0.00001) > 0.5)) {
+        shapeRgb = [whiteR / whiteWeight, whiteG / whiteWeight, whiteB / whiteWeight].map(clampByte) as Rgb;
+        cellCandidates[cellCandidates.length - 1] = null;
+        protectedCounters.set(gridY * settings.width + gridX, adjustColor(shapeRgb, settings));
+      }
       // Cartoon cells use their dominant source colour instead of averaging
       // adjacent fills. Averaging is appropriate for photographs, but it
       // creates muddy intermediate colours and halo-like double contours in
       // flat character art.
       const rgb: Rgb = pipeline === 'logo' || pipeline === 'cartoon'
-        ? logoEntry ? logoEntry.rgb.map(value => clampByte(value / logoEntry.weight)) as Rgb : [0, 0, 0]
-        : [
+        ? shapeRgb
+        : linearPhoto || valid < total - 0.000001 ? [
           linearToSrgb(linearR / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearG / Math.max(weightedValid, 0.00001)),
           linearToSrgb(linearB / Math.max(weightedValid, 0.00001)),
+        ] : [
+          // A bead represents display colour over this area, rather than a
+          // light-emitting integration of its pixels. Coverage averaging avoids
+          // bright grey fringes on small high-contrast features in photo mode.
+          clampByte(sampleR / Math.max(weightedValid, 0.00001)),
+          clampByte(sampleG / Math.max(weightedValid, 0.00001)),
+          clampByte(sampleB / Math.max(weightedValid, 0.00001)),
         ];
       if (representedInk && Math.max(...rgb) <= 64 && Math.max(...rgb) - Math.min(...rgb) <= 32) {
         representedInk[gridY * settings.width + gridX] = 1;
       }
-      const adjusted = adjustColor(rgb, settings);
+      const adjusted = pipeline === 'photo' ? adjustColor(rgb, settings) : rgb;
       targetPixels.push({ r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 });
     }
+  }
+
+  if (pipeline !== 'photo') {
+    // Selection uses only colours actually present in each cell. Neighbours
+    // confirm source support; no strokes, bridges or target cells are projected.
+    resolveCellForeground(cellCandidates, targetPixels, settings.width, settings.height);
+    targetPixels.forEach(pixel => {
+      if (pixel.alpha === 0) return;
+      const adjusted = adjustColor([pixel.r, pixel.g, pixel.b], settings);
+      pixel.r = adjusted[0]; pixel.g = adjusted[1]; pixel.b = adjusted[2];
+    });
   }
 
   if (representedInk && (sourceWidth > settings.width || sourceHeight > settings.height)) {
@@ -1339,7 +1431,7 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
     const sourceInk = projectCartoonInk(data, sourceWidth, sourceHeight, settings.width, settings.height,
       alphaCutoff, backgroundResult.mask, representedInk);
     sourceInk.forEach((rgb, index) => {
-      if (!rgb || targetPixels[index].alpha === 0) return;
+      if (!rgb || targetPixels[index].alpha === 0 || protectedCounters.has(index)) return;
       const adjusted = adjustColor(rgb, settings);
       targetPixels[index] = { r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 };
     });
@@ -1348,6 +1440,9 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   // Grid lightness sharpening adds colour bands to flat fills; cartoon ink is source-supported.
   edgeAwareEnhance(targetPixels, settings.width, settings.height,
     pipeline === 'cartoon' ? { ...settings, sharpening: 0 } : settings);
+  for (const [i, rgb] of protectedCounters) {
+    targetPixels[i] = { r: rgb[0], g: rgb[1], b: rgb[2], alpha: 255 };
+  }
 
   const matchAlgorithm: 'cie76' | 'ciede2000' = pipeline === 'logo' ? 'cie76' : 'ciede2000';
   const selectedPalette = selectPalette(targetPixels, activePalette, settings.colorLimit, matchAlgorithm);

@@ -7,6 +7,8 @@ import { getColorDisplayState } from '../utils/completionHighlight';
 import { getGridImageFitRect } from '../utils/gridImageFit';
 import { clampCanvasViewport, MIN_CANVAS_ZOOM } from '../utils/canvasViewport';
 import { getVisibleGridRange } from '../utils/visibleGridRange';
+import type { BackgroundCleanupPreview } from '../hooks/useBackgroundCleanup';
+import { BackgroundCleanupOverlay } from './BackgroundCleanupOverlay';
 import { normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes } from '../utils/gridEditing';
 import {
   changeImagePreviewScale,
@@ -26,6 +28,7 @@ import {
 } from '../utils/referencePanelPosition';
 
 interface GridCanvasProps {
+  cleanupPreview?: BackgroundCleanupPreview | null;
   symmetryAxes?: SymmetryAxes;
   onSymmetryAxesChange?: (axes: SymmetryAxes) => void;
   grid: (string | null)[][];
@@ -170,6 +173,7 @@ function getCanvasDpr(): number {
 }
 
 export const GridCanvas: React.FC<GridCanvasProps> = ({
+  cleanupPreview,
   symmetryAxes,
   onSymmetryAxesChange,
   grid,
@@ -574,6 +578,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [shapeStartCell, setShapeStartCell] = useState<{ x: number; y: number } | null>(null);
   const [hoverCell, setHoverCell] = useState<{ x: number; y: number } | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
+  const cleanupPointerRef = useRef<{ pointerId: number; x: number; y: number; id: number; moved: boolean; panX: number; panY: number } | null>(null);
   const spacePanPointerIdRef = useRef<number | null>(null);
   const isHistoryTransactionActiveRef = useRef(false);
   const historyTransactionEndRef = useRef(onHistoryTransactionEnd);
@@ -589,6 +594,16 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   }, []);
 
   useEffect(() => finishHistoryTransaction, [finishHistoryTransaction]);
+
+  const isCleanupPreview = !!cleanupPreview;
+  useEffect(() => {
+    // A preview can open during a stroke; it must never resume after cancellation.
+    cleanupPointerRef.current = null;
+    activePointerIdRef.current = null;
+    setIsDrawing(false);
+    setShapeStartCell(null);
+    finishHistoryTransaction();
+  }, [isCleanupPreview, finishHistoryTransaction]);
 
   // Cell size base in pixels
   const baseCellSize = 20;
@@ -813,6 +828,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
     const handleTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
+        cleanupPointerRef.current = null;
         // Two-finger pinch / pan start
         e.preventDefault();
         const t1 = e.touches[0];
@@ -1351,7 +1367,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     if (touchStateRef.current.isPinch) return;
 
     const isSpacePan = e.button === 0 && spacePressedRef.current && !isCanvasInteractionIgnoredTarget(e.target);
-    if (e.button === 1 || e.button === 2 || e.shiftKey || activeTool === 'hand' || isSpacePan) {
+    if (e.button === 1 || e.button === 2 || e.shiftKey || (!cleanupPreview && activeTool === 'hand') || isSpacePan) {
       if (isSpacePan) e.preventDefault();
       e.currentTarget.setPointerCapture?.(e.pointerId);
       activePointerIdRef.current = e.pointerId;
@@ -1363,6 +1379,13 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     }
 
     const cell = clientToGrid(e.clientX, e.clientY);
+    if (cleanupPreview) {
+      const id = cell ? cleanupPreview.analysis.componentIds[cell.y * width + cell.x] : 0;
+      cleanupPointerRef.current = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, id, moved: false, panX: panRef.current.x, panY: panRef.current.y };
+      activePointerIdRef.current = e.pointerId;
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+      return;
+    }
     if (!cell) return;
 
     if (activeTool === 'eyedropper') {
@@ -1397,6 +1420,13 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const handlePointerMove = (e: React.PointerEvent) => {
     if (!isPointerInputEnabled(e.pointerType)) return;
     if (interactionProfile === 'touch' && (!e.isPrimary || touchStateRef.current.isPinch)) return;
+    const cleanupPointer = cleanupPointerRef.current;
+    if (cleanupPreview && cleanupPointer?.pointerId === e.pointerId) {
+      const dx = e.clientX - cleanupPointer.x, dy = e.clientY - cleanupPointer.y;
+      if (Math.hypot(dx, dy) > 8) cleanupPointer.moved = true;
+      if (cleanupPointer.moved) scheduleTransformCommit(zoomRef.current, { x: cleanupPointer.panX + dx, y: cleanupPointer.panY + dy });
+      return;
+    }
 
     if (isPanning || spacePanPointerIdRef.current === e.pointerId) {
       if (spacePanPointerIdRef.current === e.pointerId) e.preventDefault();
@@ -1409,6 +1439,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       return;
     }
 
+    if (cleanupPreview) return;
     const cell = clientToGrid(e.clientX, e.clientY);
     const needsTouchShapePreview = isDrawing && (activeTool === 'line' || activeTool === 'rectangle' || activeTool === 'circle');
     if (e.pointerType !== 'touch' || needsTouchShapePreview) {
@@ -1432,6 +1463,17 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     if (interactionProfile === 'touch' && !e.isPrimary) return;
     if (activePointerIdRef.current !== e.pointerId) return;
     activePointerIdRef.current = null;
+    if (cleanupPreview) {
+      const pointer = cleanupPointerRef.current;
+      cleanupPointerRef.current = null;
+      const component = pointer ? cleanupPreview.analysis.components[pointer.id - 1] : null;
+      if (applyShape && pointer && !pointer.moved && !touchStateRef.current.isPinch && component?.candidate) {
+        cleanupPreview.onToggleComponent(component.id);
+      }
+      spacePanPointerIdRef.current = null;
+      setIsPanning(false);
+      return;
+    }
     const wasSpacePan = spacePanPointerIdRef.current === e.pointerId;
     if (wasSpacePan) {
       spacePanPointerIdRef.current = null;
@@ -1562,6 +1604,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
       <canvas
         ref={canvasRef}
+        data-grid-canvas
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -1570,6 +1613,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         onPointerLeave={() => setHoverCell(null)}
         className="w-full h-full block touch-none"
       />
+      {cleanupPreview && <BackgroundCleanupOverlay preview={cleanupPreview} cellSize={cellSize} originX={pan.x + coordOffset} originY={pan.y + coordOffset} />}
       {onSymmetryAxesChange && symmetryMode !== 'none' && (['x','y'] as const).map(axis => {
         if ((axis === 'x' && symmetryMode === 'vertical') || (axis === 'y' && symmetryMode === 'horizontal')) return null;
         const start = (event: React.PointerEvent<HTMLButtonElement>) => {

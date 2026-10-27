@@ -1,5 +1,6 @@
 import type { BeadColor } from '../types';
 import { rgbToLab, labToRgb, deltaE2000, type Lab } from './imagePipeline';
+import { resizeSourceArea, resizeSourceProtection } from './sourceSampling';
 
 export type Rgb = [number, number, number];
 export type PreprocessQuantizationMode = 'none' | 'cartoon' | 'photo' | 'logo';
@@ -305,13 +306,14 @@ function quantizeBuffer(
   detailHeight: number,
   mode: Exclude<PreprocessQuantizationMode, 'none'>,
   quantizationStrength = 55,
+  structureProtection?: Uint8Array,
 ): Uint8ClampedArray {
   const total = width * height;
   const quantized = new Uint8ClampedArray(data);
   if (total === 0) return quantized;
   const normalizedStrength = Math.min(100, Math.max(0, quantizationStrength)) / 100;
   if (normalizedStrength === 0) return quantized;
-  if (mode === 'cartoon') return stabilizeCartoonColors(data, alphaCutoff, normalizedStrength);
+  if (mode === 'cartoon') return stabilizeCartoonColors(data, alphaCutoff, normalizedStrength, structureProtection);
   const profile = quantizationProfile(mode);
   const mergeScale = normalizedStrength * profile.strengthScale;
   const labCache = createExactLabCache();
@@ -379,7 +381,8 @@ function quantizeBuffer(
       const detailX = Math.min(detailWidth - 1, Math.floor((x + 0.5) * detailWidth / width));
       const detailY = Math.min(detailHeight - 1, Math.floor((y + 0.5) * detailHeight / height));
       const detail = Math.min(1, Math.max(0, detailMask[detailY * detailWidth + detailX] ?? 0));
-      const merge = Math.max(0, Math.min(1, (profile.mergeBase - detail * profile.detailProtection) * mergeScale));
+      const merge = structureProtection?.[y * width + x] ? 0
+        : Math.max(0, Math.min(1, (profile.mergeBase - detail * profile.detailProtection) * mergeScale));
       // Fully protected pixels retain their exact source bytes, without a
       // negative blend extrapolation or an unnecessary Lab round trip.
       if (merge === 0) continue;
@@ -400,7 +403,8 @@ function quantizeBuffer(
 }
 
 /** Bounded colour histogram: share fills without spatially blurring their boundaries. */
-function stabilizeCartoonColors(data: Uint8ClampedArray, alphaCutoff: number, strength: number): Uint8ClampedArray {
+function stabilizeCartoonColors(data: Uint8ClampedArray, alphaCutoff: number, strength: number,
+  structureProtection?: Uint8Array): Uint8ClampedArray {
   const buckets = new Map<number, { rgb: Rgb; count: number }>();
   for (let offset = 0; offset < data.length; offset += 4) {
     if (data[offset + 3] < alphaCutoff) continue;
@@ -432,7 +436,7 @@ function stabilizeCartoonColors(data: Uint8ClampedArray, alphaCutoff: number, st
   }
   const result = new Uint8ClampedArray(data);
   for (let offset = 0; offset < data.length; offset += 4) {
-    if (data[offset + 3] < alphaCutoff) continue;
+    if (data[offset + 3] < alphaCutoff || structureProtection?.[offset / 4]) continue;
     const rgb = replacements.get(quantizedRgbKey(data[offset], data[offset + 1], data[offset + 2]))!;
     result.set(rgb, offset);
   }
@@ -465,6 +469,7 @@ export function preprocessSourceImage(
   alphaCutoff: number,
   quantizationMode: PreprocessQuantizationMode | boolean = 'none',
   quantizationStrength = 55,
+  sourceStructureMask?: Uint8Array,
 ): {
   denoised: Uint8ClampedArray;
   detailMask: Float32Array;
@@ -479,6 +484,9 @@ export function preprocessSourceImage(
   const selectedMode: PreprocessQuantizationMode = typeof quantizationMode === 'boolean'
     ? (quantizationMode ? 'photo' : 'none')
     : quantizationMode;
+  // Production cartoon/logo calls use the frozen preprocessing policy. The
+  // optional explicit mask remains available to isolated diagnostic callers.
+  const sourceAware = selectedMode === 'photo' || sourceStructureMask !== undefined;
   const quantizationEnabled = selectedMode !== 'none'
     && Math.max(0, Math.min(100, quantizationStrength)) > 0;
   // This lightweight local signal only protects centroids while clustering.
@@ -486,14 +494,19 @@ export function preprocessSourceImage(
   const kMeansProtection = quantizationEnabled
     ? computeKMeansProtectionSignal(data, width, height, alphaCutoff)
     : null;
-  const originalDetailMask = !quantizationEnabled && total > MAX_PREPROCESS_AREA
+  // A feature erased by clustering or work-buffer resizing cannot protect
+  // itself in a mask measured only after those operations.
+  const originalDetailMask = sourceAware || (!quantizationEnabled && total > MAX_PREPROCESS_AREA)
     ? computeDetailMask(data, width, height, alphaCutoff)
     : null;
   const scale = total > MAX_PREPROCESS_AREA ? Math.sqrt(MAX_PREPROCESS_AREA / total) : 1;
   const sampleWidth = Math.max(1, Math.floor(width * scale));
   const sampleHeight = Math.max(1, Math.floor(height * scale));
+  const structureProtection = sourceStructureMask?.length === total
+    ? resizeSourceProtection(sourceStructureMask, width, height, sampleWidth, sampleHeight)
+    : undefined;
   const processData = total > MAX_PREPROCESS_AREA
-    ? resizeRgbaArea(data, width, height, sampleWidth, sampleHeight)
+    ? (sourceAware ? resizeSourceArea : resizeRgbaArea)(data, width, height, sampleWidth, sampleHeight)
     : data;
   const quantizedData = quantizationEnabled
     ? quantizeBuffer(
@@ -506,6 +519,7 @@ export function preprocessSourceImage(
       height,
       selectedMode as Exclude<PreprocessQuantizationMode, 'none'>,
       quantizationStrength,
+      structureProtection,
     )
     : processData;
   const processTotal = sampleWidth * sampleHeight;
@@ -519,7 +533,7 @@ export function preprocessSourceImage(
     for (let y = 1; y < sampleHeight - 1; y++) {
       for (let x = 1; x < sampleWidth - 1; x++) {
         const idx = (y * sampleWidth + x) * 4;
-        if (quantizedData[idx + 3] < alphaCutoff) continue;
+        if (quantizedData[idx + 3] < alphaCutoff || structureProtection?.[idx / 4]) continue;
 
         let rSum = quantizedData[idx] * 6;
         let gSum = quantizedData[idx + 1] * 6;
@@ -569,7 +583,7 @@ export function preprocessSourceImage(
   // A quantized source receives its formal heatmap after its single global
   // clustering pass. The bounded work buffer is expanded to source
   // coordinates so every later grid sample uses the same region reference.
-  const detailMask = quantizationEnabled
+  const processedDetailMask = quantizationEnabled || sourceAware
     ? expandDetailMask(
       computeDetailMask(denoised, sampleWidth, sampleHeight, alphaCutoff),
       sampleWidth,
@@ -578,6 +592,11 @@ export function preprocessSourceImage(
       height,
     )
     : originalDetailMask ?? computeDetailMask(denoised, sampleWidth, sampleHeight, alphaCutoff);
+
+  const detailMask = sourceAware ? originalDetailMask! : processedDetailMask;
+  if (sourceAware) for (let index = 0; index < detailMask.length; index++) {
+    detailMask[index] = Math.max(detailMask[index], processedDetailMask[index], sourceStructureMask?.[index] ? 1 : 0);
+  }
 
   // 3. 辅助3: 色调锚点提取（提取原图高频主要代表色中心）
   const toneAnchors: ToneAnchor[] = [];

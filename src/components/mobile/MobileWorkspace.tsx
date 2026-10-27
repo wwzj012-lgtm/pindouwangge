@@ -1,4 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
+import type { BackgroundCleanupController } from '../../hooks/useBackgroundCleanup';
+import { BackgroundCleanupPanel } from '../BackgroundCleanupPanel';
 import {
   ChevronLeft,
   Pencil,
@@ -43,6 +45,7 @@ import { MobileBottomNav } from './MobileBottomNav';
 import type { WorkspaceEditingActions } from '../SymmetryAxisControls';
 
 export interface MobileWorkspaceProps {
+  backgroundCleanup?: BackgroundCleanupController;
   editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
   grid: (string | null)[][];
@@ -124,6 +127,7 @@ export interface MobileWorkspaceProps {
 export type MobileTab = 'canvas' | 'settings' | 'stats';
 
 export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
+  backgroundCleanup,
   editorActions,
   completionSummary,
   grid,
@@ -274,6 +278,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         </div>
       )}
       {/* Main Screen View Area */}
+      {backgroundCleanup?.preview && <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />}
       <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
         {/* Tab 1: Immersive Fullscreen Mobile Canvas */}
         <div
@@ -281,6 +286,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           onPointerDownCapture={() => setIsColorTrayOpen(false)}
         >
           <GridCanvas
+            cleanupPreview={backgroundCleanup?.preview}
             symmetryAxes={editorActions?.axes}
             onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
             interactionProfile="touch"
@@ -497,6 +503,12 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <button type="button" onClick={() => setActiveTool('region_clear')}
               aria-label={isEn ? 'Clear Region' : '区域清除'} title={isEn ? 'Clear connected same-color region' : '点击清除连通同色区域'}
               className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border ${activeTool === 'region_clear' ? 'border-rose-500 bg-rose-600 text-white' : 'border-purple-200 text-purple-700'}`}><Trash2 size={16}/></button>
+            {backgroundCleanup && <button type="button" onClick={() => { setCurrentTab('canvas'); setIsColorTrayOpen(false); backgroundCleanup.open(); }}
+              disabled={!backgroundCleanup.canOpen} aria-label={isEn ? 'Preview residual cleanup' : '清理残点（先预览）'}
+              title={isEn ? 'Preview small residual blocks before removing' : '先预览并保护小装饰，再批量清除'}
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 text-[11px] font-bold text-amber-900 disabled:opacity-40">
+              <Scissors size={15} aria-hidden="true" />{isEn ? 'Residuals' : '残点'}
+            </button>}
             <button
               type="button"
               onClick={() => setActiveTool('pencil')}

@@ -5,9 +5,15 @@ export function useBrandCatalog(): BrandCatalogSnapshot & { refresh: typeof refr
   const catalog: BrandCatalogSnapshot = useSyncExternalStore(subscribeBrandCatalog, getBrandCatalogSnapshot, getBrandCatalogSnapshot);
   useEffect(() => {
     if (getBrandCatalogSnapshot().status === 'loading') void refreshBrandCatalog();
-    const refresh = () => { void refreshBrandCatalog(); };
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void refreshBrandCatalog();
+    };
     window.addEventListener('focus', refresh);
-    return () => window.removeEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
   }, []);
   return { ...catalog, refresh: refreshBrandCatalog };
 }

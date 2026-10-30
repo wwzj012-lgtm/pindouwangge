@@ -380,7 +380,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             ) : communityPosts.length === 0 ? (
               <p role="status" className="py-12 text-center text-sm text-purple-600">暂无公开作品，去豆社分享你的第一份灵感吧。</p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
                 {communityPosts.map(post => (
                   <button key={post.id} type="button" onClick={() => onNavigateTab('community')} aria-label={`在豆社查看：${post.title || '未命名作品'}`} className="group min-w-0 overflow-hidden rounded-2xl border border-purple-100 bg-white text-left transition-shadow duration-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-purple-600">
                     <div className="relative aspect-4/3 bg-purple-50 flex items-center justify-center">

@@ -417,7 +417,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 my-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 my-4">
             {filteredPatterns.map(pattern => (
               <CommunityPostCard key={pattern.id} post={pattern} pending={pendingAction !== null}
                 onOpen={pattern => void openPattern(pattern)} onReaction={(event, post, reaction) => void handleReaction(event, post, reaction)} />

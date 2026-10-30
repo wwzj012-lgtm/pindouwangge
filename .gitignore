@@ -11,3 +11,6 @@ artifacts/
 .wrangler-xdg/
 .env*
 !.env.example
+
+# WorkBuddy 本地工作记忆（不进仓库）
+.workbuddy/

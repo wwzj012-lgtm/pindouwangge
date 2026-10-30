@@ -349,8 +349,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             desktop-only: on a 390px screen it starts at y=1009, i.e. below the
             first screen, and all it can show while loading is a spinner. */}
         {showCommunityFeed && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 pt-2">
-          <section aria-labelledby="home-community-title" aria-busy={communityStatus === 'loading'} className="min-w-0 lg:col-span-3 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs flex flex-col gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 pt-1">
+          <section aria-labelledby="home-community-title" aria-busy={communityStatus === 'loading'} className="min-w-0 lg:col-span-3 rounded-2xl border border-purple-200/80 bg-white p-4 shadow-2xs flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 <div className="w-1.5 h-4 bg-pink-500 rounded-full" />
@@ -383,11 +383,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {communityPosts.map(post => (
                   <button key={post.id} type="button" onClick={() => onNavigateTab('community')} aria-label={`在豆社查看：${post.title || '未命名作品'}`} className="group min-w-0 overflow-hidden rounded-2xl border border-purple-100 bg-white text-left transition-shadow duration-200 hover:shadow-md focus-visible:outline-2 focus-visible:outline-purple-600">
-                    <div className="relative aspect-square bg-purple-50 flex items-center justify-center">
+                    <div className="relative aspect-4/3 bg-purple-50 flex items-center justify-center">
                       <ImageIcon aria-hidden="true" className="absolute h-8 w-8 text-purple-300" />
                       <img src={post.imageUrl} alt={post.title || '社区作品'} loading="lazy" decoding="async" fetchPriority="low" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="relative h-full w-full object-contain" />
                     </div>
-                    <div className="p-3 space-y-2">
+                    <div className="p-2.5 space-y-1.5">
                       <h3 className="truncate text-sm font-bold text-purple-950">{post.title || '未命名作品'}</h3>
                       <p className="truncate text-xs text-purple-600">{post.author.displayName || '社区创作者'}</p>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-purple-600">
@@ -401,7 +401,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             )}
           </section>
 
-          <aside aria-labelledby="home-creators-title" className="min-w-0 lg:col-span-1 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs">
+          <aside aria-labelledby="home-creators-title" className="min-w-0 lg:col-span-1 rounded-2xl border border-purple-200/80 bg-white p-4 shadow-2xs">
             <div className="flex items-center gap-2">
               <Users aria-hidden="true" className="h-4 w-4 text-pink-500" />
               <h2 id="home-creators-title" className="text-base font-black text-purple-950">社区创作者</h2>

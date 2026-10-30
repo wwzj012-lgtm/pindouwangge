@@ -5,7 +5,7 @@
 **依据规范**：`ios-design-guidelines`（Apple HIG）+ `ui-ux-pro-max`（UX 规则库）
 **协作文档**：与 `GEMINI-UI-HANDOFF.md` 并列，那份讲"下一轮 UI 优化"的边界，这份讲"已经改了什么"。
 
-> **十九轮改动**，按下表跳转。只看结论读第 1 节；准备动手改代码先读第 5 节（测试契约）和第 7 节（未完成）。
+> **二十轮改动**，按下表跳转。只看结论读第 1 节；准备动手改代码先读第 5 节（测试契约）和第 7 节（未完成）。
 
 | 轮次 | 章节 | 主题 |
 |---|---|---|
@@ -28,6 +28,7 @@
 | 17 | 24.8 | 主按钮被 flex 压成 16px：禁止整列收缩 + 自绘复选框 |
 | 18 | 24.9 | 桌面/移动隔离现状 + 真浏览器尺寸契约（会响的警报） |
 | 19 | 24.10 | 风险防控：错误边界、上传门槛、提示条全局化、verify 脚本 |
+| 20 | 25 | 三处空间压缩：移动端用量卡横排、社区卡片与页头收紧 |
 
 **当前基线（2026-10-29 22:40）**：
 
@@ -75,6 +76,9 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 **转图页**：没有子页标题栏，`SettingsPanel` 自己带标题和重置；底部是常驻整行主按钮
 （有图 `生成图纸` / 无图 `先上传图片`），再往下才是工作台底栏。
 
+**用量页**：统计卡一律横排（标签左、数值右，约 44px），不再上下堆叠；
+`CompletionSummary` 的「手工画板」头、整合散豆、搜索框依次排列。
+
 **底栏四格各管什么**：画布 = 画；转图 = 参数与生成；用量 = 色号与消耗；工具箱 = 视图与质感。
 
 **桌面端（1440×1024 实测，`desktopLayout.browser.test.ts` 守着）**：
@@ -118,7 +122,7 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/ui/panelScale.ts` | **新增**：侧栏面板尺寸的唯一来源（桌面 32 / 移动 44） | 16 | 低 |
 | `src/components/ui/MobileSelect.tsx` | **新增**：移动端底部选择面板（替原生 select） | 14 | 中 |
 | `src/components/SettingsPanel.tsx` | `variant` + 尺寸 token、自绘复选框、删 JSON 导入导出、`hideFooterAction` | 14/16/17 | 中 |
-| `src/components/StatsPanel.tsx` | 新增 `variant`、尺寸收进 token、行内图标 26→24 | 14/16/17 | 中 |
+| `src/components/StatsPanel.tsx` | 新增 `variant`、尺寸收进 token、统计卡改横排（移动端 76→44px） | 14/16/17/20 | 中 |
 | `src/components/Header.tsx` | 右上角胶囊统一 32、删 JSON、导航项禁止折行 | 10/17/18 | 中 |
 | `src/components/Toolbar.tsx` | `buttonBase` 加 `shrink-0 + nowrap`，标签阈值 1300px | 18 | 低 |
 | `src/components/GridCanvas.tsx` | 分板导航搬到停靠标签条、参考面板按钮 28→32 | 6/18 | **高** |
@@ -128,8 +132,9 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/mobile/MobileWorkspace.tsx` | **底部结构重写**（核心：dock、分板条、转图/用量 tab 化） | 1/7/12 | **高** |
 | `src/components/mobile/MobileFeatureSheet.tsx` | 工具箱面板、删「参数设置」二级 tab、删 JSON 两张卡 | 1/8/10 | 中 |
 | `src/components/LargeCanvasView.tsx` | 移动端工具栏尺寸 + 默认折叠 | 1 | 中 |
-| `src/components/CommunityView.tsx` | 筛选 chip 形态、底部留白 | 1 | 低 |
-| `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、hero 字号回归 | 1/11/15 | 中 |
+| `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4） | 1/20 | 低 |
+| `src/components/CommunityPostCard.tsx` | 卡片压缩：标题不再撑 44、查看图纸 36、操作区 pt-2 | 20 | 低 |
+| `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、社区作品图改 4:3、区块内边距收紧 | 1/11/15/20 | 中 |
 | `src/utils/uploadGuards.ts` | **新增**：30MB / 4000 万像素门槛 | 19 | 低 |
 | `src/components/ui/panelScale.test.ts` | **新增**：尺度关系断言（5 条） | 16 | 低 |
 | `src/components/desktopIsolation.test.ts` | **新增**：桌面隔离 4 条契约 | 15/16/18 | 低 |
@@ -1617,3 +1622,39 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 
 **当前基线**：非浏览器 **1445 passed / 1 skipped（117 文件）**；浏览器类成组 **10 文件 / 40 条**；
 `vite build` 6.8s 通过（仅 chunk 体积警告）。
+
+---
+
+# 25. 三处空间压缩（第二十轮，2026-10-30）
+
+用户给了三张截图：移动端用量页空白太多、PC 首页社区作品区卡片过大、PC 豆社页要省空间。
+
+## 25.1 移动端用量页：统计卡从上下堆叠改成横排
+
+原来每张卡是「标签一行 + 数值一行 + p-3」，实测约 76px；三张卡加起来 230px+。
+改成横排（标签左、数值右）后约 44px，三张共省约 96px，整页内容（含空态）一屏放下。
+
+## 25.2 PC 豆社卡片与页头（CommunityPostCard / CommunityView）
+
+| 项 | 改前 | 改后 |
+|---|---|---|
+| 标题按钮 | `min-h-11`（44px，两行文字也要撑 44） | 移动保持 44，桌面自然高度（22px） |
+| 查看图纸 | `min-h-11`（44） | 移动 44，桌面 36 |
+| 点赞/收藏 | `min-h-11 min-w-11`（44） | 移动 44，桌面 36 |
+| 卡片内边距 | p-4 / pt-4 / mt-3 | p-3 / pt-2 / mt-2 |
+| 单卡高度（240 宽、带 1 个标签） | ~462px | ~415px |
+| 页头 | 搜索框 mt-8、chip/排序 44、栅格 my-6 | mt-5、36px、my-4 |
+
+原则不变：**移动端触控 44 硬线不动**，只把桌面降到 36/自然高度（`sm:min-h-9` / `sm:min-h-0`）。
+
+## 25.3 PC 首页社区作品区（HomeView）
+
+- 作品图 `aspect-square` → `aspect-4/3`（215 宽的卡省 54px）；
+- 区块 p-5 → p-4、卡间 gap-4 → gap-3、外层 gap-6 → gap-4。
+
+## 25.4 验证工具
+
+本地没起后端、workers API 也没数据（用户确认属正常），所以截图工具
+`.workbuddy/tools/cdp.mjs` 加了 `--mock-community`：CDP Fetch 拦截
+`*community/posts*`，回 4 条示例作品（带 CORS 头，否则页面读不到 mock 响应）。
+移动端用量页与桌面头部高度均已实测；社区卡片单卡 415px 为离线渲染实测。

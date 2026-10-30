@@ -227,22 +227,22 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
       </div>
 
       <div className="my-3 grid grid-cols-2 gap-2">
-      <div className={`rounded-2xl border border-purple-200/80 bg-purple-50/80 text-center ${sz.card}`} aria-label={isEn ? 'Total Beads' : '总用豆数'}>
+      <div className={`flex items-center justify-between gap-2 border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Total Beads' : '总用豆数'}>
         <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Total Beads' : '总用豆数'}</div>
-        <div className={`mt-0.5 font-mono font-black text-purple-900 ${isSheet ? 'text-lg' : 'text-[15px]'}`}>{totalBeads}</div>
+        <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{totalBeads}</div>
       </div>
-      <div className={`rounded-2xl border border-purple-200/80 bg-purple-50/80 text-center ${sz.card}`} aria-label={isEn ? 'Colors Used' : '颜色种类数量'}>
+      <div className={`flex items-center justify-between gap-2 border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Colors Used' : '颜色种类数量'}>
         <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Colors Used' : '颜色种类'}</div>
-        <div className={`mt-0.5 font-mono font-black text-purple-900 ${isSheet ? 'text-lg' : 'text-[15px]'}`}>{colorTypes}</div>
+        <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{colorTypes}</div>
       </div>
       </div>
 
       {hasDetails ? (
         <>
           <div className="my-3">
-            <div className={`bg-purple-50/80 rounded-2xl border border-purple-200/80 text-center ${sz.card}`}>
+            <div className={`flex items-center justify-between gap-2 bg-purple-50/80 rounded-2xl border border-purple-200/80 ${sz.card}`} aria-label={isEn ? 'Boards Needed' : '需拼豆板'}>
               <div className={`text-purple-600 font-medium ${sz.micro}`}>{isEn ? 'Boards Needed' : '需拼豆板'}</div>
-              <div className={`font-black text-indigo-700 font-mono mt-0.5 ${isSheet ? 'text-base' : 'text-[13px]'}`}>{totalBoards} {isEn ? 'boards' : '板'}</div>
+              <div className={`font-black text-indigo-700 font-mono ${isSheet ? 'text-base' : 'text-[13px]'}`}>{totalBoards} {isEn ? 'boards' : '板'}</div>
             </div>
           </div>
 

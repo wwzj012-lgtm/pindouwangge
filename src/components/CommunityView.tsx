@@ -289,7 +289,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           </div>
 
           {/* Search Bar & Tag Filters */}
-          <div className="w-full max-w-2xl mt-3 sm:mt-8 relative">
+          <div className="w-full max-w-2xl mt-3 sm:mt-5 relative">
             <div className="relative flex items-center">
               <Search aria-hidden="true" className="w-5 h-5 absolute left-3.5 text-purple-600" />
               <input
@@ -314,9 +314,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       </section>
 
       {/* Main Content Area */}
-      <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-5">
+      <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
         {/* Category Tabs & Sorting bar */}
-        <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-4 sm:pb-4">
+        <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
           {/* Categories — a single swipeable row on phones so a long tag list
               never pushes the first artwork below the fold. */}
           <div role="group" aria-label="按作品标签筛选" className="-mx-4 flex w-[calc(100%+2rem)] flex-nowrap items-center gap-2 overflow-x-auto scrollbar-none px-4 sm:mx-0 sm:w-full sm:flex-wrap sm:overflow-visible sm:px-0">
@@ -327,7 +327,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 aria-pressed={activeCategory === cat}
                 aria-label={cat === null ? '全部作品' : `筛选标签：${cat}`}
                 onClick={() => setActiveCategory(cat)}
-                className={`inline-flex min-h-11 min-w-[4.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full px-4 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
                   activeCategory === cat
                     ? 'bg-purple-600 text-white shadow-sm'
                     : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
@@ -348,7 +348,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <button
               aria-pressed={sortBy === 'hot'}
               onClick={() => setSortBy('hot')}
-              className={`min-h-11 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
                 sortBy === 'hot' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
@@ -357,7 +357,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <button
               aria-pressed={sortBy === 'new'}
               onClick={() => setSortBy('new')}
-              className={`min-h-11 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
                 sortBy === 'new' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
@@ -366,7 +366,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <button
               aria-pressed={sortBy === 'favorites'}
               onClick={() => setSortBy('favorites')}
-              className={`min-h-11 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
                 sortBy === 'favorites' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
@@ -391,7 +391,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         {/* The status line duplicates the loading block below during the first
             fetch, so only show it once there is something to count. */}
         {!(isLoading && patternsState.length === 0) && (
-          <p role="status" aria-live="polite" className="mt-4 text-xs text-purple-700">
+          <p role="status" aria-live="polite" className="mt-3 text-xs text-purple-700">
             {isLoading ? '正在刷新社区作品与标签…' : `已加载 ${patternsState.length} 件作品 · 当前显示 ${filteredPatterns.length} 件`}
             {nextCursor && ' · 加载更多可发现更多作品和标签'}
           </p>
@@ -417,7 +417,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4 gap-4 md:gap-5 my-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 my-4">
             {filteredPatterns.map(pattern => (
               <CommunityPostCard key={pattern.id} post={pattern} pending={pendingAction !== null}
                 onOpen={pattern => void openPattern(pattern)} onReaction={(event, post, reaction) => void handleReaction(event, post, reaction)} />

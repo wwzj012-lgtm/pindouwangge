@@ -56,15 +56,21 @@ Do not remove existing controls or workflows to make a layout appear simpler. Do
 6. Text and controls do not overlap or clip at narrow widths, landscape mobile, or browser zoom.
 7. Keyboard focus and accessible names are present for icon-only controls.
 8. Do not change image-generation results, color counts, palette matching, or conversion settings semantics.
+9. Side-panel control sizes come **only** from `src/components/ui/panelScale.ts`. Do not write ad-hoc `h-11` / `sm:h-auto` / `lg:text-[..]` on a control: desktop must stay on the 16 / 24 / 32 / 36 / 40 px grid, mobile on >= 40 px.
+10. A scrolling `flex flex-col` panel must mark its children `shrink-0` (`[&>*]:shrink-0`). Without it, overflow squeezes every fixed-height control instead of scrolling — this is how the primary button silently collapsed to 16 px.
+11. Nav and toolbar labels must never wrap into a vertical stack; use `shrink-0 whitespace-nowrap` and hide labels below the threshold instead of letting them break.
 
 ## Required Verification
 
 Run and report:
 
-    node node_modules/typescript/bin/tsc --noEmit
-    node node_modules/vitest/vitest.mjs run
-    node node_modules/vite/bin/vite.js build
+    npm run verify        # tsc --noEmit && vite build && vitest run --no-file-parallelism
     git diff --check
+
+`npm run verify` is the canonical gate. Two things to know before you report results:
+
+- Browser-backed suites (`*.browser.test.ts`, `practiceBrowser`) spawn their own Vite server and Chrome. Run them serially (`npm run test:serial`) or as one group; under parallel load they fail at `Server.httpServer.listen` — that is port contention, **not** a regression, and it shows up as a *file*-level failure with zero failed test cases.
+- `src/components/desktopLayout.browser.test.ts` measures real rendered heights at 1440x1024 and 390x844. If you touch shared components (GridCanvas, HomeView, SettingsPanel, StatsPanel, Header, Toolbar), run it first: it catches "mobile change crushed the desktop" in ~15s.
 
 If browser automation is available, capture desktop and mobile screenshots, including a narrow mobile viewport and landscape viewport. Report exact changed files and any visual checks that could not be performed.
 

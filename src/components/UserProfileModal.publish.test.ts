@@ -23,8 +23,18 @@ vi.mock('react', () => {
     hooks.effects[slot] = [...dependencies];
     if (changed) effect();
   };
+  // ErrorBoundary 是 class 组件，裸 mock 的 react 模块必须提供 Component，
+  // 否则 `class ... extends Component` 在模块求值阶段就会拿到 undefined。
+  class Component {
+    props: any;
+    state: any;
+    constructor(props: any) { this.props = props; this.state = {}; }
+    setState(next: any) {
+      this.state = { ...this.state, ...(typeof next === 'function' ? next(this.state) : next) };
+    }
+  }
   return {
-    default: {}, useEffect, useLayoutEffect: useEffect, useRef: <T,>(initial: T) => {
+    Component, default: {}, useEffect, useLayoutEffect: useEffect, useRef: <T,>(initial: T) => {
       const slot = hooks.cursor++;
       if (!(slot in hooks.slots)) hooks.slots[slot] = { current: initial };
       return hooks.slots[slot] as { current: T };

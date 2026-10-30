@@ -5,7 +5,6 @@ import {
   Compass,
   Grid2X2,
   User,
-  Sparkles,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -16,6 +15,13 @@ interface MobileBottomNavProps {
   isEn?: boolean;
 }
 
+/**
+ * Floating bottom navigation for the four top-level destinations.
+ *
+ * One visual language for all five slots: identical height, identical icon
+ * size, identical 11px label. The profile slot used to be a filled pill while
+ * its siblings were plain — that read as a call-to-action instead of a tab.
+ */
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   currentTab,
   setCurrentTab,
@@ -24,82 +30,72 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
 }) => {
   const { currentUser, isVip } = useAuth();
 
+  const items = [
+    { tab: 'home' as const, icon: Home, zh: '首页', en: 'Home' },
+    { tab: 'studio' as const, icon: Palette, zh: '画板', en: 'Studio' },
+    { tab: 'community' as const, icon: Compass, zh: '豆社', en: 'Feed' },
+    { tab: 'largeCanvas' as const, icon: Grid2X2, zh: '大画板', en: 'Big' },
+  ];
+
   return (
-    <div className="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] sm:bottom-5 left-1/2 -translate-x-1/2 w-[calc(100%-1.5rem)] max-w-md sm:max-w-xl z-40 select-none pointer-events-auto">
-      <nav className="bg-white/95 backdrop-blur-xl border border-purple-200/90 shadow-2xl sm:shadow-purple-900/20 rounded-2xl sm:rounded-3xl px-1 py-1 sm:px-5 sm:py-2 flex items-center justify-around sm:justify-center sm:gap-6 md:gap-8">
-        {/* 1. 首页 Home */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('home')}
-          aria-current={currentTab === 'home' ? 'page' : undefined}
-          className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'home'
-              ? 'text-purple-600 font-black bg-purple-100/90 shadow-2xs scale-102'
-              : 'text-slate-500 hover:text-purple-900 font-bold'
-          }`}
-        >
-          <Home className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTab === 'home' ? 'text-purple-600 stroke-[2.5]' : 'text-slate-500'}`} />
-          <span className="text-[10px] sm:text-xs leading-tight">{isEn ? 'Home' : '首页'}</span>
-        </button>
+    <div className="pointer-events-none fixed bottom-0 left-1/2 z-40 w-[calc(100%-1.5rem)] max-w-md -translate-x-1/2 sm:max-w-xl">
+      <nav
+        aria-label={isEn ? 'Main navigation' : '主导航'}
+        className="pointer-events-auto flex items-stretch gap-0.5 rounded-2xl border border-purple-200/90 bg-white/95 px-1 py-1 shadow-2xl backdrop-blur-xl sm:justify-center sm:gap-4 sm:rounded-3xl sm:px-4 sm:py-1.5"
+        style={{ marginBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))' }}
+      >
+        {items.map(({ tab, icon: Icon, zh, en }) => {
+          const isActive = currentTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setCurrentTab(tab)}
+              aria-current={isActive ? 'page' : undefined}
+              className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 transition-colors sm:min-w-[68px] sm:flex-none sm:px-3 ${
+                isActive ? 'bg-purple-50 text-purple-700' : 'text-slate-500 active:bg-slate-100'
+              }`}
+            >
+              <Icon
+                aria-hidden="true"
+                className={`h-5 w-5 ${isActive ? 'stroke-[2.4]' : ''}`}
+              />
+              <span className={`text-[11px] leading-none ${isActive ? 'font-black' : 'font-bold'}`}>
+                {isEn ? en : zh}
+              </span>
+            </button>
+          );
+        })}
 
-        {/* 2. 画板 Studio */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('studio')}
-          aria-current={currentTab === 'studio' ? 'page' : undefined}
-          className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'studio'
-              ? 'text-purple-600 font-black bg-purple-100/90 shadow-2xs scale-102'
-              : 'text-slate-500 hover:text-purple-900 font-bold'
-          }`}
-        >
-          <Palette className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTab === 'studio' ? 'text-purple-600 stroke-[2.5]' : 'text-slate-500'}`} />
-          <span className="text-[10px] sm:text-xs leading-tight">{isEn ? 'Studio' : '画板'}</span>
-        </button>
-
-        {/* 3. 豆社 Community */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('community')}
-          aria-current={currentTab === 'community' ? 'page' : undefined}
-          className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'community'
-              ? 'text-purple-600 font-black bg-purple-100/90 shadow-2xs scale-102'
-              : 'text-slate-500 hover:text-purple-900 font-bold'
-          }`}
-        >
-          <Compass className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTab === 'community' ? 'text-purple-600 stroke-[2.5]' : 'text-slate-500'}`} />
-          <span className="text-[10px] sm:text-xs leading-tight">{isEn ? 'Feed' : '豆社'}</span>
-        </button>
-
-        {/* 4. 大画板 Large Canvas */}
-        <button
-          type="button"
-          onClick={() => setCurrentTab('largeCanvas')}
-          aria-current={currentTab === 'largeCanvas' ? 'page' : undefined}
-          className={`flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl transition-all cursor-pointer ${
-            currentTab === 'largeCanvas'
-              ? 'text-purple-600 font-black bg-purple-100/90 shadow-2xs scale-102'
-              : 'text-slate-500 hover:text-purple-900 font-bold'
-          }`}
-        >
-          <Grid2X2 className={`w-4 h-4 sm:w-5 sm:h-5 ${currentTab === 'largeCanvas' ? 'text-purple-600 stroke-[2.5]' : 'text-slate-500'}`} />
-          <span className="text-[10px] sm:text-xs leading-tight">{isEn ? 'Big' : '大画板'}</span>
-        </button>
-
-        {/* 5. 我的 Profile / VIP */}
+        {/* Profile slot: same geometry as a tab, avatar replaces the icon. */}
         <button
           type="button"
           onClick={onOpenProfile}
-          className="relative flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1 text-slate-500 transition-all cursor-pointer hover:text-purple-900 font-bold sm:min-w-[68px] sm:flex-none sm:px-3.5 rounded-xl sm:rounded-2xl"
+          aria-haspopup="menu"
+          aria-label={
+            currentUser
+              ? (isEn ? 'Account and saved patterns' : '账号与我的图纸')
+              : (isEn ? 'Sign in' : '登录')
+          }
+          className="relative flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl px-1 py-1 text-slate-500 transition-colors active:bg-slate-100 sm:min-w-[68px] sm:flex-none sm:px-3"
         >
-          <div className="relative">
-            <User className="w-4 h-4 sm:w-5 sm:h-5 text-slate-500" />
+          <span className="relative flex h-5 w-5 items-center justify-center">
+            <span
+              aria-hidden="true"
+              className={`flex h-5 w-5 items-center justify-center rounded-full ${
+                currentUser ? 'bg-purple-100 text-purple-700' : 'bg-slate-200 text-slate-600'
+              }`}
+            >
+              <User className="h-3.5 w-3.5" />
+            </span>
             {isVip && (
-              <span className="absolute -top-1 -right-1.5 w-2 h-2 rounded-full bg-amber-400 border border-white" />
+              <span
+                aria-hidden="true"
+                className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-white bg-amber-400"
+              />
             )}
-          </div>
-          <span className="text-[10px] sm:text-xs leading-tight">
+          </span>
+          <span className="text-[11px] font-bold leading-none">
             {currentUser ? (isEn ? 'Me' : '我的') : isEn ? 'Login' : '我的'}
           </span>
         </button>

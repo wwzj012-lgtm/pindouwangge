@@ -26,10 +26,11 @@ it.skipIf(!browser).each([1280, 390])('keeps the actual App canvas stable and st
         .catch(error=>{parent.document.body.dataset.result='failed';parent.document.getElementById('result').textContent=String(error.stack||error);});`, resolveDir: projectRoot, loader: 'tsx' },
       plugins: [{ name: 'browser-app-probe', setup(builder: any) {
         builder.onLoad({ filter: /[\\/]src[\\/]App\.tsx$/ }, ({ path }: { path: string }) => {
-          const original = readFileSync(path, 'utf8');
-          const marker = '  return (\n    <div className="flex flex-col h-screen';
+          // The probe matches logical source lines in either LF or CRLF checkouts.
+          const original = readFileSync(path, 'utf8').replace(/\r\n/g, '\n');
+          const marker = '  return (\n    <div className="app-shell-height';
           if (!original.includes(marker)) throw new Error('App probe insertion point changed');
-          return { contents: original.replace(marker, `  (window as any).__brandCatalogApp = { convertImageToGrid, handleConvertLargeCanvasImage, activePalette, setActivePalette, grid, settings, imageLoadMessage, setImageLoadMessage };\n${marker}`), loader: 'tsx' };
+          return { contents: original.replace(marker, `  (window as any).__brandCatalogApp = { convertImageToGrid, handleConvertLargeCanvasImage, get activePalette() { return activePalette; }, setActivePalette, get grid() { return grid; }, settings, imageLoadMessage, setImageLoadMessage };\n${marker}`), loader: 'tsx' };
         });
         builder.onLoad({ filter: /\.css$/ }, () => ({ contents: '', loader: 'text' }));
       } }],
@@ -57,7 +58,7 @@ it.skipIf(!browser).each([1280, 390])('keeps the actual App canvas stable and st
     expect(stdout.includes('data-result="passed"'), reportText).toBe(true);
     const report = JSON.parse(reportText);
     expect(report.viewportWidth).toBe(width);
-    expect(report.checks.length).toBe(width >= 1024 ? 25 : 24);
+    expect(report.checks.length).toBe(width >= 1024 ? 40 : 39);
     expect(report.browserErrors).toEqual([]);
     if (evidence) writeFileSync(resolve(evidence, `brand-refresh-${width}.json`), JSON.stringify(report, null, 2));
   } finally {

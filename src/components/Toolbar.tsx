@@ -75,7 +75,7 @@ interface ToolbarProps {
 
 type MenuId = 'shape' | 'symmetry' | 'view' | 'assist' | 'mirror' | null;
 
-const buttonBase = 'inline-flex min-h-8 items-center justify-center gap-1 rounded-lg border px-2 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
+const buttonBase = 'inline-flex min-h-8 shrink-0 items-center justify-center gap-1 whitespace-nowrap rounded-lg border px-2 text-[11px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-40';
 const iconButton = 'inline-flex h-8 w-8 items-center justify-center rounded-lg border border-transparent text-purple-800 transition-colors hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-35';
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -210,7 +210,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         : 'border-transparent text-purple-800 hover:border-purple-200 hover:bg-purple-100 hover:text-purple-950'}`}
     >
       {tool.icon}
-      <span className="hidden min-[1180px]:inline">{tool.label.split(' ')[0]}</span>
+      <span className="hidden min-[1300px]:inline">{tool.label.split(' ')[0]}</span>
     </button>
   );
 
@@ -227,7 +227,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       className={`${buttonBase} ${openMenu === menu ? 'border-purple-300 bg-purple-100 text-purple-950' : 'border-purple-200 bg-white/70 text-purple-800 hover:bg-purple-100'}`}
     >
       {icon}
-      <span className="hidden min-[1100px]:inline">{label}</span>
+      <span className="hidden min-[1300px]:inline">{label}</span>
       <ChevronDown className={`h-3 w-3 transition-transform ${openMenu === menu ? 'rotate-180' : ''}`} />
     </button>
   );

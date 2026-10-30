@@ -1105,7 +1105,7 @@ export const LandingView: React.FC<LandingViewProps> = ({
                 {/* Color Legend Filter Pills */}
                 <div className="pt-1 border-t border-purple-100">
                   <div className="flex items-center gap-1.5 overflow-x-auto scrollbar-none py-1 w-full">
-                    <span className="text-[11px] font-black text-purple-500 shrink-0">用量与高亮:</span>
+                    <span className="text-[11px] font-black text-purple-600 shrink-0">用量与高亮:</span>
                     {beadStats.topColors.map(tc => {
                       const isHighlighted = highlightedColorChar === tc.char;
                       return (

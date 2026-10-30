@@ -1,46 +1,77 @@
-import { useState, useEffect, ReactNode } from 'react';
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
   fallbackTitle?: string;
+  /** 根级边界用：重试等于刷新整页，而不是重渲染同一棵必然再崩的树。 */
+  reloadOnReset?: boolean;
 }
 
-export function ErrorBoundary({ children, fallbackTitle }: Props) {
-  const [error, setError] = useState<Error | null>(null);
+interface State {
+  error: Error | null;
+}
 
-  useEffect(() => {
-    const handleWindowError = (event: ErrorEvent) => {
-      if (event.error) {
-        setError(event.error);
-      }
-    };
-    window.addEventListener('error', handleWindowError);
-    return () => window.removeEventListener('error', handleWindowError);
-  }, []);
+/**
+ * 真正的 React 错误边界。
+ *
+ * 旧实现只监听 `window.error`，有两个问题：
+ * 1. React 的渲染错误走的是 `getDerivedStateFromError`，不会冒泡成普通的 window 事件，
+ *    所以它**从来没有捕获过任何渲染崩溃**，只会被无关的异步错误误伤；
+ * 2. 一个和本组件无关的报错（比如某个请求回调抛错）也会把整个子树换成错误卡片。
+ *
+ * 现在改成 class 边界：只接住自己子树里的渲染/生命周期错误。
+ * 根级用法见 `main.tsx` —— 没有它时，任意一处渲染抛错都是整页白屏。
+ */
+export class ErrorBoundary extends Component {
+  // 本项目没有装 @types/react（见 tsconfig/依赖），`Component` 解析为 any，
+  // 继承不到 props/setState 的声明，所以这里显式声明它们在运行时的存在。
+  declare props: Props;
+  declare setState: (state: Partial<State>) => void;
+  state: State = { error: null };
 
-  if (error) {
+  static getDerivedStateFromError(error: Error): State {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    // 堆栈留给控制台/线上日志，界面只显示可读文案
+    console.error('[ErrorBoundary]', error, info.componentStack);
+  }
+
+  private handleReset = () => {
+    if (this.props.reloadOnReset) {
+      window.location.reload();
+      return;
+    }
+    this.setState({ error: null });
+  };
+
+  render() {
+    const { error } = this.state;
+    if (!error) return <>{this.props.children}</>;
+
     return (
-      <div className="p-6 bg-slate-900 text-slate-100 rounded-3xl border border-slate-800 shadow-2xl max-w-md mx-auto my-8 text-center space-y-4">
-        <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center mx-auto">
-          <AlertTriangle className="w-6 h-6" />
+      <div className="flex min-h-[50vh] items-center justify-center p-6">
+        <div className="w-full max-w-md space-y-4 rounded-3xl border border-rose-200 bg-white p-6 text-center shadow-xl">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-200 bg-rose-50 text-rose-500">
+            <AlertTriangle className="h-6 w-6" />
+          </div>
+          <h3 className="text-base font-bold text-purple-950">
+            {this.props.fallbackTitle || '页面组件加载异常'}
+          </h3>
+          <p className="text-xs leading-relaxed text-purple-600">
+            页面暂时遇到问题，请点击下方按钮重试。
+          </p>
+          <button
+            onClick={this.handleReset}
+            className="mx-auto flex items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-2 text-xs font-bold text-white transition-all hover:bg-purple-500 cursor-pointer"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>{this.props.reloadOnReset ? '刷新页面' : '重新载入此界面'}</span>
+          </button>
         </div>
-        <h3 className="text-base font-bold text-white">
-          {fallbackTitle || '页面组件加载异常'}
-        </h3>
-        <p className="text-xs text-slate-400">
-          {error.message || '遇到未知问题，点击重试恢复显示。'}
-        </p>
-        <button
-          onClick={() => setError(null)}
-          className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 mx-auto transition-all cursor-pointer"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>重新载入此界面</span>
-        </button>
       </div>
     );
   }
-
-  return <>{children}</>;
 }

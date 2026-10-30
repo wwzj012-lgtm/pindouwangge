@@ -79,7 +79,7 @@ export function Field({ className, label, hint, error, children, ...props }: Fie
     <label className={cx('block', className)} {...props}>
       <span className="flex items-baseline justify-between gap-2 text-[11px] font-black text-purple-900">
         <span>{label}</span>
-        {hint && <span className="text-[10px] font-bold text-purple-400">{hint}</span>}
+        {hint && <span className="text-[10px] font-bold text-purple-600">{hint}</span>}
       </span>
       <span className="mt-1 block">{children}</span>
       {error ? <span className="mt-1 block text-[10px] font-bold text-rose-700" role="alert">{error}</span> : null}

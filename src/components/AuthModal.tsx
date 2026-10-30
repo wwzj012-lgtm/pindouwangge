@@ -456,7 +456,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                           value={displayName}
                           onChange={e => setDisplayName(e.target.value)}
                           placeholder="例如: 拼豆小当家 / 像素创作者"
-                          className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
+                          className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-base sm:text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
                         />
                       </div>
                     </div>
@@ -467,7 +467,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       手机号 / QQ邮箱 / 163邮箱 / 自定义账号
                     </label>
                     <div className="relative">
-                      <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                      <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input
                         type="text"
                         name="username"
@@ -476,9 +476,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         autoComplete={AUTH_AUTOCOMPLETE.username}
                         value={email}
                         onChange={e => setEmail(e.target.value)}
-                        placeholder="支持 11位手机号、QQ邮箱或自定义用户名"
+                        placeholder="手机号 / 邮箱 / 用户名"
                         required
-                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-base sm:text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
                       />
                     </div>
                     <p className="text-[10px] text-slate-400 mt-1">
@@ -489,7 +489,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div>
                     <label className="text-[11px] text-slate-600 block mb-1 font-medium">登录密码</label>
                     <div className="relative">
-                      <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
+                      <Lock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                       <input
                         type="password"
                         name="password"
@@ -501,7 +501,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         onChange={e => setPassword(e.target.value)}
                         placeholder="请输入至少 6 位密码"
                         required
-                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50/80 border border-slate-200 focus:bg-white rounded-xl text-base sm:text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 min-h-[44px]"
                       />
                     </div>
                   </div>

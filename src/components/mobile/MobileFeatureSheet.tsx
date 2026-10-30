@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  X,
   Sparkles,
   Zap,
   Palette,
@@ -17,8 +18,6 @@ import {
   Wand2,
   Download,
   Share2,
-  FileCode,
-  FolderOpen,
   Save,
   Crown,
   ChevronRight,
@@ -27,6 +26,7 @@ import {
   ZoomOut,
   Maximize2,
   Trash2,
+  Timer,
 } from 'lucide-react';
 import { BeadShape, SymmetryMode, CanvasBackdrop } from '../../types';
 import { SymmetryAxisControls, type WorkspaceEditingActions } from '../SymmetryAxisControls';
@@ -46,11 +46,13 @@ export interface MobileFeatureSheetProps {
   onResetZoom: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
-  onRequestImportJson: () => void;
-  onExportJson: () => void;
-  conversionSettingsContent?: React.ReactNode;
-  usageContent?: React.ReactNode;
-  initialTab?: 'basic' | 'parameters';
+  onOpenExportModal?: () => void;
+  onTogglePractice?: () => void;
+  isPracticeMode?: boolean;
+  onOpenResidualCleanup?: () => void;
+  residualCleanupDisabled?: boolean;
+  onSelectRegionClear?: () => void;
+  isRegionClearActive?: boolean;
 
   // View states
   beadShape: BeadShape;
@@ -88,11 +90,13 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
   onResetZoom,
   onZoomIn,
   onZoomOut,
-  onRequestImportJson,
-  onExportJson,
-  conversionSettingsContent,
-  usageContent,
-  initialTab = 'basic',
+  onOpenExportModal,
+  onTogglePractice,
+  isPracticeMode = false,
+  onOpenResidualCleanup,
+  residualCleanupDisabled = false,
+  onSelectRegionClear,
+  isRegionClearActive = false,
   beadShape,
   setBeadShape,
   showSymbols,
@@ -112,7 +116,6 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
   hasSourceImage,
   isEn,
 }) => {
-  const [activeTab, setActiveTab] = React.useState<'basic' | 'parameters'>(initialTab);
 
   if (!isOpen) return null;
 
@@ -122,63 +125,36 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
       <div className="flex-1" onClick={onClose} />
 
       {/* Sheet Container with iOS style rounded corners */}
-      <div className="bg-white rounded-t-3xl shadow-2xl max-h-[85vh] overflow-y-auto p-4 pb-[calc(2rem+env(safe-area-inset-bottom))] space-y-4 border-t border-purple-100 animate-in slide-in-from-bottom-5 duration-200 select-none">
+      <div className="bg-white rounded-t-3xl shadow-2xl max-h-[85dvh] overflow-y-auto p-4 pb-[calc(1.5rem+var(--safe-bottom))] space-y-4 border-t border-purple-100 animate-in slide-in-from-bottom-5 duration-200 select-none">
         {/* Top Drag Handle */}
         <div className="w-12 h-1.5 bg-slate-300 rounded-full mx-auto" />
 
         {/* Sheet Title */}
-        <div className="flex items-center justify-between px-1">
+        <div className="flex items-start justify-between gap-3 px-1">
           <div>
             <h3 className="text-base font-black text-slate-900">
-              {isEn ? 'Studio Toolkit & View Controls' : '画板增强工具箱 & 视图控制'}
+              {isEn ? 'Board Toolkit' : '画板工具箱'}
             </h3>
-            <p className="text-[11px] font-bold text-slate-400">
+            <p className="mt-0.5 text-xs font-bold text-slate-500">
               {isEn ? 'Customize rendering, shape, and quick actions' : '自定义拼豆质感、显示辅助线及核心捷径'}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 font-bold flex items-center justify-center cursor-pointer hover:bg-slate-200"
+            aria-label={isEn ? 'Close' : '关闭'}
+            className="-mr-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-700 transition-colors active:bg-slate-200"
           >
-            ✕
+            <span aria-hidden="true" className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100">
+              <X className="h-4 w-4" aria-hidden="true" />
+            </span>
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1" role="tablist" aria-label={isEn ? 'Mobile tool panels' : '移动端工具面板'}>
-          <button
-            id="mobile-feature-sheet-basic-tab"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'basic'}
-            aria-controls="mobile-feature-sheet-basic-panel"
-            onClick={() => setActiveTab('basic')}
-            className={`min-w-0 rounded-lg px-2 py-2 text-xs font-black transition-colors cursor-pointer ${
-              activeTab === 'basic' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            {isEn ? 'Basic settings' : '基础设置'}
-          </button>
-          <button
-            id="mobile-feature-sheet-parameters-tab"
-            type="button"
-            role="tab"
-            aria-selected={activeTab === 'parameters'}
-            aria-controls="mobile-feature-sheet-parameters-panel"
-            onClick={() => setActiveTab('parameters')}
-            className={`min-w-0 rounded-lg px-2 py-2 text-xs font-black transition-colors cursor-pointer ${
-              activeTab === 'parameters' ? 'bg-white text-purple-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            {isEn ? 'Parameters' : '参数设置'}
-          </button>
-        </div>
-
-        {activeTab === 'basic' ? (
-          <div id="mobile-feature-sheet-basic-panel" role="tabpanel" aria-labelledby="mobile-feature-sheet-basic-tab" className="space-y-4">
+        <div className="space-y-4">
 
         {/* 1. Bead Shape & Texture */}
         <div className="bg-purple-50/60 p-3 rounded-2xl border border-purple-100/90 space-y-2">
-          <span className="text-[11px] font-black text-purple-900 flex items-center gap-1.5">
+          <span className="text-xs font-black text-purple-900 flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-purple-600" />
             {isEn ? 'Bead Rendering Texture' : '拼豆形状与渲染质感'}
           </span>
@@ -192,7 +168,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               }`}
             >
               <CircleIcon className="w-4 h-4" />
-              <span className="text-[10px]">{isEn ? '3D Fuse' : '3D圆豆'}</span>
+              <span className="text-xs">{isEn ? '3D Fuse' : '3D圆豆'}</span>
             </button>
             <button
               onClick={() => setBeadShape('circle_flat')}
@@ -203,7 +179,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               }`}
             >
               <CircleIcon className="w-4 h-4" />
-              <span className="text-[10px]">{isEn ? 'Flat' : '扁平圆'}</span>
+              <span className="text-xs">{isEn ? 'Flat' : '扁平圆'}</span>
             </button>
             <button
               onClick={() => setBeadShape('square')}
@@ -214,7 +190,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               }`}
             >
               <Square className="w-4 h-4" />
-              <span className="text-[10px]">{isEn ? 'Pixel' : '方块'}</span>
+              <span className="text-xs">{isEn ? 'Pixel' : '方块'}</span>
             </button>
             <button
               onClick={() => setBeadShape('ironed')}
@@ -225,21 +201,21 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               }`}
             >
               <Flame className="w-4 h-4" />
-              <span className="text-[10px]">{isEn ? 'Ironed' : '融豆'}</span>
+              <span className="text-xs">{isEn ? 'Ironed' : '融豆'}</span>
             </button>
           </div>
         </div>
 
         {/* 2. Visual Overlays & Display Toggles */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">
-          <span className="text-[11px] font-black text-slate-900 flex items-center gap-1.5">
+          <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
             <Layers className="w-3.5 h-3.5 text-indigo-600" />
             {isEn ? 'Display Guides & Overlay' : '视觉辅助线与叠影'}
           </span>
           <div className="grid grid-cols-2 gap-2">
             <button
               onClick={() => setShowSymbols(!showSymbols)}
-              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
+              className={`min-h-11 p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
                 showSymbols
                   ? 'bg-purple-100/90 border-purple-300 text-purple-950'
                   : 'bg-white border-slate-200 text-slate-700'
@@ -254,13 +230,13 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                   showSymbols ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300'
                 }`}
               >
-                {showSymbols && <span className="text-[9px]">✓</span>}
+                {showSymbols && <span className="text-xs">✓</span>}
               </div>
             </button>
 
             <button
               onClick={() => setShowGridLines(!showGridLines)}
-              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
+              className={`min-h-11 p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
                 showGridLines
                   ? 'bg-purple-100/90 border-purple-300 text-purple-950'
                   : 'bg-white border-slate-200 text-slate-700'
@@ -275,13 +251,13 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                   showGridLines ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300'
                 }`}
               >
-                {showGridLines && <span className="text-[9px]">✓</span>}
+                {showGridLines && <span className="text-xs">✓</span>}
               </div>
             </button>
 
             <button
               onClick={() => setShowCoordinates(!showCoordinates)}
-              className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
+              className={`min-h-11 p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
                 showCoordinates
                   ? 'bg-purple-100/90 border-purple-300 text-purple-950'
                   : 'bg-white border-slate-200 text-slate-700'
@@ -296,7 +272,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                   showCoordinates ? 'bg-purple-600 border-purple-600 text-white' : 'border-slate-300'
                 }`}
               >
-                {showCoordinates && <span className="text-[9px]">✓</span>}
+                {showCoordinates && <span className="text-xs">✓</span>}
               </div>
             </button>
 
@@ -304,7 +280,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               <div className="space-y-2">
               <button
                 onClick={() => setShowOverlay(!showOverlay)}
-                className={`p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
+                className={`min-h-11 p-2.5 rounded-xl border flex items-center justify-between text-xs font-black transition-all cursor-pointer ${
                   showOverlay
                     ? 'bg-amber-100/90 border-amber-300 text-amber-950'
                     : 'bg-white border-slate-200 text-slate-700'
@@ -319,11 +295,11 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                     showOverlay ? 'bg-amber-600 border-amber-600 text-white' : 'border-slate-300'
                   }`}
                 >
-                  {showOverlay && <span className="text-[9px]">✓</span>}
+                  {showOverlay && <span className="text-xs">✓</span>}
                 </div>
               </button>
               {showOverlay && (
-                <label className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-900">
+                <label className="flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
                   <span className="shrink-0">{isEn ? 'Opacity' : '叠底透明度'}</span>
                   <input type="range" min="10" max="70" step="5" value={Math.round(overlayOpacity * 100)} onChange={event => setOverlayOpacity(Number(event.target.value) / 100)} className="min-w-0 flex-1 accent-amber-500" aria-label={isEn ? 'Overlay opacity' : '原图叠底透明度'} />
                   <span className="w-9 text-right">{Math.round(overlayOpacity * 100)}%</span>
@@ -336,7 +312,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
 
         {/* 3. Symmetry Drawing Mode */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">
-          <span className="text-[11px] font-black text-slate-900 flex items-center gap-1.5">
+          <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
             <Wand2 className="w-3.5 h-3.5 text-indigo-600" />
             {isEn ? 'Symmetry Drawing Mode' : '对称绘图模式'}
           </span>
@@ -345,7 +321,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               <button
                 key={mode}
                 onClick={() => setSymmetryMode(mode)}
-                className={`py-2 px-1 rounded-xl border text-[11px] font-black transition-all cursor-pointer text-center ${
+                className={`min-h-11 py-2 px-1 rounded-xl border text-xs font-black transition-all cursor-pointer text-center ${
                   symmetryMode === mode
                     ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
                     : 'bg-white border-slate-200 text-slate-700 hover:bg-purple-50'
@@ -374,7 +350,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
 
         {/* 4. Canvas Backdrop Tone */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">
-          <span className="text-[11px] font-black text-slate-900">
+          <span className="text-xs font-black text-slate-900">
             {isEn ? 'Board Backdrop Color' : '画板底板底色'}
           </span>
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -382,7 +358,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               <button
                 key={b}
                 onClick={() => setCanvasBackdrop(b)}
-                className={`flex-1 min-w-[56px] py-1.5 rounded-xl border text-[10px] font-black transition-all cursor-pointer ${
+                className={`flex-1 min-w-[56px] min-h-11 py-1.5 rounded-xl border text-xs font-black transition-all cursor-pointer ${
                   canvasBackdrop === b
                     ? 'bg-purple-600 border-purple-600 text-white shadow-xs'
                     : 'bg-white border-slate-200 text-slate-700'
@@ -404,7 +380,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
 
         {/* 5. View Zoom Controls */}
         <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200/90 space-y-2">
-          <span className="text-[11px] font-black text-slate-900 flex items-center gap-1.5">
+          <span className="text-xs font-black text-slate-900 flex items-center gap-1.5">
             <Sliders className="w-3.5 h-3.5 text-indigo-600" />
             {isEn ? 'Canvas Zoom' : '画板缩放'}
           </span>
@@ -438,6 +414,89 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
 
         {/* 6. Shortcuts & Tools Grid */}
         <div className="grid grid-cols-2 gap-2 pt-2">
+          {onOpenExportModal && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenExportModal();
+              }}
+              className="min-h-12 min-w-0 p-3 rounded-2xl bg-purple-600 border border-purple-600 text-white font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            >
+              <Download className="w-5 h-5 shrink-0" aria-hidden="true" />
+              <div className="min-w-0 text-left">
+                <p>{isEn ? 'Export pattern' : '导出图纸'}</p>
+                <p className="text-xs text-purple-100 font-medium">
+                  {isEn ? 'PNG / PDF / BOM' : '图片、图纸与物料单'}
+                </p>
+              </div>
+            </button>
+          )}
+
+          {onTogglePractice && (
+            <button
+              onClick={() => {
+                onClose();
+                onTogglePractice();
+              }}
+              aria-pressed={isPracticeMode}
+              className={`min-h-12 min-w-0 p-3 rounded-2xl border font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer ${
+                isPracticeMode
+                  ? 'bg-emerald-600 border-emerald-600 text-white'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-950'
+              }`}
+            >
+              <Timer className={`w-5 h-5 shrink-0 ${isPracticeMode ? 'text-white' : 'text-emerald-600'}`} aria-hidden="true" />
+              <div className="min-w-0 text-left">
+                <p>{isEn ? 'Practice mode' : '实操模式'}</p>
+                <p className={`text-xs font-medium ${isPracticeMode ? 'text-emerald-50' : 'text-emerald-700'}`}>
+                  {isPracticeMode ? (isEn ? 'On — tap to exit' : '已开启 · 点击退出') : (isEn ? 'Track bead progress' : '按色号逐步打卡')}
+                </p>
+              </div>
+            </button>
+          )}
+
+          {onSelectRegionClear && (
+            <button
+              onClick={() => {
+                onClose();
+                onSelectRegionClear();
+              }}
+              aria-pressed={isRegionClearActive}
+              className={`min-h-12 min-w-0 p-3 rounded-2xl border font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer ${
+                isRegionClearActive
+                  ? 'bg-rose-600 border-rose-600 text-white'
+                  : 'bg-rose-50 border-rose-200 text-rose-950'
+              }`}
+            >
+              <Trash2 className={`w-5 h-5 shrink-0 ${isRegionClearActive ? 'text-white' : 'text-rose-600'}`} aria-hidden="true" />
+              <div className="min-w-0 text-left">
+                <p>{isEn ? 'Clear region' : '区域清除'}</p>
+                <p className={`text-xs font-medium ${isRegionClearActive ? 'text-rose-50' : 'text-rose-700'}`}>
+                  {isRegionClearActive ? (isEn ? 'Active — tap canvas' : '已开启 · 点击画布生效') : (isEn ? 'Remove linked same color' : '清除连通同色区域')}
+                </p>
+              </div>
+            </button>
+          )}
+
+          {onOpenResidualCleanup && (
+            <button
+              onClick={() => {
+                onClose();
+                onOpenResidualCleanup();
+              }}
+              disabled={residualCleanupDisabled}
+              className="min-h-12 min-w-0 p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer disabled:opacity-40"
+            >
+              <Scissors className="w-5 h-5 text-amber-600 shrink-0" aria-hidden="true" />
+              <div className="min-w-0 text-left">
+                <p>{isEn ? 'Residual cleanup' : '清理残点'}</p>
+                <p className="text-xs text-amber-700 font-medium">
+                  {isEn ? 'Review before removing' : '先预览，再批量清除'}
+                </p>
+              </div>
+            </button>
+          )}
+
           <button
             onClick={() => {
               onClose();
@@ -448,7 +507,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
             <Crown className="w-5 h-5 text-amber-500 shrink-0" />
             <div className="min-w-0 text-left">
               <p>{isEn ? 'Stella VIP' : '星格会员'}</p>
-              <p className="text-[9px] text-amber-700 font-medium">
+              <p className="text-xs text-amber-700 font-medium">
                 {isEn ? 'Unlock premium tools' : '解锁高级创作工具'}
               </p>
             </div>
@@ -464,7 +523,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
             <Zap className="w-5 h-5 text-amber-500 fill-amber-400 shrink-0" />
             <div className="min-w-0 text-left">
               <p>{isEn ? 'Smart Bead Saver' : '智能精准省豆'}</p>
-              <p className="text-[9px] text-amber-700 font-medium">
+              <p className="text-xs text-amber-700 font-medium">
                 {isEn ? 'Preserve features' : '合并相近过渡杂色'}
               </p>
             </div>
@@ -480,7 +539,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
             <Palette className="w-5 h-5 text-purple-600 shrink-0" />
             <div className="min-w-0 text-left">
               <p>{isEn ? 'Color Brand Card' : '品牌色号卡库'}</p>
-              <p className="text-[9px] text-purple-700 font-medium">
+              <p className="text-xs text-purple-700 font-medium">
                 {isEn ? 'MARD, Artkal, Perler' : '查看全色号清单'}
               </p>
             </div>
@@ -496,7 +555,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
             <ImageIcon className="w-5 h-5 text-indigo-600 shrink-0" />
             <div className="min-w-0 text-left">
               <p>{isEn ? 'My Pattern Cloud' : '云端图纸库'}</p>
-              <p className="text-[9px] text-slate-500 font-medium">
+              <p className="text-xs text-slate-600 font-medium">
                 {isEn ? 'Saved works' : '查看历史作品'}
               </p>
             </div>
@@ -507,42 +566,14 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onClearOuterBackground();
             }}
-            className="min-h-12 min-w-0 p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
+            className="col-span-2 min-h-12 min-w-0 p-3 rounded-2xl bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-800 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
           >
             <Scissors className="w-5 h-5 text-rose-500 shrink-0" />
             <div className="min-w-0 text-left">
               <p>{isEn ? 'Trim Canvas Edge' : '自动裁剪黑白边'}</p>
-              <p className="text-[9px] text-slate-500 font-medium">
+              <p className="text-xs text-slate-600 font-medium">
                 {isEn ? 'Auto crop outer borders' : '消除主体周围空白'}
               </p>
-            </div>
-          </button>
-
-          <button
-            onClick={() => {
-              onClose();
-              onRequestImportJson();
-            }}
-            className="min-h-12 min-w-0 p-3 rounded-2xl bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
-          >
-            <FolderOpen className="w-5 h-5 text-sky-600 shrink-0" />
-            <div className="min-w-0 text-left">
-              <p>{isEn ? 'Import Project JSON' : '导入项目 JSON'}</p>
-              <p className="text-[9px] text-sky-700 font-medium">{isEn ? 'Open a saved project' : '打开已保存的项目文件'}</p>
-            </div>
-          </button>
-
-          <button
-            onClick={() => {
-              onClose();
-              onExportJson();
-            }}
-            className="min-h-12 min-w-0 p-3 rounded-2xl bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-950 font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer"
-          >
-            <FileCode className="w-5 h-5 text-emerald-600 shrink-0" />
-            <div className="min-w-0 text-left">
-              <p>{isEn ? 'Export Project JSON' : '导出项目 JSON'}</p>
-              <p className="text-[9px] text-emerald-700 font-medium">{isEn ? 'Save an editable project' : '保存可继续编辑的项目文件'}</p>
             </div>
           </button>
         </div>
@@ -554,7 +585,7 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onOpenGuideModal();
             }}
-            className="flex-1 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+            className="flex-1 min-h-11 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer"
           >
             <BookOpen className="w-4 h-4 text-indigo-600" />
             <span>{isEn ? 'Beginner Guide' : '新手使用指南'}</span>
@@ -565,25 +596,13 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
               onClose();
               onClearCanvas();
             }}
-            className="py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200"
+            className="min-h-11 py-2.5 px-4 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-rose-200"
           >
             <RotateCcw className="w-4 h-4" />
             <span>{isEn ? 'Clear Canvas' : '清空画板'}</span>
           </button>
         </div>
-          </div>
-        ) : (
-          <div id="mobile-feature-sheet-parameters-panel" role="tabpanel" aria-labelledby="mobile-feature-sheet-parameters-tab" className="space-y-5">
-            {conversionSettingsContent ? (
-              <div>{conversionSettingsContent}</div>
-            ) : (
-              <div className="py-8 text-center text-xs font-bold text-slate-400">
-                {isEn ? 'No parameters available' : '暂无可用参数'}
-              </div>
-            )}
-            {usageContent && <div>{usageContent}</div>}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

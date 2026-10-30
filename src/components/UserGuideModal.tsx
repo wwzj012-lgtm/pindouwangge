@@ -168,15 +168,15 @@ export const UserGuideModal: React.FC<UserGuideModalProps> = ({ isOpen, onClose 
                     <span className="text-sky-700 font-mono font-bold">鼠标悬停画板后滚动滚轮缩放</span>
                   </div>
                   <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-sky-100/80 shadow-xs text-slate-700">
-                    <span className="flex items-center gap-2"><Keyboard className="w-3.5 h-3.5 text-purple-500" /> 画板快捷缩放</span>
+                    <span className="flex items-center gap-2"><Keyboard className="w-3.5 h-3.5 text-purple-600" /> 画板快捷缩放</span>
                     <span className="text-purple-700 font-mono font-bold">Ctrl/Cmd + + / −；Ctrl/Cmd + 0</span>
                   </div>
                   <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-sky-100/80 shadow-xs text-slate-700">
-                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-purple-500" /> 撤销操作 (Undo)</span>
+                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-purple-600" /> 撤销操作 (Undo)</span>
                     <kbd className="bg-slate-100 text-slate-800 font-mono font-bold px-2 py-0.5 rounded-lg border border-slate-200">Ctrl + Z</kbd>
                   </div>
                   <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-sky-100/80 shadow-xs text-slate-700">
-                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-purple-500" /> 重做操作 (Redo)</span>
+                    <span className="flex items-center gap-2"><RotateCcw className="w-3.5 h-3.5 text-purple-600" /> 重做操作 (Redo)</span>
                     <kbd className="bg-slate-100 text-slate-800 font-mono font-bold px-2 py-0.5 rounded-lg border border-slate-200">Ctrl + Y / Ctrl + Shift + Z</kbd>
                   </div>
                 </div>

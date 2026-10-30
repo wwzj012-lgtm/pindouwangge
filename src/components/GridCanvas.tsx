@@ -1,5 +1,5 @@
-import React, { useRef, useEffect, useState, useCallback, useLayoutEffect } from 'react';
-import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, Upload, RotateCcw, Cloud } from 'lucide-react';
+import React, { useRef, useEffect, useState, useCallback, useLayoutEffect, type MutableRefObject } from 'react';
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, Focus, Hand, Pencil, Eye, EyeOff, Image as ImageIcon, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Upload, RotateCcw, Cloud } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop } from '../types';
 import { drawPreviewBeadOnCanvas, getPreviewCellBounds } from '../utils/ironedPreview';
 import { getColumnLabelPositions, getRowLabelPositions } from '../utils/gridCoordinateLabels';
@@ -26,6 +26,18 @@ import {
   getInitialReferencePanelPosition,
   type ReferencePanelPosition,
 } from '../utils/referencePanelPosition';
+
+/** Below this many pixels per bead a fingertip cannot hit a single bead. */
+const MIN_PAINTABLE_CELL_PX = 9;
+
+/** Zoom target used by the "too small to paint" shortcut. */
+const COMFORTABLE_CELL_PX = 26;
+
+/**
+ * Bottom strip covered by the floating zoom cluster and the size chip on
+ * phones. Framing subtracts it so a focused board never ends underneath them.
+ */
+const MOBILE_CANVAS_BOTTOM_BAND = 64;
 
 interface GridCanvasProps {
   cleanupPreview?: BackgroundCleanupPreview | null;
@@ -68,6 +80,27 @@ interface GridCanvasProps {
    * workspace shell to install only the interaction listeners it needs.
    */
   interactionProfile?: 'desktop' | 'touch' | 'hybrid';
+  /**
+   * Lets a mobile shell own the board switcher chrome. On a phone a floating
+   * prev/next pill covers the grid it is meant to help with, and stepping to
+   * board 5 costs four taps; the shell renders a docked tab strip in the thumb
+   * zone instead and drives it through this API.
+   */
+  boardNavApiRef?: MutableRefObject<BoardNavApi | null>;
+  onBoardNavStateChange?: (state: BoardNavState) => void;
+}
+
+/** Board geometry the shell needs to draw its own board switcher. */
+export interface BoardNavState {
+  focusedBoard: number | null;
+  totalBoards: number;
+}
+
+export interface BoardNavApi {
+  /** Focus one physical pegboard by index, 0-based. */
+  focusBoard: (index: number) => void;
+  /** Frame the whole pattern and clear the focused board. */
+  showWholePattern: () => void;
 }
 
 // Bresenham's Line Algorithm
@@ -209,6 +242,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onResetCanvas,
   keepImageAspectRatio = true,
   interactionProfile = 'hybrid',
+  boardNavApiRef,
+  onBoardNavStateChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -257,6 +292,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const [referencePanelPosition, setReferencePanelPosition] = useState<ReferencePanelPosition>({ x: 8, y: 8 });
   const referencePanelDragRef = useRef<{ pointerId: number; startClientX: number; startClientY: number; startPosition: ReferencePanelPosition } | null>(null);
   const [isReferenceSheetOpen, setIsReferenceSheetOpen] = useState(false);
+  // Which physical pegboard the mobile board navigator is showing (null = whole pattern).
+  const [focusedBoard, setFocusedBoard] = useState<number | null>(null);
+  const focusedBoardRef = useRef<number | null>(null);
   const referencePanelInitializedRef = useRef(false);
   const [isCanvasResetDialogOpen, setIsCanvasResetDialogOpen] = useState(false);
   const confirmCanvasResetRef = useRef<HTMLButtonElement>(null);
@@ -608,6 +646,11 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   // Cell size base in pixels
   const baseCellSize = 20;
   const cellSize = baseCellSize * zoom;
+  const boardsAcross = Math.max(1, Math.ceil(width / boardSize));
+  const boardsDown = Math.max(1, Math.ceil(height / boardSize));
+  const totalBoards = boardsAcross * boardsDown;
+  const canvasBottomBand = interactionProfile === 'desktop' ? 0 : MOBILE_CANVAS_BOTTOM_BAND;
+  const showPaintScaleHint = interactionProfile !== 'desktop' && !isFullscreenPreview && focusedBoard === null && cellSize < MIN_PAINTABLE_CELL_PX;
   const minSymbolCellSize = 18;
   const coordOffset = showCoordinates ? 28 : 0;
   const axes = normalizeSymmetryAxes(symmetryAxes, width, height);
@@ -626,16 +669,24 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   const boundGridTransform = useCallback((nextZoom: number, nextPan: { x: number; y: number }) => {
     const container = containerRef.current;
     if (!container) return { zoom: nextZoom, pan: nextPan };
-    // Rulers are a fixed CSS-pixel strip before the scaled cells, not part of
-    // world-space zoom. Bound the whole decorated board without moving cells
-    // relative to the rulers or changing clientToGrid coordinates.
+    // Bound the active board in its own frame. Whole-pattern centering can
+    // otherwise overwrite a lower board's pan and push it under the zoom dock.
+    // Keep the stored pan in whole-grid coordinates for drawing and overlays.
+    const index = focusedBoardRef.current;
+    const across = Math.max(1, Math.ceil(width / boardSize));
+    const x0 = index === null ? 0 : (index % across) * boardSize;
+    const y0 = index === null ? 0 : Math.floor(index / across) * boardSize;
+    const frameWidth = index === null ? width : Math.min(boardSize, width - x0);
+    const frameHeight = index === null ? height : Math.min(boardSize, height - y0);
+    const originX = x0 * baseCellSize * nextZoom;
+    const originY = y0 * baseCellSize * nextZoom;
     const bounded = clampCanvasViewport(
-      { zoom: 1, ...nextPan },
-      { width: container.clientWidth, height: container.clientHeight },
-      { width: width * baseCellSize * nextZoom + coordOffset, height: height * baseCellSize * nextZoom + coordOffset },
+      { zoom: 1, x: nextPan.x + originX, y: nextPan.y + originY },
+      { width: container.clientWidth, height: Math.max(0, container.clientHeight - canvasBottomBand) },
+      { width: frameWidth * baseCellSize * nextZoom + coordOffset, height: frameHeight * baseCellSize * nextZoom + coordOffset },
     );
-    return { zoom: nextZoom, pan: { x: bounded.x, y: bounded.y } };
-  }, [width, height, coordOffset]);
+    return { zoom: nextZoom, pan: { x: bounded.x - originX, y: bounded.y - originY } };
+  }, [width, height, boardSize, coordOffset, canvasBottomBand]);
 
   // Also handle zoom supplied by the parent and ruler/board geometry changes.
   useLayoutEffect(() => {
@@ -702,6 +753,15 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     return changeZoomAtClient(zoomRef.current * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
   }, [changeZoomAtClient]);
 
+  // A fitted large pattern lands around 20% zoom, i.e. ~4px per bead — smaller
+  // than a fingertip, so taps land on the wrong bead. This jumps straight to a
+  // paintable scale from the inline hint instead of asking for a precise pinch.
+  const zoomToEditingScale = useCallback(() => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    return changeZoomAtClient(COMFORTABLE_CELL_PX / baseCellSize, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  }, [baseCellSize, changeZoomAtClient]);
+
   // Touch tracking ref for pinch-to-zoom & two-finger pan
   const touchStateRef = useRef<{
     isPinch: boolean;
@@ -754,8 +814,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     if (clientWidth <= 0 || clientHeight <= 0) return;
 
     const padding = clientWidth < 640 ? 12 : 36;
-    const availW = Math.max(100, clientWidth - padding * 2);
-    const availH = Math.max(100, clientHeight - padding * 2);
+    const availW = Math.max(1, clientWidth - padding * 2);
+    const availH = Math.max(1, clientHeight - padding * 2 - canvasBottomBand);
 
     const scaleX = Math.max(1, availW - coordOffset) / (width * baseCellSize);
     const scaleY = Math.max(1, availH - coordOffset) / (height * baseCellSize);
@@ -764,11 +824,59 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const finalPixelW = width * baseCellSize * bestZoom + coordOffset;
     const finalPixelH = height * baseCellSize * bestZoom + coordOffset;
 
+    focusedBoardRef.current = null;
+    setFocusedBoard(null);
     scheduleTransformCommit(bestZoom, {
       x: (clientWidth - finalPixelW) / 2,
-      y: (clientHeight - finalPixelH) / 2,
+      y: (clientHeight - canvasBottomBand - finalPixelH) / 2,
     });
-  }, [width, height, coordOffset, baseCellSize, scheduleTransformCommit]);
+  }, [width, height, coordOffset, baseCellSize, canvasBottomBand, scheduleTransformCommit]);
+
+  // Zoom to one physical pegboard, the way the split-board export lays it out:
+  // a whole board legible at once, with its row/column numbers around it.
+  const focusBoard = useCallback((index: number) => {
+    const container = containerRef.current;
+    if (!container) return;
+    const { clientWidth, clientHeight } = container;
+    if (clientWidth <= 0 || clientHeight <= 0) return;
+    const across = Math.max(1, Math.ceil(width / boardSize));
+    const down = Math.max(1, Math.ceil(height / boardSize));
+    const total = across * down;
+    if (total <= 1) return;
+    const next = ((index % total) + total) % total;
+    const col = next % across;
+    const row = Math.floor(next / across);
+    const x0 = col * boardSize;
+    const y0 = row * boardSize;
+    const boardW = Math.min(boardSize, width - x0);
+    const boardH = Math.min(boardSize, height - y0);
+    if (boardW <= 0 || boardH <= 0) return;
+
+    // Short landscape canvases may have less than 20px left after the ruler
+    // and dock. Spend spare room on cells before adding decorative margins.
+    const padding = Math.min(10, Math.max(0, (clientHeight - canvasBottomBand - coordOffset - 40) / 2));
+    // The board switcher lives in the dock below the canvas now, so no band is
+    // reserved at the top. The zoom cluster still floats over the bottom-right
+    // corner though, so framing keeps the board clear of it instead of painting
+    // the last two rows underneath a row of buttons.
+    const availW = Math.max(1, container.clientWidth - coordOffset - padding * 2);
+    const availH = Math.max(1, container.clientHeight - coordOffset - padding * 2 - canvasBottomBand);
+    const scale = Math.min(availW / (boardW * baseCellSize), availH / (boardH * baseCellSize));
+    const nextZoom = Math.min(4.5, Math.max(MIN_CANVAS_ZOOM, scale));
+
+    const boardPxW = boardW * baseCellSize * nextZoom;
+    const boardPxH = boardH * baseCellSize * nextZoom;
+    // Screen x of grid column 0 is pan.x + coordOffset; centre the board inside
+    // the cell area, which starts after the ruler strip.
+    const centerX = coordOffset + (container.clientWidth - coordOffset) / 2;
+    const centerY = coordOffset + (container.clientHeight - canvasBottomBand - coordOffset) / 2;
+    focusedBoardRef.current = next;
+    setFocusedBoard(next);
+    scheduleTransformCommit(nextZoom, {
+      x: centerX - coordOffset - x0 * baseCellSize * nextZoom - boardPxW / 2,
+      y: centerY - coordOffset - y0 * baseCellSize * nextZoom - boardPxH / 2,
+    });
+  }, [boardSize, baseCellSize, coordOffset, height, width, scheduleTransformCommit, canvasBottomBand]);
 
   const fitContentToView = useCallback(() => {
     const container = containerRef.current;
@@ -808,16 +916,49 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     scheduleTransformCommit(bestZoom, nextPan);
   }, [baseCellSize, coordOffset, fitToView, grid, height, scheduleTransformCommit, width]);
 
-  useEffect(() => {
+  // Phones open on board 1: fitting a 79×44 sheet into 390px gives ~4px per
+  // bead, which nobody can tap. Desktop keeps the whole-pattern fit.
+  const resetCanvasView = useCallback(() => {
+    if (interactionProfile !== 'desktop' && totalBoards > 1) {
+      focusBoard(0);
+      return;
+    }
     fitToView();
-  }, [width, height]);
+  }, [fitToView, focusBoard, interactionProfile, totalBoards]);
+
+  /** Back to the whole sheet: clear the spotlight and frame everything. */
+  const showWholePattern = useCallback(() => {
+    setFocusedBoard(null);
+    fitToView();
+  }, [fitToView]);
+
+  // Publish the board switch to the shell. The strip lives outside the canvas
+  // box (docked above the tool dock) so it can never cover the grid it is
+  // switching, and it stays inside the thumb zone instead of the top-left.
+  useEffect(() => {
+    if (!boardNavApiRef) return;
+    boardNavApiRef.current = { focusBoard, showWholePattern };
+    return () => { boardNavApiRef.current = null; };
+  }, [boardNavApiRef, focusBoard, showWholePattern]);
+
+  useEffect(() => {
+    onBoardNavStateChange?.({ focusedBoard, totalBoards });
+  }, [focusedBoard, totalBoards, onBoardNavStateChange]);
+
+  useEffect(() => {
+    resetCanvasView();
+    // The container may still be 0-sized on the very first pass; the delayed
+    // pass below re-applies the same choice once layout settles.
+  }, [width, height, boardSize, interactionProfile]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      fitToView();
+      // Fullscreen preview is a look-at-the-whole-pattern mode by definition.
+      if (isFullscreenPreview) fitToView();
+      else resetCanvasView();
     }, 80);
     return () => clearTimeout(timer);
-  }, [isFullscreenPreview, fitToView]);
+  }, [isFullscreenPreview, fitToView, resetCanvasView]);
 
   // Handle Touch Gestures (Pinch to zoom & two-finger / hand panning)
   useEffect(() => {
@@ -974,60 +1115,50 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     const startX = pan.x + coordOffset;
     const startY = pan.y + coordOffset;
 
-    // 1. Render Coordinate Labels (Top & Left: Arabic numbers 1..N)
-    if (showCoordinates) {
-      ctx.fillStyle = canvasBackdrop === 'dark_grid' ? '#E2E8F0' : '#334155';
-      ctx.font = `bold ${Math.max(10, Math.floor(11 * Math.min(zoom, 1.2)))}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      const columnLabels = getColumnLabelPositions({
-        columns: width,
-        cellSize,
-        boardSize,
-        originX: startX,
-        viewportWidth: canvasWidth,
-        getLabel: index => (index + 1).toString(),
-        measureLabel: label => ctx.measureText(label).width,
-      });
-      for (const { label, center } of columnLabels) {
-        ctx.fillText(label, center, pan.y + coordOffset / 2);
-      }
-
-      ctx.textAlign = 'right';
-      const rowMetrics = ctx.measureText('0');
-      const rowLabelHeight = Math.max(
-        10,
-        rowMetrics.actualBoundingBoxAscent + rowMetrics.actualBoundingBoxDescent,
-      );
-      const rowLabels = getRowLabelPositions({
-        rows: height,
-        cellSize,
-        boardSize,
-        originY: startY,
-        viewportHeight: canvasHeight,
-        measureLabel: () => rowLabelHeight,
-      });
-      for (const { label, center } of rowLabels) {
-        ctx.fillText(label, startX - 6, center);
-      }
-    }
+    // Geometry of the board currently in focus, if any. Used both for the
+    // spotlight scrim and for restarting the rulers at 1, the way a printed
+    // split-board sheet numbers each board on its own.
+    const focusRect = (() => {
+      if (focusedBoard === null) return null;
+      const across = Math.max(1, Math.ceil(width / boardSize));
+      const down = Math.max(1, Math.ceil(height / boardSize));
+      const total = across * down;
+      const index = ((focusedBoard % total) + total) % total;
+      const col = index % across;
+      const row = Math.floor(index / across);
+      const cols = Math.min(boardSize, width - col * boardSize);
+      const rows = Math.min(boardSize, height - row * boardSize);
+      return {
+        x: startX + col * boardSize * cellSize,
+        y: startY + row * boardSize * cellSize,
+        w: cols * cellSize,
+        h: rows * cellSize,
+        cols,
+        rows,
+      };
+    })();
 
     // 2. Pegboard Area Fill based on Canvas Backdrop
     const gridPixelWidth = width * cellSize;
     const gridPixelHeight = height * cellSize;
 
-    if (canvasBackdrop === 'light_pegboard') {
-      ctx.fillStyle = '#FAF8FF';
-    } else if (canvasBackdrop === 'wood') {
-      ctx.fillStyle = '#F5E6D3';
-    } else if (canvasBackdrop === 'studio') {
-      ctx.fillStyle = '#F3E8FF';
-    } else if (canvasBackdrop === 'slate') {
-      ctx.fillStyle = '#F1F5F9';
-    } else {
-      ctx.fillStyle = '#FAF8FF'; // clean light pegboard
-    }
+    const boardPaperColor = canvasBackdrop === 'wood'
+      ? '#F5E6D3'
+      : canvasBackdrop === 'studio'
+        ? '#F3E8FF'
+        : canvasBackdrop === 'slate'
+          ? '#F1F5F9'
+          : '#FAF8FF'; // light pegboard + default
+    // Lift the pattern off the desk so it reads as one sheet of paper rather
+    // than a coloured rectangle painted directly on the page.
+    ctx.save();
+    ctx.fillStyle = boardPaperColor;
+    ctx.shadowColor = 'rgba(76, 29, 149, 0.18)';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetY = 3;
+    ctx.fillRect(startX, startY, gridPixelWidth, gridPixelHeight);
+    ctx.restore();
+    ctx.fillStyle = boardPaperColor;
     ctx.fillRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
     // 3. Render Source Image Semi-transparent Overlay if enabled
@@ -1274,6 +1405,65 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       ctx.restore();
     }
 
+    // 7b. Board seams. Every physical pegboard is a separate tray, so the
+    // boundary matters more than the 10-cell drafting guides: it tells the user
+    // where one board ends. Without it a 3-board pattern looks like one sheet
+    // and the "第 N 板" navigation below has nothing to point at.
+    const boardsAcross = Math.max(1, Math.ceil(width / boardSize));
+    const boardsDown = Math.max(1, Math.ceil(height / boardSize));
+    if (showGridLines && (boardsAcross > 1 || boardsDown > 1)) {
+      ctx.save();
+      ctx.strokeStyle = canvasBackdrop === 'wood'
+        ? 'rgba(120, 53, 15, 0.9)'
+        : 'rgba(109, 40, 217, 0.72)';
+      ctx.lineWidth = Math.max(1.6, Math.min(2.6, cellSize * 0.14));
+      ctx.setLineDash([]);
+      for (let bx = 1; bx < boardsAcross; bx++) {
+        const px = startX + bx * boardSize * cellSize;
+        if (px < startX || px > startX + gridPixelWidth) continue;
+        ctx.beginPath();
+        ctx.moveTo(px, startY);
+        ctx.lineTo(px, startY + gridPixelHeight);
+        ctx.stroke();
+      }
+      for (let by = 1; by < boardsDown; by++) {
+        const py = startY + by * boardSize * cellSize;
+        if (py < startY || py > startY + gridPixelHeight) continue;
+        ctx.beginPath();
+        ctx.moveTo(startX, py);
+        ctx.lineTo(startX + gridPixelWidth, py);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // 7c. Spotlight the focused board. Neighbouring boards share the exact same
+    // pegboard texture, so without a scrim the user cannot tell where "第 N 板"
+    // actually ends — the seam line alone is too quiet at low zoom.
+    if (focusRect) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(30, 21, 56, 0.13)';
+      // Stay inside the cell area: the ruler strips above and to the left are
+      // the only way to read a coordinate off a partition chart, so they must
+      // never be dimmed along with the neighbouring boards.
+      const bandTop = Math.max(startY, 0);
+      const bandLeft = Math.max(startX, 0);
+      if (focusRect.y > bandTop) ctx.fillRect(bandLeft, bandTop, canvasWidth - bandLeft, focusRect.y - bandTop);
+      if (focusRect.y + focusRect.h < canvasHeight) {
+        ctx.fillRect(bandLeft, focusRect.y + focusRect.h, canvasWidth - bandLeft, canvasHeight - (focusRect.y + focusRect.h));
+      }
+      if (focusRect.x > bandLeft) ctx.fillRect(bandLeft, focusRect.y, focusRect.x - bandLeft, focusRect.h);
+      if (focusRect.x + focusRect.w < canvasWidth) {
+        ctx.fillRect(focusRect.x + focusRect.w, focusRect.y, canvasWidth - (focusRect.x + focusRect.w), focusRect.h);
+      }
+
+      ctx.strokeStyle = 'rgba(124, 58, 237, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([]);
+      ctx.strokeRect(focusRect.x + 1, focusRect.y + 1, focusRect.w - 2, focusRect.h - 2);
+      ctx.restore();
+    }
+
     // 8. Grid Outer Border (High-contrast clean frame)
     const frameWidth = Math.max(1.8, Math.min(2.5, cellSize * 0.12));
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
@@ -1284,6 +1474,54 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       : 'rgba(30, 41, 59, 0.9)';
     ctx.lineWidth = frameWidth;
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
+
+    // Render rulers last: adjacent boards and their spotlight must not cover them.
+    if (showCoordinates) {
+      if (focusRect) {
+        // Opaque ruler strips separate the local labels from neighbouring beads.
+        ctx.fillStyle = boardPaperColor;
+        ctx.fillRect(focusRect.x - coordOffset, focusRect.y - coordOffset, focusRect.w + coordOffset, coordOffset);
+        ctx.fillRect(focusRect.x - coordOffset, focusRect.y, coordOffset, focusRect.h);
+      }
+      // Every backdrop in this app renders a light pegboard, so the ruler must
+      // stay dark. Keying it off the 'dark_grid' name produced near-white
+      // digits on a light desk — coordinates were effectively invisible.
+      ctx.fillStyle = '#334155';
+      ctx.font = `bold ${Math.max(10, Math.floor(11 * Math.min(zoom, 1.2)))}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const columnLabels = getColumnLabelPositions({
+        columns: focusRect ? focusRect.cols : width,
+        cellSize,
+        boardSize: focusRect ? focusRect.cols : boardSize,
+        originX: focusRect ? focusRect.x : startX,
+        viewportWidth: canvasWidth,
+        getLabel: index => (index + 1).toString(),
+        measureLabel: label => ctx.measureText(label).width,
+      });
+      for (const { label, center } of columnLabels) {
+        ctx.fillText(label, center, (focusRect ? focusRect.y : startY) - coordOffset / 2);
+      }
+
+      ctx.textAlign = 'right';
+      const rowMetrics = ctx.measureText('0');
+      const rowLabelHeight = Math.max(
+        10,
+        rowMetrics.actualBoundingBoxAscent + rowMetrics.actualBoundingBoxDescent,
+      );
+      const rowLabels = getRowLabelPositions({
+        rows: focusRect ? focusRect.rows : height,
+        cellSize,
+        boardSize: focusRect ? focusRect.rows : boardSize,
+        originY: focusRect ? focusRect.y : startY,
+        viewportHeight: canvasHeight,
+        measureLabel: () => rowLabelHeight,
+      });
+      for (const { label, center } of rowLabels) {
+        ctx.fillText(label, (focusRect ? focusRect.x : startX) - 6, center);
+      }
+    }
 
     ctx.restore();
   }, [
@@ -1307,6 +1545,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     zoom,
     symmetryMode,
     canvasBackdrop,
+    focusedBoard,
     overlayImage,
     showOverlay,
     overlayOpacity,
@@ -1577,8 +1816,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     <div
       ref={containerRef}
       tabIndex={0}
-      className={`relative w-full h-full bg-[#F5F0FD] bg-[radial-gradient(#DDD6FE_1px,transparent_1px)] [background-size:20px_20px] overflow-hidden select-none touch-none transition-all ${
-        isFullscreenPreview ? 'fixed inset-0 z-[9999] bg-[#F5F0FD] w-screen h-screen' : ''
+      className={`relative w-full h-full bg-[#ECEAF4] bg-gradient-to-b from-[#F2F0F9] to-[#E6E3F1] overflow-hidden select-none touch-none transition-all ${
+        isFullscreenPreview ? 'fixed inset-0 z-[9999] bg-[#ECEAF4] w-screen h-screen' : ''
       } ${
         isPanning ? 'cursor-grabbing' : activeTool === 'hand' ? 'cursor-grab' : 'cursor-crosshair'
       }`}
@@ -1591,7 +1830,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 bg-white/95 border border-purple-200 text-purple-950 px-4 py-1.5 rounded-full shadow-lg backdrop-blur-md">
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
           <span className="text-xs font-extrabold text-purple-900">全屏全图预览模式</span>
-          <span className="text-[10px] text-purple-500 font-mono hidden sm:inline">(按 ESC 或点击退出)</span>
+          <span className="text-[10px] text-purple-600 font-mono hidden sm:inline">(按 ESC 或点击退出)</span>
           <button
             onClick={toggleFullscreenPreview}
             className="p-1 hover:bg-rose-50 text-rose-600 rounded-full cursor-pointer transition-colors"
@@ -1665,17 +1904,17 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
               )}
             </div>
           ) : (
-            <span className="text-purple-400 font-medium border-l border-purple-200 pl-2">无色</span>
+            <span className="text-purple-600 font-medium border-l border-purple-200 pl-2">无色</span>
           )}
         </div>
       )}
 
       {/* Floating Info Overlay at bottom left */}
-      <div className="absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-900 text-[9px] sm:text-[11px] px-2.5 py-1.5 rounded-2xl backdrop-blur-md shadow-md flex flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-220px)] sm:max-w-none z-10 font-bold">
+      <div className={`${showPaintScaleHint ? 'hidden' : 'flex'} absolute bottom-2.5 sm:bottom-3 left-2 sm:left-3 bg-white/95 border border-purple-200/90 text-purple-900 text-[11px] px-2.5 py-1.5 rounded-2xl backdrop-blur-md shadow-md flex-wrap items-center gap-1.5 sm:gap-2 max-w-[calc(100vw-212px)] sm:max-w-none z-10 font-bold`}>
         <span><strong className="text-purple-950 font-black">{width} × {height}</strong> 豆</span>
         <span><strong className="text-purple-700 font-black">{Math.ceil(width / boardSize) * Math.ceil(height / boardSize)}</strong> 板 ({boardSize}x{boardSize})</span>
         {symmetryMode !== 'none' && (
-          <span className="text-purple-900 font-bold bg-purple-100 px-1.5 py-0.5 rounded-lg border border-purple-300 text-[8px] sm:text-[10px]">
+          <span className="text-purple-900 font-bold bg-purple-100 px-1.5 py-0.5 rounded-lg border border-purple-300 text-[11px] sm:text-[10px]">
             {symmetryMode === 'horizontal' ? '左右镜像' : symmetryMode === 'vertical' ? '上下镜像' : '4向镜像'}
           </span>
         )}
@@ -1683,7 +1922,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
       {/* Mobile & Touch Floating Zoom & Pan Controls at bottom right */}
       <div data-canvas-interaction-ignore className="absolute bottom-2.5 sm:bottom-3 right-2 sm:right-3 bg-white/95 border border-purple-200/90 rounded-2xl p-1 sm:p-1.5 shadow-md flex items-center gap-0.5 sm:gap-1 z-10 backdrop-blur-md">
-        {/* Toggle Hand / Pan Tool Button (desktop only; mobile uses the bottom tool dock) */}
+        {/* Toggle Hand / Pan Tool Button (desktop only; mobile pans with two fingers) */}
         {setActiveTool && (
           <button
             onClick={toggleHandTool}
@@ -1700,19 +1939,22 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
         <div className="hidden sm:block w-px h-4 bg-purple-200" />
 
-        {/* Focus / Auto-Fit View Button */}
+        {/* Focus / Auto-Fit View Button. Kept on mobile too: after zooming in to
+            paint there was previously no one-tap way back to the whole pattern. */}
         <button
           onClick={fitToView}
-          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          aria-label="居中适应屏幕"
+          className="flex h-11 w-11 sm:h-8 sm:w-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="居中适应屏幕"
         >
-          <Focus className="w-4 h-4" />
+          <Focus className="h-4 w-4" />
         </button>
 
         {/* Fullscreen Full Pattern Preview Button */}
         <button
           onClick={toggleFullscreenPreview}
-          className={`w-8 h-8 rounded-xl flex items-center justify-center cursor-pointer transition-all border ${
+          aria-label={isFullscreenPreview ? '退出全屏预览' : '全屏全图预览'}
+          className={`flex h-11 w-11 sm:h-8 sm:w-8 rounded-xl items-center justify-center cursor-pointer transition-all border ${
             isFullscreenPreview
               ? 'bg-purple-600 text-white border-purple-600 shadow-xs'
               : 'bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 border-purple-200/80'
@@ -1722,14 +1964,18 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
           {isFullscreenPreview ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4 text-purple-700" />}
         </button>
 
-        <span className="text-[9px] sm:text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[28px] sm:min-w-[36px] text-center">
+        {/* Percentage readout is desktop-only: on a phone the capsule needs the
+            width for real controls (fit / fullscreen / zoom), and the raw number
+            is not actionable there. */}
+        <span className="hidden sm:block text-[10px] font-mono font-black text-purple-900 px-1 select-none min-w-[36px] text-center">
           {Math.round(zoom * 100)}%
         </span>
 
         {/* Zoom Out */}
         <button
           onClick={() => changeZoomAtCanvasCenter(0.8)}
-          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          aria-label="缩小"
+          className="flex h-11 w-11 sm:h-8 sm:w-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="缩小"
         >
           <ZoomOut className="w-4 h-4" />
@@ -1738,7 +1984,8 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         {/* Zoom In */}
         <button
           onClick={() => changeZoomAtCanvasCenter(1.25)}
-          className="w-8 h-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 flex items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
+          aria-label="放大"
+          className="flex h-11 w-11 sm:h-8 sm:w-8 rounded-xl bg-purple-50 hover:bg-purple-100 active:bg-purple-200 text-purple-900 items-center justify-center cursor-pointer transition-colors border border-purple-200/80"
           title="放大"
         >
           <ZoomIn className="w-4 h-4" />
@@ -1749,7 +1996,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       <div
         ref={referencePanelRef}
         data-canvas-interaction-ignore
-        className={`absolute z-20 hidden pointer-events-auto sm:block ${
+        className={`absolute z-20 hidden pointer-events-auto lg:block ${
           isThumbnailMinimized
             ? 'w-auto'
             : 'w-[min(220px,calc(100vw-16px))] sm:w-[300px]'
@@ -1817,7 +2064,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={!onReferenceImageUpload}
-                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-md border border-emerald-300 bg-emerald-50 px-2 text-[10px] font-bold text-emerald-800 transition-all hover:bg-emerald-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
+                  className="inline-flex h-8 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-emerald-300 bg-emerald-50 px-2 text-[11px] font-bold text-emerald-800 transition-all hover:bg-emerald-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
                   title="上传原图作为画板参考"
                   aria-label="上传原图"
                 >
@@ -1828,7 +2075,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                   type="button"
                   onClick={() => setIsCanvasResetDialogOpen(true)}
                   disabled={!onResetCanvas}
-                  className="inline-flex h-7 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-md border border-rose-300 bg-rose-50 px-2 text-[10px] font-bold text-rose-800 transition-all hover:bg-rose-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
+                  className="inline-flex h-8 cursor-pointer items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-rose-300 bg-rose-50 px-2 text-[11px] font-bold text-rose-800 transition-all hover:bg-rose-100 active:scale-95 disabled:cursor-not-allowed disabled:opacity-40 shadow-2xs"
                   title="清空当前画板"
                   aria-label="重置当前画板"
                 >
@@ -1838,7 +2085,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
               </div>
 
               {/* Draggable spacer */}
-              <div className="flex-1 h-7 cursor-grab active:cursor-grabbing" />
+              <div className="flex-1 h-8 cursor-grab active:cursor-grabbing" />
 
               {/* Right side collapse indicator button */}
               <div
@@ -1848,7 +2095,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                 <button
                   type="button"
                   onClick={handleCollapseReferencePanel}
-                  className="inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-md border border-purple-200 bg-purple-50/80 text-purple-700 transition-all hover:bg-purple-200 hover:text-purple-900 active:scale-90 shadow-2xs"
+                  className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg border border-purple-200 bg-purple-50/80 text-purple-700 transition-all hover:bg-purple-200 hover:text-purple-900 active:scale-90 shadow-2xs"
                   title="收起原图参考"
                   aria-label="收起原图参考"
                 >
@@ -1899,7 +2146,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
                     <Upload className="h-5 w-5 text-purple-600 group-hover:text-white transition-colors" />
                   </div>
                   <span className="text-[13px] font-extrabold text-purple-950">上传原图</span>
-                  <span className="mt-0.5 text-[11px] font-medium text-purple-500">对照原图手动绘制</span>
+                  <span className="mt-0.5 text-[11px] font-medium text-purple-600">对照原图手动绘制</span>
                 </button>
               )}
             </div>
@@ -1907,7 +2154,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         )}
       </div>
 
-      <div className="sm:hidden absolute top-2 right-2 z-20" data-canvas-interaction-ignore>
+      <div className="lg:hidden absolute top-2 right-2 z-20" data-canvas-interaction-ignore>
         <button
           type="button"
           onClick={() => setIsReferenceSheetOpen(true)}
@@ -1919,8 +2166,31 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         </button>
       </div>
 
+      {/* Board switching moved to the docked strip the mobile shell renders
+          below this canvas (see boardNavApiRef). A floating pill here covered
+          the very cells it was meant to help with, and stepping to board 5
+          cost four taps. */}
+
+      {/* A fitted large pattern drops to ~20% zoom, i.e. beads smaller than a
+          fingertip. When the pattern spans several boards the fix is to switch
+          to board editing (same geometry as the split-board export); a small
+          single-board pattern just zooms to a paintable scale. */}
+      {showPaintScaleHint && (
+        <div className="absolute bottom-2.5 left-2 z-20 max-w-[calc(100%-212px)]" data-canvas-interaction-ignore>
+          <button
+            type="button"
+            onClick={() => { if (totalBoards > 1) focusBoard(0); else zoomToEditingScale(); }}
+            title={totalBoards > 1 ? '豆格太小，按板编辑更准' : '豆格太小，点此放大绘制'}
+            className="flex min-h-11 items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50/95 px-3 text-[11px] font-black text-amber-900 shadow-lg backdrop-blur-md active:scale-95"
+          >
+            <ZoomIn className="h-4 w-4 shrink-0" aria-hidden="true" />
+            {totalBoards > 1 ? '按板编辑' : '放大绘制'}
+          </button>
+        </div>
+      )}
+
       {isReferenceSheetOpen && (
-        <div className="sm:hidden fixed inset-0 z-[55] flex items-end bg-slate-950/35" data-canvas-interaction-ignore onClick={() => setIsReferenceSheetOpen(false)}>
+        <div className="lg:hidden fixed inset-0 z-[55] flex items-end bg-slate-950/35" data-canvas-interaction-ignore onClick={() => setIsReferenceSheetOpen(false)}>
           <section className="w-full rounded-t-3xl border-t border-purple-200 bg-white p-4 pb-6 shadow-2xl" onClick={event => event.stopPropagation()}>
             <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-purple-200" />
             <div className="mb-3 flex items-center justify-between">

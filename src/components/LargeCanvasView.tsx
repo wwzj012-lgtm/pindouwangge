@@ -843,7 +843,11 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
   const [panMode, setPanMode] = useState(true);
   const [activeTool, setActiveTool] = useState<LargeCanvasTool>('pan');
   const [symmetryMode, setSymmetryMode] = useState<LargeCanvasSymmetry>('none');
-  const [toolbarExpanded, setToolbarExpanded] = useState(true);
+  // Phones open canvas-first: the 44px control stack costs ~180px when open,
+  // which would leave too little board to draw on. Wider screens keep it open.
+  const [toolbarExpanded, setToolbarExpanded] = useState(
+    () => typeof window === 'undefined' || !window.matchMedia('(max-width: 639px)').matches,
+  );
   const [mobileToolbarPanel, setMobileToolbarPanel] = useState<'tools' | 'view' | 'settings'>('tools');
   const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
   const [colorPickerAnchor, setColorPickerAnchor] = useState<{ left: number; top: number; width: number } | null>(null);
@@ -1975,10 +1979,12 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <Grid2X2 className="h-5 w-5 shrink-0 text-purple-600" />
             <h1 className="text-base font-extrabold text-slate-900 sm:text-lg">大画板</h1>
-            <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">全局拼豆网格</span>
-            <label className="ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold text-purple-700 sm:text-xs">
-              <span className="hidden xs:inline">选用拼豆色卡</span>
-              <select aria-label="选用拼豆色卡" value={selectedPaletteId} onChange={event => onChangePalette(event.target.value)} className="max-w-[145px] rounded-lg border border-purple-200 bg-white px-2 py-1 text-[10px] font-bold text-purple-900 outline-none focus:border-purple-500 sm:max-w-[180px] sm:text-xs">
+            <span className="rounded-full bg-purple-50 px-2 py-0.5 text-[11px] font-bold text-purple-700 sm:text-[10px]">全局拼豆网格</span>
+            {/* On a phone the palette picker collapsed to ~38px — unreadable and
+                untappable. Give it its own full-width row there. */}
+            <label className="flex w-full min-w-0 shrink-0 items-center gap-1 text-[11px] font-bold text-purple-700 sm:ml-auto sm:w-auto sm:text-xs">
+              <span className="shrink-0">选用拼豆色卡</span>
+              <select aria-label="选用拼豆色卡" value={selectedPaletteId} onChange={event => onChangePalette(event.target.value)} className="min-h-11 min-w-0 flex-1 rounded-lg border border-purple-200 bg-white px-2 py-1 text-[11px] font-bold text-purple-900 outline-none focus:border-purple-500 sm:min-h-0 sm:max-w-[180px] sm:flex-none sm:text-xs">
                 {paletteOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
             </label>
@@ -1991,48 +1997,48 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
           <div className="flex min-w-0 items-center justify-between gap-2">
             <div className="ml-auto flex shrink-0 items-center gap-1">
               <span className="hidden text-xs font-semibold text-slate-500 sm:inline">{frames.length} 个图框 · {completedCount} 个结果</span>
-              <button type="button" onClick={() => setToolbarExpanded(current => !current)} className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2 py-1 text-[10px] font-bold text-purple-700" aria-expanded={toolbarExpanded}>{toolbarExpanded ? '折叠工具' : '展开工具'}</button>
-              <button type="button" onClick={addFrame} className="inline-flex items-center gap-1 rounded-lg bg-purple-600 px-2 py-1 text-[10px] font-bold text-white shadow-sm hover:bg-purple-700"><Plus className="h-3.5 w-3.5" />图框</button>
-              <button type="button" onClick={exportWholeCanvas} disabled={!completedCount && !manualCells.size} className="inline-flex items-center gap-1 rounded-lg border border-purple-200 bg-white px-2 py-1 text-[10px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-3.5 w-3.5" />导出</button>
-              <button type="button" onClick={clearAllFrames} disabled={!frames.length} className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[10px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 className="h-3.5 w-3.5" />清空</button>
+              <button type="button" onClick={() => setToolbarExpanded(current => !current)} className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-purple-200 bg-purple-50 px-2.5 text-[11px] font-bold text-purple-700" aria-expanded={toolbarExpanded}>{toolbarExpanded ? '折叠工具' : '展开工具'}</button>
+              <button type="button" onClick={addFrame} className="inline-flex min-h-11 items-center gap-1 rounded-xl bg-purple-600 px-2.5 text-[11px] font-bold text-white shadow-sm hover:bg-purple-700"><Plus className="h-4 w-4" />图框</button>
+              <button type="button" onClick={exportWholeCanvas} disabled={!completedCount && !manualCells.size} className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-purple-200 bg-white px-2.5 text-[11px] font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-40"><Download className="h-4 w-4" />导出</button>
+              <button type="button" onClick={clearAllFrames} disabled={!frames.length} className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-slate-300 bg-white px-2.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"><Trash2 className="h-4 w-4" />清空</button>
             </div>
           </div>
           {toolbarExpanded && (
             <div className="min-w-0 pb-0.5" role="toolbar" aria-label="大画板工具栏">
-              <div className="grid min-h-[116px] gap-2 sm:hidden">
-                <div className="grid grid-cols-3 rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="tablist" aria-label="大画板移动工具分组">
+              <div className="grid gap-2 sm:hidden">
+                <div className="grid grid-cols-3 rounded-xl border border-slate-200 bg-slate-50 p-0.5" role="tablist" aria-label="大画板移动工具分组">
                   {([
                     ['tools', '工具'],
                     ['view', '视图'],
                     ['settings', '设置'],
-                  ] as const).map(([panel, label]) => <button key={panel} type="button" role="tab" aria-selected={mobileToolbarPanel === panel} onClick={() => setMobileToolbarPanel(panel)} className={`min-h-8 rounded px-2 text-[11px] font-bold ${mobileToolbarPanel === panel ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}
+                  ] as const).map(([panel, label]) => <button key={panel} type="button" role="tab" aria-selected={mobileToolbarPanel === panel} onClick={() => setMobileToolbarPanel(panel)} className={`min-h-11 rounded-lg px-2 text-[11px] font-bold ${mobileToolbarPanel === panel ? 'bg-white text-purple-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{label}</button>)}
                 </div>
-                <div className="min-h-[78px]">
+                <div>
                   {mobileToolbarPanel === 'tools' && (
                     <div className="space-y-1.5" role="tabpanel" aria-label="绘图工具">
-                      <div className="grid grid-cols-10 gap-1" role="group" aria-label="绘图与平移工具">
-                        {drawingTools.map(([tool, title, Icon]) => <button key={tool} type="button" title={title} aria-label={title} onClick={() => selectTool(tool)} className={`flex h-8 min-w-0 items-center justify-center rounded border border-slate-200 ${activeTool === tool ? (tool === 'eraser' ? 'bg-rose-600 text-white' : 'bg-purple-600 text-white') : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Icon className="h-3.5 w-3.5" /></button>)}
-                        <button type="button" title="剪切到拖选区域" aria-label="剪切到拖选区域" onClick={() => selectTool('cut')} className={`flex h-8 items-center justify-center rounded border border-slate-200 ${activeTool === 'cut' ? 'bg-purple-600 text-white' : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Scissors className="h-3.5 w-3.5" /></button>
+                      <div className="grid grid-cols-5 gap-1.5" role="group" aria-label="绘图与平移工具">
+                        {drawingTools.map(([tool, title, Icon]) => <button key={tool} type="button" title={title} aria-label={title} onClick={() => selectTool(tool)} className={`flex h-11 min-w-0 items-center justify-center rounded-xl border border-slate-200 ${activeTool === tool ? (tool === 'eraser' ? 'bg-rose-600 text-white' : 'bg-purple-600 text-white') : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Icon className="h-[18px] w-[18px]" /></button>)}
+                        <button type="button" title="剪切到拖选区域" aria-label="剪切到拖选区域" onClick={() => selectTool('cut')} className={`flex h-11 items-center justify-center rounded-xl border border-slate-200 ${activeTool === 'cut' ? 'bg-purple-600 text-white' : 'bg-slate-50 text-purple-700 hover:bg-white'}`}><Scissors className="h-[18px] w-[18px]" /></button>
                       </div>
-                      <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-1">
-                        <label className="flex min-w-0 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1.5 text-[10px] font-bold text-purple-700">对称<select aria-label="对称模式" value={symmetryMode} onChange={event => setSymmetryMode(event.target.value as LargeCanvasSymmetry)} className="min-w-0 flex-1 rounded border border-purple-200 bg-white px-1 py-1 text-[10px] font-bold text-purple-900"><option value="none">无对称</option><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">水平+垂直</option></select></label>
-                        <button type="button" title="撤销" aria-label="撤销" disabled={drawMode ? !canUndoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.past.length ?? 0))} onClick={() => drawMode ? undoManual() : selectedId && undoFrame(selectedId)} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Undo2 className="h-3.5 w-3.5" /></button>
-                        <button type="button" title="重做" aria-label="重做" disabled={drawMode ? !canRedoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.future.length ?? 0))} onClick={() => drawMode ? redoManual() : selectedId && redoFrame(selectedId)} className="flex h-8 w-8 items-center justify-center rounded border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Redo2 className="h-3.5 w-3.5" /></button>
+                      <div className="flex items-center gap-1.5">
+                        <label className="flex min-h-11 min-w-0 flex-1 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-2 text-[11px] font-bold text-purple-700">对称<select aria-label="对称模式" value={symmetryMode} onChange={event => setSymmetryMode(event.target.value as LargeCanvasSymmetry)} className="min-h-9 min-w-0 flex-1 rounded-lg border border-purple-200 bg-white px-1.5 text-[11px] font-bold text-purple-900"><option value="none">无对称</option><option value="horizontal">水平</option><option value="vertical">垂直</option><option value="both">水平+垂直</option></select></label>
+                        <button ref={colorPickerTriggerRef} type="button" title="选择绘图颜色" aria-label={`选择绘图颜色：${selectedDrawColorCode} ${selectedDrawColorName}`} aria-expanded={isColorPickerOpen} onClick={event => toggleColorPicker(event.currentTarget)} className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-700 hover:border-purple-300"><span className="h-4 w-4 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: selectedDrawColor?.hex ?? 'transparent' }} /><span className="shrink-0 text-purple-800">{selectedDrawColorCode}</span></button>
+                        <button type="button" title="撤销" aria-label="撤销" disabled={drawMode ? !canUndoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.past.length ?? 0))} onClick={() => drawMode ? undoManual() : selectedId && undoFrame(selectedId)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Undo2 className="h-[18px] w-[18px]" /></button>
+                        <button type="button" title="重做" aria-label="重做" disabled={drawMode ? !canRedoManual : !selectedId || !(selectedId && (frameHistoryRef.current.get(selectedId)?.future.length ?? 0))} onClick={() => drawMode ? redoManual() : selectedId && redoFrame(selectedId)} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-35"><Redo2 className="h-[18px] w-[18px]" /></button>
                       </div>
-                      <button ref={colorPickerTriggerRef} type="button" title="选择绘图颜色" aria-label={`选择绘图颜色：${selectedDrawColorCode} ${selectedDrawColorName}`} aria-expanded={isColorPickerOpen} onClick={event => toggleColorPicker(event.currentTarget)} className="inline-flex h-8 w-full min-w-0 items-center gap-1.5 rounded border border-slate-200 bg-white px-2 text-left text-[10px] font-bold text-slate-700 hover:border-purple-300"><span className="h-4 w-4 shrink-0 rounded-sm border border-slate-300" style={{ backgroundColor: selectedDrawColor?.hex ?? 'transparent' }} /><span className="shrink-0 text-purple-800">{selectedDrawColorCode}</span><span className="truncate text-slate-500">{selectedDrawColorName}</span></button>
                     </div>
                   )}
                   {mobileToolbarPanel === 'view' && (
                     <div className="space-y-1.5" role="tabpanel" aria-label="画板视图">
-                      <div className="flex h-8 items-center gap-1 rounded border border-slate-200 bg-slate-50 px-1"><button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-4 w-4" /></button><input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="min-w-0 flex-1 accent-purple-600" /><span className="w-10 text-center text-[10px] font-bold text-slate-600">{Math.round(viewScale * 100)}%</span><button type="button" title="放大画板" aria-label="放大画板" disabled={viewScale >= MAX_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current + VIEW_SCALE_STEP))} className="rounded p-1 text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="h-4 w-4" /></button></div>
-                      <div className="grid grid-cols-3 gap-1 rounded border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="拼豆形态">{([['fuse_3d', '3D立体豆'], ['circle_flat', '平面圆豆'], ['square', '像素方块']] as [BeadShape, string][]).map(([shape, label]) => <button key={shape} type="button" onClick={() => onChangeBeadShape(shape)} className={`h-8 rounded px-1 text-[10px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{label}</button>)}</div>
-                      <div className="grid grid-cols-2 gap-1" role="group" aria-label="显示选项"><button type="button" onClick={() => onChangeShowCodeLabels(!showCodeLabels)} className={`h-8 rounded border border-slate-200 px-2 text-[10px] font-bold ${showCodeLabels ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}>色号标记</button><button type="button" onClick={() => onChangeShowDataPreview(!showDataPreview)} className={`inline-flex h-8 items-center justify-center gap-1 rounded border border-slate-200 px-2 text-[10px] font-bold ${showDataPreview ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}><Eye className="h-3.5 w-3.5" />数据预览</button></div>
+                      <div className="flex h-11 items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 px-1"><button type="button" title="缩小画板" aria-label="缩小画板" disabled={viewScale <= MIN_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current - VIEW_SCALE_STEP))} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomOut className="h-[18px] w-[18px]" /></button><input aria-label="画板缩放百分比" type="range" min={MIN_VIEW_SCALE * 100} max={MAX_VIEW_SCALE * 100} step={VIEW_SCALE_STEP * 100} value={Math.round(viewScale * 100)} onChange={event => setViewScale(normalizeViewScale(Number(event.target.value) / 100))} className="min-w-0 flex-1 accent-purple-600" /><span className="w-10 text-center text-[11px] font-bold text-slate-600">{Math.round(viewScale * 100)}%</span><button type="button" title="放大画板" aria-label="放大画板" disabled={viewScale >= MAX_VIEW_SCALE} onClick={() => setViewScale(current => normalizeViewScale(current + VIEW_SCALE_STEP))} className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-600 hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"><ZoomIn className="h-[18px] w-[18px]" /></button></div>
+                      <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="拼豆形态">{([['fuse_3d', '3D立体豆'], ['circle_flat', '平面圆豆'], ['square', '像素方块']] as [BeadShape, string][]).map(([shape, label]) => <button key={shape} type="button" onClick={() => onChangeBeadShape(shape)} className={`h-11 rounded-lg px-1 text-[11px] font-bold ${beadShape === shape ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{label}</button>)}</div>
+                      <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="显示选项"><button type="button" onClick={() => onChangeShowCodeLabels(!showCodeLabels)} className={`h-11 rounded-xl border border-slate-200 px-2 text-[11px] font-bold ${showCodeLabels ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}>色号标记</button><button type="button" onClick={() => onChangeShowDataPreview(!showDataPreview)} className={`inline-flex h-11 items-center justify-center gap-1 rounded-xl border border-slate-200 px-2 text-[11px] font-bold ${showDataPreview ? 'bg-purple-600 text-white' : 'bg-slate-50 text-slate-600 hover:bg-white'}`}><Eye className="h-4 w-4" />数据预览</button></div>
                     </div>
                   )}
                   {mobileToolbarPanel === 'settings' && (
                     <div className="space-y-1.5" role="tabpanel" aria-label="画板设置">
-                      <label className="flex h-8 items-center gap-2 rounded border border-slate-200 bg-slate-50 px-2 text-[10px] font-bold text-slate-600">背景<select aria-label="大画板背景" value={canvasBackdrop} onChange={event => onChangeCanvasBackdrop(event.target.value as CanvasBackdrop)} className="min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 py-1 text-[10px] font-semibold"><option value="dark_grid">浅灰网格</option><option value="light_pegboard">浅色底板</option><option value="wood">木纹色</option><option value="studio">工作室紫</option><option value="slate">石板灰</option></select></label>
-                      <div className="grid grid-cols-3 gap-1 rounded border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="新图框档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" onClick={() => setNewFrameMaxSide(side)} className={`h-8 rounded px-2 text-[10px] font-bold ${newFrameMaxSide === side ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{side}格</button>)}</div>
+                      <label className="flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-bold text-slate-600">背景<select aria-label="大画板背景" value={canvasBackdrop} onChange={event => onChangeCanvasBackdrop(event.target.value as CanvasBackdrop)} className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-1.5 text-[11px] font-semibold"><option value="dark_grid">浅灰网格</option><option value="light_pegboard">浅色底板</option><option value="wood">木纹色</option><option value="studio">工作室紫</option><option value="slate">石板灰</option></select></label>
+                      <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label="新图框档位">{LARGE_CANVAS_MAX_SIDES.map(side => <button key={side} type="button" onClick={() => setNewFrameMaxSide(side)} className={`h-11 rounded-lg px-2 text-[11px] font-bold ${newFrameMaxSide === side ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-white'}`}>{side}格</button>)}</div>
                     </div>
                   )}
                 </div>
@@ -2093,6 +2099,11 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
           document.body,
         )}
 
+        {/* The floating dock covers the bottom 66px of the viewport, so the
+            scroll area reserves it through the shared --mobile-nav-clearance
+            contract. Do not go back to a local pb-24 here: `sm:p-6` used to
+            win over it between 640 and 1023px, which left the last ruler row
+            unreachable on tablets. */}
         <div
           ref={scrollContainerRef}
           tabIndex={0}
@@ -2102,7 +2113,7 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
           onPointerMoveCapture={moveCanvasPan}
           onPointerUpCapture={finishCanvasPan}
           onPointerCancelCapture={finishCanvasPan}
-          className={`relative min-h-0 flex-1 overflow-auto p-4 sm:p-6 outline-none ${isPanning ? 'cursor-grabbing select-none' : 'cursor-default'}`}
+          className={`relative min-h-0 flex-1 overflow-auto p-4 sm:p-6 mobile-nav-clearance outline-none ${isPanning ? 'cursor-grabbing select-none' : 'cursor-default'}`}
         >
           <div
             ref={boardRef}
@@ -2118,7 +2129,7 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
             onPointerUp={finishInteraction}
             onPointerCancel={() => setInteraction(null)}
           >
-            <div className="pointer-events-none absolute left-3 top-2 text-[10px] font-bold text-slate-400">1格 = 1颗拼豆 · 每5格虚线 · 每10格粗线 · {BOARD_GRID_WIDTH} × {BOARD_GRID_HEIGHT}</div>
+            <div className="pointer-events-none absolute left-3 top-2 text-[11px] font-bold text-slate-500 sm:text-[10px]">1格 = 1颗拼豆 · 每5格虚线 · 每10格粗线 · {BOARD_GRID_WIDTH} × {BOARD_GRID_HEIGHT}</div>
             {Array.from({ length: Math.ceil(BOARD_GRID_WIDTH / 5) }, (_, index) => index * 5).map(x => <span key={`col-${x}`} className="pointer-events-none absolute -top-4 -translate-x-1/2 text-[9px] font-semibold text-slate-400" style={{ left: x * scaledCellSize + scaledCellSize / 2 }}>{x + 1}</span>)}
             {Array.from({ length: Math.ceil(BOARD_GRID_HEIGHT / 5) }, (_, index) => index * 5).map(y => <span key={`row-${y}`} className="pointer-events-none absolute -left-5 -translate-y-1/2 text-right text-[9px] font-semibold text-slate-400" style={{ top: y * scaledCellSize + scaledCellSize / 2 }}>{y + 1}</span>)}
             {frames.map(frame => {

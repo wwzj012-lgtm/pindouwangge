@@ -137,7 +137,7 @@ export async function runLibraryChecks(width: number) {
   check(Boolean(document.querySelector('.profile-pattern-card')), 'entry resets prior inventory tab to library');
   if (width < 768) {
     await click('关闭个人中心');
-    await click('更多工具与视图设置');
+    await click('画板工具箱');
     const cloudEntry = buttons().find(value => value.textContent?.includes('云端图纸库'));
     check(cloudEntry, 'phone toolkit cloud entry exists'); cloudEntry!.click(); await pause();
     check(profile()?.textContent?.includes('我的图库 · 全部工程'), 'phone toolkit opens new profile library');

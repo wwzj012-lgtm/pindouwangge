@@ -33,7 +33,7 @@ export function SymmetryAxisControls({ actions, mode, isEn = false }: {
           className="min-h-10 w-full rounded-lg border border-purple-200 bg-white px-2 disabled:opacity-40" />
       </label>
     </div>
-    <p className="mt-2 text-[10px] leading-4 text-purple-500">{isEn ? 'Half-cell steps. Drag the axis handles on the canvas too.' : '支持半格位置，也可拖动画板上的轴控制点。'}</p>
+    <p className="mt-2 text-[10px] leading-4 text-purple-600">{isEn ? 'Half-cell steps. Drag the axis handles on the canvas too.' : '支持半格位置，也可拖动画板上的轴控制点。'}</p>
     <button type="button" onClick={() => actions.onAxesChange(null)} className="mt-1 min-h-9 rounded-lg px-2 font-bold hover:bg-purple-50">{isEn ? 'Center axes' : '恢复居中'}</button>
   </div>;
 }

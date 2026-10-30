@@ -1889,7 +1889,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                 您即将导出包含全量未核销卡密明文的 CSV 文件（共计 <strong className="text-amber-300 font-mono font-bold">{codesList.length}</strong> 份记录）。
               </p>
               <div className="p-3 bg-rose-950/40 border border-rose-800/50 rounded-xl text-rose-200 text-[11px] leading-relaxed">
-                <strong className="block mb-1 font-bold text-rose-300">⚠️ 运维安全合规声明：</strong>
+                <strong className="block mb-1 font-bold text-rose-300">运维安全合规声明：</strong>
                 本次导出操作将包含敏感凭证信息，系统将永久把操作员邮箱 (<span className="font-mono text-white">{currentUser?.email}</span>)、精准时间戳与导出量记入全网不可篡改的<strong className="text-white">【运维操作审计日志】</strong>。
               </div>
             </div>

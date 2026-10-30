@@ -865,15 +865,3 @@ export async function downloadCanvasImage(
     throw error instanceof Error ? error : new Error('无法启动浏览器下载。');
   }
 }
-
-// Download project JSON file
-export function downloadProjectJson(data: object, filename: string) {
-  const jsonStr = JSON.stringify(data, null, 2);
-  const blob = new Blob([jsonStr], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.download = filename.endsWith('.perler') ? filename : `${filename}.perler`;
-  link.href = url;
-  link.click();
-  URL.revokeObjectURL(url);
-}

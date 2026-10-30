@@ -51,6 +51,11 @@ interface HomeViewProps {
   onStartPhotoToBead: (file: File) => void;
   onLoadHeroExample: (example: HeroExample) => void;
   onOpenImportBlueprint: () => void;
+  /**
+    * 首页只负责「开始创作」。手机上有底栏「豆社」tab，社区作品/创作者在首页属于重复入口，
+    * 而且排在第二屏（390×844 实测 top 1009），滚到那里常常只看到加载中。桌面端保留以填充版面。
+    */
+  showCommunityFeed?: boolean;
 }
 
 const HOME_COMMUNITY_POST_LIMIT = 6;
@@ -64,6 +69,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onStartPhotoToBead,
   onLoadHeroExample,
   onOpenImportBlueprint,
+  showCommunityFeed = true,
 }) => {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const [vibeIndex, setVibeIndex] = useState(0);
@@ -73,6 +79,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [communityRequest, setCommunityRequest] = useState(0);
 
   useEffect(() => {
+    if (!showCommunityFeed) return;
     let active = true;
     setCommunityStatus('loading');
     const loadPosts = async () => {
@@ -91,7 +98,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     };
     void loadPosts();
     return () => { active = false; };
-  }, [communityRequest]);
+  }, [communityRequest, showCommunityFeed]);
 
   const communityCreators = useMemo(() => {
     const authors = new Map<string, CommunityPost['author']>();
@@ -113,7 +120,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#F5F0FD] min-h-screen text-purple-950 pb-24 select-none">
+    <div className="flex-1 overflow-y-auto bg-[#F5F0FD] min-h-0 text-purple-950 select-none mobile-nav-clearance lg:pb-16">
       <input
         ref={photoInputRef}
         type="file"
@@ -127,67 +134,71 @@ export const HomeView: React.FC<HomeViewProps> = ({
       <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-3 sm:pt-5 space-y-5">
         
         {/* 1. HERO BANNER CARD */}
-        <div className="relative rounded-3xl bg-gradient-to-r from-purple-800 via-purple-700 to-indigo-800 text-white p-5 sm:p-6 md:p-8 shadow-xl overflow-hidden border border-purple-500/20">
+        <div className="relative rounded-3xl bg-gradient-to-r from-purple-800 via-purple-700 to-indigo-800 text-white p-4 sm:p-6 md:p-8 shadow-xl overflow-hidden border border-purple-500/20">
           {/* Ambient Glow Effects */}
           <div className="absolute -top-16 -right-16 w-64 h-64 bg-pink-500/15 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute -bottom-16 -left-16 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-center">
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 items-center">
             {/* Left Content */}
-            <div className="lg:col-span-7 flex flex-col items-start space-y-4">
+            <div className="lg:col-span-7 flex flex-col items-start space-y-3 sm:space-y-4">
               {/* Tag Pill */}
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs font-bold text-purple-100 shadow-xs">
+              <div className="inline-flex items-center gap-2 px-2.5 py-1 sm:px-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs sm:text-xs font-bold text-purple-100 shadow-xs">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
                 <span>豆织星格 · 拼豆像素艺术与图纸工作台</span>
               </div>
 
               {/* Main Headline */}
-              <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-black tracking-tight leading-tight text-white drop-shadow-xs">
+              <h1 className="text-[22px] sm:text-3xl md:text-4xl lg:text-5xl font-black tracking-tight leading-tight text-white drop-shadow-xs">
                 一粒一粒<br />织出像素星格
               </h1>
 
-              {/* Subtitle */}
-              <p className="text-xs sm:text-sm text-purple-100/90 leading-relaxed max-w-2xl font-medium">
+              {/* Subtitle — two lines is enough to establish context on a phone;
+                  the full pitch stays on tablet and up. */}
+              <p className="line-clamp-2 text-xs sm:line-clamp-none sm:text-sm text-purple-100/90 leading-relaxed max-w-2xl font-medium">
                 专业的 Perler / Artkal / Mard 拼豆网格转换与像素画板。包含智能图像转图、精准色号匹配、1:1 实物比对与高清图纸导出。
               </p>
 
-              {/* Action Buttons */}
-              <div className="flex flex-wrap items-center gap-3.5 pt-2">
+              {/* Action Buttons — a uniform 2×2 grid on phones. Four differently
+                  sized pills wrapping into ragged rows made it unclear which
+                  action was primary; equal cells restore the hierarchy. */}
+              <div className="grid w-full grid-cols-2 gap-2 pt-1 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-3.5 sm:pt-2">
                 <button
                   onClick={() => onNavigateTab('studio')}
-                  className="px-6 py-3 sm:px-7 sm:py-3.5 rounded-full bg-white hover:bg-purple-50 text-purple-950 font-black text-sm sm:text-base shadow-lg transition-all hover:scale-102 active:scale-98 flex items-center gap-2.5 cursor-pointer"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-black text-purple-950 shadow-lg transition-all hover:bg-purple-50 active:scale-98 sm:rounded-full sm:px-7 sm:py-3.5 sm:text-base"
                 >
-                  <Palette className="w-5 h-5 text-purple-700 fill-purple-700" />
+                  <Palette className="w-[18px] h-[18px] shrink-0 text-purple-700 fill-purple-700 sm:w-5 sm:h-5" />
                   <span>进入画板创作</span>
                 </button>
 
                 <button
                   onClick={choosePhoto}
-                  className="px-6 py-3 sm:px-7 sm:py-3.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/30 text-white font-bold text-sm sm:text-base backdrop-blur-md transition-all hover:scale-102 active:scale-98 flex items-center gap-2.5 cursor-pointer"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/15 px-3 py-2.5 text-sm font-bold text-white backdrop-blur-md transition-all hover:bg-white/25 active:scale-98 sm:rounded-full sm:px-7 sm:py-3.5 sm:text-base"
                 >
-                  <Zap className="w-5 h-5 text-amber-300 fill-amber-300" />
+                  <Zap className="w-[18px] h-[18px] shrink-0 text-amber-300 fill-amber-300 sm:w-5 sm:h-5" />
                   <span>照片一键转拼豆</span>
                 </button>
 
                 <button
                   onClick={() => onNavigateTab('community')}
-                  className="px-5 py-3 sm:py-3.5 rounded-full bg-transparent hover:bg-white/10 text-purple-200 font-bold text-sm sm:text-base transition-all cursor-pointer flex items-center gap-1.5"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm font-bold text-purple-100 transition-all hover:bg-white/15 active:scale-98 sm:rounded-full sm:border-transparent sm:bg-transparent sm:px-5 sm:py-3.5 sm:text-base sm:text-purple-200"
                 >
                   <span>探索社区作品</span>
-                  <ChevronRight className="w-5 h-5" />
+                  <ChevronRight className="w-4 h-4 shrink-0 sm:w-5 sm:h-5" />
                 </button>
 
                 <button
                   onClick={onOpenImportBlueprint}
-                  className="px-5 py-3 sm:py-3.5 rounded-full bg-amber-300/15 hover:bg-amber-300/25 border border-amber-200/40 text-amber-100 font-bold text-sm sm:text-base transition-all cursor-pointer flex items-center gap-1.5"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-200/40 bg-amber-300/15 px-3 py-2.5 text-sm font-bold text-amber-100 transition-all hover:bg-amber-300/25 active:scale-98 sm:rounded-full sm:px-5 sm:py-3.5 sm:text-base"
                 >
-                  <FilePlus2 className="w-5 h-5" />
+                  <FilePlus2 className="w-[18px] h-[18px] shrink-0 sm:w-5 sm:h-5" />
                   <span>颜色识别</span>
                 </button>
               </div>
 
-              {/* Stats Footer */}
-              <div className="flex flex-wrap items-center gap-4 sm:gap-6 pt-3 border-t border-white/15 text-xs text-purple-100 font-bold">
+              {/* Stats Footer — desktop only; on a phone it cost two extra
+                  lines without adding anything actionable. */}
+              <div className="hidden sm:flex flex-wrap items-center gap-4 sm:gap-6 pt-3 border-t border-white/15 text-xs text-purple-100 font-bold">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-emerald-400" />
                   <span className="text-purple-200">支持 4 大主流色卡品牌</span>
@@ -205,24 +216,30 @@ export const HomeView: React.FC<HomeViewProps> = ({
               </div>
             </div>
 
-            {/* Official Studio starting examples, not community activity. */}
-            <div className="lg:col-span-5 flex justify-center lg:justify-end">
-              <div className="bg-white/10 backdrop-blur-md p-3 sm:p-4 rounded-3xl border border-white/20 grid grid-cols-2 gap-3 shadow-2xl max-w-md w-full relative">
-                <span className="absolute top-2 left-3 text-[10px] font-bold text-purple-100 z-10">官方起始示例</span>
+            {/* Official Studio starting examples, not community activity.
+                A swipeable strip on phones (two rows of squares pushed the
+                quick-workspace cards off-screen), a 2×2 grid from tablet up. */}
+            <div className="lg:col-span-5 w-full lg:flex lg:justify-end">
+              <div className="relative bg-white/10 backdrop-blur-md p-2.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-white/20 max-w-md w-full shadow-2xl">
+                {/* Phones stack the label above the strip; desktop keeps it as an
+                    overlay caption so the hero does not grow a whole extra row. */}
+                <span className="mb-1.5 block text-xs font-bold text-purple-100 lg:absolute lg:left-3 lg:top-2 lg:mb-0 lg:text-[10px]">官方起始示例</span>
+                <div className="flex gap-2 overflow-x-auto pb-0.5 scrollbar-none sm:grid sm:grid-cols-2 sm:gap-3 sm:overflow-visible sm:pb-0">
                 {HERO_EXAMPLES.map((example) => (
                   <button
                     key={example.id}
                     type="button"
                     onClick={createHeroExampleActivation(example, onLoadHeroExample)}
-                    className="group relative aspect-square min-w-0 cursor-pointer overflow-hidden rounded-2xl border border-white/30 bg-purple-900/50 text-left shadow-inner outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white"
+                    className="group relative aspect-square w-[86px] shrink-0 cursor-pointer overflow-hidden rounded-xl border border-white/30 bg-purple-900/50 text-left shadow-inner outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-white sm:w-auto sm:rounded-2xl"
                     title={`转换示例：${example.name}`}
                   >
                     <img src={example.url} alt={example.name} decoding="async" fetchPriority={example.id === 'batiao-cat' ? 'high' : 'low'} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105" />
-                    <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/70 to-transparent p-2 text-[11px] font-bold text-white">
-                      示例：{example.name}
+                    <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-2 pt-4 pb-2 text-xs font-bold text-white">
+                        <span className="hidden sm:inline">示例：</span>{example.name}
                     </span>
                   </button>
                 ))}
+                </div>
               </div>
             </div>
           </div>
@@ -235,7 +252,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <div className="w-1.5 h-4 bg-purple-600 rounded-full" />
               <h2 className="text-base font-black text-purple-950">快捷工作台</h2>
             </div>
-            <span className="text-xs font-bold text-purple-400">高效创建与导入图纸</span>
+            <span className="text-xs font-bold text-purple-600">高效创建与导入图纸</span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -250,7 +267,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">智能转拼豆</h3>
-                  <p className="text-xs text-purple-500 font-medium">照片一键识别量化</p>
+                  <p className="text-xs text-purple-600 font-medium">照片一键识别量化</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -267,7 +284,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">进入画板</h3>
-                  <p className="text-xs text-purple-500 font-medium">自定义画布自由绘制</p>
+                  <p className="text-xs text-purple-600 font-medium">自定义画布自由绘制</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -285,7 +302,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">颜色识别</h3>
-                  <p className="text-xs text-purple-500 font-medium">手动对齐网格，识别每格主色与色号</p>
+                  <p className="text-xs text-purple-600 font-medium">手动对齐网格，识别每格主色与色号</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -302,7 +319,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">豆社灵感</h3>
-                  <p className="text-xs text-purple-500 font-medium">发现图纸并 Remix</p>
+                  <p className="text-xs text-purple-600 font-medium">发现图纸并 Remix</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -319,7 +336,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 </div>
                 <div>
                   <h3 className="text-sm font-extrabold text-purple-950">大画板</h3>
-                  <p className="text-xs text-purple-500 font-medium">多图框批量生成图纸</p>
+                  <p className="text-xs text-purple-600 font-medium">多图框批量生成图纸</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -327,7 +344,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
           </div>
         </div>
 
-        {/* Public feed and its creators; no global ranking is implied. */}
+        {/* Public feed and its creators; no global ranking is implied.
+            Phones reach the same feed through the 豆社 tab, so this block is
+            desktop-only: on a 390px screen it starts at y=1009, i.e. below the
+            first screen, and all it can show while loading is a spinner. */}
+        {showCommunityFeed && (
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 pt-2">
           <section aria-labelledby="home-community-title" aria-busy={communityStatus === 'loading'} className="min-w-0 lg:col-span-3 rounded-2xl border border-purple-200/80 bg-white p-5 shadow-2xs flex flex-col gap-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -400,7 +421,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                         {author.photoUrl && <img src={author.photoUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" onError={event => { event.currentTarget.style.visibility = 'hidden'; }} className="absolute inset-0 h-full w-full object-cover" />}
                       </span>
                       <span className="min-w-0 flex-1 truncate text-sm font-bold text-purple-900">{author.displayName || '社区创作者'}</span>
-                      <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-purple-400" />
+                      <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-purple-600" />
                     </button>
                   </li>
                 ))}
@@ -408,6 +429,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             )}
           </aside>
         </div>
+        )}
 
       </div>
     </div>

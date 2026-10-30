@@ -1,11 +1,81 @@
 @import "tailwindcss";
 
 /* Gemini neutral light theme base */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   background-color: #F8FAFC;
   color: #0F172A;
   font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+  /* dvh follows the collapsing browser toolbar on iOS/Android; 100vh overflows
+     and pushes fixed bottom bars under the home indicator. */
   min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-x: none;
+}
+
+/* App shell height: matches the *visible* viewport, not the layout viewport. */
+.app-shell-height {
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Safe-area helpers. Values resolve to 0 unless the viewport meta opts in
+   with viewport-fit=cover, which index.html now sets. */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+.pb-safe {
+  padding-bottom: var(--safe-bottom);
+}
+
+.pb-safe-3 {
+  padding-bottom: calc(0.75rem + var(--safe-bottom));
+}
+
+/* Mobile dock contract.
+   The floating tab bar is 54px tall and sits 12px above the safe area. Every
+   scrolling page has to reserve height + offset + breathing room, otherwise
+   the last card ends up underneath the bar. This used to be hand-tuned per
+   page (pb-24 / pb-28) while the pages themselves were 114px taller than the
+   viewport — so the reservation sat off-screen and the card was still hidden.
+   One variable, one class, four pages. */
+:root {
+  --mobile-nav-height: 54px;
+  --mobile-nav-offset: 12px;
+  --mobile-nav-gap: 16px;
+  --mobile-nav-clearance: calc(
+    var(--mobile-nav-height) + var(--mobile-nav-offset) + var(--mobile-nav-gap) + var(--safe-bottom)
+  );
+}
+
+/* Doubled class keeps this above `sm:p-6` / `pb-24` utilities regardless of
+   the order Tailwind emits them in. Only applies while the dock exists
+   (< 1024px), so desktop pages keep their own padding. */
+@media (max-width: 1023px) {
+  .mobile-nav-clearance.mobile-nav-clearance {
+    padding-bottom: var(--mobile-nav-clearance);
+  }
+}
+
+/* iOS Safari zooms the whole page when a text field smaller than 16px receives
+   focus. That leaves the layout scaled up and usually hides the primary button
+   behind the keyboard. Force a 16px entry size on phone-width viewports only;
+   everything around the field keeps its compact scale. */
+@media (max-width: 639px) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
 
 /* Global neutral 6px scrollbar styling */
@@ -56,6 +126,19 @@ body {
   .touch-feedback:active {
     transform: scale(0.96);
     filter: brightness(0.95);
+  }
+}
+
+/* Respect the OS "Reduce Motion" setting: drop decorative motion but keep the
+   layout intact. Mirrors Apple HIG 5.4 / WCAG 2.3.3. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

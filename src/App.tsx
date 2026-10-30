@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Bell, Loader2, RefreshCw, X } from 'lucide-react';
+import { Bell, Loader2, RefreshCw } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -7,14 +7,13 @@ import {
   BeadShape,
   BrandKey,
   ConvertSettings,
-  ProjectData,
   ToolType,
   SymmetryMode,
   CanvasBackdrop,
 } from './types';
 import { BRAND_PALETTES as INITIAL_PALETTES } from './data/palettes';
 import { useBrandCatalog } from './hooks/useBrandCatalog';
-import { getBrandCatalogSnapshot, paletteForNewConversion, refreshBrandCatalog } from './data/brandCatalog';
+import { BrandCatalogUnavailableError, conversionPalette, getBrandCatalogSnapshot, paletteForNewConversion, refreshBrandCatalog } from './data/brandCatalog';
 import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
@@ -78,6 +77,7 @@ import { normalizeRestoredPatternSettings, patternEditingSnapshot, savedPatternS
 import { toggleCompletedColorId } from './utils/completionHighlight';
 import { apiCompletePattern, apiImportLegacyPatterns, apiQuotePatternCompletion } from './utils/api';
 import { advanceCompletionEditRevision, completionInputKey, isCompletionEditRevisionCurrent, isWithinServerPaidCoverage, readServerPaidCoverage, type ServerPaidCoverage } from './utils/patternCompletionState';
+import { checkUploadPixels, checkUploadSize, describeUploadRejection } from './utils/uploadGuards';
 
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
 
@@ -464,6 +464,46 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [publicFeatureFlagsLoaded, setPublicFeatureFlagsLoaded] = useState(false);
   const canAccessAssembly = ASSEMBLY_DEV_MODE || publicFeatureFlags['public.assembly'] || (ASSEMBLY_ADMIN_BYPASS && userProfile?.role === 'admin');
   const [brand, setBrand] = useState<BrandKey>('MARD');
+  const [catalogToast, setCatalogToast] = useState<{ key: string; message: string } | null>(null);
+  const catalogToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastCatalogToastKeyRef = useRef('');
+  const showCatalogToast = useCallback((key: string, message: string, force = false) => {
+    if (!force && lastCatalogToastKeyRef.current === key) return;
+    if (!force) lastCatalogToastKeyRef.current = key;
+    if (catalogToastTimerRef.current) clearTimeout(catalogToastTimerRef.current);
+    setCatalogToast({ key, message });
+    catalogToastTimerRef.current = setTimeout(() => {
+      setCatalogToast(current => current?.key === key ? null : current);
+      catalogToastTimerRef.current = null;
+    }, 2000);
+  }, []);
+  useEffect(() => () => {
+    if (catalogToastTimerRef.current) clearTimeout(catalogToastTimerRef.current);
+  }, []);
+  useEffect(() => {
+    if (brandCatalog.status === 'error') {
+      showCatalogToast('blocked:' + brandCatalog.error, '该色卡当前无法使用：' + brandCatalog.error);
+      return;
+    }
+    if (brandCatalog.status === 'ready' && !brandCatalog.palettes[brand]?.length) {
+      showCatalogToast('unavailable:' + brand,
+        '当前品牌已禁用或删除，已有图纸颜色快照保留；请选择其他品牌。');
+      return;
+    }
+    if (brandCatalog.origin === 'offline' && brandCatalog.backgroundError) {
+      const paletteLabel = brandCatalog.source === 'builtin' ? '内置旧色卡' : '最近缓存的旧色卡';
+      showCatalogToast('offline:' + brandCatalog.source,
+        '品牌目录暂不可达，当前使用' + paletteLabel + '；新转换仍可继续。');
+      return;
+    }
+    if (brandCatalog.origin === 'live') {
+      lastCatalogToastKeyRef.current = '';
+      if (catalogToastTimerRef.current) clearTimeout(catalogToastTimerRef.current);
+      catalogToastTimerRef.current = null;
+      setCatalogToast(null);
+    }
+  }, [brand, brandCatalog.backgroundError, brandCatalog.error, brandCatalog.origin, brandCatalog.palettes,
+    brandCatalog.source, brandCatalog.status, showCatalogToast]);
   const [activePalette, setActivePalette] = useState<BeadColor[]>(INITIAL_PALETTES.MARD);
   const restoredPaletteRef = useRef<{ brand: BrandKey; palette: BeadColor[] } | null>(null);
   const previousPaletteBrandRef = useRef<BrandKey>('MARD');
@@ -1238,16 +1278,16 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // Perform Image Pixel Conversion
   const convertImageToGrid = useCallback(
     async (img: HTMLImageElement, currentSettings: ConvertSettings, currentPalette: BeadColor[], requestToken = beginImageRequest()) => {
-      const catalogRefreshed = await refreshBrandCatalog();
+      await refreshBrandCatalog();
       if (!isCurrentImageRequest(requestToken)) return;
       const latestCatalog = getBrandCatalogSnapshot();
-      const availablePalette = latestCatalog.palettes[currentSettings.brand];
-      if (!catalogRefreshed || latestCatalog.status !== 'ready' || !availablePalette?.length) {
-        setImageLoadMessage('品牌目录不可用，或该品牌已禁用/删除。请选择可用品牌后再转换；已有图纸与颜色快照保留。');
+      const livePalette = conversionPalette(latestCatalog, currentSettings.brand, currentPalette);
+      if (!livePalette) {
+        showCatalogToast('conversion-blocked:' + currentSettings.brand + ':' + latestCatalog.error,
+          '当前品牌无法使用，未开始转换；请选择可用品牌。已有图纸与颜色快照保留。', true);
         finishImageRequest(requestToken);
         return;
       }
-      const livePalette = paletteForNewConversion(availablePalette, currentPalette, currentSettings.brand);
       setIsConverting(true);
       setTimeout(() => {
         if (!isCurrentImageRequest(requestToken)) return;
@@ -1285,7 +1325,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         }
       }, 50);
     },
-    [applyGridChange, beginImageRequest, finishImageRequest, isCurrentImageRequest, isEn]
+    [applyGridChange, beginImageRequest, finishImageRequest, isCurrentImageRequest, isEn, showCatalogToast]
   );
 
   // Re-convert on settings update if source image exists
@@ -1304,10 +1344,22 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       return;
     }
 
-    beginNewCompletionDraft();
+    // 体积在读取前就拦：8000×6000 的原图画到 canvas 会把移动端直接卡死，
+    // 而且卡住时没有任何提示，用户只会以为「点了没反应」。
+    const sizeRejection = checkUploadSize(file.size);
+    if (sizeRejection) {
+      setImageLoadMessage(describeUploadRejection(sizeRejection, isEn));
+      return;
+    }
+
     const requestToken = beginImageRequest();
-    setActivePatternId(null);
     setIsConverting(true);
+    setImageLoadMessage(null);
+    const failUpload = () => {
+      if (!isCurrentImageRequest(requestToken)) return;
+      setImageLoadMessage(isEn ? 'Unable to load this image. Please try another image. Your current work is unchanged.' : '图片加载失败，请重试或选择其他图片，当前作品已保留。');
+      finishImageRequest(requestToken);
+    };
     const reader = new FileReader();
     reader.onload = evt => {
       if (!isCurrentImageRequest(requestToken)) return;
@@ -1316,7 +1368,17 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         img.crossOrigin = 'anonymous';
         img.onload = () => {
           if (!isCurrentImageRequest(requestToken)) return;
+          const pixelRejection = checkUploadPixels(img.naturalWidth, img.naturalHeight);
+          if (pixelRejection) {
+            setImageLoadMessage(describeUploadRejection(pixelRejection, isEn));
+            finishImageRequest(requestToken);
+            return;
+          }
           const safeSettings = resetBackgroundRemovalForNewImage(settings);
+          // Commit the new source identity only after reading, decoding and
+          // upload validation succeed. Rejected uploads keep the entire work.
+          beginNewCompletionDraft();
+          setActivePatternId(null);
           setSourceImage(img);
           setSubjectCropSource(null);
           setProjectName(file.name.replace(/\.[^/.]+$/, ''));
@@ -1325,16 +1387,19 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           setCurrentTab('studio');
           setIsStudioModalOpen(true);
         };
-        img.onerror = () => {
-          finishImageRequest(requestToken);
-        };
+        img.onerror = failUpload;
         img.src = evt.target.result as string;
+      } else {
+        failUpload();
       }
     };
-    reader.onerror = () => {
-      finishImageRequest(requestToken);
-    };
-    reader.readAsDataURL(file);
+    reader.onerror = failUpload;
+    reader.onabort = failUpload;
+    try {
+      reader.readAsDataURL(file);
+    } catch {
+      failUpload();
+    }
   };
 
   // Load Sample Preset Image
@@ -1424,14 +1489,15 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   }, [largeCanvasStudioRequest]);
 
   const handleConvertLargeCanvasImage = useCallback(async (file: File, mode: LargeCanvasConversionMode, gridW: number, gridH: number): Promise<{ grid: (string | null)[][]; sourceImageDataUrl: string }> => {
-    const catalogRefreshed = await refreshBrandCatalog();
+    await refreshBrandCatalog();
     const latestCatalog = getBrandCatalogSnapshot();
+    const livePalette = conversionPalette(latestCatalog, settings.brand, activePalette);
+    if (!livePalette) {
+      showCatalogToast('large-conversion-blocked:' + settings.brand + ':' + latestCatalog.error,
+        '当前品牌无法使用，未开始转换；请选择可用品牌。已有图纸与颜色快照保留。', true);
+      throw new BrandCatalogUnavailableError();
+    }
     return new Promise((resolve, reject) => {
-      const availablePalette = latestCatalog.palettes[settings.brand];
-      if (!catalogRefreshed || latestCatalog.status !== 'ready' || !availablePalette?.length) {
-        reject(new Error('品牌目录不可用，或该品牌已禁用/删除，请选择可用品牌。')); return;
-      }
-      const livePalette = paletteForNewConversion(availablePalette, activePalette, settings.brand);
       const reader = new FileReader();
       reader.onerror = () => reject(new Error('无法读取图片'));
       reader.onload = event => {
@@ -1461,7 +1527,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       };
       reader.readAsDataURL(file);
     });
-  }, [activePalette, settings]);
+  }, [activePalette, settings, showCatalogToast]);
 
   const handleOpenLargeCanvasFrame = useCallback((frame: LargeCanvasFrame) => {
     if (!frame.beanResult?.length || !frame.beanResult[0]?.length) return;
@@ -1761,67 +1827,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     applyGridChange(newGrid);
   }, [applyGridChange, settings]);
 
-  // Export & Import Project JSON
-  const handleExportJson = () => {
-    if (!isPatternUnlocked) {
-      setSaveMessage(isEn ? 'Complete the pattern to unlock codes, quantities, coordinates, and downloads.' : '完成后解锁色号、数量、坐标和导出。');
-      return;
-    }
-    if (!requireFormalLogin(isEn ? 'Sign in before downloading project files.' : '请先登录，再下载工程文件。')) return;
-    const project: ProjectData = {
-      version: '1.0',
-      name: projectName,
-      width: settings.width,
-      height: settings.height,
-      boardSize: settings.boardSize,
-      brand,
-      grid,
-      customPalette: activePalette,
-      createdAt: new Date().toISOString(),
-    };
-
-    const jsonStr = JSON.stringify(project, null, 2);
-    const blob = new Blob([jsonStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.download = `${projectName}.perler`;
-    link.href = url;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportJson = (jsonStr: string) => {
-    try {
-      const project: ProjectData = JSON.parse(jsonStr);
-      if (project.grid && Array.isArray(project.grid)) {
-        const importedBrand = project.brand || 'MARD';
-        // Old exports without a snapshot use their original bundled palette, never today's live catalog.
-        const importedPalette = project.customPalette ?? INITIAL_PALETTES[importedBrand];
-        if (!importedPalette?.length) throw new Error('工程文件缺少品牌颜色快照');
-        const importedSettings = { ...settings, brand: importedBrand,
-          width: project.width || project.grid[0].length, height: project.height || project.grid.length,
-          boardSize: project.boardSize || 29 };
-        validateStoredProject({ version: 2, name: project.name || '导入的拼豆项目', brand: importedBrand, palette: importedPalette,
-          grid: project.grid, width: importedSettings.width, height: importedSettings.height,
-          boardSize: importedSettings.boardSize, settings: importedSettings, createdAt: Date.parse(project.createdAt) });
-        beginNewCompletionDraft();
-        invalidateImageRequest();
-        setActivePatternId(null);
-        setCompletedColorIds([]);
-        setSourceImage(null);
-        setSubjectCropSource(null);
-        setProjectName(project.name || '导入的拼豆项目');
-        restoredPaletteRef.current = { brand: importedBrand, palette: importedPalette };
-        setBrand(importedBrand);
-        setActivePalette(importedPalette);
-        setSettings(importedSettings);
-        applyGridChange(project.grid, false);
-      }
-    } catch {
-      alert('解析拼豆工程文件失败，请确保格式正确');
-    }
-  };
-
   const handleRestorePattern = (project: EditablePatternProject): boolean => {
     // Local copies need the same integrity checks as decoded cloud projects.
     // Validate and prepare everything before touching the current draft or URL.
@@ -2101,16 +2106,17 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   );
 
   return (
-    <div className="flex flex-col h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
-      {(brandCatalog.status !== 'ready' || !BRAND_PALETTES[brand]) && <div role={brandCatalog.status === 'error' ? 'alert' : 'status'} className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-950">
-        {brandCatalog.status === 'loading' ? '正在读取品牌目录，暂不可开始新转换。' : brandCatalog.status === 'error'
-          ? `品牌目录不可用：${brandCatalog.error} 新转换暂停，已有图纸颜色快照保留。`
-          : '当前图纸品牌已禁用或删除，颜色快照保留；请另选品牌后开始新转换。'}
-        {brandCatalog.status === 'error' && <button type="button" className="ml-3 underline" onClick={() => void brandCatalog.refresh()}>重新读取品牌</button>}
-      </div>}
-      {brandCatalog.status === 'ready' && brandCatalog.backgroundError && <div role="status" className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
-        品牌目录更新失败，已有图纸与颜色快照保留；新转换需重新读取成功后才能开始。
-        <button type="button" className="ml-3 underline" disabled={brandCatalog.refreshing} onClick={() => void brandCatalog.refresh()}>重新读取品牌</button>
+    <div className="app-shell-height flex flex-col bg-slate-50 font-sans text-slate-900 overflow-hidden">
+      {catalogToast && <div data-brand-catalog-toast role="status" aria-live="polite" aria-atomic="true"
+        className="fixed bottom-20 left-1/2 z-50 flex max-w-[calc(100vw-2rem)] -translate-x-1/2 items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 shadow-lg">
+        <span>{catalogToast.message}</span>
+        <button type="button" className="shrink-0 underline" disabled={brandCatalog.refreshing}
+          onClick={() => void refreshBrandCatalog().then(ok => {
+            if (!ok) showCatalogToast('manual-retry:' + Date.now(), '品牌目录仍不可用；' +
+              (getBrandCatalogSnapshot().source === 'builtin' ? '继续使用内置旧色卡。' :
+                getBrandCatalogSnapshot().source === 'cache' ? '继续使用最近缓存的旧色卡。' :
+                  '该品牌仍不可用。'), true);
+          })}>重试</button>
       </div>}
       {isDesktop ? (
         <Header
@@ -2118,8 +2124,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           setProjectName={setProjectName}
           onImageUpload={handleImageUpload}
           onLoadSample={handleLoadSample}
-          onExportJson={handleExportJson}
-          onImportJson={handleImportJson}
           onOpenExportModal={openExportModal}
           onOpenGuideModal={() => setIsGuideModalOpen(true)}
           onOpenAnnouncements={announcement.store.openHistory}
@@ -2140,8 +2144,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           projectName={projectName}
           setProjectName={setProjectName}
           onImageUpload={handleImageUpload}
-          onExportJson={handleExportJson}
-          onImportJson={handleImportJson}
           onOpenGuideModal={() => setIsGuideModalOpen(true)}
           onOpenAnnouncements={announcement.store.openHistory}
           hasUnreadAnnouncements={announcement.hasUnread}
@@ -2172,6 +2174,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
           onStartPhotoToBead={handleImageUpload}
           onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
           onOpenImportBlueprint={() => setIsImportBlueprintOpen(true)}
+          showCommunityFeed={isDesktop}
         />
       )}
 
@@ -2335,6 +2338,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             />
           ) : (
             <MobileWorkspace
+              onImageUpload={handleImageUpload}
               backgroundCleanup={backgroundCleanup}
               editorActions={editorActions}
               completionSummary={completionSummary}
@@ -2395,8 +2399,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               openSaveNameDialog={openSaveNameDialog}
               isSavingPattern={isSavingPattern}
               openExportModal={openExportModal}
-              onExportJson={handleExportJson}
-              onImportJson={handleImportJson}
               openSmartReduce={openSmartReduce}
               isConverting={isConverting}
               isEn={isEn}
@@ -2408,17 +2410,20 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
             </PatternDetailsUnlockContext.Provider>
           )}
 
-          {saveMessage && (
-            <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 shadow-lg">
-              {saveMessage}
-            </div>
-          )}
-          {imageLoadMessage && (
-            <div role="status" className="fixed bottom-20 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 shadow-lg">
-              {imageLoadMessage}
-            </div>
-          )}
       </>
+      )}
+
+      {/* 保存/上传的结果在任何 tab 下都要能看见：放在 tab 分支外面，
+          否则在首页上传一张超限图片时，提示条根本不会渲染。 */}
+      {saveMessage && (
+        <div className="fixed bottom-20 left-1/2 z-50 -translate-x-1/2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-900 shadow-lg">
+          {saveMessage}
+        </div>
+      )}
+      {imageLoadMessage && (
+        <div role="status" className="fixed bottom-20 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-md border border-rose-300 bg-white px-3 py-2 text-xs font-medium text-rose-900 shadow-lg">
+          {imageLoadMessage}
+        </div>
       )}
 
       {!isDesktop && currentTab !== 'studio' && (

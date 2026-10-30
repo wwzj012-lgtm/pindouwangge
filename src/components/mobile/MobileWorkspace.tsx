@@ -2,47 +2,32 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { BackgroundCleanupController } from '../../hooks/useBackgroundCleanup';
 import { BackgroundCleanupPanel } from '../BackgroundCleanupPanel';
 import {
-  ChevronLeft,
   Pencil,
   PaintBucket,
   Pipette,
   Eraser,
   Undo2,
   Redo2,
-  Hand,
   Sliders,
   BarChart3,
-  Download,
-  Save,
-  Zap,
   LayoutGrid,
-  X,
   Sparkles,
-  Hash,
-  Grid2x2,
-  Eye,
-  Circle as CircleIcon,
-  Square,
-  Flame,
-  Wand2,
-  Scissors,
   Loader2,
-  Palette,
-  Maximize2,
   ChevronDown,
-  Layers,
-  Check,
+  Save,
   Plus,
-  Timer,
-  Trash2,
+  Wrench,
+  Image as ImageIcon,
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop, ConvertSettings } from '../../types';
 import { SettingsPanel } from '../SettingsPanel';
 import { StatsPanel } from '../StatsPanel';
 import { GridCanvas } from '../GridCanvas';
+import type { BoardNavApi, BoardNavState } from '../GridCanvas';
 import { MobileFeatureSheet } from './MobileFeatureSheet';
 import { MobileBottomNav } from './MobileBottomNav';
 import type { WorkspaceEditingActions } from '../SymmetryAxisControls';
+import { consumeSelectedImageFile } from '../../utils/imageFileSelection';
 
 export interface MobileWorkspaceProps {
   backgroundCleanup?: BackgroundCleanupController;
@@ -109,8 +94,6 @@ export interface MobileWorkspaceProps {
   openSaveNameDialog: () => void;
   isSavingPattern: boolean;
   openExportModal: () => void;
-  onExportJson: () => void;
-  onImportJson: (jsonStr: string) => void;
   openSmartReduce: () => void;
   onConsolidateStrayBeads?: (strength: 'light' | 'standard' | 'strong') => void;
   isConverting: boolean;
@@ -120,7 +103,8 @@ export interface MobileWorkspaceProps {
   onOpenPatternsModal: () => void;
   onOpenGuideModal: () => void;
   onOpenVipModal: () => void;
-  onNavigateTab?: (tab: 'home' | 'studio' | 'community' | 'largeCanvas') => void;
+  /** 与首页「上传图片」同一个回调：转图页在没有图片时直接调起选择器。 */
+  onImageUpload?: (file: File) => void;
   onOpenProfile?: () => void;
 }
 
@@ -187,8 +171,6 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   openSaveNameDialog,
   isSavingPattern,
   openExportModal,
-  onExportJson,
-  onImportJson,
   openSmartReduce,
   onConsolidateStrayBeads,
   isConverting,
@@ -196,58 +178,55 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   onOpenPatternsModal,
   onOpenGuideModal,
   onOpenVipModal,
-  onNavigateTab,
+  onImageUpload,
   onOpenProfile,
 }) => {
   const [currentTab, setCurrentTab] = useState<MobileTab>('canvas');
   const [isFeatureSheetOpen, setIsFeatureSheetOpen] = useState(false);
   const [isColorTrayOpen, setIsColorTrayOpen] = useState(false);
-  const [jsonImportError, setJsonImportError] = useState<string | null>(null);
-  const jsonFileInputRef = useRef<HTMLInputElement>(null);
+  const imageFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Board switching is driven from a docked strip, so the canvas owns the
+  // geometry and the workspace owns the chrome. `boardNav` mirrors the canvas
+  // state, `boardApiRef` reaches back into it.
+  const [boardNav, setBoardNav] = useState<BoardNavState>({ focusedBoard: null, totalBoards: 1 });
+  const boardApiRef = useRef<BoardNavApi | null>(null);
+  const boardStripRef = useRef<HTMLDivElement>(null);
+  const activeBoardChipRef = useRef<HTMLButtonElement>(null);
 
   // Collapse the used-color tray whenever the active tab changes
   useEffect(() => {
     setIsColorTrayOpen(false);
   }, [currentTab]);
 
-  const handleJsonFileInputChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    if (!file) return;
+  // Keep the active board chip visible without ever scrolling the page itself
+  // (scrollIntoView on a nested strip can drag the document on iOS).
+  useEffect(() => {
+    const chip = activeBoardChipRef.current;
+    const strip = boardStripRef.current;
+    if (!chip || !strip) return;
+    const stripRect = strip.getBoundingClientRect();
+    const chipRect = chip.getBoundingClientRect();
+    const delta = (chipRect.left + chipRect.width / 2) - (stripRect.left + stripRect.width / 2);
+    if (Math.abs(delta) < 4) return;
+    strip.scrollTo({ left: Math.max(0, strip.scrollLeft + delta), behavior: 'smooth' });
+  }, [boardNav.focusedBoard, boardNav.totalBoards, currentTab]);
 
-    try {
-      onImportJson(await file.text());
-    } catch {
-      setJsonImportError(isEn ? 'Unable to read the project JSON file. Please try again.' : '无法读取项目 JSON 文件，请重试。');
-    } finally {
-      input.value = '';
-    }
+  /** 转图页唯一的提交动作：按当前参数重算图纸，然后回到画板看结果。 */
+  const applyConversionSettings = () => {
+    handleReconvert();
+    setCurrentTab('canvas');
   };
 
-  const handleRequestImportJson = () => {
-    setJsonImportError(null);
-    jsonFileInputRef.current?.click();
+  /**
+    * 还没有图片时，那个常驻按钮就是「上传图片」本身——直接唤起系统选择器，
+    * 走和首页「上传图片」完全相同的链路（App.handleImageUpload），
+    * 而不是把用户甩回首页再自己找入口。
+    */
+  const handleImageFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = consumeSelectedImageFile(event.currentTarget);
+    if (file) onImageUpload?.(file);
   };
-
-  const conversionSettingsContent = (
-    <SettingsPanel
-      settings={settings}
-      setSettings={setSettings}
-      conversionDiagnostics={conversionDiagnostics}
-      variant="sheet"
-      showDiagnostics={false}
-      onReconvert={() => {
-        setIsFeatureSheetOpen(false);
-        handleReconvert();
-      }}
-      hasImage={sourceImage !== null}
-      onOpenImageStudio={() => {
-        setIsFeatureSheetOpen(false);
-        setIsStudioModalOpen(true);
-      }}
-      onCloseMobile={() => setIsFeatureSheetOpen(false)}
-    />
-  );
 
   // Extract unique used colors from current grid for quick bottom carousel
   const usedColorIds = React.useMemo(() => {
@@ -263,20 +242,16 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-slate-100">
+      {/* 转图页「先上传图片」直接唤起这个选择器，和首页的「上传图片」走同一条链路 */}
       <input
-        ref={jsonFileInputRef}
+        ref={imageFileInputRef}
         type="file"
-        accept="application/json,.json"
+        accept="image/*"
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"
-        onChange={handleJsonFileInputChange}
+        onChange={handleImageFileInputChange}
       />
-      {jsonImportError && (
-        <div role="alert" className="absolute top-3 left-3 right-3 z-40 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700 shadow-sm">
-          {jsonImportError}
-        </div>
-      )}
       {/* Main Screen View Area */}
       {backgroundCleanup?.preview && <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />}
       <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
@@ -320,6 +295,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             onEyedropColor={color => setSelectedColor(color)}
             onReferenceImageUpload={handleReferenceImageUpload}
             onResetCanvas={handleResetCurrentCanvas}
+            boardNavApiRef={boardApiRef}
+            onBoardNavStateChange={setBoardNav}
           />
 
           {/* Converting Spinner */}
@@ -337,66 +314,52 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           )}
         </div>
 
-        {/* Tab 2: Dedicated Mobile Image Studio & Conversion Settings */}
-        <div className={`w-full h-full bg-white overflow-y-auto ${currentTab === 'settings' ? 'block' : 'hidden'}`}>
-          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-purple-100 px-3.5 py-2.5 flex items-center justify-between shadow-2xs">
-            <button
-              type="button"
-              onClick={() => setCurrentTab('canvas')}
-              className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-purple-200 bg-white px-2.5 text-xs font-black text-purple-700 shadow-sm active:scale-95"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>{isEn ? 'Back to Canvas' : '返回画板'}</span>
-            </button>
-            <span className="text-xs font-black text-slate-800">{isEn ? 'Convert Settings' : '转图与算法设置'}</span>
-            <button
-              type="button"
-              onClick={() => {
-                handleReconvert();
-                setCurrentTab('canvas');
-              }}
-              className="inline-flex h-9 items-center justify-center rounded-lg bg-purple-600 px-3 text-xs font-black text-white shadow-sm active:scale-95"
-            >
-              {isEn ? 'Apply' : '应用'}
-            </button>
-          </div>
-          <div className="p-3 pb-24">
+        {/* Tab 2: 转图与算法设置。
+            它是底部的三个 tab 之一，不是被 push 出来的子页面，所以这里不再放
+            「返回画板」——底栏的「画布」就是返回，再加一个只会让人在两个返回键之间犹豫。
+            参数列表很长，真正的主操作（生成图纸）固定贴在底栏上方，永远不用滑到底。 */}
+        <div className={`h-full w-full bg-white ${currentTab === 'settings' ? 'flex flex-col' : 'hidden'}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
             <SettingsPanel
               settings={settings}
               setSettings={setSettings}
               conversionDiagnostics={conversionDiagnostics}
-              onReconvert={() => {
-                handleReconvert();
-                setCurrentTab('canvas');
-              }}
+              variant="sheet"
+              onReconvert={applyConversionSettings}
               hasImage={sourceImage !== null}
               onOpenImageStudio={() => setIsStudioModalOpen(true)}
-              onCloseMobile={() => setCurrentTab('canvas')}
+              hideFooterAction
             />
+          </div>
+          <div className="shrink-0 border-t border-purple-100 bg-white px-3 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (sourceImage) applyConversionSettings();
+                else imageFileInputRef.current?.click();
+              }}
+              disabled={isConverting}
+              className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-purple-600 text-sm font-black text-white shadow-sm transition-colors active:bg-purple-700 disabled:opacity-60"
+            >
+              {sourceImage ? (
+                <>
+                  <Sparkles className="h-4 w-4 text-amber-300" aria-hidden="true" />
+                  <span>{isEn ? 'Generate Pattern' : '生成图纸'}</span>
+                </>
+              ) : (
+                <>
+                  <ImageIcon className="h-4 w-4" aria-hidden="true" />
+                  <span>{isEn ? 'Upload an image' : '先上传图片'}</span>
+                </>
+              )}
+            </button>
           </div>
         </div>
 
-        {/* Tab 3: Dedicated Mobile Stats & Bead Palette List */}
-        <div className={`w-full h-full bg-white overflow-y-auto ${currentTab === 'stats' ? 'block' : 'hidden'}`}>
-          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-md border-b border-purple-100 px-3.5 py-2.5 flex items-center justify-between shadow-2xs">
-            <button
-              type="button"
-              onClick={() => setCurrentTab('canvas')}
-              className="inline-flex h-9 items-center justify-center gap-1 rounded-lg border border-purple-200 bg-white px-2.5 text-xs font-black text-purple-700 shadow-sm active:scale-95"
-            >
-              <ChevronLeft className="w-4 h-4" />
-              <span>{isEn ? 'Back to Canvas' : '返回画板'}</span>
-            </button>
-            <span className="text-xs font-black text-slate-800">{isEn ? 'Bead Usage & Colors' : '拼豆用量与色号'}</span>
-            <button
-              type="button"
-              onClick={() => setCurrentTab('canvas')}
-              className="inline-flex h-9 items-center justify-center rounded-lg border border-purple-200 bg-white px-2.5 text-xs font-black text-purple-700 shadow-sm active:scale-95"
-            >
-              {isEn ? 'Done' : '完成'}
-            </button>
-          </div>
-          <div className="p-3 pb-24">
+        {/* Tab 3: 用量与色号。同样是一个 tab 而不是子页面：不设返回键，不做重复标题，
+            面板自带「豆数用量统计与色卡清单」标题，底栏的「画布」就是返回。 */}
+        <div className={`h-full w-full bg-white overflow-y-auto ${currentTab === 'stats' ? 'block' : 'hidden'}`}>
+          <div className="p-3">
             {completionSummary}
             <StatsPanel
               grid={grid}
@@ -404,6 +367,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               width={settings.width}
               height={settings.height}
               boardSize={settings.boardSize}
+              variant="sheet"
               highlightColorIds={highlightColorIds}
               highlightColorId={highlightColorIds.length === 1 ? highlightColorIds[0] : null}
               onSetHighlightColorIds={setHighlightColorIds}
@@ -420,23 +384,73 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               onRestoreColor={handleRestoreColor}
               erasedColorCoords={erasedColorCoords}
               onConsolidateStrayBeads={onConsolidateStrayBeads}
-              onCloseMobile={() => setCurrentTab('canvas')}
             />
           </div>
         </div>
       </div>
 
+      {/* Board strip: the phone equivalent of the split-board export. Docked,
+          never floating — the old pill sat on top of the grid's top-left corner
+          and reaching board 5 meant four taps. Here every board is one tap away
+          and the whole strip lives in the thumb zone. */}
+      {currentTab === 'canvas' && !editorActions?.isPracticeMode && boardNav.totalBoards > 1 && (
+        <div className="shrink-0 border-t border-purple-100 bg-white">
+          <div className="flex items-center gap-1.5 px-2 py-1.5">
+            <button
+              type="button"
+              onClick={() => boardApiRef.current?.showWholePattern()}
+              aria-pressed={boardNav.focusedBoard === null}
+              className={`inline-flex h-11 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-xs font-black transition-colors ${
+                boardNav.focusedBoard === null
+                  ? 'border-purple-600 bg-purple-600 text-white shadow-xs'
+                  : 'border-purple-200 bg-white text-purple-800'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{isEn ? 'All' : '全图'}</span>
+            </button>
+            <div
+              ref={boardStripRef}
+              className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scrollbar-none"
+              role="group"
+              aria-label={isEn ? 'Pegboards' : '拼豆板'}
+            >
+              {Array.from({ length: boardNav.totalBoards }, (_, index) => {
+                const isActive = boardNav.focusedBoard === index;
+                return (
+                  <button
+                    key={index}
+                    ref={isActive ? activeBoardChipRef : undefined}
+                    type="button"
+                    onClick={() => boardApiRef.current?.focusBoard(index)}
+                    aria-pressed={isActive}
+                    aria-label={isEn ? `Board ${index + 1}` : `第 ${index + 1} 板`}
+                    className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border text-sm font-black tabular-nums transition-colors ${
+                      isActive
+                        ? 'border-purple-600 bg-purple-600 text-white shadow-xs'
+                        : 'border-purple-200 bg-purple-50/60 text-purple-900 active:bg-purple-100'
+                    }`}
+                  >
+                    {index + 1}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Unified Mobile Bottom Workstation (所有按钮集中在底部) */}
       {editorActions?.isPracticeMode && <div className="max-h-[40dvh] shrink-0 overflow-y-auto border-t border-emerald-200 bg-white">{editorActions.practicePanel}</div>}
-      <div className="shrink-0 relative bg-white/98 backdrop-blur-md border-t border-purple-200/90 shadow-2xl flex flex-col z-20 select-none">
+      <div className="pb-safe shrink-0 relative z-20 flex flex-col border-t border-purple-100 bg-white select-none">
         {/* Collapsible Used-Color Tray (已用色号快捷托盘，默认收起) */}
         {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
           <div
-            className={`absolute bottom-full left-0 right-0 overflow-hidden bg-purple-50/95 backdrop-blur-md shadow-lg transition-[max-height] duration-200 ease-out ${
-              isColorTrayOpen ? 'max-h-16 border-b border-purple-100/90' : 'max-h-0'
+            className={`absolute bottom-full left-0 right-0 overflow-hidden border-b border-purple-100/90 bg-purple-50/97 backdrop-blur-md shadow-lg transition-[max-height] duration-200 ease-out ${
+              isColorTrayOpen ? 'max-h-[60px]' : 'max-h-0'
             }`}
           >
-            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-2.5 py-2">
+            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-2 py-2">
               {usedColorIds.map(colorId => {
                 const bead = paletteMap.get(colorId);
                 if (!bead) return null;
@@ -446,13 +460,19 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
                     key={bead.code}
                     type="button"
                     onClick={() => setSelectedColor(bead)}
-                    className={`inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border px-2 ${isSelected ? 'scale-105 border-purple-500 bg-purple-600 font-black text-white' : 'border-purple-200 bg-white font-bold text-purple-700'}`}
+                    aria-pressed={isSelected}
+                    className={`inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-2.5 transition-colors ${
+                      isSelected
+                        ? 'border-purple-600 bg-purple-600 font-black text-white'
+                        : 'border-purple-200 bg-white font-bold text-purple-800'
+                    }`}
                   >
-                    <div
-                      className="w-2.5 h-2.5 rounded-full border border-black/20 shrink-0"
+                    <span
+                      aria-hidden="true"
+                      className="h-3 w-3 shrink-0 rounded-full border border-black/20"
                       style={{ backgroundColor: bead.hex }}
                     />
-                    <span className="text-[9px]">{bead.code}</span>
+                    <span className="text-xs leading-none">{bead.code}</span>
                   </button>
                 );
               })}
@@ -462,197 +482,163 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
                   setIsColorTrayOpen(false);
                   openColorManagerModal();
                 }}
-                className="inline-flex h-8 shrink-0 items-center justify-center gap-1 rounded-md border border-purple-200 bg-white px-2 text-[9px] font-bold text-purple-700"
+                className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border border-purple-200 bg-white px-2.5 text-xs font-bold text-purple-800"
               >
-                <Plus className="w-2.5 h-2.5" />
+                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>{isEn ? 'All' : '全色库'}</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* Row 1: Single-Line Tool Dock (current color chip + tools + undo/redo + more) */}
+        {/* Row 1: Tool dock. One segmented switch for the four drawing tools
+            instead of four separate outlined boxes — fewer borders, and the
+            current tool reads as a selected segment rather than a button. */}
         {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
-          <div className="flex items-center gap-1 border-b border-purple-100/90 bg-white px-2 py-1.5">
+          <div className="flex h-[56px] items-center gap-1.5 px-2">
             {/* Current Color Chip - toggles the used-color tray */}
             <button
               type="button"
               onClick={() => setIsColorTrayOpen(open => !open)}
-              className={`inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border px-2 shadow-sm active:scale-95 ${
+              className={`inline-flex h-11 w-[52px] max-[359px]:w-11 shrink-0 flex-col items-center justify-center rounded-xl border shadow-xs transition-colors active:scale-95 ${
                 isColorTrayOpen
-                  ? 'border-purple-500 bg-purple-50 text-purple-800'
-                  : 'border-purple-200 bg-white text-purple-700'
+                  ? 'border-purple-600 bg-purple-50 text-purple-900'
+                  : 'border-purple-200 bg-white text-purple-800'
               }`}
-              title={isEn ? 'Show used colors' : '展开已用色号'}
               aria-expanded={isColorTrayOpen}
+              aria-label={
+                selectedColor
+                  ? (isEn ? `Current color ${selectedColor.code}, show used colors` : `当前色号 ${selectedColor.code}，展开已用色号`)
+                  : (isEn ? 'Choose a bead color' : '选择拼豆色号')
+              }
             >
-              <div
-                className="w-4 h-4 rounded-full border border-black/20 shadow-xs shrink-0"
-                style={{ backgroundColor: selectedColor?.hex || 'transparent' }}
-              />
-              <span className="text-[10px] font-black text-purple-950 leading-tight">
-                {selectedColor ? selectedColor.code : isEn ? 'Palette' : '色号'}
+              <span className="flex items-center gap-1">
+                <span
+                  aria-hidden="true"
+                  className="h-3.5 w-3.5 shrink-0 rounded-full border border-black/20"
+                  style={{ backgroundColor: selectedColor?.hex || 'transparent' }}
+                />
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`h-3 w-3 text-purple-600 transition-transform ${isColorTrayOpen ? 'rotate-180' : ''}`}
+                />
               </span>
-              <ChevronDown className={`w-3 h-3 text-purple-600 transition-transform ${isColorTrayOpen ? 'rotate-180' : ''}`} />
+              <span className="mt-0.5 max-w-full truncate text-xs font-black leading-none">
+                {selectedColor ? selectedColor.code : isEn ? 'Color' : '色号'}
+              </span>
             </button>
 
-            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
+            <div
+              role="group"
+              aria-label={isEn ? 'Drawing tools' : '绘制工具'}
+              className="flex h-[46px] min-w-0 flex-1 items-stretch overflow-hidden rounded-xl border border-purple-200 bg-white shadow-xs"
+            >
+              {[
+                { tool: 'pencil' as ToolType, icon: Pencil, zh: '画笔', en: 'Pencil' },
+                { tool: 'bucket' as ToolType, icon: PaintBucket, zh: '油漆桶', en: 'Fill' },
+                { tool: 'eyedropper' as ToolType, icon: Pipette, zh: '吸管', en: 'Pick' },
+                { tool: 'eraser' as ToolType, icon: Eraser, zh: '橡皮', en: 'Eraser' },
+              ].map(({ tool, icon: Icon, zh, en }, index) => {
+                const isActive = activeTool === tool;
+                return (
+                  <button
+                    key={tool}
+                    type="button"
+                    onClick={() => setActiveTool(tool)}
+                    aria-pressed={isActive}
+                    aria-label={isEn ? en : zh}
+                    className={`inline-flex min-w-10 flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
+                      index > 0 ? 'border-l border-purple-100' : ''
+                    } ${
+                      isActive
+                        ? 'bg-purple-600 text-white'
+                        : 'text-purple-700 active:bg-purple-50'
+                    }`}
+                  >
+                    <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                    <span className="text-xs font-bold leading-none">{isEn ? en : zh}</span>
+                  </button>
+                );
+              })}
+            </div>
 
-            {/* Scrollable Tool Buttons */}
-            <div className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-none">
-            <button type="button" onClick={() => setActiveTool('region_clear')}
-              aria-label={isEn ? 'Clear Region' : '区域清除'} title={isEn ? 'Clear connected same-color region' : '点击清除连通同色区域'}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border ${activeTool === 'region_clear' ? 'border-rose-500 bg-rose-600 text-white' : 'border-purple-200 text-purple-700'}`}><Trash2 size={16}/></button>
-            {backgroundCleanup && <button type="button" onClick={() => { setCurrentTab('canvas'); setIsColorTrayOpen(false); backgroundCleanup.open(); }}
-              disabled={!backgroundCleanup.canOpen} aria-label={isEn ? 'Preview residual cleanup' : '清理残点（先预览）'}
-              title={isEn ? 'Preview small residual blocks before removing' : '先预览并保护小装饰，再批量清除'}
-              className="inline-flex h-11 shrink-0 items-center justify-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 text-[11px] font-bold text-amber-900 disabled:opacity-40">
-              <Scissors size={15} aria-hidden="true" />{isEn ? 'Residuals' : '残点'}
-            </button>}
-            <button
-              type="button"
-              onClick={() => setActiveTool('pencil')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'pencil' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
-              title={isEn ? 'Pencil' : '画笔'}
-              aria-label={isEn ? 'Pencil' : '画笔'}
-            >
-              <Pencil className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTool('bucket')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'bucket' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
-              title={isEn ? 'Bucket Fill' : '油漆桶'}
-              aria-label={isEn ? 'Bucket Fill' : '油漆桶'}
-            >
-              <PaintBucket className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTool('eyedropper')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'eyedropper' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
-              title={isEn ? 'Eyedropper' : '吸管'}
-              aria-label={isEn ? 'Eyedropper' : '吸管'}
-            >
-              <Pipette className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTool('eraser')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'eraser' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
-              title={isEn ? 'Eraser' : '橡皮擦'}
-              aria-label={isEn ? 'Eraser' : '橡皮擦'}
-            >
-              <Eraser className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTool('hand')}
-              className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border p-0 ${activeTool === 'hand' ? 'border-purple-500 bg-purple-600 text-white shadow-sm' : 'border-purple-200 bg-white text-purple-700'}`}
-              title={isEn ? 'Hand/Pan' : '抓手'}
-              aria-label={isEn ? 'Hand/Pan' : '抓手'}
-            >
-              <Hand className="w-4 h-4" />
-            </button>
-
-            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
-
-            <button
-              type="button"
-              onClick={handleUndo}
-              disabled={!canUndo}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
-              title={isEn ? 'Undo' : '撤销'}
-              aria-label={isEn ? 'Undo' : '撤销'}
-            >
-              <Undo2 className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={handleRedo}
-              disabled={!canRedo}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-white p-0 text-purple-700 disabled:opacity-30 active:scale-95"
-              title={isEn ? 'Redo' : '重做'}
-              aria-label={isEn ? 'Redo' : '重做'}
-            >
-              <Redo2 className="w-4 h-4" />
-            </button>
-
-            <div className="w-px h-5 bg-purple-200/70 shrink-0 mx-0.5" />
-
-            <button
-              type="button"
-              onClick={() => setIsFeatureSheetOpen(true)}
-              className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-purple-200 bg-purple-50 p-0 text-purple-700 active:scale-95"
-              title={isEn ? 'More tools and view settings' : '更多工具与视图设置'}
-              aria-label={isEn ? 'More tools and view settings' : '更多工具与视图设置'}
-            >
-              <Sliders className="w-4 h-4 text-purple-600" />
-            </button>
+            <div className="flex h-[46px] shrink-0 items-stretch overflow-hidden rounded-xl border border-purple-200 bg-white shadow-xs">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={!canUndo}
+                aria-label={isEn ? 'Undo' : '撤销'}
+                className="inline-flex w-11 items-center justify-center border-r border-purple-100 text-purple-800 transition-colors active:bg-purple-50 disabled:opacity-30"
+              >
+                <Undo2 className="h-[18px] w-[18px]" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={!canRedo}
+                aria-label={isEn ? 'Redo' : '重做'}
+                className="inline-flex w-11 items-center justify-center text-purple-800 transition-colors active:bg-purple-50 disabled:opacity-30"
+              >
+                <Redo2 className="h-[18px] w-[18px]" aria-hidden="true" />
+              </button>
             </div>
           </div>
         )}
 
-        {/* Row 3: Main Action Navigation Bar (画布 / 转图 / 用量 / 省豆 / 保存 / 导出) */}
-        <nav className="bg-white px-2 py-1 sm:px-6 flex items-center justify-around sm:justify-center sm:gap-6 md:gap-10 text-[10px] sm:text-xs border-t border-purple-100">
-          {editorActions && <button type="button" aria-pressed={editorActions.isPracticeMode}
-            onClick={() => {setCurrentTab('canvas');editorActions.onTogglePractice();}}
-            className={`inline-flex h-12 min-w-10 flex-col items-center justify-center gap-0.5 rounded-lg px-1 ${editorActions.isPracticeMode ? 'bg-emerald-600 text-white' : 'text-emerald-800'}`}>
-            <Timer size={16}/><span>{isEn ? 'Practice' : '实操'}</span></button>}
-          <button
-            type="button"
-            onClick={() => setCurrentTab('canvas')}
-            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'canvas' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
-          >
-            <LayoutGrid className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>{isEn ? 'Canvas' : '画布'}</span>
-          </button>
+        {/* Row 2: View switcher + the single primary action (save). */}
+        <nav
+          aria-label={isEn ? 'Studio views' : '画板视图'}
+          className="flex h-14 items-center gap-1 border-t border-purple-100 px-1.5"
+        >
+          <div role="tablist" aria-label={isEn ? 'Studio views' : '画板视图'} className="flex flex-1 items-center gap-1">
+            {[
+              { tab: 'canvas' as MobileTab, icon: LayoutGrid, zh: '画布', en: 'Canvas' },
+              { tab: 'settings' as MobileTab, icon: Sliders, zh: '转图', en: 'Convert' },
+              { tab: 'stats' as MobileTab, icon: BarChart3, zh: '用量', en: 'Usage' },
+            ].map(({ tab, icon: Icon, zh, en }) => {
+              const isActive = currentTab === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setCurrentTab(tab)}
+                  className={`inline-flex h-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl transition-colors ${
+                    isActive ? 'bg-purple-50 text-purple-700' : 'text-slate-500 active:bg-slate-100'
+                  }`}
+                >
+                  <Icon className={`h-[18px] w-[18px] ${isActive ? 'stroke-[2.4]' : ''}`} aria-hidden="true" />
+                  <span className={`text-xs leading-none ${isActive ? 'font-black' : 'font-bold'}`}>
+                    {isEn ? en : zh}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
           <button
             type="button"
-            onClick={() => setCurrentTab('settings')}
-            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'settings' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
+            onClick={() => setIsFeatureSheetOpen(true)}
+            className="inline-flex h-11 w-14 shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl text-slate-500 transition-colors active:bg-slate-100"
+            aria-label={isEn ? 'Board toolkit' : '画板工具箱'}
           >
-            <Sliders className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>{isEn ? 'Convert' : '转图'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setCurrentTab('stats')}
-            className={`inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg px-1.5 ${currentTab === 'stats' ? 'bg-purple-600 text-white shadow-sm' : 'text-purple-700 hover:bg-purple-50'} sm:min-w-16 sm:px-3`}
-          >
-            <BarChart3 className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>{isEn ? 'Stats' : '用量'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={openSmartReduce}
-            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-amber-200 bg-amber-50 px-1.5 font-black text-amber-700 sm:min-w-16 sm:px-3"
-            title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
-          >
-            <Zap className="w-4 h-4 sm:w-5 sm:h-5 text-amber-600 fill-amber-500" />
-            <span>{isEn ? 'Reduce' : '省豆'}</span>
+            <Wrench className="h-[18px] w-[18px]" aria-hidden="true" />
+            <span className="text-xs font-bold leading-none">{isEn ? 'Tools' : '工具箱'}</span>
           </button>
 
           <button
             type="button"
             onClick={openSaveNameDialog}
             disabled={isSavingPattern}
-            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg bg-emerald-600 px-1.5 font-black text-white shadow-sm disabled:opacity-50 active:scale-95 sm:min-w-16 sm:px-3"
+            className="inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-3.5 text-xs font-black text-white shadow-sm transition-colors active:bg-purple-700 disabled:opacity-50"
           >
-            {isSavingPattern ? <Loader2 className="w-4 h-4 sm:w-5 sm:h-5 animate-spin" /> : <Save className="w-4 h-4 sm:w-5 sm:h-5" />}
+            {isSavingPattern ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Save className="h-4 w-4" aria-hidden="true" />
+            )}
             <span>{isEn ? 'Save' : '保存'}</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={openExportModal}
-            className="inline-flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 font-black text-emerald-700 active:scale-95 sm:min-w-16 sm:px-4"
-          >
-            <Download className="w-4 h-4 sm:w-5 sm:h-5" />
-            <span>{isEn ? 'Export' : '导出'}</span>
           </button>
         </nav>
       </div>
@@ -672,10 +658,27 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         onResetZoom={handleResetZoom}
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
-        onRequestImportJson={handleRequestImportJson}
-        onExportJson={onExportJson}
-        conversionSettingsContent={conversionSettingsContent}
-        initialTab="basic"
+        onOpenExportModal={() => {
+          setIsFeatureSheetOpen(false);
+          openExportModal();
+        }}
+        onTogglePractice={editorActions ? editorActions.onTogglePractice : undefined}
+        isPracticeMode={editorActions?.isPracticeMode ?? false}
+        onOpenResidualCleanup={
+          backgroundCleanup
+            ? () => {
+                setCurrentTab('canvas');
+                setIsColorTrayOpen(false);
+                backgroundCleanup.open();
+              }
+            : undefined
+        }
+        residualCleanupDisabled={!backgroundCleanup?.canOpen}
+        onSelectRegionClear={() => {
+          setCurrentTab('canvas');
+          setActiveTool('region_clear');
+        }}
+        isRegionClearActive={activeTool === 'region_clear'}
         beadShape={beadShape}
         setBeadShape={setBeadShape}
         showSymbols={showSymbols}

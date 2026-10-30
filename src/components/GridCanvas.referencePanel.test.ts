@@ -43,7 +43,9 @@ describe('original image reference panel header contract', () => {
     expect(panel).toContain('min-h-24 w-full');
     expect(panel).toContain('h-5 w-5 text-purple-600');
     expect(panel).toContain('text-[13px] font-extrabold text-purple-950">上传原图');
-    expect(panel).toContain('text-[11px] font-medium text-purple-500">对照原图手动绘制');
+    // purple-600 (not 500): the 11px helper sits on a light panel, and
+    // purple-500 only reaches 4.12:1 there — below WCAG AA for body text.
+    expect(panel).toContain('text-[11px] font-medium text-purple-600">对照原图手动绘制');
     expect(panel).toContain('max-h-[120px] w-auto max-w-full object-contain sm:max-h-[150px] lg:max-h-[180px]');
     expect(panel).toContain('flex min-h-24 w-full flex-col');
   });

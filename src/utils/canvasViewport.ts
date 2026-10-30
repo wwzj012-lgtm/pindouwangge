@@ -35,7 +35,8 @@ export function clampCanvasViewport(
     if (scaled <= available || available === 0) return centered;
     // Keep some content visible even in a viewport narrower than the gutter.
     const gutter = Math.min(safePadding, available / 2);
-    return Math.max(available - scaled - gutter, Math.min(gutter, Number.isFinite(offset) ? offset : centered));
+    const upper = Math.min(gutter, available);
+    return Math.max(available - scaled - gutter, Math.min(upper, Number.isFinite(offset) ? offset : centered));
   };
 
   return {

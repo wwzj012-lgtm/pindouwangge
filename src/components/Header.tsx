@@ -2,8 +2,6 @@ import React, { useRef, useState } from 'react';
 import {
   Upload,
   Download,
-  FolderOpen,
-  FileJson,
   Image as ImageIcon,
   RotateCcw,
   BookOpen,
@@ -34,8 +32,6 @@ interface HeaderProps {
   setProjectName: (name: string) => void;
   onImageUpload: (file: File) => void;
   onLoadSample: (sampleUrl: string) => void;
-  onExportJson: () => void;
-  onImportJson: (jsonStr: string) => void;
   onOpenExportModal: () => void;
   onOpenGuideModal: () => void;
   onOpenAnnouncements?: () => void;
@@ -73,7 +69,7 @@ export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
     return (
       <button
         onClick={onOpenAuthModal}
-        className="flex items-center gap-1.5 rounded-full bg-purple-100/90 px-2 py-1 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
+        className="flex h-8 items-center gap-1.5 rounded-full bg-purple-100/90 px-2 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
         title={loginLabel}
       >
         <User className="w-4 h-4 shrink-0" />
@@ -89,7 +85,7 @@ export const HeaderAccountTrigger: React.FC<HeaderAccountTriggerProps> = ({
         if (onOpenUserProfileModal) onOpenUserProfileModal();
         else onOpenAuthModal?.();
       }}
-      className="flex items-center gap-1.5 rounded-full bg-purple-100/90 px-2 py-1 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
+      className="flex h-8 items-center gap-1.5 rounded-full bg-purple-100/90 px-2 text-xs font-bold text-purple-950 border border-purple-200/80 transition-all cursor-pointer shadow-2xs hover:bg-purple-200 hover:scale-102 active:scale-95 sm:px-3"
       title="点击进入个人中心"
     >
       {photoURL ? (
@@ -109,8 +105,6 @@ export const Header: React.FC<HeaderProps> = ({
   setProjectName,
   onImageUpload,
   onLoadSample,
-  onExportJson,
-  onImportJson,
   onOpenExportModal,
   onOpenGuideModal,
   onOpenAnnouncements,
@@ -143,24 +137,10 @@ export const Header: React.FC<HeaderProps> = ({
   const [checkinPending, setCheckinPending] = useState(false);
   const [checkinMessage, setCheckinMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const jsonInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = consumeSelectedImageFile(e.target);
     if (file) onImageUpload(file);
-  };
-
-  const handleJsonChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onload = evt => {
-        if (evt.target?.result) {
-          onImportJson(evt.target.result as string);
-        }
-      };
-      reader.readAsText(file);
-    }
   };
 
   // The Worker returns the spendable balance as `availableUnits` (with
@@ -245,7 +225,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="flex items-center gap-1 whitespace-nowrap text-base font-black leading-none tracking-tight text-purple-950 sm:text-lg md:text-xl">
                 豆织<span className="text-purple-600">星格</span>
               </span>
-              <span className="hidden text-[10px] font-bold tracking-wider text-purple-400 sm:block">BEADGRID STUDIO</span>
+              <span className="hidden text-[10px] font-bold tracking-wider text-purple-600 sm:block">BEADGRID STUDIO</span>
             </div>
           </div>
 
@@ -253,7 +233,7 @@ export const Header: React.FC<HeaderProps> = ({
           <nav className="hidden md:flex items-center gap-1.5 ml-3">
             <button
               onClick={() => setCurrentTab?.('home')}
-              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+              className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
                 currentTab === 'home'
                   ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
@@ -267,7 +247,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={() => setCurrentTab?.('community')}
-              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+              className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
                 currentTab === 'community'
                   ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
@@ -281,7 +261,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={() => setCurrentTab?.('studio')}
-              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+              className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
                 currentTab === 'studio'
                   ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
@@ -295,7 +275,7 @@ export const Header: React.FC<HeaderProps> = ({
 
             <button
               onClick={() => setCurrentTab?.('largeCanvas')}
-              className={`px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
+              className={`shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-xl text-sm font-extrabold transition-all cursor-pointer relative ${
                 currentTab === 'largeCanvas'
                   ? 'text-purple-900 bg-purple-100/80 shadow-2xs'
                   : 'text-purple-700 hover:text-purple-950 hover:bg-purple-50'
@@ -312,7 +292,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex min-w-0 shrink-0 items-center gap-1.5 sm:gap-3">
           {onOpenAnnouncements && <AnnouncementBell onClick={onOpenAnnouncements} hasUnread={hasUnreadAnnouncements} />}
           {/* Header Search Input Bar */}
-          <div className="hidden lg:flex items-center relative w-48 xl:w-56">
+          <div className="hidden lg:flex items-center relative w-40 xl:w-56 2xl:w-64">
             <input
               type="text"
               value={headerSearchQuery}
@@ -325,13 +305,13 @@ export const Header: React.FC<HeaderProps> = ({
               placeholder={t('searchPlaceholder')}
               className="w-full pl-8 pr-3 py-1.5 rounded-full bg-purple-50/80 border border-purple-200/80 text-purple-950 placeholder-purple-400 font-medium text-xs focus:outline-none focus:ring-2 focus:ring-purple-400 transition-all"
             />
-            <Search className="w-3.5 h-3.5 absolute left-2.5 text-purple-500 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 text-purple-600 pointer-events-none" />
           </div>
 
           {onOpenSmartReduceModal && (
             <button
               onClick={onOpenSmartReduceModal}
-              className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors cursor-pointer"
+              className="hidden md:flex h-8 items-center gap-1.5 px-3 rounded-full text-xs font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 transition-colors cursor-pointer"
               title={isEn ? 'Feature-preserving bead saver' : '特征保真智能省豆'}
             >
               <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
@@ -342,7 +322,7 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Guide Modal Trigger */}
           <button
             onClick={onOpenGuideModal}
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold text-purple-800 hover:bg-purple-100/60 transition-all cursor-pointer"
+            className="hidden sm:flex h-8 items-center gap-1.5 px-2.5 rounded-full text-xs font-bold text-purple-800 hover:bg-purple-100/60 transition-all cursor-pointer"
             title="拼豆新手指导与功能说明"
           >
             <BookOpen className="w-3.5 h-3.5 text-purple-600" />
@@ -353,7 +333,7 @@ export const Header: React.FC<HeaderProps> = ({
           {onOpenVipModal && (
             <button
               onClick={onOpenVipModal}
-              className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer"
+              className="hidden sm:flex h-8 items-center gap-1 px-2.5 rounded-full bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-900 text-xs font-bold transition-all cursor-pointer"
             >
               <Crown className="w-3.5 h-3.5 text-amber-500 fill-amber-400" />
               <span>{t('vip')}</span>
@@ -365,7 +345,7 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => setLanguage(language === 'zh' ? 'en' : 'zh')}
             aria-label={language === 'zh' ? '切换为英文' : 'Switch to Chinese'}
             aria-pressed={language === 'en'}
-            className="text-xs font-bold px-2.5 py-1.5 rounded-xl flex items-center gap-1 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200/80 transition-all cursor-pointer shrink-0"
+            className="flex h-8 shrink-0 items-center gap-1 rounded-full border border-purple-200/80 bg-purple-50 px-2.5 text-xs font-bold text-purple-900 transition-all cursor-pointer hover:bg-purple-100"
             title={language === 'zh' ? 'Switch to English' : '切换为中文'}
           >
             <Globe className="w-3.5 h-3.5 text-purple-600 shrink-0" />
@@ -376,7 +356,7 @@ export const Header: React.FC<HeaderProps> = ({
           {currentUser ? (
             <div className="relative flex min-w-0 items-center gap-1">
               <div
-                className="flex min-h-8 items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 text-[11px] font-extrabold text-purple-900 sm:px-2.5"
+                className="flex h-8 items-center gap-1 rounded-full border border-purple-200 bg-purple-50 px-2 text-[11px] font-extrabold text-purple-900 sm:px-2.5"
                 title={`可用积分 ${availablePoints}`}
                 aria-label={`可用积分 ${availablePoints}`}
               >
@@ -388,10 +368,10 @@ export const Header: React.FC<HeaderProps> = ({
                 type="button"
                 onClick={handleCheckin}
                 disabled={checkinPending || !creditSummary}
-                className={`flex min-h-8 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-extrabold transition-colors sm:px-2.5 ${
+                className={`flex h-8 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-extrabold transition-colors sm:px-2.5 ${
                   checkinAvailable
                     ? 'border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100'
-                    : 'cursor-default border-purple-200 bg-white text-purple-400'
+                    : 'cursor-default border-purple-200 bg-white text-purple-600'
                 }`}
                 title={!creditSummary ? '正在加载积分信息' : checkinAvailable ? `每日签到 +${checkinPoints} 积分` : '今日已签到'}
                 aria-label={!creditSummary ? '正在加载积分信息' : checkinAvailable ? `每日签到，领取 ${checkinPoints} 积分` : '今日已签到'}
@@ -413,7 +393,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={handleCheckin}
-              className="flex min-h-8 shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 text-[11px] font-extrabold text-amber-900 transition-colors hover:bg-amber-100 sm:px-2.5"
+              className="flex h-8 shrink-0 items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 text-[11px] font-extrabold text-amber-900 transition-colors hover:bg-amber-100 sm:px-2.5"
               title="登录后每日签到领取积分"
               aria-label="登录后每日签到领取积分"
             >
@@ -543,31 +523,6 @@ export const Header: React.FC<HeaderProps> = ({
                 <Upload className="w-4 h-4" />
                 <span>{t('uploadImage')}</span>
               </button>
-
-              {/* Open & Save Project */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    jsonInputRef.current?.click();
-                  }}
-                  className="p-3 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <FolderOpen className="w-4 h-4 text-purple-600" />
-                  <span>{t('openProject')}</span>
-                </button>
-
-                <button
-                  onClick={() => {
-                    setIsMobileMenuOpen(false);
-                    onExportJson();
-                  }}
-                  className="p-3 rounded-2xl bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
-                >
-                  <FileJson className="w-4 h-4 text-emerald-600" />
-                  <span>{t('saveProject')}</span>
-                </button>
-              </div>
 
               {/* Design Guide */}
               <button

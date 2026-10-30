@@ -11,7 +11,9 @@
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:image-regression": "node scripts/image-regression.mjs",
-    "test:algorithm-materials": "node scripts/algorithm-material-report.mjs"
+    "test:algorithm-materials": "node scripts/algorithm-material-report.mjs",
+    "test:serial": "vitest run --no-file-parallelism",
+    "verify": "tsc --noEmit && vite build && vitest run --no-file-parallelism"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

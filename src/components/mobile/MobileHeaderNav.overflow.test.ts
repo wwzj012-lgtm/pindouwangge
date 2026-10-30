@@ -16,8 +16,6 @@ const props: MobileHeaderNavProps = {
   projectName: '本机测试',
   setProjectName: vi.fn(),
   onImageUpload: vi.fn(),
-  onExportJson: vi.fn(),
-  onImportJson: vi.fn(),
   onOpenGuideModal: vi.fn(),
   onOpenPatternsModal: vi.fn(),
   onClearCanvas: vi.fn(),

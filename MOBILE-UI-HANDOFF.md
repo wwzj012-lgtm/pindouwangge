@@ -132,7 +132,7 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/mobile/MobileWorkspace.tsx` | **底部结构重写**（核心：dock、分板条、转图/用量 tab 化） | 1/7/12 | **高** |
 | `src/components/mobile/MobileFeatureSheet.tsx` | 工具箱面板、删「参数设置」二级 tab、删 JSON 两张卡 | 1/8/10 | 中 |
 | `src/components/LargeCanvasView.tsx` | 移动端工具栏尺寸 + 默认折叠 | 1 | 中 |
-| `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4）、手机端三列缩略图（21 轮，见第 29 节） | 1/20/21 | 低 |
+| `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4）、手机端三列缩略图（见第 29 节）、详情弹窗删「框选区域副本」+ 获赞/收藏改可点（第 30 节） | 1/20/21 | 低 |
 | `src/components/CommunityPostCard.tsx` | 卡片压缩：标题不再撑 44、查看图纸 36、操作区 pt-2；手机端紧凑形态（封面 + 2 行标题 + 作者/点赞） | 20/21 | 低 |
 | `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、社区作品图改 4:3、区块内边距收紧、hero 四按钮改三级色阶（白 / 亮玻璃 / 静音玻璃，暖色只上一次）、`lg` 2×2 到 `xl` 单排 | 1/11/15/20/21 | 中 |
 | `src/utils/uploadGuards.ts` | **新增**：30MB / 4000 万像素门槛 | 19 | 低 |
@@ -1857,3 +1857,73 @@ KPI 条下沿到「制作进度」卡的间距 12px，与「制作进度」→�
 
 **本地截图注意**：`--mock-community` 造的 post 只有 `assetId`，`communityApi` 会用 `publicAssetUrl(assetId)` 重写 `imageUrl`，
 所以本地没有后端时封面是空的——这不是布局问题。验证时用 `--js` 把 `article img` 的 `src` 换成内联 SVG 占位即可。
+
+---
+
+# 30. 作品详情：删「框选区域副本」、去掉重复日期、获赞 / 收藏改可点（第二十一轮，2026-10-31）
+
+## 30.1 三件事
+
+1. 删掉详情弹窗底部的「框选区域副本」按钮（`setWorkspaceMode('crop')` 的入口），超限提示里的
+   「编辑可框选区域副本，或升级会员」同步改成「超过这个尺寸需要升级会员后才能编辑」。`workspaceMode` 收窄为 `'practice' | null`。
+2. 手机端「获赞 / 收藏」原来只是两个只读数字，现在整格就是按钮。
+3. 同一张弹窗里日期出现了三次（封面左下角黑药丸 / 作者行「发布于 …」/ 互动条第一格「发布时间 …」），现在只留作者行那一处。
+
+## 30.2 日期去重
+
+「谁发布 + 什么时候发」本来就是一组信息，合并到作者行下面即可。
+封面角标和互动条里的日期格都删掉——顺带让互动条从三格变两格，两个按钮各拿到半行宽，比原来挤在 1/3 里好点。
+
+## 30.3 互动条长什么样
+
+两格：`获赞` / `收藏`，`grid-cols-2 gap-2`，每格 `min-h-12`，整格可点。
+
+| 状态 | 点赞 | 收藏 |
+|---|---|---|
+| 未激活 | `bg-purple-50` + `border-purple-200/80`，标签 `purple-600`，数字 `purple-900`，图标空心 `purple-500` | 同左 |
+| 已激活 | `bg-rose-50` + `border-rose-200`，标签 `rose-600`，数字 `rose-700` | `bg-indigo-50` + `border-indigo-200`，标签 `indigo-600`，数字 `indigo-700` |
+| 图标 | `fill-rose-600` 实心 + `scale-110` + 5px 同色 `drop-shadow` | `fill-indigo-600` 实心 + 同上 |
+| 标签文案 | 获赞 → 已赞 | 收藏 → 已收藏 |
+
+颜色沿用桌面卡片上的既有语义（点赞 rose / 收藏 indigo），不再引入第三套色。
+
+**点亮动画**：`index.css` 里加了 `@keyframes reaction-pop`（0.8 → 1.28 → 1.1，0.34s ease-out），
+只在 class 从未激活变已激活时播放一次，停在 1.1 倍实心态。整格另有 `active:scale-[0.97]` 作为按下反馈。
+
+不做的事：未激活一律中性紫。两格如果常驻彩色，会跟下面「查看与实操」的紫色主按钮抢注意力。
+
+## 30.4 弹窗结构：先分区，再往里放东西
+
+```
+┌──────────────────────────── 弹窗 ────────────────────────────┐
+│                                            ×   ← 浮层，距边 12px    │
+├────────────────────────┬───────────────────────────────────────┤
+│  封面（1:1，contain）    │  作者 + 发布日期                        │
+│                        │  标题 / 标签 / 说明 / 尺寸               │
+│  ── 12px ──            │  获赞 / 收藏（两格按钮）                 │
+│  编辑上限提示（仅桌面）   │  ── 手机：提示块放这里 ──                │
+│                        │  查看与实操 / 载入完整图纸                │
+└────────────────────────┴───────────────────────────────────────┘
+```
+
+- **关闭键**：`absolute top-3 right-3` 浮在弹窗右上角，**不占文档流**——中间试过用 `sticky` 顶栏放它，
+  白吃 56px 高度，被否。40px 圆角方形、无描边、`bg-white/70 + backdrop-blur`：平时只有一枚浅色 X，
+  hover 才浮出 `purple-100` 底、按下变 `purple-200` 并缩到 0.95；`after:-inset-1` 把热区撑到 48px。
+  桌面上它落在右栏顶部，所以作者行加了 `pr-12` 让位。
+- **左栏** = 封面 + （桌面）编辑上限提示。提示原来在右栏，结果左边图片下方空一大块、右边挤成一列。
+- **右栏** = 三件事：这是谁的作品（作者 / 标题 / 说明 / 尺寸）、能不能互动（获赞 / 收藏）、怎么用（两个主按钮）。
+- 提示块在左栏和右栏各渲染一次（`hidden sm:block` / `sm:hidden`）：手机留在按钮上方，桌面补左栏空白。
+  `editLimitNotice` 是一个变量，两处引用同一个元素，隐藏的一端 `display:none` 不进无障碍树。
+
+## 30.5 保留了什么
+
+进入「查看与实操」后，右侧栏仍有「区域副本」标签页（`CommunityPatternWorkspace` 的 crop 模式）与配套框选工具。
+本轮只删了详情弹窗里的入口。**要连功能一起去掉**，需要同时删：那个 tab、`community-workspace__selection-tools`、
+crop 面板整段、以及 `cropCommunityPattern` 调用与相关 CSS —— 这是一次产品决策，动之前先确认。
+
+## 30.6 验证
+
+`tsc` 通过；`CommunityView.ui.test.ts` 8 条全绿（用例不锁日期文案与 class）。
+本地没有后端，`reactToCommunityPost` 必然失败，所以「已赞」态是 dev 下注入 class 截的图；
+真实点击走的是既有 `handleReaction` → `updatePattern`（第 197 行，同时刷新列表与弹窗）。
+桌面端「提示块落在图片下方」这一态也是靠注入同结构 DOM 验证的（本地 `selectedProject` 为 null 时该块不渲染）。

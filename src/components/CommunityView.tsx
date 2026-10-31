@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Crop, Crown } from 'lucide-react';
+import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Heart, Bookmark, Crown } from 'lucide-react';
 import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
@@ -82,7 +82,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const [detailMessage, setDetailMessage] = useState<string | null>(null);
   const [ownerOriginal, setOwnerOriginal] = useState<StoredPatternProject | null>(null);
   const [originalPreview, setOriginalPreview] = useState<string | null>(null);
-  const [workspaceMode, setWorkspaceMode] = useState<'practice' | 'crop' | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'practice' | null>(null);
   const detailRequestRef = useRef(0);
   const { posts: patternsState, nextCursor, isLoading, isLoadingMore, error: feedError, refresh: refreshPatterns, loadMore, updatePost } = useCommunityFeed(currentUser?.uid ?? null);
   const [sortBy, setSortBy] = useState<SortMode>('hot');
@@ -254,6 +254,15 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     }
   };
 
+
+  // 超限提示：桌面放在封面下方（那里原本空着一大块），手机仍留在按钮上方，
+  // 所以同一个元素在左栏与右栏各渲染一次，靠 hidden / sm:hidden 只显示一个。
+  const editLimitNotice = selectedProject && !canEditCommunityPattern(selectedProject, membership) ? (
+    <div role="status" className="rounded-xl border border-purple-200 bg-purple-50 p-3 text-xs leading-6 text-purple-800">
+      当前账号最多编辑 {editLimit} × {editLimit} 格。你仍可完整查看、收藏和实操；超过这个尺寸需要升级会员后才能编辑。原图不会自动缩小。
+      <button type="button" onClick={openMembership} className="mt-1 inline-flex min-h-11 items-center gap-1.5 font-bold text-purple-700"><Crown size={15} />查看会员权益</button>
+    </div>
+  ) : null;
 
   return (
     <div className="flex-1 overflow-y-auto bg-gradient-to-b from-[#F5F0FD] via-[#FAF6FE] to-[#EFE7FA] min-h-0 text-purple-950 mobile-nav-clearance lg:pb-16 [&_button]:focus-visible:outline-none [&_button]:focus-visible:ring-2 [&_button]:focus-visible:ring-purple-600 [&_button]:focus-visible:ring-offset-2">
@@ -441,30 +450,35 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       {selectedPattern && (
         <dialog ref={detailDialogRef} aria-labelledby="community-detail-title" onCancel={closeDetail}
           className="fixed inset-0 m-auto w-[calc(100%_-_2rem)] max-w-2xl max-h-[90dvh] overflow-y-auto rounded-3xl border border-purple-200 bg-white p-6 text-purple-950 shadow-2xl backdrop:bg-purple-950/50 backdrop:backdrop-blur-md">
+            {/* 关闭键：浮在弹窗右上角，不占文档流（原来那条 sticky 顶栏白吃 56px 高度）。
+                圆角方形、无描边，平时只有一枚浅色 X；hover 才浮出浅紫底，按下再深一档。
+                `after:-inset-1` 把热区撑到 48px，视觉 40px 不显大。 */}
             <button
               type="button" onClick={closeDetail}
               aria-label="关闭图纸详情"
-              className="absolute top-4 right-4 z-10 min-h-11 min-w-11 bg-white/95 p-2 text-purple-700 hover:text-purple-900 rounded-xl shadow-sm hover:bg-purple-50 cursor-pointer focus-visible:ring-2 focus-visible:ring-purple-600"
               title="关闭图纸详情"
+              className="absolute top-3 right-3 z-20 flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-xl bg-white/70 text-purple-500 backdrop-blur-sm transition-all duration-200 after:absolute after:-inset-1 after:content-[''] hover:bg-purple-100 hover:text-purple-900 active:scale-95 active:bg-purple-200 focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2"
             >
               <X className="h-5 w-5" aria-hidden="true" />
             </button>
 
             <div className="flex flex-col sm:flex-row gap-5 items-start">
-              <div className="w-full sm:w-1/2 aspect-square rounded-2xl overflow-hidden bg-purple-50 border border-purple-200 relative shrink-0">
-                <img src={originalPreview ?? selectedPattern.imageUrl} alt={selectedPattern.title} decoding="async" fetchPriority="high" className="w-full h-full object-contain [image-rendering:pixelated]" />
-                <span className="absolute bottom-3 left-3 bg-black/70 text-white font-mono text-xs lg:text-[10px] px-2.5 py-1 rounded-md">
-                  {publishedLabel(selectedPattern.publishedAt)}
-                </span>
-                {isOpeningPattern && (
-                  <div className="absolute inset-0 bg-white/70 flex items-center justify-center">
-                    <Loader2 className="w-6 h-6 text-purple-600 animate-spin" />
-                  </div>
-                )}
+              {/* 左栏 = 封面 + （桌面）编辑上限提示。图片下方原本空着一大块，把提示挪过来补位，
+                  右栏就只剩「这是谁的作品 / 能不能用 / 怎么用」三件事。 */}
+              <div className="w-full shrink-0 space-y-3 sm:w-1/2">
+                <div className="relative aspect-square overflow-hidden rounded-2xl border border-purple-200 bg-purple-50">
+                  <img src={originalPreview ?? selectedPattern.imageUrl} alt={selectedPattern.title} decoding="async" fetchPriority="high" className="h-full w-full object-contain [image-rendering:pixelated]" />
+                  {isOpeningPattern && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-white/70">
+                      <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
+                    </div>
+                  )}
+                </div>
+                <div className="hidden sm:block">{editLimitNotice}</div>
               </div>
 
               <div className="min-w-0 flex-1 space-y-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 pr-12">
                   {selectedPattern.author.photoUrl ? (
                     <img src={selectedPattern.author.photoUrl} alt={selectedPattern.author.displayName} loading="lazy" decoding="async" fetchPriority="low" className="w-7 h-7 rounded-full object-cover border" />
                   ) : (
@@ -486,25 +500,43 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 {detailMessage && <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">{detailMessage}</p>}
                 {selectedProject && <p className="text-xs text-purple-700">{selectedProject.width} × {selectedProject.height} 格 · {selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0)} 颗豆 · {new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size} 种颜色</p>}
 
-                <div className="grid grid-cols-3 gap-2 bg-purple-50 p-3 rounded-2xl border border-purple-200/80 text-center">
-                  <div>
-                    <div className="text-xs lg:text-[10px] text-purple-600">发布时间</div>
-                    <div className="text-xs font-black text-purple-900">{publishedLabel(selectedPattern.publishedAt)}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs lg:text-[10px] text-purple-600">获赞</div>
-                    <div className="text-xs font-black text-purple-900">{selectedPattern.likeCount}</div>
-                  </div>
-                  <div>
-                    <div className="text-xs lg:text-[10px] text-purple-600">收藏</div>
-                    <div className="text-xs font-black text-purple-900">{selectedPattern.favoriteCount}</div>
-                  </div>
+                {/* 互动条：获赞 / 收藏两格，各自整格可点。
+                    发布日期已经在作者行下面写过一次，这里不再重复（原来封面角标 + 作者行 +
+                    第三格各写一遍，一屏三个日期）。
+                    颜色约定：点赞 = 玫瑰 rose，收藏 = 靛蓝 indigo，与桌面卡片上的按钮同一套语义。
+                    未激活一律中性紫，只有点亮后才上色，避免和下面「查看与实操」抢注意力。 */}
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <button
+                    type="button"
+                    onClick={event => void handleReaction(event, selectedPattern, 'like')}
+                    disabled={pendingAction === `like:${selectedPattern.id}`}
+                    aria-pressed={selectedPattern.liked}
+                    aria-label={`${selectedPattern.liked ? '取消点赞' : '点赞'}：${selectedPattern.title}（${selectedPattern.likeCount}）`}
+                    className={`flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border px-1.5 py-2 transition-all duration-200 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 ${selectedPattern.liked ? 'border-rose-200 bg-rose-50' : 'border-purple-200/80 bg-purple-50 hover:border-purple-300 hover:bg-purple-100'}`}
+                  >
+                    <span className={`text-[10px] font-bold ${selectedPattern.liked ? 'text-rose-600' : 'text-purple-600'}`}>{selectedPattern.liked ? '已赞' : '获赞'}</span>
+                    <span className={`inline-flex items-center gap-1 text-base font-black ${selectedPattern.liked ? 'text-rose-700' : 'text-purple-900'}`}>
+                      <Heart size={15} aria-hidden="true" className={`shrink-0 transition-all duration-200 ${selectedPattern.liked ? 'scale-110 fill-rose-600 text-rose-600 animate-[reaction-pop_.34s_ease-out] drop-shadow-[0_0_5px_rgba(225,29,72,0.45)]' : 'scale-100 text-purple-500'}`} />
+                      {selectedPattern.likeCount}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={event => void handleReaction(event, selectedPattern, 'favorite')}
+                    disabled={pendingAction === `favorite:${selectedPattern.id}`}
+                    aria-pressed={selectedPattern.favorited}
+                    aria-label={`${selectedPattern.favorited ? '取消收藏' : '收藏'}：${selectedPattern.title}（${selectedPattern.favoriteCount}）`}
+                    className={`flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border px-1.5 py-2 transition-all duration-200 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 ${selectedPattern.favorited ? 'border-indigo-200 bg-indigo-50' : 'border-purple-200/80 bg-purple-50 hover:border-purple-300 hover:bg-purple-100'}`}
+                  >
+                    <span className={`text-[10px] font-bold ${selectedPattern.favorited ? 'text-indigo-600' : 'text-purple-600'}`}>{selectedPattern.favorited ? '已收藏' : '收藏'}</span>
+                    <span className={`inline-flex items-center gap-1 text-base font-black ${selectedPattern.favorited ? 'text-indigo-700' : 'text-purple-900'}`}>
+                      <Bookmark size={15} aria-hidden="true" className={`shrink-0 transition-all duration-200 ${selectedPattern.favorited ? 'scale-110 fill-indigo-600 text-indigo-600 animate-[reaction-pop_.34s_ease-out] drop-shadow-[0_0_5px_rgba(79,70,229,0.45)]' : 'scale-100 text-purple-500'}`} />
+                      {selectedPattern.favoriteCount}
+                    </span>
+                  </button>
                 </div>
 
-                {selectedProject && !canEditCommunityPattern(selectedProject, membership) && <div role="status" className="rounded-xl border border-purple-200 bg-purple-50 p-3 text-xs leading-6 text-purple-800">
-                  当前账号最多编辑 {editLimit} × {editLimit} 格。你仍可完整查看、收藏和实操；编辑可框选区域副本，或升级会员。原图不会自动缩小。
-                  <button type="button" onClick={openMembership} className="mt-1 inline-flex min-h-11 items-center gap-1.5 font-bold text-purple-700"><Crown size={15} />查看会员权益</button>
-                </div>}
+                <div className="sm:hidden">{editLimitNotice}</div>
                 <div className="grid gap-2 pt-2">
                   <button type="button" onClick={() => setWorkspaceMode('practice')} disabled={isOpeningPattern || !selectedProject}
                     className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50">
@@ -520,8 +552,6 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                     <Zap className="w-4 h-4" />
                     <span>{isOpeningPattern ? '正在加载原始图纸…' : selectedProject && !canEditCommunityPattern(selectedProject, membership) ? '超出当前账号编辑上限' : '载入完整图纸'}</span>
                   </button>
-                  <button type="button" disabled={isOpeningPattern || !selectedProject} onClick={() => setWorkspaceMode('crop')}
-                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-bold text-purple-700 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"><Crop size={15} />框选区域副本</button>
                 </div>
               </div>
             </div>

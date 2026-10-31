@@ -192,6 +192,13 @@ body:has(.landing-shell), body:has(.landing-shell) #root { min-height: 0; backgr
 @keyframes landing-spin { to { transform: rotate(360deg); } }
 @keyframes landing-bead-pulse { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
 
+/* 社区点赞 / 收藏：按下瞬间图标从 outline 弹成实心，停在 1.1 倍并带一圈同色光晕。 */
+@keyframes reaction-pop {
+  0% { transform: scale(.8); }
+  55% { transform: scale(1.28); }
+  100% { transform: scale(1.1); }
+}
+
 @media (min-width: 761px) {
   .landing-section, .landing-workflow, .landing-footer { width: calc(100% - 80px); max-width: none; }
 }

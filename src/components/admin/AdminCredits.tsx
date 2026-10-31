@@ -173,8 +173,8 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
         </tbody></table></div>{accounts.items.length===0 && <p>未找到符合条件的用户。</p>}
         <CreditPagination page={accountPage} total={accounts.total} loading={accountLoading} onChange={setAccountPage} label="账户" /></>}
       </section>
-      <section className="admin-credits-card" aria-label="积分调整"><h3>积分调整</h3>
-        {!uid && <p>先在用户账户列表中选择用户。</p>}{detailLoading && <p role="status">正在读取最新余额…</p>}
+      <section className="admin-credits-card" aria-label="积分调整" data-empty={!uid || undefined}><h3>积分调整</h3>
+        {!uid && <p className="admin-credits-hint">从左侧选一位用户，可查看余额明细与冻结积分，填写原因后提交调整。</p>}{detailLoading && <p role="status">正在读取最新余额…</p>}
         {detailError && <p role="alert">{detailError} <AdminButton onClick={()=>void readAccount(uid)}>重新读取</AdminButton></p>}
         {account && <><p data-credit-selected><strong>{name(account)}</strong> · {account.email} · {account.uid}</p>
           <dl className="admin-credits-balances"><div><dt>可用积分</dt><dd>{formatCreditUnits(account.availableUnits)}</dd></div><div><dt>冻结积分</dt><dd>{formatCreditUnits(account.heldUnits)}</dd></div></dl>

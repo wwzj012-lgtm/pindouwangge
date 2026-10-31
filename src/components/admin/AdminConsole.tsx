@@ -51,7 +51,7 @@ const MENU_ITEMS: MenuItem[] = [
   { id: 'roles', label: '角色与权限', group: 'system', icon: ShieldCheck },
 ];
 const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
-  dashboard: '查看用户增长、内容数据与服务运行情况。',
+  dashboard: '查看用户增长、内容数据与服务运行情况；不可用项标记为 —。',
   users: '查找用户，管理账号、会员与访问权限。',
   credits: '查看真实积分余额与消费流水，核对账户快照和原因后调整积分。',
   roles: '管理角色与权限，授权结果以服务端为准。',
@@ -90,11 +90,48 @@ function MetricCard({ label, value, detail, icon: Icon }: { label: string; value
   return <article className="admin-metric"><div className="admin-metric-head"><span>{label}</span><Icon aria-hidden="true" /></div><p className="admin-metric-value" data-metric={label}>{typeof value === 'string' ? value : formatAdminMetric(value)}</p><p>{detail}</p></article>;
 }
 function TrendChart({ label, points }: { label: string; points?: TrendPoint[] }) {
+  const [hover, setHover] = useState<number | null>(null);
   const samples = (Array.isArray(points) ? points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
-  const maximum = Math.max(1, ...samples.map(point => point.count));
-  const line = samples.map((point, index) => (samples.length === 1 ? 50 : index / (samples.length - 1) * 100) + ',' + (42 - Math.max(0, point.count) / maximum * 38)).join(' ');
-  return <article className="admin-chart"><div className="admin-chart-head"><h3>{label}</h3><span>{formatAdminMetric(samples.at(-1)?.count)}</span></div>
-    {samples.length ? <><svg viewBox="0 0 100 48" preserveAspectRatio="none" role="img" aria-label={label + '，最近' + samples.length + '个样本，末次' + formatAdminMetric(samples.at(-1)?.count)}><path d="M0 42H100" fill="none" stroke="var(--admin-border)" strokeWidth=".7" /><polyline points={line} fill="none" stroke="var(--admin-primary)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg><div className="admin-chart-axis">{samples.map(point => <span key={point.date}>{point.date.slice(5)}</span>)}</div></> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
+  const count = samples.length;
+  const peak = Math.max(0, ...samples.map(point => point.count));
+  const flat = peak === 0;
+  // 给峰值留 15% 的顶空，否则最大值那一天会顶到上边框，看着像被裁掉。
+  const scale = flat ? 1 : peak * 1.15;
+  const total = samples.reduce((sum, point) => sum + Math.max(0, point.count), 0);
+  // 92 是基线，向上 80 个单位留给最大值；顶部再留 12 给 hover 气泡。
+  const at = (index: number): [number, number] => {
+    const x = count <= 1 ? 50 : (index / (count - 1)) * 100;
+    const y = 92 - (Math.max(0, samples[index].count) / scale) * 80;
+    return [Number(x.toFixed(2)), Number(y.toFixed(2))];
+  };
+  const polyline = samples.map((_, index) => at(index).join(' ')).join(' L ');
+  const area = count ? 'M ' + at(0)[0] + ' 100 L ' + polyline + ' L ' + at(count - 1)[0] + ' 100 Z' : '';
+  return <article className="admin-chart">
+    <div className="admin-chart-head">
+      <h3>{label}</h3>
+      {count > 0 && <p><span>{count}日合计</span><strong>{formatAdminMetric(total)}</strong></p>}
+    </div>
+    {count ? <>
+      <div className="admin-chart-plot" onMouseLeave={() => setHover(null)}>
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={label + '，最近' + count + '天合计' + formatAdminMetric(total)}>
+          {[12, 52, 92].map(y => <line key={y} x1="0" y1={y} x2="100" y2={y} className="admin-chart-grid" vectorEffect="non-scaling-stroke" />)}
+          <path d={area} className="admin-chart-area" />
+          <path d={'M ' + polyline} className="admin-chart-line" vectorEffect="non-scaling-stroke" />
+          {hover !== null && <line x1={at(hover)[0]} y1="4" x2={at(hover)[0]} y2="100" className="admin-chart-cursor" vectorEffect="non-scaling-stroke" />}
+        </svg>
+        {flat && <p className="admin-chart-flat">{count} 天内没有新增</p>}
+        <div className="admin-chart-hits">
+          {samples.map((point, index) => <button key={point.date} type="button" className="admin-chart-hit"
+            aria-label={point.date + '：' + formatAdminMetric(point.count)}
+            onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)} />)}
+        </div>
+        {hover !== null && <div className="admin-chart-tip"
+          style={{ left: at(hover)[0] + '%', transform: 'translateX(' + (at(hover)[0] < 14 ? '0' : at(hover)[0] > 86 ? '-100%' : '-50%') + ')' }}>
+          <span>{samples[hover].date.slice(5)}</span><b>{formatAdminMetric(samples[hover].count)}</b>
+        </div>}
+      </div>
+      <div className="admin-chart-axis">{samples.map(point => <span key={point.date}>{point.date.slice(5)}</span>)}</div>
+    </> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
   </article>;
 }
 function Dashboard({ data, error, loading, retry }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void }) {
@@ -104,12 +141,16 @@ function Dashboard({ data, error, loading, retry }: { data: DashboardData | null
   const overview = data.overview, telemetry = data.telemetry;
   const duration = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? formatAdminMetric(Math.max(0, Math.round(value))) + ' ms' : '—';
   return <section aria-label="运营概览" aria-busy={loading}>
-    <AdminToolbar><h2>运营概览</h2><p>来自后台的汇总数据；不可用项目标记为 —。</p></AdminToolbar>
+    <AdminToolbar><h2>运营概览</h2></AdminToolbar>
     {loading && <p role="status" className="admin-muted">正在更新统计，当前结果暂时保留…</p>}
     <div className="admin-metrics"><MetricCard label="注册用户" value={overview?.totalUsers} detail={'近30天新增 ' + formatAdminMetric(overview?.newUsers30Days)} icon={Users} /><MetricCard label="活跃会员" value={overview?.activeVipUsers} detail="当前有效 VIP / Pro" icon={Crown} /><MetricCard label="图纸与社区作品" value={sumAdminMetrics(overview?.works, overview?.communityPosts)} detail={'图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts)} icon={Archive} /><MetricCard label="累计兑换" value={overview?.redeemedCodes} detail={'近24小时错误 ' + formatAdminMetric(overview?.recentErrors)} icon={KeyRound} /></div>
     <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2><p>仅统计已采集的状态变更和服务端错误，不代表所有请求。</p></AdminToolbar>
       <div className="admin-metrics"><MetricCard label="24小时成功操作" value={telemetry?.successfulActions24h} detail="仅计入已记录的状态变更" icon={Activity} /><MetricCard label="平均操作耗时" value={telemetry?.durationSamples24h > 0 ? duration(telemetry.averageDurationMs) : '—'} detail={'有效样本 ' + formatAdminMetric(telemetry?.durationSamples24h)} icon={Activity} /><MetricCard label="最大操作耗时" value={telemetry?.durationSamples24h > 0 ? duration(telemetry.maximumDurationMs) : '—'} detail="过去24小时的有效样本" icon={Activity} /><MetricCard label="24小时服务端错误" value={telemetry?.errors24h} detail={telemetry ? formatAdminMetric(telemetry.errorCodes?.length) + '类受控错误码' : '遥测暂不可用'} icon={Activity} /></div>
-      <div className="admin-telemetry"><h3>错误码分布</h3>{telemetry && Array.isArray(telemetry.errorCodes) ? telemetry.errorCodes.length ? <div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div> : <p className="admin-muted">近24小时未记录服务端错误。</p> : <p className="admin-muted">遥测数据暂不可用。</p>}</div>
+      {telemetry && Array.isArray(telemetry.errorCodes)
+        ? telemetry.errorCodes.length
+          ? <div className="admin-telemetry"><h3>错误码分布</h3><div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div></div>
+          : <p className="admin-telemetry-empty"><CheckCircle2 aria-hidden="true" />近 24 小时未记录服务端错误，错误码分布为空。</p>
+        : <p className="admin-telemetry-empty" data-tone="muted">遥测数据暂不可用，无法给出错误码分布。</p>}
     </section>
     <div className="admin-charts"><TrendChart label="用户新增趋势" points={data.trends?.days7?.users} /><TrendChart label="图纸创建趋势" points={data.trends?.days7?.works} /><TrendChart label="社区发布趋势" points={data.trends?.days7?.communityPosts} /><TrendChart label="成功操作趋势" points={data.trends?.days7?.successfulActions} /><TrendChart label="服务端错误趋势" points={data.trends?.days7?.errors} /></div>
     {Boolean(data.warnings?.length) && <div className="admin-warning" role="status"><strong>部分统计暂不可用</strong><ul>{data.warnings?.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}

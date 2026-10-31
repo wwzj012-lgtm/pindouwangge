@@ -8,6 +8,8 @@
 .admin-credits input,.admin-credits select,.admin-credits textarea { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:10px 12px; background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:44px; }
 .admin-credits input:focus-visible,.admin-credits select:focus-visible,.admin-credits textarea:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
 .admin-credits-columns { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr); gap:20px; align-items:start; }
+.admin-credits-card[data-empty] { padding:16px 20px; }
+.admin-credits-hint { color:var(--admin-muted,#6b7b72); line-height:1.6; }
 .admin-credits-card { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px; min-width:0; background:var(--admin-surface,#fff); }
 .admin-credits-table { max-width:100%; overflow-x:auto; }
 .admin-credits table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }

@@ -53,9 +53,11 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
   const close = () => { setSelected(null); requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); }); };
   const tagText = (user: AdminUser) => {
     const known = details[user.uid]?.tags ?? user.tags;
-    return known ? known.length ? known.map(tag => tag.displayName).join('、') : '无标签' : '详情可查看';
+    return known ? known.length ? known.map(tag => tag.displayName).join('、') : '无标签' : '—';
   };
-  const eligibility = (user: AdminUser) => { const view = membershipPresentation(user); return <><span className="admin-eligibility">{view.effective}</span><small>接口付费字段：{view.paid}</small><small>{view.expiry}</small>{view.caveat && <small>{view.caveat}</small>}</>; };
+  const eligibility = (user: AdminUser) => { const view = membershipPresentation(user);
+    const expiry = view.expiry === '空到期值' ? '无到期限制' : view.expiry;
+    return <><span className="admin-eligibility">{view.effective}</span><small title={'接口付费字段 ' + view.paid + ' · 原到期值 ' + view.expiry}>{expiry}</small>{view.caveat && <small>{view.caveat}</small>}</>; };
   return <section className="admin-users-page">
     <AdminToolbar actions={<AdminButton onClick={() => void load()} busy={loading}>刷新列表</AdminButton>}><h2>用户与会员</h2><p>账号限制与会员资格分开展示；查询仅在提交后生效。</p></AdminToolbar>
     <div className="admin-stage-panel admin-user-filters" role="search" aria-label="用户查询">
@@ -69,13 +71,13 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
     <div className="admin-stage-panel admin-user-results" aria-busy={loading}>
       <p className="admin-result-caption" role="status">{loading ? '正在查询；已有列表暂时保留…' : snapshot ? '已读取 ' + snapshot.total + ' 名匹配用户。' : '尚无成功读取结果。'}{snapshot && error && ' 当前展示上次成功结果：' + (snapshot.query.search || '全部用户') + '，第' + snapshot.query.page + '页。'}</p>
       {!snapshot ? loading ? <AdminLoading label="正在读取用户列表…" /> : <AdminEmptyState title="尚无可显示结果" description="请重试读取；未知总数不会显示为零。" /> : snapshot.items.length === 0 ? <AdminEmptyState title="没有匹配的用户" description="调整查询条件，或重置后重试。" action={<AdminButton onClick={reset}>重置筛选</AdminButton>} /> : <>
-        <div className="admin-users-table-wrap"><table className="admin-stage-table" aria-label="用户列表"><thead><tr><th>用户 / 账号</th><th>账号状态</th><th>会员权益 / 付费字段</th><th>标签</th><th>最近活动</th><th>操作</th></tr></thead><tbody>{snapshot.items.map(user => <tr key={user.uid} data-user-row={user.uid}>
+        <div className="admin-users-table-wrap"><table className="admin-stage-table" aria-label="用户列表"><thead><tr><th>用户 / 账号</th><th>账号状态</th><th>会员权益</th><th>标签</th><th>最近活动</th><th>操作</th></tr></thead><tbody>{snapshot.items.map(user => <tr key={user.uid} data-user-row={user.uid}>
           <td><strong>{userLabel(user)}</strong><small>{user.email}</small><small className="admin-mono">{user.uid}</small></td>
           <td><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small>限制至 {dateText(user.moderation.expiresAt)}</small>}</td>
-          <td>{eligibility(user)}</td><td><span className="admin-tag-summary">{tagText(user)}</span></td><td>{dateText(user.lastActiveAt)}{user.lastActiveAt == null && <small>接口未提供</small>}</td>
+          <td>{eligibility(user)}</td><td><span className="admin-tag-summary">{tagText(user)}</span></td><td title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>{dateText(user.lastActiveAt)}</td>
           <td><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></td>
         </tr>)}</tbody></table></div>
-        <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono">{user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p>最近活动：{user.lastActiveAt == null ? '接口未提供' : dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
+        <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono">{user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>最近活动：{dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
       </>}
       {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {adminPageCount(snapshot.total, snapshot.limit)} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= adminPageCount(snapshot.total, snapshot.limit)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
     </div>

@@ -53,10 +53,10 @@
 .admin-root .admin-account-name { max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .admin-root .admin-mobile-menu { display:none; }
 .admin-root .admin-main { max-width:1680px; margin:auto; padding:24px; }
-.admin-root .admin-toolbar { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:20px; }
-.admin-root .admin-toolbar-copy { color:var(--admin-muted); }
+.admin-root .admin-toolbar { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:14px; }
+.admin-root .admin-toolbar-copy { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; color:var(--admin-muted); }
 .admin-root .admin-toolbar-copy h2 { color:var(--admin-ink); margin:0; font-size:16px; font-weight:600; }
-.admin-root .admin-toolbar-copy p { margin:4px 0 0; }
+.admin-root .admin-toolbar-copy p { margin:0; }
 .admin-root .admin-toolbar-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .admin-root .admin-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
 .admin-root .admin-metric, .admin-root .admin-chart, .admin-root .admin-telemetry { background:var(--admin-surface); border:1px solid var(--admin-border); border-radius:8px; padding:16px; box-shadow:var(--admin-shadow); }
@@ -65,13 +65,32 @@
 .admin-root .admin-metric-value { margin:12px 0 8px; font-size:28px; line-height:1.2; font-weight:600; font-variant-numeric:tabular-nums; }
 .admin-root .admin-metric p:last-child { color:var(--admin-muted); font-size:12px; margin:0; }
 .admin-root .admin-dashboard-section { margin-top:28px; }
-.admin-root .admin-charts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin-top:24px; }
+/* 六个网格列：普通图表占 2 列（=三栏），最后两张各占 3 列（=两栏），
+   这样 5 张图刚好排成 3 + 2，第二行不会剩一个空格。 */
+.admin-root .admin-charts { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:16px; margin-top:20px; }
+.admin-root .admin-chart { grid-column:span 2; display:flex; flex-direction:column; gap:10px; }
+.admin-root .admin-chart:nth-last-child(2):nth-child(4), .admin-root .admin-chart:last-child { grid-column:span 3; }
 .admin-root .admin-chart h3, .admin-root .admin-telemetry h3 { margin:0; font-size:14px; font-weight:600; }
-.admin-root .admin-chart-head { display:flex; justify-content:space-between; gap:12px; }
-.admin-root .admin-chart-head span { color:var(--admin-muted); font-variant-numeric:tabular-nums; }
-.admin-root .admin-chart svg { height:88px; width:100%; margin-top:16px; }
-.admin-root .admin-chart-axis { display:flex; justify-content:space-between; margin-top:8px; gap:4px; color:var(--admin-muted); font-size:11px; }
+.admin-root .admin-chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+.admin-root .admin-chart-head p { display:flex; align-items:baseline; gap:6px; margin:0; color:var(--admin-muted); font-size:11px; }
+.admin-root .admin-chart-head strong { color:var(--admin-ink); font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
+.admin-root .admin-chart-plot { position:relative; height:104px; }
+.admin-root .admin-chart-plot svg { display:block; width:100%; height:100%; overflow:visible; }
+.admin-root .admin-chart-grid { stroke:var(--admin-border); stroke-dasharray:3 4; stroke-width:1; }
+.admin-root .admin-chart-area { fill:var(--admin-primary); fill-opacity:.12; }
+.admin-root .admin-chart-line { fill:none; stroke:var(--admin-primary); stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.admin-root .admin-chart-cursor { stroke:var(--admin-primary); stroke-dasharray:3 3; stroke-width:1; opacity:.6; }
+.admin-root .admin-chart-hits { position:absolute; inset:0; display:flex; }
+.admin-root .admin-chart-hit { flex:1; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer; transition:background-color 120ms; }
+.admin-root .admin-chart-hit:hover, .admin-root .admin-chart-hit:focus-visible { background:var(--admin-primary-soft); outline:none; }
+.admin-root .admin-chart-tip { position:absolute; top:-6px; z-index:2; display:flex; align-items:baseline; gap:6px; padding:3px 8px; border-radius:6px; background:var(--admin-ink); color:var(--admin-surface); font-size:11px; white-space:nowrap; pointer-events:none; box-shadow:0 4px 12px rgb(15 23 42 / .18); }
+.admin-root .admin-chart-tip b { font-size:13px; font-variant-numeric:tabular-nums; }
+.admin-root .admin-chart-flat { position:absolute; inset:0; display:grid; place-items:center; margin:0; color:var(--admin-muted); font-size:12px; pointer-events:none; }
+.admin-root .admin-chart-axis { display:flex; justify-content:space-between; gap:4px; color:var(--admin-muted); font-size:11px; }
 .admin-root .admin-telemetry { margin-top:16px; }
+.admin-root .admin-telemetry-empty { display:flex; align-items:center; gap:8px; margin:16px 0 0; padding:12px 14px; border:1px solid var(--admin-success); border-radius:8px; background:var(--admin-success-soft); color:var(--admin-success); font-size:13px; }
+.admin-root .admin-telemetry-empty svg { width:16px; height:16px; flex-shrink:0; }
+.admin-root .admin-telemetry-empty[data-tone='muted'] { border-color:var(--admin-border); background:var(--admin-subtle); color:var(--admin-muted); }
 .admin-root .admin-muted { color:var(--admin-muted); }
 .admin-root .admin-state { display:flex; min-height:160px; flex-direction:column; align-items:center; justify-content:center; gap:12px; padding:24px; text-align:center; color:var(--admin-muted); }
 .admin-root .admin-state svg { width:24px; height:24px; }
@@ -114,7 +133,7 @@
 @keyframes admin-dialog-in { from { transform:translateY(8px); } to { transform:translateY(0); } }
 @keyframes admin-drawer-in { from { transform:translateX(24px); } to { transform:translateX(0); } }
 @keyframes admin-navigation-in { from { transform:translateX(-24px); } to { transform:translateX(0); } }
-@media (max-width:1279px) { .admin-root .admin-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .admin-root .admin-charts { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:1279px) { .admin-root .admin-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .admin-root .admin-charts { grid-template-columns:repeat(2,minmax(0,1fr)); } .admin-root .admin-chart, .admin-root .admin-chart:nth-last-child(2):nth-child(4), .admin-root .admin-chart:last-child { grid-column:auto; } }
 @media (max-width:1023px) { .admin-root .admin-sidebar { display:none; } .admin-root .admin-layout { margin-left:0; } .admin-root .admin-mobile-menu { display:inline-flex; } .admin-root .admin-skip-link { left:16px; } }
 @media (max-width:639px) {
   .admin-root .admin-header { min-height:96px; padding:16px 12px; gap:8px; } .admin-root .admin-header-title { gap:8px; }

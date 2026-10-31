@@ -132,8 +132,8 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/mobile/MobileWorkspace.tsx` | **底部结构重写**（核心：dock、分板条、转图/用量 tab 化） | 1/7/12 | **高** |
 | `src/components/mobile/MobileFeatureSheet.tsx` | 工具箱面板、删「参数设置」二级 tab、删 JSON 两张卡 | 1/8/10 | 中 |
 | `src/components/LargeCanvasView.tsx` | 移动端工具栏尺寸 + 默认折叠 | 1 | 中 |
-| `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4） | 1/20 | 低 |
-| `src/components/CommunityPostCard.tsx` | 卡片压缩：标题不再撑 44、查看图纸 36、操作区 pt-2 | 20 | 低 |
+| `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4）、手机端三列缩略图（21 轮，见第 29 节） | 1/20/21 | 低 |
+| `src/components/CommunityPostCard.tsx` | 卡片压缩：标题不再撑 44、查看图纸 36、操作区 pt-2；手机端紧凑形态（封面 + 2 行标题 + 作者/点赞） | 20/21 | 低 |
 | `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、社区作品图改 4:3、区块内边距收紧、hero 四按钮改三级色阶（白 / 亮玻璃 / 静音玻璃，暖色只上一次）、`lg` 2×2 到 `xl` 单排 | 1/11/15/20/21 | 中 |
 | `src/utils/uploadGuards.ts` | **新增**：30MB / 4000 万像素门槛 | 19 | 低 |
 | `src/components/ui/panelScale.test.ts` | **新增**：尺度关系断言（5 条） | 16 | 低 |
@@ -1809,3 +1809,51 @@ const applyEstimatedPitch = useCallback(() => { ... }, [...]);   // 第 593 行
 KPI 条下沿到「制作进度」卡的间距 12px，与「制作进度」→「整合散豆」一致。
 `tsc` 通过；`panelScale` / `desktopIsolation` / `CompletionSummary.visibility` 22 条全绿。
 改动只在 `StatsPanel.tsx`，无新增契约。
+
+---
+
+# 29. 手机端豆社改三列缩略图（第二十一轮，2026-10-31）
+
+## 29.1 现象
+
+用户的两张截图：左边是手机上的豆社，一列大卡（封面 4:3 约 358×268）＋作者 / 标题 / 日期 / 标签 / 点赞收藏 / 查看图纸按钮，
+单卡接近 600px 高，一屏只放得下一张；右边是他画的示意，三个黑框并排铺满宽度。
+
+## 29.2 改法：一套 DOM，两副形态
+
+没有拆成两个组件，靠断点切：
+
+| 元素 | 手机（<640） | sm 起 |
+|---|---|---|
+| 栅格 | `grid-cols-3`，`gap-2.5` | `sm:grid-cols-2` → md 3 → lg 4 → xl 5，`sm:gap-4` |
+| 封面 | `aspect-square` | `sm:aspect-4/3` |
+| 卡片圆角 / 内边距 | `rounded-xl` / `p-2` | `sm:rounded-3xl` / `sm:p-4` |
+| 作者行（头像+名字） | 隐藏 | `sm:flex` |
+| 标题 | `text-xs` + `line-clamp-2` | `sm:text-base`、不截断 |
+| 发布日期 | 隐藏 | `sm:block` |
+| 标签 chip | 隐藏 | `sm:flex` |
+| 点赞 / 收藏 / 查看图纸 | 隐藏 | `sm:block` |
+| 手机专属 meta 行 | 作者名 + ♥ 数（只读） | 隐藏 |
+
+单卡从 358×约 600 变成 113×183，一屏能看到 2 行共 6 张，滚一屏等于原来四屏。
+
+保留 `object-contain`（不是 cover）：拼豆作品的边缘就是内容，缩略图裁掉一圈会让人误判构图。
+代价是 4:3 作品在方形格子里上下各留一点浅紫底，成排看起来仍然整齐。
+
+## 29.3 取舍：手机上不再直接点赞
+
+三列每格 113px，放不下 44px 的点赞/收藏按钮，硬塞就是违反触控红线。
+所以手机卡片只显示 **只读** 的 ♥ 数，点赞/收藏/查看图纸都进详情弹窗（点封面或标题）。
+标题按钮取消 `min-h-11`（否则两行标题也被撑到 44px）；主要触控入口是 111×111 的封面按钮。
+
+## 29.4 实测
+
+| 端 | 栅格 | 单卡 | 封面 |
+|---|---|---|---|
+| 390 | 3 列 | 113 × 183 | 111 × 111 |
+| 1440 | 5 列（262px 轨道） | 262 × 432 | 桌面形态完整：日期 / 查看图纸 / 作者都在 |
+
+`tsc` 通过；`CommunityView.ui.test.ts` 8 条全绿（该用例断言的是组件树与筛选逻辑，不锁 class）。
+
+**本地截图注意**：`--mock-community` 造的 post 只有 `assetId`，`communityApi` 会用 `publicAssetUrl(assetId)` 重写 `imageUrl`，
+所以本地没有后端时封面是空的——这不是布局问题。验证时用 `--js` 把 `article img` 的 `src` 换成内联 SVG 占位即可。

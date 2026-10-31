@@ -21,24 +21,35 @@ export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pend
   const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(post.publishedAt));
   const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2';
   return (
-    <article aria-label={post.title} className="group flex min-w-0 flex-col overflow-hidden rounded-3xl border border-purple-200/90 bg-white shadow-sm transition-shadow duration-200 hover:shadow-lg">
-      <button type="button" onClick={() => onOpen(post)} aria-label={`查看作品：${post.title}`} className={`relative block aspect-4/3 w-full overflow-hidden bg-purple-50/50 ${focus}`}>
+    <article aria-label={post.title} className="group flex min-w-0 flex-col overflow-hidden rounded-xl border border-purple-200/90 bg-white shadow-sm transition-shadow duration-200 hover:shadow-lg sm:rounded-3xl">
+      <button type="button" onClick={() => onOpen(post)} aria-label={`查看作品：${post.title}`} className={`relative block aspect-square w-full overflow-hidden bg-purple-50/50 sm:aspect-4/3 ${focus}`}>
         <img src={post.imageUrl} alt={post.title} loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-contain [image-rendering:pixelated]" />
       </button>
-      <div className="flex flex-1 flex-col p-4">
-        <div className="mb-1.5 flex min-w-0 items-center gap-2 text-xs font-bold text-purple-900">
+      <div className="flex flex-1 flex-col p-2 sm:p-4">
+        {/* 作者行：手机上让位给三列缩略图，由底部的紧凑 meta 行代替。 */}
+        <div className="mb-1.5 hidden min-w-0 items-center gap-2 text-xs font-bold text-purple-900 sm:flex">
           {post.author.photoUrl ? <img src={post.author.photoUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-6 w-6 rounded-full border border-purple-200 object-cover" />
             : <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-purple-100 text-purple-700">{post.author.displayName.slice(0, 1).toUpperCase() || '豆'}</span>}
           <span className="min-w-0 truncate">{post.author.displayName}</span>
         </div>
-        <h3 className="text-sm sm:text-base font-extrabold leading-snug text-purple-950">
-          <button type="button" onClick={() => onOpen(post)} className={`min-h-11 sm:min-h-0 w-full break-words rounded-lg text-left hover:text-purple-700 ${focus}`}>{post.title}</button>
+        <h3 className="text-xs font-extrabold leading-snug text-purple-950 sm:text-base">
+          <button type="button" onClick={() => onOpen(post)} className={`block w-full break-words line-clamp-2 rounded-lg text-left hover:text-purple-700 sm:line-clamp-none ${focus}`}>{post.title}</button>
         </h3>
-        <p className="text-xs leading-relaxed text-purple-700">发布于 {date}</p>
-        {tags.length > 0 && <ul aria-label="作品标签" className="mt-2 flex flex-wrap gap-1.5">
+        <p className="hidden text-xs leading-relaxed text-purple-700 sm:block">发布于 {date}</p>
+        {tags.length > 0 && <ul aria-label="作品标签" className="mt-2 hidden flex-wrap gap-1.5 sm:flex">
           {tags.map(tag => <li key={tag} className="max-w-full break-words rounded-md border border-purple-200/80 bg-purple-50 px-2 py-1 text-xs font-medium text-purple-800">#{tag}</li>)}
         </ul>}
-        <div className="mt-auto pt-2">
+
+        {/* 手机三列卡片的信息下限：作者 + 点赞数（只读，点整卡看详情）。 */}
+        <div className="mt-auto flex items-center justify-between gap-1 pt-1.5 text-[10px] text-purple-600 sm:hidden">
+          <span className="min-w-0 truncate font-bold">{post.author.displayName}</span>
+          <span className="inline-flex shrink-0 items-center gap-0.5 font-bold">
+            <Heart size={10} aria-hidden="true" className={post.liked ? 'fill-current text-rose-600' : ''} />
+            {post.likeCount}
+          </span>
+        </div>
+
+        <div className="mt-auto hidden pt-2 sm:block">
           <div className="flex flex-wrap items-center gap-1 border-t border-purple-100 pt-2">
             <button type="button" onClick={event => onReaction(event, post, 'like')} disabled={pending} aria-pressed={post.liked}
               aria-label={`${post.liked ? '取消点赞' : '点赞'}：${post.title}（${post.likeCount}）`}

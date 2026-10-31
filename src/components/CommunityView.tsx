@@ -417,7 +417,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           </div>
         ) : (
           <>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4 my-4">
+          {/* 手机上三列缩略图：作品图是内容主体，一列大卡一屏只放得下一张。
+              三列时卡片只留封面 + 标题 + 作者/点赞，完整信息在详情里。 */}
+          <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-4 my-4">
             {filteredPatterns.map(pattern => (
               <CommunityPostCard key={pattern.id} post={pattern} pending={pendingAction !== null}
                 onOpen={pattern => void openPattern(pattern)} onReaction={(event, post, reaction) => void handleReaction(event, post, reaction)} />

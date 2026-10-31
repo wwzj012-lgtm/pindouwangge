@@ -206,9 +206,125 @@
   overflow:auto
 }
 .ir-upload {
-  max-width:760px;
+  max-width:1100px;
   margin:0 auto;
-  padding:clamp(32px,7vh,80px) 24px
+  padding:clamp(20px,3.5vh,44px) 24px;
+  display:grid;
+  grid-template-columns:minmax(0,1.4fr) minmax(280px,.6fr);
+  gap:clamp(24px,4vw,56px);
+  align-items:start
+}
+.ir-autocorrect-toggles {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  margin:10px 0 2px
+}
+.ir-autocorrect {
+  border-left:3px solid var(--ir-purple);
+  padding:6px 0 6px 10px;
+  color:var(--ir-ink) !important;
+  background:var(--ir-tint);
+  border-radius:0 8px 8px 0
+}
+.ir-autocorrect strong {
+  font-weight:600
+}
+.ir-autocorrect span {
+  display:block;
+  margin-top:2px;
+  font-size:11.5px;
+  color:var(--ir-muted)
+}
+.ir-upload-main {
+  min-width:0
+}
+.ir-upload-aside {
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+  padding-top:6px
+}
+.ir-fact-card {
+  border:1px solid var(--ir-line);
+  border-radius:16px;
+  background:var(--ir-surface);
+  padding:16px 18px
+}
+.ir-fact-card h3 {
+  margin:0 0 10px;
+  font-size:13px;
+  font-weight:600;
+  letter-spacing:.01em;
+  color:var(--ir-ink)
+}
+.ir-flow {
+  margin:0;
+  padding:0;
+  list-style:none;
+  display:flex;
+  flex-direction:column;
+  gap:10px
+}
+.ir-flow li {
+  display:flex;
+  gap:10px;
+  align-items:flex-start;
+  font-size:12.5px;
+  line-height:1.5;
+  color:var(--ir-muted)
+}
+.ir-flow b {
+  flex:none;
+  width:20px;
+  height:20px;
+  border-radius:6px;
+  display:grid;
+  place-items:center;
+  background:var(--ir-tint);
+  color:var(--ir-purple);
+  font-size:11px;
+  font-weight:600
+}
+.ir-flow strong {
+  display:block;
+  color:var(--ir-ink);
+  font-weight:600;
+  font-size:12.5px
+}
+.ir-facts {
+  margin:0;
+  padding:0;
+  list-style:none;
+  display:flex;
+  flex-direction:column;
+  gap:8px
+}
+.ir-facts li {
+  display:flex;
+  gap:8px;
+  font-size:12.5px;
+  line-height:1.5;
+  color:var(--ir-muted)
+}
+.ir-facts li::before {
+  content:"";
+  flex:none;
+  width:5px;
+  height:5px;
+  margin-top:7px;
+  border-radius:50%;
+  background:var(--ir-purple);
+  opacity:.5
+}
+@media (max-width:900px) {
+  .ir-upload {
+    grid-template-columns:1fr;
+    gap:24px
+  }
+  .ir-upload-aside {
+    padding-top:0
+  }
 }
 .ir-upload h2 {
   font-size:clamp(26px,4vw,38px);

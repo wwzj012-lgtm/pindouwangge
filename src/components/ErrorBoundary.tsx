@@ -39,6 +39,14 @@ export class ErrorBoundary extends Component {
     console.error('[ErrorBoundary]', error, info.componentStack);
   }
 
+  /** 把错误信息交给用户/开发者，省掉"截图里只有一句通用文案"的来回。 */
+  private handleCopy = () => {
+    const { error } = this.state;
+    if (!error) return;
+    const text = `${error.name}: ${error.message}\n${error.stack ?? ''}`;
+    void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
+
   private handleReset = () => {
     if (this.props.reloadOnReset) {
       window.location.reload();
@@ -69,6 +77,15 @@ export class ErrorBoundary extends Component {
           >
             <RotateCcw className="h-3.5 w-3.5" />
             <span>{this.props.reloadOnReset ? '刷新页面' : '重新载入此界面'}</span>
+          </button>
+          {/* 只给"复制"，不在卡片里渲染原始报错：既守住"不泄露内部信息"的既有契约，
+              又免得用户只能截一张只有通用文案的图，谁也判断不了是什么崩的。 */}
+          <button
+            type="button"
+            onClick={this.handleCopy}
+            className="mx-auto block text-[11px] font-bold text-purple-400 underline underline-offset-2 transition-colors hover:text-purple-600 cursor-pointer"
+          >
+            复制错误信息
           </button>
         </div>
       </div>

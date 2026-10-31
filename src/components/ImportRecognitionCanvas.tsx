@@ -142,8 +142,14 @@ export function ImportRecognitionCanvas({ image, result, selected, pending, only
             context.strokeStyle = '#f59e0b';
             context.lineWidth = 1.5 / view.zoom;
             context.strokeRect(column * cellWidth + 1 / view.zoom, row * cellHeight + 1 / view.zoom, cellWidth - 2 / view.zoom, cellHeight - 2 / view.zoom);
+          } else if (screenCellWidth >= 3) {
+            // 缩小到一格只有 3~5 像素时，整格描边会连成一片橙色网格，反而看不清图。
+            // 改画左上角一个小方块：一眼能看出"这一片待核对得比较多"，又不遮颜色。
+            const dot = Math.max(1.5, cellWidth * 0.34);
+            context.fillStyle = '#f59e0b';
+            context.fillRect(column * cellWidth, row * cellHeight, dot, dot);
           } else {
-            context.fillStyle = 'rgba(245, 158, 11, .55)';
+            context.fillStyle = 'rgba(245, 158, 11, .6)';
             context.fillRect(column * cellWidth, row * cellHeight, cellWidth, cellHeight);
           }
         }

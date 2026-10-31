@@ -46,8 +46,22 @@ import {
   type ImportRecognitionMode,
   type ImportRecognitionResult,
 } from '../utils/importRecognition';
+import { describeGains } from '../utils/importColorBalance';
+import { estimateBeadPitch } from '../utils/importGridPitch';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
+
+/** 把"这次自动做了什么"翻译成一句人话；没有触发就返回空字符串。 */
+function describeAutoCorrection(result: ImportRecognitionResult | null): string {
+  const info = result?.autoCorrection;
+  if (!info) return '';
+  const parts: string[] = [];
+  if (info.colorGains) parts.push(describeGains(info.colorGains));
+  if (info.gridOffset.x !== 0 || info.gridOffset.y !== 0) {
+    parts.push(`网格整体偏移已校正 ${info.gridOffset.x.toFixed(2)} / ${info.gridOffset.y.toFixed(2)} 格`);
+  }
+  return parts.join('；');
+}
 const SUPPORTED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 type PaletteChoice = Exclude<BrandKey, 'CUSTOM'> | 'ACTIVE';
 const BUILT_IN_BRANDS = BRAND_ORDER.filter((brand): brand is Exclude<BrandKey, 'CUSTOM'> => brand !== 'CUSTOM');
@@ -105,6 +119,12 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const [paletteChoice, setPaletteChoice] = useState<PaletteChoice>(() => initialPaletteChoice(activePalette));
   const [localPalette, setLocalPalette] = useState<BeadColor[]>(activePalette);
   const [edgeInsetRatio, setEdgeInsetRatio] = useState(0);
+  // 三项都默认关闭：网格对准、图是数字原图时，任何"额外校正"都只会把颜色推偏。
+  const [beadPhoto, setBeadPhoto] = useState(false);
+  const [smoothNoise, setSmoothNoise] = useState(false);
+  const [pitchHint, setPitchHint] = useState<string | null>(null);
+  const [autoColorBalance, setAutoColorBalance] = useState(false);
+  const [autoAlign, setAutoAlign] = useState(false);
   const [corrections, setCorrections] = useState<ImportRecognitionCorrections>({});
   const [backgroundHistory, setBackgroundHistory] = useState<string[][]>([]);
   const [backgroundColorId, setBackgroundColorId] = useState('');
@@ -372,7 +392,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         undefined,
         { signal: controller.signal, onProgress: value => {
           if (mountedRef.current && openRef.current && recognitionControllerRef.current === controller && !controller.signal.aborted) setRecognitionProgress(Math.floor(value));
-        }, batchSize: 256, edgeInsetRatio },
+        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise },
       );
       if (!mountedRef.current || !openRef.current || recognitionControllerRef.current !== controller || controller.signal.aborted) return;
       setRecognition(result);
@@ -393,7 +413,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         setIsRecognizing(false);
       }
     }
-  }, [localPalette, edgeInsetRatio, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
+  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
 
   const backgroundCorrections = useMemo(() => recognitionBackgroundCorrections(backgroundHistory), [backgroundHistory]);
   const effectiveCorrections = useMemo(() => ({ ...corrections, ...backgroundCorrections }), [corrections, backgroundCorrections]);
@@ -563,6 +583,40 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setDrafts(current => current ? { ...current, [key]: value } : current);
   };
 
+  /**
+   * 按豆距估算格数。
+   *
+   * 用户最容易在这里出错：网格线看上去是对齐的，但格数只有实际豆数的一半，
+   * 每格摊上 4~5 颗豆——颜色被平均，结果必然糊，而且从网格上完全看不出来。
+   * 这里只做"建议 + 一键套用"，置信度低时只提示不套用。
+   */
+  // 注意：这里不能用 useCallback。组件在上方有 `if (!isOpen) return null`，
+  // 任何写在这个提前返回之后的 Hook 都会让"打开/关闭"两条渲染路径的钩子数量不一致，
+  // 触发 "Rendered more hooks than during the previous render" 并整页崩到 ErrorBoundary。
+  const applyEstimatedPitch = () => {
+    if (!imageElement || !imageDimensions || !alignment) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = imageDimensions.width;
+    canvas.height = imageDimensions.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(imageElement, 0, 0);
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+    const estimate = estimateBeadPitch({ data, width: canvas.width, height: canvas.height });
+    if (!estimate) {
+      setPitchHint('没能估算豆距：图片太小或图案过于平滑，请手动填方格边长。');
+      return;
+    }
+    const summary = `检测到豆距约 ${estimate.cell.toFixed(1)} px（约 ${estimate.columns} × ${estimate.rows} 格），置信度 ${(estimate.confidence * 100).toFixed(0)}%`;
+    if (estimate.confidence < 0.15) {
+      setPitchHint(`${summary}。置信度太低，没有套用，请手动微调。`);
+      return;
+    }
+    setAlignmentValue({ ...alignment, cellSize: estimate.cell });
+    updateDraft('cellSize', String(Number(estimate.cell.toFixed(1))));
+    setPitchHint(`${summary}。已套用到方格边长。`);
+  };
+
   const renderNumberField = (key: keyof NumericDrafts, label: string, min: number | undefined, max: number | undefined, stepValue: number) => (
     <label className="min-w-0 space-y-1">
       <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">{label}</span>
@@ -610,11 +664,38 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     </nav>
     <main className="ir-main">
       {step === 'upload' ? <section className="ir-upload">
+        <div className="ir-upload-main">
         <span className="ir-eyebrow">COLOR RECOGNITION</span><h2>从一张图纸，<br />还原每一格的颜色。</h2><p>选择已有的网格图纸，对齐实际行列，识别本地色板中的颜色代码，再用原图逐格核对。</p>
         <div className="ir-upload-drop" data-dragging={isDraggingFile} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFile(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFile(false); }} onDrop={event => { event.preventDefault(); setIsDraggingFile(false); loadFile(event.dataTransfer.files[0]); }}>
           <ImagePlus size={35} strokeWidth={1.4} /><h3>拖入图纸，或从本地选择</h3><p>PNG / JPG / WebP · 最大 15 MB</p><button type="button" className="ir-button ir-primary" onClick={() => fileInputRef.current?.click()}><Upload size={16} />选择本地图片</button>
         </div><p className="ir-upload-note"><Lock size={16} className="shrink-0" />图片只在本次浏览器会话内处理。识别结果可复核、修正，并复制为颜色代码矩阵。</p>
         {status && <p role={status.tone === 'error' ? 'alert' : 'status'} className="ir-status" data-tone={status.tone}>{status.message}</p>}
+        </div>
+        <aside className="ir-upload-aside" aria-label="识别流程与素材要求">
+          <div className="ir-fact-card">
+            <h3>三步完成</h3>
+            <ol className="ir-flow">
+              <li><b>1</b><span><strong>导入图纸</strong>支持 PNG / JPG / WebP，最大 15 MB</span></li>
+              <li><b>2</b><span><strong>校准网格</strong>拖动红点对齐位置、蓝点调整格距</span></li>
+              <li><b>3</b><span><strong>识别与复核</strong>自动标出可疑格，可逐格手改</span></li>
+            </ol>
+          </div>
+          <div className="ir-fact-card">
+            <h3>识别会自动处理这些情况</h3>
+            <ul className="ir-facts">
+              <li>格线、抗锯齿、混色：按面积加权，先按色号分组再比主色</li>
+              <li>成品照片：中心孔洞与反光会按亮度裁掉，整片偏暗按画面白点归一</li>
+              <li>整体偏色、网格偏移：需要手动勾选，且只在能被验证时才生效</li>
+            </ul>
+          </div>
+          <div className="ir-fact-card">
+            <h3>隐私</h3>
+            <ul className="ir-facts">
+              <li>图片只在本次浏览器会话内处理，不上传服务器</li>
+              <li>识别结果可复核、修正，并复制为颜色代码矩阵</li>
+            </ul>
+          </div>
+        </aside>
       </section> : imageDimensions && alignment && region && imageUrl && <div className="ir-layout">
         <section className="ir-stage" aria-label="图纸预览">
           <header className="ir-stage-header"><div className="ir-file-info"><strong title={imageName}>{imageName}</strong><small>{imageDimensions.width} × {imageDimensions.height} px · {gridSummary}</small></div><span className="ir-badge">{step === 'calibrate' ? '网格校准' : paletteLabel}</span></header>
@@ -633,6 +714,8 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
             <div className="ir-calibration-readout"><span>当前方格边长</span><strong>{Number(alignment.cellSize.toFixed(1))}<small> px</small></strong><span className="ir-calibration-min">最小 5 px</span></div>
             <details className="ir-details"><summary>精细调整</summary><div className="ir-compact-grid ir-pitch-field">{renderNumberField('cellSize', '方格边长 px', 5, 512, .1)}</div><label className="ir-inset">键盘微调步长<select aria-label="微调步长" value={adjustmentStep} onChange={event => setAdjustmentStep(Number(event.target.value))}><option value={.1}>0.1 像素</option><option value={1}>1 像素</option><option value={10}>10 像素</option></select></label><div className="ir-adjust-row" role="group" aria-label="平移网格微调"><button type="button" className="ir-icon-button" aria-label="网格左移" onClick={() => nudgeGrid(-1, 0)}><ArrowLeft size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格上移" onClick={() => nudgeGrid(0, -1)}><ArrowUp size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格下移" onClick={() => nudgeGrid(0, 1)}><ArrowDown size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格右移" onClick={() => nudgeGrid(1, 0)}><ArrowRight size={16} /></button></div></details>
             <details className="ir-details"><summary>精确调整网格锚点</summary><div className="ir-compact-grid">{renderNumberField('originX', '锚点 X px', undefined, undefined, .1)}{renderNumberField('originY', '锚点 Y px', undefined, undefined, .1)}</div><p className="ir-help">锚点可超出图片边界，所有坐标均为原图像素。</p></details>
+            <button type="button" className="ir-text-button" onClick={applyEstimatedPitch}>按豆距自动估算格数</button>
+            {pitchHint && <p className="ir-help" role="status">{pitchHint}</p>}
             <button type="button" className="ir-text-button" onClick={resetCalibration}>重置为 5 px 网格</button>
             <details className="ir-details"><summary>精确调整识别区域</summary><div className="ir-compact-grid">{renderRegionNumberField('x', '识别区域 X px', imageDimensions.width)}{renderRegionNumberField('y', '识别区域 Y px', imageDimensions.height)}{renderRegionNumberField('width', '识别区域宽度 px', imageDimensions.width)}{renderRegionNumberField('height', '识别区域高度 px', imageDimensions.height)}</div><p className="ir-help">矩形范围独立于网格相位，超出图片的部分会裁去。</p></details>
             <div className="ir-coverage" aria-live="polite" aria-atomic="true"><div className="ir-section-title"><h3>识别区域内完整格</h3><span className="ir-review-count">{calibration ? `${calibration.columns * calibration.rows} 格` : '0 格'}</span></div><div className="ir-stats"><div><strong>{calibration?.columns ?? '—'}</strong><span>实际列数</span></div><div><strong>{calibration?.rows ?? '—'}</strong><span>实际行数</span></div></div><p className="ir-help">橙框 {Number((derived?.region.width ?? 0).toFixed(2))} × {Number((derived?.region.height ?? 0).toFixed(2))} px · 绿色区域为实际识别范围。仅纳入完整方格，边缘不足一格的像素不参与识别。</p>{derived?.error && <p className="ir-status" data-tone="error" role="alert">{derived.error}</p>}</div>
@@ -642,6 +725,19 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
               <div className="ir-mode-buttons" role="group" aria-label="识别模式">{(['fast', 'precision'] as const).map(mode => <button type="button" key={mode} aria-pressed={recognitionMode === mode} onClick={() => { if (mode !== recognitionMode) { invalidateRecognition(); setRecognitionMode(mode); setStatus({ tone: 'neutral', message: '识别模式已更新，请重新识别。' }); } }}><strong>{mode === 'fast' ? '快速识别' : '高精度识别'}</strong><small>{mode === 'fast' ? '均匀采样 · 估算占比' : '像素面积 · 主色占比'}</small></button>)}</div>
               <label className="ir-inset">忽略边线<select aria-label="忽略边线" value={edgeInsetRatio} onChange={event => { invalidateRecognition(); setEdgeInsetRatio(Number(event.target.value)); setStatus({ tone: 'neutral', message: '忽略边线设置已更新，请重新识别。' }); }}><option value={0}>关闭 · 整格</option><option value={.05}>每边 5%</option><option value={.1}>每边 10%</option><option value={.15}>每边 15%</option></select></label>
               <p className="ir-help">按有效像素面积选择占比最高的色板颜色。忽略边线时仅统计每格内部区域；透明像素不参与占比。</p>
+              <div className="ir-autocorrect-toggles">
+                <label className="ir-check"><input type="checkbox" checked={beadPhoto} onChange={event => { invalidateRecognition(); setBeadPhoto(event.target.checked); }} />实物照片模式（拍下来的成品豆板）</label>
+                <label className="ir-check"><input type="checkbox" checked={autoColorBalance} onChange={event => { invalidateRecognition(); setAutoColorBalance(event.target.checked); }} />校正整体色偏（需要画面里有白色或灰白区域）</label>
+                <label className="ir-check"><input type="checkbox" checked={autoAlign} onChange={event => { invalidateRecognition(); setAutoAlign(event.target.checked); }} />对齐整体偏移（整张图都框歪了再用）</label>
+                <label className="ir-check"><input type="checkbox" checked={smoothNoise} onChange={event => { invalidateRecognition(); setSmoothNoise(event.target.checked); }} />去除杂色（糊掉的孤立格按周围多数修正）</label>
+              </div>
+              <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、并按画面白点归一曝光。</p>
+              {recognition && describeAutoCorrection(recognition) && (
+                <p className="ir-help ir-autocorrect" role="status">
+                  <strong>本次自动校正：</strong>{describeAutoCorrection(recognition)}
+                  <span>（抽样 {recognition.autoCorrection?.sampledCells ?? 0} 格估计；关闭校正可在识别设置里取消勾选）</span>
+                </p>
+              )}
             </section>
             {recognition && effectiveRecognition && <>
               <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats" aria-label="当前结果统计"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>总用豆数</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}

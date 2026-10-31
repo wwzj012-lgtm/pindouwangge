@@ -14,3 +14,7 @@ artifacts/
 
 # WorkBuddy 本地工作记忆（不进仓库）
 .workbuddy/
+
+# 本地 AI 记忆与实验产出（不进仓库）
+.ai-memory/
+scripts/lab/out/

@@ -142,6 +142,8 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/ErrorBoundary.test.ts` | **新增**：边界契约（必须有 `getDerivedStateFromError`） | 19 | 低 |
 | `src/utils/uploadGuards.test.ts` | **新增**：门槛单测（5 条） | 19 | 低 |
 | `src/data/brandCatalog.browser.test.ts` | 只改探针锚点字符串，未改断言 | 1 | 低 |
+| `src/components/UserProfileModal.tsx` / `.css` | 个人中心四 tab；图库元信息压成一行、操作按钮手机 2×2 / 桌面一行（见第 31 节） | 21 | 中 |
+| `src/components/BeadInventoryPanel.tsx` | 豆仓；低库存只提示临界色、保存改图标键、移动端卡片压缩（见第 31 节） | 21 | 中 |
 | `package.json` | 新增 `test:serial` / `verify` | 19 | 低 |
 
 > 风险列的判断标准：**高** = 改了要跑一遍真机/浏览器回归；**中** = 影响两端布局但有用例兜底；**低** = 局部且无共享状态。
@@ -1927,3 +1929,54 @@ crop 面板整段、以及 `cropCommunityPattern` 调用与相关 CSS —— 这
 本地没有后端，`reactToCommunityPost` 必然失败，所以「已赞」态是 dev 下注入 class 截的图；
 真实点击走的是既有 `handleReaction` → `updatePattern`（第 197 行，同时刷新列表与弹窗）。
 桌面端「提示块落在图片下方」这一态也是靠注入同结构 DOM 验证的（本地 `selectedProject` 为 null 时该块不渲染）。
+
+---
+
+# 31. 我的图库 / 豆仓：按钮不再丢、卡片不再挤（第二十一轮，2026-10-31）
+
+## 31.1 图库：手机端「按钮不见了」的真因
+
+`UserProfileModal.css` 有一条 `@media(max-width:767px)` 写死了 `.profile-card-grid { grid-template-columns:repeat(2,...) }`，
+它压过 Tailwind 的 `grid-cols-1`，于是手机上每张卡只有 176px 宽。同一条规则里还有：
+
+```css
+.profile-pattern-card button { font-size:10px; gap:3px; }
+.profile-pattern-card button svg { display:none; }   /* ← 所有按钮图标被抹掉 */
+```
+
+四个操作按钮（编辑 / 发布 / 删除本机副本 / 删除云端）在这个宽度里被 `flex-wrap` 拆成两行、字挤到 10px、图标全消失——
+这就是「有的功能按键不见了」。
+
+改法：
+
+| 元素 | 改前 | 改后 |
+|---|---|---|
+| 元信息 | 更新时间一行、发布状态一行、同步状态一行（3 行约 70px） | `10/27 · 未发布 · 已同步` 一行，日期省年份、`title` 里留完整日期 |
+| 操作区 | `flex flex-wrap` + `flex-1`，176px 里乱折 | `grid grid-cols-2`（手机 2×2）+ `sm:flex`；按钮 `w-full sm:w-auto sm:flex-1` |
+| 图标 | `display:none` | 恢复，12px |
+| 按钮字号 | 10px | 11px |
+
+单卡从约 380px 降到约 305px，且四颗按钮等宽、两行两列，不再有被压成竖条的字。
+桌面端仍是 3 列、四按钮一行平分。
+
+## 31.2 豆仓：291 张卡各喊一遍「低库存」
+
+MARD-291 有 291 个色号，没录入的库存都是 0，而旧逻辑是 `count <= threshold` 就显示提示，于是**几乎每张卡**底下都挂着
+「低库存 · ≤100 粒」——291 条重复文案，是这一页最大的噪音。同时「低库存色号」统计把 291 全算进去，数字没有意义。
+
+改法：
+
+- 提示只在 `0 < count ≤ alertThreshold` 时出现，文案改成一条橙色小条：`仅剩 60 粒 · 低于 100 提醒线`；
+  `count === 0` 和库存充足都不渲染任何东西。
+- 统计与「低库存」筛选用同一条件，排除 0。
+- 「保存」原来在手机上被 `width:100%` 拉成一条灰色横杠；改成 44×44 图标键（✓），常态有浅紫底、禁用时变淡。
+- 输入行 `label { flex:1 1 0 }` + `input { min-width:0 }`，让 `[输入][粒][✓]` 稳定待在一行（原来 input 的 max-content 把它们挤下去）。
+- 移动端色块 54→44、卡片 `gap 6 / padding 8`、批量区数量框与三个批量按钮同一行。
+
+## 31.3 验证
+
+`npm run verify` 全绿：140 文件 / 1590 passed / 2 skipped。
+两个浏览器用例依然通过（豆仓 77 项含 phone touch targets / no horizontal overflow；个人中心 110 项含 390 与 1280 两种宽度）。
+
+**本地怎么验的**：这两个页面都要登录才能打开，本地没有账号，所以卡片样式是把同一套 class 注入空白页、在 390 与 1440 两个宽度下截图核对的；
+DOM 结构与 CSS 选择器与真实组件一致，但**真实数据下的最终观感仍要在线上确认一次**。

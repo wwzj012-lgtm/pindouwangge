@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useSyncExternalStore } from 'react';
+import { Check } from 'lucide-react';
 import { BRAND_NAMES, BRAND_PALETTES } from '../data/palettes';
 import type { BrandKey } from '../types';
 import {
@@ -25,7 +26,7 @@ function QuantityInput({ count, code, onSave }: { count: number; code: string; o
         value={draft} aria-invalid={!valid} onChange={event => setDraft(event.target.value)} />
     </label>
     <span>粒</span>
-    <button type="submit" disabled={!valid || !changed} aria-label={`保存 ${code} 库存`}>保存</button>
+    <button type="submit" disabled={!valid || !changed} aria-label={`保存 ${code} 库存`} title="保存"><Check className="h-4 w-4" aria-hidden="true" /></button>
     {!valid && <small role="alert">请输入 0–1,000,000 的整数</small>}
   </form>;
 }
@@ -47,7 +48,7 @@ export function BeadInventoryPanel({ requireLogin }: { requireLogin: () => boole
   const query = search.trim().toLowerCase();
   const filtered = rows.filter(row => (!query || `${row.code} ${row.name}`.toLowerCase().includes(query))
     && (group === 'all' || groupOf(row.code) === group)
-    && (status === 'all' || (status === 'in_stock' ? row.count > 0 : row.count <= row.alertThreshold)));
+    && (status === 'all' || (status === 'in_stock' ? row.count > 0 : row.count > 0 && row.count <= row.alertThreshold)));
   const pages = Math.max(1, Math.ceil(filtered.length / INVENTORY_PAGE_SIZE));
   const currentPage = Math.min(page, pages - 1);
   const visible = filtered.slice(currentPage * INVENTORY_PAGE_SIZE, (currentPage + 1) * INVENTORY_PAGE_SIZE);
@@ -82,7 +83,7 @@ export function BeadInventoryPanel({ requireLogin }: { requireLogin: () => boole
     <div className="bead-stock__stats" aria-label="当前品牌库存统计">
       <div><strong>{rows.reduce((sum, row) => sum + row.count, 0).toLocaleString()}</strong><span>本品牌库存 · 粒</span></div>
       <div><strong>{rows.filter(row => row.count > 0).length} / {rows.length}</strong><span>有库存色号</span></div>
-      <div><strong>{rows.filter(row => row.count <= row.alertThreshold).length}</strong><span>低库存色号</span></div>
+      <div><strong>{rows.filter(row => row.count > 0 && row.count <= row.alertThreshold).length}</strong><span>低库存色号</span></div>
     </div>
     <label className="bead-stock__search">搜索当前品牌
       <input type="search" placeholder="搜索色号或名称" value={search}
@@ -117,7 +118,7 @@ export function BeadInventoryPanel({ requireLogin }: { requireLogin: () => boole
           <button aria-label={`${row.code} 减少100粒`} disabled={row.count === 0} onClick={() => edit([row.colorId], -100, 'delta')}>−100</button>
           <button aria-label={`${row.code} 增加100粒`} disabled={row.count >= MAX_BEAD_COUNT} onClick={() => edit([row.colorId], 100, 'delta')}>+100</button>
         </div>
-        <small>{row.count <= row.alertThreshold ? `低库存 · ≤${row.alertThreshold} 粒` : '库存充足'}</small>
+        {row.count > 0 && row.count <= row.alertThreshold && <small className="bead-stock__low">仅剩 {row.count} 粒 · 低于 {row.alertThreshold} 提醒线</small>}
         {row.inventoryKeys.length > 1 && <small>旧重复记录取较小值；编辑会同步数量</small>}
       </article>)}
     </div>

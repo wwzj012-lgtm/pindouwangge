@@ -59,8 +59,7 @@
  .profile-card-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
  .profile-pattern-card > .p-3\.5 { padding:10px; }
  .profile-pattern-card .border-t { gap:3px; }
- .profile-pattern-card button { font-size:10px; gap:3px; }
- .profile-pattern-card button svg { display:none; }
+ .profile-pattern-card button { font-size:11px; gap:4px; }
  .profile-library-heading { flex-direction:row; align-items:center; gap:8px; }
  .profile-library-heading button { align-self:center; flex-shrink:0; }
  .profile-library-heading h3 { font-size:14px; }
@@ -98,11 +97,15 @@
 .bead-stock__swatch strong { color:#403148; background:#fffffff0; padding:3px 8px; border-radius:5px; font-size:13px; }
 .bead-stock__card h4 { color:#766680; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .bead-stock__quantity { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
-.bead-stock__quantity label { flex:1; }
-.bead-stock__quantity input { padding:6px; text-align:center; font-weight:700; }
-.bead-stock__quantity > span { font-size:11px; }
-.bead-stock__quantity button { padding:4px 6px; }
+.bead-stock__quantity label { flex:1 1 0; min-width:0; }
+.bead-stock__quantity input { min-height:36px; padding:4px 6px; text-align:center; font-weight:700; }
+.bead-stock__quantity > span { flex-shrink:0; font-size:11px; }
+/* 保存是图标键，别再让它撑满整行（手机上原来是一条灰色横杠） */
+.bead-stock__quantity button { flex-shrink:0; display:grid; place-items:center; width:44px; min-height:44px; padding:0; border-color:#d6c8e4; background:#f6f0fb; color:#5c4370; }
+.bead-stock__quantity button:disabled { background:#fbf8fd; color:#a99bb8; }
 .bead-stock__quantity small { flex-basis:100%; color:#a53c48; }
+/* 低库存提示只挂在"有货但快用完"的卡上，做成一条小警示条 */
+.bead-stock__low { align-self:flex-start; border:1px solid #fcd6a4; border-radius:6px; background:#fff7ed; padding:3px 6px; color:#a75a15; font-size:10px; font-weight:700; }
 .bead-stock__adjust { display:flex; gap:6px; }
 .bead-stock__adjust button { flex:1; padding:6px; }
 .bead-stock__card > small { font-size:10px; }
@@ -115,9 +118,12 @@
  .bead-stock__grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
  .bead-stock__brand { width:100%; }
  .bead-stock__stats strong { font-size:17px; }
- .bead-stock__card { padding:8px; }
- .bead-stock__quantity label { flex-basis:calc(100% - 20px); }
- .bead-stock__quantity button { width:100%; }
- .bead-stock__batch label { width:100%; flex-basis:100%; }
- .bead-stock__batch button { flex:1; white-space:nowrap; }
+ .bead-stock__stats > div { padding:10px 4px; }
+ .bead-stock__card { gap:6px; padding:8px; }
+ .bead-stock__swatch { height:44px; }
+ .bead-stock__swatch strong { font-size:12px; padding:2px 6px; }
+ .bead-stock__quantity button { width:44px; }
+ .bead-stock__batch { gap:6px; padding:10px; }
+ .bead-stock__batch label { width:auto; flex:1 1 78px; }
+ .bead-stock__batch button { flex:1 1 auto; padding:6px 8px; font-size:11px; white-space:nowrap; }
 }

@@ -122,7 +122,7 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/ui/panelScale.ts` | **新增**：侧栏面板尺寸的唯一来源（桌面 32 / 移动 44） | 16 | 低 |
 | `src/components/ui/MobileSelect.tsx` | **新增**：移动端底部选择面板（替原生 select） | 14 | 中 |
 | `src/components/SettingsPanel.tsx` | `variant` + 尺寸 token、自绘复选框、删 JSON 导入导出、`hideFooterAction` | 14/16/17 | 中 |
-| `src/components/StatsPanel.tsx` | 新增 `variant`、尺寸收进 token、统计卡改横排（移动端 76→44px） | 14/16/17/20 | 中 |
+| `src/components/StatsPanel.tsx` | 新增 `variant`、尺寸收进 token、统计卡改横排（移动端 76→44px）、三张 KPI 卡改一行三格（21 轮，见第 28 节） | 14/16/17/20/21 | 中 |
 | `src/components/Header.tsx` | 右上角胶囊统一 32、删 JSON、导航项禁止折行 | 10/17/18 | 中 |
 | `src/components/Toolbar.tsx` | `buttonBase` 加 `shrink-0 + nowrap`，标签阈值 1300px | 18 | 低 |
 | `src/components/GridCanvas.tsx` | 分板导航搬到停靠标签条、参考面板按钮 28→32 | 6/18 | **高** |
@@ -134,7 +134,7 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 | `src/components/LargeCanvasView.tsx` | 移动端工具栏尺寸 + 默认折叠 | 1 | 中 |
 | `src/components/CommunityView.tsx` | 筛选 chip 形态、页头间距收紧（搜索 mt-5、chip/排序桌面 36px、栅格 my-4） | 1/20 | 低 |
 | `src/components/CommunityPostCard.tsx` | 卡片压缩：标题不再撑 44、查看图纸 36、操作区 pt-2 | 20 | 低 |
-| `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、社区作品图改 4:3、区块内边距收紧 | 1/11/15/20 | 中 |
+| `src/components/HomeView.tsx` | 底部留白、`showCommunityFeed` 开关、社区作品图改 4:3、区块内边距收紧、hero 四按钮改三级色阶（白 / 亮玻璃 / 静音玻璃，暖色只上一次）、`lg` 2×2 到 `xl` 单排 | 1/11/15/20/21 | 中 |
 | `src/utils/uploadGuards.ts` | **新增**：30MB / 4000 万像素门槛 | 19 | 低 |
 | `src/components/ui/panelScale.test.ts` | **新增**：尺度关系断言（5 条） | 16 | 低 |
 | `src/components/desktopIsolation.test.ts` | **新增**：桌面隔离 4 条契约 | 15/16/18 | 低 |
@@ -377,6 +377,21 @@ useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 
    禁止在 JSX 里写 `sm:h-auto` / 裸 `min-h-11`「覆盖一下」——第 16 轮那批 9 种高度就是这么长出来的。
 8. **滚动容器不许压缩子元素**。`flex flex-col` + `overflow-y-auto` 必须同时给子元素 `shrink-0`，
    否则内容超长时不会出滚动条，而是把每个固定高度的控件均匀压扁（第 17 轮主按钮 16px 就是这么来的）。
+9. **一个按钮组只用一套色阶，暖色只上一次**（第 21 轮，`HomeView.tsx` hero 区）。
+   改前那四个入口各说各话：纯白实心 / 白 15% 玻璃 / 白 5% 幽灵（桌面还直接 `sm:bg-transparent`，所以那一排在桌面上是歪的）/ 琥珀 15% 描边。
+   四个填充色相读起来像四个不相干的控件，琥珀压在紫上还发土——这就是「色彩乱」的全部来源。
+
+   现在固定三级，全部落在白–紫单色族：
+
+   | 层级 | 用途 | 类 |
+   |---|---|---|
+   | 主 | 进入画板创作 | `bg-white text-purple-950` + 深紫投影 + 底部内阴影 |
+   | 次主 | 照片一键转拼豆（核心卖点） | `bg-white/24 border-white/45` + `inset 0 1px 0 white/45` 顶边高光 |
+   | 次级 | 探索社区作品 / 颜色识别 | `bg-white/[0.06] border-white/[0.16]`，文字 `purple-100` |
+
+   暖色只保留一处：转图按钮的琥珀闪电（`fill-amber-300` + 微光）。**不要给次级按钮再加第二种色相**，
+   那正是这排按钮最初显得脏的原因。主按钮必须带 `border border-transparent`，否则比带 1px 边框的兄弟矮 2px。
+   排布：`sm` 起单排 → `lg`（右栏示例图占位后左栏只剩 ~660px，四颗胶囊会折成 3+1）回退成 2×2 等宽格 → `xl` 再回单排（此时左栏 757px 放得下 684px 的按钮组，需要搭配 `xl:col-span-8/4`）。
 
 ---
 
@@ -398,6 +413,7 @@ useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 
 | 12 | `desktopLayout.browser.test.ts` | 真 Chrome 量尺寸：桌面 1440 下每个控件高度 ∈`{16,24,32,36,40}`、「重新计算拼豆图纸」=36、导航/工具条高度 ≤40；移动 390 下控件 ≥40 且 sheet `padding=0`；两端无横向溢出 |
 | 13 | `utils/uploadGuards.test.ts` | 30MB / 4000 万像素门槛；宽高读不出来时必须**放行**而不是抢着拒绝 |
 | 14 | `ErrorBoundary.test.ts` | 必须具备 `getDerivedStateFromError`（有人改回函数组件 + `window.addEventListener` 时会红） |
+| 15 | `ImportBlueprintWizard.hooks.test.ts` | 扫全部组件：**组件体里的提前 `return` 之后不允许出现任何 Hook**。第一版没做作用域限制扫出 62 条误报，改成按顶层声明做花括号配对后才干净 |
 
 ---
 
@@ -1634,6 +1650,10 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 原来每张卡是「标签一行 + 数值一行 + p-3」，实测约 76px；三张卡加起来 230px+。
 改成横排（标签左、数值右）后约 44px，三张共省约 96px，整页内容（含空态）一屏放下。
 
+> **第 21 轮又改了一次**：用户指出「前两张各占半行、需拼豆板独占一行」的排布浪费横向空间，要求三张占一行。
+> 1/3 宽度里放不下横排（桌面 320 侧栏每格内容只剩 74px），所以三格改成 label 上、数值下的竖排 68px。
+> 详见第 28 节。
+
 ## 25.2 PC 豆社卡片与页头（CommunityPostCard / CommunityView）
 
 | 项 | 改前 | 改后 |
@@ -1658,3 +1678,134 @@ npm run verify        # tsc --noEmit && vite build && vitest run --no-file-paral
 `.workbuddy/tools/cdp.mjs` 加了 `--mock-community`：CDP Fetch 拦截
 `*community/posts*`，回 4 条示例作品（带 CORS 头，否则页面读不到 mock 响应）。
 移动端用量页与桌面头部高度均已实测；社区卡片单卡 415px 为离线渲染实测。
+
+---
+
+# 26. 一个 Hook 位置错了，整页崩成错误卡片（2026-10-30）
+
+## 26.1 现象
+
+打开「颜色识别」后整页变成 `豆织星格加载遇到错误 / 页面暂时遇到问题，请点击下方按钮重试。`
+——这是根级 `ErrorBoundary` 接住了崩溃（说明边界本身工作正常），但卡片里只有通用文案，
+截图看不出任何线索。
+
+## 26.2 真因
+
+在校准面板里加了「按豆距自动估算格数」，顺手把处理函数写成了 `useCallback`：
+
+```tsx
+if (!isOpen) return null;          // 第 580 行：向导关闭时提前返回
+...
+const applyEstimatedPitch = useCallback(() => { ... }, [...]);   // 第 593 行
+```
+
+关闭时这条路径执行 41 个 Hook，打开时 42 个。React 抛
+`Rendered more hooks than during the previous render`，整棵树被卸载，边界接管。
+
+**Hook 只是个普通函数调用，tsc 完全查不出来**，而且只有"先关闭、再打开"这种交互后才爆，
+所以本地看首屏是正常的。
+
+## 26.3 修法
+
+1. 那个函数不需要 memo（只是按钮的 onClick），改成普通函数，写在提前返回之后是安全的；
+2. 新增静态契约 `ImportBlueprintWizard.hooks.test.ts`：按顶层声明做花括号配对，
+   只在**组件函数体**内检查"提前 return 之后是否还有 Hook"。变异验证：插一行
+   `const probeRef = useRef(0);` → 立刻报
+   `{"component":"ImportBlueprintWizard","hook":"const probeRef = useRef(0);"}`；
+3. 错误卡片加了一个「复制错误信息」按钮（只在点击时把 message + stack 写进剪贴板，
+   **不在卡片里渲染原始报错**，守住"不泄露内部细节"的既有契约）——
+   下次崩了直接把文本发过来，不用再靠一张只有通用文案的截图猜。
+
+## 26.4 教训
+
+- 组件里 `if (!x) return ...` 之后是禁区：Hook、`useMemo` 依赖、任何有状态的东西都不能写在那儿；
+- 静态契约要**限定作用域**再断言，否则误报会淹没真问题（第一版 62 条误报）；
+- 错误边界要能"把话带出来"，但方式可以是复制而不是展示。
+
+---
+
+# 27. 首页四个入口按钮重做色阶（第二十一轮，2026-10-31）
+
+## 27.1 现象
+
+用户截了 hero 区那排按钮：白实心、白 15% 玻璃、白 5% 幽灵、琥珀 15% 描边。
+四个填充是四种语言，看不出谁是主操作；琥珀压在紫色上发土，像没调完的占位色。
+
+## 27.2 诊断（三个独立问题，被同一张截图暴露）
+
+1. **色相数量** = 4。白 / 白玻璃 / 白幽灵 / 琥珀。按钮组超过两档明度 + 一个色相，就会读成随机。
+2. **桌面端那次「幽灵化」**：`sm:bg-transparent sm:border-transparent`，
+   后两个按钮在桌面直接没有底和边，跟前面两颗不是一套控件，整排看起来是歪的。
+3. **层级错位**：`照片一键转拼豆` 是产品核心卖点，视觉权重却跟 `探索社区作品` 一样弱。
+
+## 27.3 改法（唯一一套，见第 4 节第 9 条）
+
+| 层级 | 按钮 | 填充 | 描边 | 文字 |
+|---|---|---|---|---|
+| 1 主 | 进入画板创作 | `bg-white` | `border-transparent` | `purple-950`（900 字重） |
+| 2 次主 | 照片一键转拼豆 | `white/24` + 顶边内高光 | `white/45` | `white` |
+| 3 次级 ×2 | 探索社区作品 / 颜色识别 | `white/[0.06]` | `white/[0.16]` | `purple-100` |
+
+- 暖色收敛成一处：只有转图按钮的闪电是琥珀（`fill-amber-300` + `drop-shadow` 微光）。
+- 三档都补 `focus-visible:ring-2 ring-white ring-offset-2 ring-offset-purple-800`，
+  深紫底上原来没有可见的键盘焦点环。
+- 全部 `transition-all duration-200` + `active:scale-98`，hover 只提亮一档，不换色相。
+
+## 27.4 顺带修的两处排版
+
+| 问题 | 事实 | 修法 |
+|---|---|---|
+| 主按钮比兄弟矮 2px | 无边框 52px vs 有边框 54px | 主按钮加 `border border-transparent` |
+| 1280 折成 3+1 | `lg` 起右栏示例图占位，左栏只剩 ~660px，四颗胶囊总宽 722px | `lg:grid-cols-2`（等宽 249px）→ `xl:flex` 单排；配 `xl:col-span-8 / 4` 把左栏拉到 757px |
+
+断点验证（真 Chrome，量 `getBoundingClientRect`）：
+
+| 视口 | 结果 |
+|---|---|
+| 1024 | 2×2 等宽，每格 249px，两行 top 差 64 |
+| 1280 | 单排 174 / 190 / 158 / 126，全部 top 一致 |
+| 1440 | 单排，同上 |
+
+四颗按钮高度统一 54px、顶边对齐；`tsc` 通过，`HomeView.heroExamples` + `LandingView` 7 条、
+`desktopLayout.browser` 7 条全绿。改动**只在 `HomeView.tsx`**，无新增测试契约（纯视觉，靠上面的实测数据兜底）。
+
+## 27.5 备选方案（没采用，但可一键切回）
+
+把两个次级按钮从「白 6% 雾」换成「深紫凹槽」`bg-purple-950/20 + border-white/18`，
+体积感更实、白字对比更高，但底色贴近渐变背景，边界全靠描边。
+当前选白雾是因为它在深浅两端都不会被误读成「禁用」。
+
+---
+
+# 28. 用量页三张 KPI 卡改成一行三格（第二十一轮，2026-10-31）
+
+## 28.1 现象
+
+用户截图：`总用豆数` 和 `颜色种类` 各占半行，`需拼豆板` 独占一整行。
+三张卡信息量完全相同（都是「标签 + 一个数字」），却用了 1/2 + 1/1 两种宽度，
+纵向吃掉 112px，第三张卡右边空着一大片。
+
+## 28.2 为什么不是简单的 `grid-cols-3`
+
+三格并排后每格只剩 1/3：手机 sheet 117px、桌面 320 侧栏 90px（减掉 `p-2` 只剩 74px 内容）。
+原来的「标签左 + 数值右」横排在 74px 里放不下 `需拼豆板` + `6 板`，必然换行。
+
+所以三格内部改成**竖排**：标签一行（`sz.micro`）、数值一行（`text-base` / `text-[15px]`），
+**只有两格时**（`hasDetails === false`，只剩总豆数与颜色数）仍用横排——
+两格各占一半时横排更省高度，硬套竖排会得到两张大空卡。
+
+## 28.3 顺带统一的两处
+
+- `需拼豆板` 的数值原来是 `text-indigo-700`，三卡并排后是全组唯一的异色；改成和兄弟一致的 `purple-900`，单位「板」降级成 `rowMeta` + `purple-500` 小字。
+- 数字统一 `font-mono font-black`，三格基线对齐。
+
+## 28.4 实测
+
+| 端 | 单卡尺寸 | 标签行高 | 溢出 |
+|---|---|---|---|
+| 手机 390（sheet） | 117 × 68 | 16（单行） | 无 |
+| 桌面 1440（320 侧栏） | 90 × 53 | 13（单行） | 无 |
+
+KPI 条下沿到「制作进度」卡的间距 12px，与「制作进度」→「整合散豆」一致。
+`tsc` 通过；`panelScale` / `desktopIsolation` / `CompletionSummary.visibility` 22 条全绿。
+改动只在 `StatsPanel.tsx`，无新增契约。

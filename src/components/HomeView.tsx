@@ -141,7 +141,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
           <div className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 lg:gap-8 items-center">
             {/* Left Content */}
-            <div className="lg:col-span-7 flex flex-col items-start space-y-3 sm:space-y-4">
+            <div className="lg:col-span-7 xl:col-span-8 flex flex-col items-start space-y-3 sm:space-y-4">
               {/* Tag Pill */}
               <div className="inline-flex items-center gap-2 px-2.5 py-1 sm:px-3 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs sm:text-xs font-bold text-purple-100 shadow-xs">
                 <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
@@ -159,29 +159,48 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 专业的 Perler / Artkal / Mard 拼豆网格转换与像素画板。包含智能图像转图、精准色号匹配、1:1 实物比对与高清图纸导出。
               </p>
 
-              {/* Action Buttons — a uniform 2×2 grid on phones. Four differently
-                  sized pills wrapping into ragged rows made it unclear which
-                  action was primary; equal cells restore the hierarchy. */}
-              <div className="grid w-full grid-cols-2 gap-2 pt-1 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-3.5 sm:pt-2">
+              {/* Action Buttons.
+
+                  Colour: one accent, three steps. The panel behind is a purple
+                  gradient, so every fill is either pure white, translucent white
+                  glass, or nothing. Amber is spent once — on the lightning icon —
+                  instead of tinting a whole button, which is what made the row
+                  read as four unrelated widgets before.
+                  Step order: primary white > bright glass > quiet glass (×2).
+
+                  Layout: equal 2×2 cells on phones. From lg up the hero column
+                  narrows (the example grid takes the right side), so four pills
+                  would wrap into a lopsided 3+1; they go back to a 2×2 block
+                  there and only rejoin into one row at xl. */}
+              <div className="grid w-full grid-cols-2 gap-2 pt-1 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-3 sm:pt-2 lg:grid lg:w-full lg:grid-cols-2 lg:gap-2.5 xl:flex xl:w-auto">
+                {/* Step 1 — primary. Solid white, inset bottom shade for weight.
+                    A transparent border keeps it exactly as tall as the glass
+                    siblings, which carry a real 1px border. */}
                 <button
                   onClick={() => onNavigateTab('studio')}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-white px-3 py-2.5 text-sm font-black text-purple-950 shadow-lg transition-all hover:bg-purple-50 active:scale-98 sm:rounded-full sm:px-7 sm:py-3.5 sm:text-base"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-transparent bg-white px-3 py-2.5 text-sm font-black text-purple-950 shadow-[0_10px_22px_-12px_rgba(24,0,64,0.8),inset_0_-1px_0_rgba(88,28,135,0.10)] transition-all duration-200 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-6 sm:py-3.5 sm:text-base"
                 >
                   <Palette className="w-[18px] h-[18px] shrink-0 text-purple-700 fill-purple-700 sm:w-5 sm:h-5" />
                   <span>进入画板创作</span>
                 </button>
 
+                {/* Step 2 — the product's headline feature. Brighter glass with a lit top
+                    edge so it sits clearly above the two quiet links, and the
+                    only warm note in the row (glowing lightning). */}
                 <button
                   onClick={choosePhoto}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/15 px-3 py-2.5 text-sm font-bold text-white backdrop-blur-md transition-all hover:bg-white/25 active:scale-98 sm:rounded-full sm:px-7 sm:py-3.5 sm:text-base"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/[0.24] px-3 py-2.5 text-sm font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] backdrop-blur-md transition-all duration-200 hover:border-white/60 hover:bg-white/[0.32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-6 sm:py-3.5 sm:text-base"
                 >
-                  <Zap className="w-[18px] h-[18px] shrink-0 text-amber-300 fill-amber-300 sm:w-5 sm:h-5" />
+                  <Zap className="w-[18px] h-[18px] shrink-0 fill-amber-300 text-amber-300 drop-shadow-[0_0_7px_rgba(252,211,77,0.55)] sm:w-5 sm:h-5" />
                   <span>照片一键转拼豆</span>
                 </button>
 
+                {/* Step 3 — quiet glass, identical on phone and desktop. The old
+                    version dropped to a borderless transparent link on desktop,
+                    which is why the group looked misaligned there. */}
                 <button
                   onClick={() => onNavigateTab('community')}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-3 py-2.5 text-sm font-bold text-purple-100 transition-all hover:bg-white/15 active:scale-98 sm:rounded-full sm:border-transparent sm:bg-transparent sm:px-5 sm:py-3.5 sm:text-base sm:text-purple-200"
+                  className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3 py-2.5 text-sm font-bold text-purple-100 transition-all duration-200 hover:border-white/30 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-4 sm:py-3.5 sm:text-base"
                 >
                   <span>探索社区作品</span>
                   <ChevronRight className="w-4 h-4 shrink-0 sm:w-5 sm:h-5" />
@@ -189,9 +208,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                 <button
                   onClick={onOpenImportBlueprint}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-200/40 bg-amber-300/15 px-3 py-2.5 text-sm font-bold text-amber-100 transition-all hover:bg-amber-300/25 active:scale-98 sm:rounded-full sm:px-5 sm:py-3.5 sm:text-base"
+                  className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3 py-2.5 text-sm font-bold text-purple-100 transition-all duration-200 hover:border-white/30 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-4 sm:py-3.5 sm:text-base"
                 >
-                  <FilePlus2 className="w-[18px] h-[18px] shrink-0 sm:w-5 sm:h-5" />
+                  <FilePlus2 className="w-[18px] h-[18px] shrink-0 text-purple-200 transition-colors group-hover:text-white sm:w-5 sm:h-5" />
                   <span>颜色识别</span>
                 </button>
               </div>
@@ -219,7 +238,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             {/* Official Studio starting examples, not community activity.
                 A swipeable strip on phones (two rows of squares pushed the
                 quick-workspace cards off-screen), a 2×2 grid from tablet up. */}
-            <div className="lg:col-span-5 w-full lg:flex lg:justify-end">
+            <div className="lg:col-span-5 xl:col-span-4 w-full lg:flex lg:justify-end">
               <div className="relative bg-white/10 backdrop-blur-md p-2.5 sm:p-4 rounded-2xl sm:rounded-3xl border border-white/20 max-w-md w-full shadow-2xl">
                 {/* Phones stack the label above the strip; desktop keeps it as an
                     overlay caption so the hero does not grow a whole extra row. */}

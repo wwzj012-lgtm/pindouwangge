@@ -191,6 +191,10 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // KPI 卡内部排布：三格挤在 1/3 宽度里只能上下叠；只有两格时横排更省高度。
+  const kpiStack = 'flex flex-col justify-center gap-0.5';
+  const kpiRow = 'flex items-center justify-between gap-2';
+
   return (
     <div className={`w-full lg:w-80 lg:max-w-[85vw] bg-white/90 backdrop-blur-md border-l-0 lg:border-l border-purple-200/90 text-purple-950 flex flex-col h-full overflow-hidden text-xs select-none shrink-0 shadow-sm ${isSheet ? 'p-0' : 'p-4'}`}>
       {/* Header */}
@@ -226,26 +230,33 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </div>
       </div>
 
-      <div className="my-3 grid grid-cols-2 gap-2">
-      <div className={`flex items-center justify-between gap-2 border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Total Beads' : '总用豆数'}>
-        <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Total Beads' : '总用豆数'}</div>
-        <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{totalBeads}</div>
-      </div>
-      <div className={`flex items-center justify-between gap-2 border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Colors Used' : '颜色种类数量'}>
-        <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Colors Used' : '颜色种类'}</div>
-        <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{colorTypes}</div>
-      </div>
+      {/* KPI 条：三个数一行。之前是「两张卡占半行 + 需拼豆板独占一行」，
+          在手机抽屉里纵向吃掉约 112px，而三张卡的信息量是一样的。
+          横向 label/值并排在 1/3 宽度里放不下（桌面 320 侧栏每格只剩 74px），
+          所以三格改成 label 上、数值下的竖排；只有两格时（未解锁明细）
+          仍沿用横排，否则两张大空卡比原来更难看。 */}
+      <div className={`my-3 grid gap-2 ${hasDetails ? 'grid-cols-3' : 'grid-cols-2'}`}>
+        <div className={`${hasDetails ? kpiStack : kpiRow} border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Total Beads' : '总用豆数'}>
+          <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Total Beads' : '总用豆数'}</div>
+          <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{totalBeads}</div>
+        </div>
+        <div className={`${hasDetails ? kpiStack : kpiRow} border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Colors Used' : '颜色种类数量'}>
+          <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Colors Used' : '颜色种类'}</div>
+          <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>{colorTypes}</div>
+        </div>
+        {hasDetails && (
+          <div className={`${kpiStack} border border-purple-200/80 bg-purple-50/80 ${sz.card}`} aria-label={isEn ? 'Boards Needed' : '需拼豆板'}>
+            <div className={`font-medium text-purple-600 ${sz.micro}`}>{isEn ? 'Boards' : '需拼豆板'}</div>
+            <div className={`font-mono font-black text-purple-900 ${isSheet ? 'text-base' : 'text-[15px]'}`}>
+              {totalBoards}
+              <span className={`ml-1 font-sans font-bold text-purple-500 ${sz.rowMeta}`}>{isEn ? 'boards' : '板'}</span>
+            </div>
+          </div>
+        )}
       </div>
 
       {hasDetails ? (
         <>
-          <div className="my-3">
-            <div className={`flex items-center justify-between gap-2 bg-purple-50/80 rounded-2xl border border-purple-200/80 ${sz.card}`} aria-label={isEn ? 'Boards Needed' : '需拼豆板'}>
-              <div className={`text-purple-600 font-medium ${sz.micro}`}>{isEn ? 'Boards Needed' : '需拼豆板'}</div>
-              <div className={`font-black text-indigo-700 font-mono ${isSheet ? 'text-base' : 'text-[13px]'}`}>{totalBoards} {isEn ? 'boards' : '板'}</div>
-            </div>
-          </div>
-
           <div className="mb-3 rounded-2xl border border-emerald-200/90 bg-emerald-50/70 px-3 py-2 text-emerald-950">
             <div className={`flex items-center justify-between gap-2 font-extrabold ${sz.rowTitle}`}>
               <span>{isEn ? 'Making progress' : '制作进度'}</span>

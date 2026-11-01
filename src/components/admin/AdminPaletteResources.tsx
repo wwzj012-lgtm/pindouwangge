@@ -129,6 +129,9 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
   const [search, setSearch] = useState('');
   const [ownerUid, setOwnerUid] = useState('');
   const [contentType, setContentType] = useState('');
+  // 文件状态由服务端逐个 KV 对象判断，前端只传筛选值（available / missing / check_failed）。
+  const [availability, setAvailability] = useState('');
+  const filtered = Boolean(search.trim() || ownerUid.trim() || contentType || availability);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -141,7 +144,7 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
-    const result = await request<AdminAssetPage>(`/api/admin/community-assets${adminAssetQuery({ page, limit, search: search.trim(), ownerUid: ownerUid.trim(), contentType })}`);
+    const result = await request<AdminAssetPage>(`/api/admin/community-assets${adminAssetQuery({ page, limit, search: search.trim(), ownerUid: ownerUid.trim(), contentType, availability: availability || null })}`);
     if (!result.ok) {
       setError(result.error ?? '资源列表加载失败。');
       setLoading(false);
@@ -155,7 +158,7 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
     setItems(result.data.items);
     setTotal(result.data.total);
     setLoading(false);
-  }, [contentType, limit, ownerUid, page, request, search]);
+  }, [availability, contentType, limit, ownerUid, page, request, search]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -206,13 +209,13 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
     <div className="admin-final-notice mt-4 admin-notice-quiet" role="note"><ShieldAlert aria-hidden="true" /><span>只读：删除暂时关闭（跨存储操作不保证原子性）；内建调色板只读，色卡增删改仍在「品牌与颜色」。</span></div>
     {error && <div className="mt-4"><AdminErrorState message={error} retry={() => void load()} busy={loading} /></div>}
     {success && <p className="admin-success-message" role="status">{success}</p>}
-    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,0.45fr)_12rem]">
+    <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(11rem,0.4fr)_10rem_10rem]">
       <label className="relative block"><Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 admin-muted" aria-hidden="true" /><span className="sr-only">搜索资源 ID 或所属用户</span><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="搜索资源 ID / 用户 UID" className="min-h-11 w-full border admin-final-surface py-2 pl-9 pr-3 text-sm" /></label>
       <label><span className="sr-only">所属用户 UID</span><input value={ownerUid} onChange={(event) => { setOwnerUid(event.target.value); setPage(1); }} placeholder="所属用户 UID" className="min-h-11 w-full border admin-final-surface px-3 text-sm" /></label>
-      <label><span className="sr-only">文件类型</span><select value={contentType} onChange={(event) => { setContentType(event.target.value); setPage(1); }} className="min-h-11 w-full border admin-final-surface px-3 text-sm"><option value="">全部类型</option>{IMAGE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+      <label><span className="sr-only">文件类型</span><select value={contentType} onChange={(event) => { setContentType(event.target.value); setPage(1); }} className="min-h-11 w-full border admin-final-surface px-3 text-sm"><option value="">全部类型</option>{IMAGE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label><span className="sr-only">文件状态</span><select value={availability} onChange={(event) => { setAvailability(event.target.value); setPage(1); }} className="min-h-11 w-full border admin-final-surface px-3 text-sm"><option value="">全部状态</option><option value="available">对象存在</option><option value="missing">对象缺失</option><option value="check_failed">检查失败</option></select></label>
     </div>
     <div className="mt-5">
-      {loading ? <AdminLoading label="正在检查 KV 文件与引用关系…" /> : rows.length === 0 ? <AdminEmptyState title={error ? "尚无成功读取结果，请重试" : "暂无真实资源"} description="列表只显示 community_assets 中有记录的真实资源。" /> : <>
+      {loading ? <AdminLoading label="正在检查 KV 文件与引用关系…" /> : rows.length === 0 ? <AdminEmptyState title={error ? '尚无成功读取结果，请重试' : filtered ? '没有匹配的资源' : '暂无真实资源'} description={error ? undefined : filtered ? '换个状态、类型或清空搜索词再试。' : '列表只显示 community_assets 中有记录的真实资源。'} /> : <>
         <div className="hidden overflow-x-auto border md:block"><table className="w-full min-w-[1060px] text-left text-sm"><thead className="admin-final-surface text-xs admin-muted"><tr><th className="px-4 py-3">预览</th><th className="px-4 py-3">资源 / 所属用户</th><th className="px-4 py-3">类型 / 大小</th><th className="px-4 py-3">关联使用</th><th className="px-4 py-3">文件状态</th><th className="px-4 py-3 text-right">安全操作</th></tr></thead><tbody>{rows.map((asset) => { const availability = availabilityLabel(asset.availability); const deleteReason = assetDeleteReason(asset); return <tr key={asset.id} className="border-t"><td className="px-4 py-3"><button type="button" className="grid h-14 w-14 place-items-center border admin-final-surface" onClick={() => void openPreview(asset)} disabled={previewLoading === asset.id || asset.availability !== 'available'} aria-label={`预览资源 ${asset.id}`}>{previewLoading === asset.id ? <RefreshCw className="admin-spin" aria-hidden="true" /> : <Eye aria-hidden="true" />}</button></td><td className="max-w-[18rem] px-4 py-3"><p className="truncate font-mono text-xs">{asset.id}</p><p className="mt-1 truncate text-xs admin-muted">{asset.ownerUid}</p><p className="mt-1 text-xs admin-muted">{date(asset.createdAt)}</p></td><td className="px-4 py-3"><p>{asset.contentType}</p><p className="mt-1 text-xs admin-muted">{formatAssetBytes(asset.byteSize)}</p></td><td className="px-4 py-3"><p>{formatAssetUsage(asset.usage)}</p><p className="mt-1 text-xs admin-muted">活跃帖子 {asset.usage.activePostCount}</p></td><td className="px-4 py-3"><AdminBadge tone={availability.tone}>{availability.label}</AdminBadge></td><td className="px-4 py-3"><div className="flex justify-end"><AdminButton variant={deleteReason ? 'ghost' : 'danger'} disabled={readOnly || Boolean(deleteReason) || deleting} onClick={() => setDeleteTarget(asset)} title={deleteReason ?? '删除真实 KV 文件及其目录记录'}>{deleteReason ? <Lock aria-hidden="true" /> : <Trash2 aria-hidden="true" />}{deleteReason ? '受保护' : '删除'}</AdminButton></div></td></tr>; })}</tbody></table></div>
         <div className="space-y-2 md:hidden">{rows.map((asset) => { const availability = availabilityLabel(asset.availability); const deleteReason = assetDeleteReason(asset); return <article key={asset.id} className="border admin-final-surface p-3"><div className="flex gap-3"><button type="button" className="grid h-14 w-14 shrink-0 place-items-center border" onClick={() => void openPreview(asset)} disabled={previewLoading === asset.id || asset.availability !== 'available'} aria-label={`预览资源 ${asset.id}`}><Eye aria-hidden="true" /></button><div className="min-w-0 flex-1"><p className="truncate font-mono text-xs">{asset.id}</p><p className="mt-1 truncate text-xs admin-muted">{asset.ownerUid}</p><p className="mt-2 text-sm">{asset.contentType} · {formatAssetBytes(asset.byteSize)}</p><p className="mt-1 text-xs admin-muted">{formatAssetUsage(asset.usage)} · {availability.label}</p></div></div><div className="mt-3 flex justify-end"><AdminButton variant={deleteReason ? 'ghost' : 'danger'} disabled={readOnly || Boolean(deleteReason) || deleting} onClick={() => setDeleteTarget(asset)}>{deleteReason ? '受保护' : '删除真实文件'}</AdminButton></div></article>; })}</div>
         <div className="admin-pagination mt-4"><span>共{total}条 · {page}/{pages}页</span><div className="flex gap-2"><AdminButton disabled={!canPrevious} onClick={() => setPage((value) => value - 1)}>上一页</AdminButton><AdminButton disabled={!canNext} onClick={() => setPage((value) => value + 1)}>下一页</AdminButton></div></div>

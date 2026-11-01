@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Archive, ArrowLeft, CheckCircle2, ChevronRight, ClipboardList, Coins, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { clearAdminSession, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
@@ -86,8 +86,13 @@ function Sidebar({ active, navigate, returnToApp }: { active: SectionId; navigat
     <div className="admin-sidebar-footer"><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton></div>
   </>;
 }
-function MetricCard({ label, value, detail, icon: Icon }: { label: string; value: unknown; detail: string; icon: LucideIcon }) {
-  return <article className="admin-metric"><div className="admin-metric-head"><span>{label}</span><Icon aria-hidden="true" /></div><p className="admin-metric-value" data-metric={label}>{typeof value === 'string' ? value : formatAdminMetric(value)}</p><p>{detail}</p></article>;
+function MetricCard({ label, value, detail, icon: Icon, onOpen }: { label: string; value: unknown; detail: string; icon: LucideIcon; onOpen?: () => void }) {
+  const text = typeof value === 'string' ? value : formatAdminMetric(value);
+  const body = <><div className="admin-metric-head"><span>{label}</span><Icon aria-hidden="true" /></div><p className="admin-metric-value" data-metric={label}>{text}</p><p>{detail}</p></>;
+  // 数字是入口，不只是展示：能下钻的指标 hover 出箭头，点击跳到对应模块。
+  return onOpen
+    ? <button type="button" className="admin-metric" onClick={onOpen} aria-label={label + ' ' + text + '，查看明细'}>{body}<ArrowUpRight className="admin-metric-open" aria-hidden="true" /></button>
+    : <article className="admin-metric">{body}</article>;
 }
 function TrendChart({ label, points }: { label: string; points?: TrendPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -134,25 +139,41 @@ function TrendChart({ label, points }: { label: string; points?: TrendPoint[] })
     </> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
   </article>;
 }
-function Dashboard({ data, error, loading, retry }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void }) {
+function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void; navigate: (id: SectionId) => void }) {
   if (loading && !data) return <AdminLoading label="正在加载服务端统计…" />;
   if (error) return <AdminErrorState title="统计暂不可用" message={error} retry={retry} busy={loading} />;
   if (!data) return <AdminEmptyState title="尚无统计结果" description="未知值不会显示为零。" action={<AdminButton onClick={retry}>刷新统计</AdminButton>} />;
   const overview = data.overview, telemetry = data.telemetry;
+  const trendDefs = ([
+    { label: '用户新增趋势', points: data.trends?.days7?.users },
+    { label: '图纸创建趋势', points: data.trends?.days7?.works },
+    { label: '社区发布趋势', points: data.trends?.days7?.communityPosts },
+    { label: '成功操作趋势', points: data.trends?.days7?.successfulActions },
+    { label: '服务端错误趋势', points: data.trends?.days7?.errors },
+  ] as { label: string; points?: TrendPoint[] }[]).map(item => {
+    const samples = (Array.isArray(item.points) ? item.points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
+    // 全 0 的图不再占一张大卡：它只是"这段时间没发生"，折叠成一行说明。
+    return { ...item, zero: samples.length > 0 && samples.every(point => point.count <= 0) };
+  });
   const duration = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? formatAdminMetric(Math.max(0, Math.round(value))) + ' ms' : '—';
   return <section aria-label="运营概览" aria-busy={loading}>
     <AdminToolbar><h2>运营概览</h2></AdminToolbar>
     {loading && <p role="status" className="admin-muted">正在更新统计，当前结果暂时保留…</p>}
-    <div className="admin-metrics"><MetricCard label="注册用户" value={overview?.totalUsers} detail={'近30天新增 ' + formatAdminMetric(overview?.newUsers30Days)} icon={Users} /><MetricCard label="活跃会员" value={overview?.activeVipUsers} detail="当前有效 VIP / Pro" icon={Crown} /><MetricCard label="图纸与社区作品" value={sumAdminMetrics(overview?.works, overview?.communityPosts)} detail={'图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts)} icon={Archive} /><MetricCard label="累计兑换" value={overview?.redeemedCodes} detail={'近24小时错误 ' + formatAdminMetric(overview?.recentErrors)} icon={KeyRound} /></div>
+    <div className="admin-metrics"><MetricCard label="注册用户" value={overview?.totalUsers} detail={'近30天新增 ' + formatAdminMetric(overview?.newUsers30Days)} icon={Users} onOpen={() => navigate('users')} /><MetricCard label="活跃会员" value={overview?.activeVipUsers} detail="当前有效 VIP / Pro" icon={Crown} onOpen={() => navigate('users')} /><MetricCard label="图纸与社区作品" value={sumAdminMetrics(overview?.works, overview?.communityPosts)} detail={'图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts)} icon={Archive} onOpen={() => navigate('community')} /><MetricCard label="累计兑换" value={overview?.redeemedCodes} detail={'近24小时错误 ' + formatAdminMetric(overview?.recentErrors)} icon={KeyRound} onOpen={() => navigate('codes')} /></div>
     <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2><p>仅统计已采集的状态变更和服务端错误，不代表所有请求。</p></AdminToolbar>
-      <div className="admin-metrics"><MetricCard label="24小时成功操作" value={telemetry?.successfulActions24h} detail="仅计入已记录的状态变更" icon={Activity} /><MetricCard label="平均操作耗时" value={telemetry?.durationSamples24h > 0 ? duration(telemetry.averageDurationMs) : '—'} detail={'有效样本 ' + formatAdminMetric(telemetry?.durationSamples24h)} icon={Activity} /><MetricCard label="最大操作耗时" value={telemetry?.durationSamples24h > 0 ? duration(telemetry.maximumDurationMs) : '—'} detail="过去24小时的有效样本" icon={Activity} /><MetricCard label="24小时服务端错误" value={telemetry?.errors24h} detail={telemetry ? formatAdminMetric(telemetry.errorCodes?.length) + '类受控错误码' : '遥测暂不可用'} icon={Activity} /></div>
-      {telemetry && Array.isArray(telemetry.errorCodes)
-        ? telemetry.errorCodes.length
-          ? <div className="admin-telemetry"><h3>错误码分布</h3><div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div></div>
-          : <p className="admin-telemetry-empty"><CheckCircle2 aria-hidden="true" />近 24 小时未记录服务端错误，错误码分布为空。</p>
-        : <p className="admin-telemetry-empty" data-tone="muted">遥测数据暂不可用，无法给出错误码分布。</p>}
+      <div className="admin-ops">
+        <div><span>24小时成功操作</span><strong>{formatAdminMetric(telemetry?.successfulActions24h)}</strong></div>
+        <div><span>平均耗时</span><strong>{telemetry && telemetry.durationSamples24h > 0 ? duration(telemetry.averageDurationMs) : '—'}</strong></div>
+        <div><span>最大耗时</span><strong>{telemetry && telemetry.durationSamples24h > 0 ? duration(telemetry.maximumDurationMs) : '—'}</strong></div>
+        <div><span>24小时服务端错误</span><strong>{formatAdminMetric(telemetry?.errors24h)}</strong></div>
+        {telemetry && Array.isArray(telemetry.errorCodes)
+          ? telemetry.errorCodes.length === 0 && <p className="admin-ops-note"><CheckCircle2 aria-hidden="true" />近 24 小时未记录服务端错误</p>
+          : <p className="admin-ops-note" data-tone="muted">遥测暂不可用</p>}
+      </div>
+      {telemetry && Array.isArray(telemetry.errorCodes) && telemetry.errorCodes.length > 0 && <div className="admin-telemetry"><h3>错误码分布</h3><div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div></div>}
     </section>
-    <div className="admin-charts"><TrendChart label="用户新增趋势" points={data.trends?.days7?.users} /><TrendChart label="图纸创建趋势" points={data.trends?.days7?.works} /><TrendChart label="社区发布趋势" points={data.trends?.days7?.communityPosts} /><TrendChart label="成功操作趋势" points={data.trends?.days7?.successfulActions} /><TrendChart label="服务端错误趋势" points={data.trends?.days7?.errors} /></div>
+    <div className="admin-charts">{trendDefs.filter(item => !item.zero).map(item => <React.Fragment key={item.label}><TrendChart label={item.label} points={item.points} /></React.Fragment>)}</div>
+    {trendDefs.some(item => item.zero) && <p className="admin-zero-note">近 7 天没有新增：{trendDefs.filter(item => item.zero).map(item => item.label.replace('趋势', '')).join('、')}。产生数据后这里会出现对应趋势图。</p>}
     {Boolean(data.warnings?.length) && <div className="admin-warning" role="status"><strong>部分统计暂不可用</strong><ul>{data.warnings?.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
   </section>;
 }
@@ -386,7 +407,7 @@ function AdminConsoleSession(_props: { key?: string }) {
         onChangeCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, '\u0000'); }}>
         <p className="admin-page-description">{SECTION_DESCRIPTIONS[activeSection]}</p>
         {requestNotice && <AdminErrorState title="模块连接失败" message={requestNotice} retry={() => queueAction({ kind: 'refresh' })} busy={busy} />}
-        {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
+        {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} navigate={navigate} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
       </main>
     </div>
     <AdminDrawer open={mobileNavigation} title="后台菜单" side="left" className="admin-navigation-drawer" onClose={() => setMobileNavigation(false)}><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></AdminDrawer>

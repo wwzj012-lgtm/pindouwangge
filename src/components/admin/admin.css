@@ -1,13 +1,13 @@
 .admin-root {
   --admin-text:var(--admin-ink); --admin-text-muted:var(--admin-muted); --admin-accent:var(--admin-primary); --admin-surface-alt:var(--admin-subtle);
-  --admin-bg:#f3f6f5; --admin-surface:#fff; --admin-subtle:#eef2f4; --admin-ink:#18212f; --admin-muted:#526174; --admin-border:#d9e0e8;
-  --admin-primary:#0f766e; --admin-primary-hover:#115e59; --admin-primary-soft:#e7f3f0;
-  --admin-danger:#b42318; --admin-danger-soft:#fef3f2; --admin-warning:#9a6700; --admin-warning-soft:#fff8df;
-  --admin-success:#166534; --admin-success-soft:#edf8ef; --admin-overlay:rgb(9 16 27 / .64); --admin-shadow:0 2px 8px rgb(20 35 50 / .045);
+  --admin-bg:#f5f6f8; --admin-surface:#fff; --admin-subtle:#f1f4f8; --admin-ink:#0f172a; --admin-muted:#5b6b80; --admin-border:#e3e8ef;
+  --admin-primary:#4f46e5; --admin-primary-hover:#4338ca; --admin-primary-soft:#eceefe;
+  --admin-danger:#dc2626; --admin-danger-soft:#fef2f2; --admin-warning:#b45309; --admin-warning-soft:#fffbeb;
+  --admin-success:#15803d; --admin-success-soft:#f0fdf4; --admin-overlay:rgb(9 16 27 / .64); --admin-shadow:0 1px 2px rgb(15 23 42 / .05);
   color-scheme:light; min-height:100vh; color:var(--admin-ink); background:var(--admin-bg);
   font:14px/1.6 'PingFang SC','Microsoft YaHei',-apple-system,BlinkMacSystemFont,sans-serif;
 }
-@supports (color:oklch(1 0 0)) { .admin-root { --admin-primary:oklch(.511 .096 186.39); --admin-primary-hover:oklch(.437 .078 188.22); } }
+@supports (color:oklch(1 0 0)) { .admin-root { --admin-primary:oklch(.45 .21 271); --admin-primary-hover:oklch(.40 .19 271); } }
 @media (prefers-color-scheme:dark) {
   .admin-root { --admin-bg:#111820; --admin-surface:#19232e; --admin-subtle:#24313f; --admin-ink:#edf2f6; --admin-muted:#b2bfce; --admin-border:#3b4a59; --admin-primary:#6ed3c1; --admin-primary-hover:#91e4d6; --admin-primary-soft:#153d3a; --admin-danger:#ffaba3; --admin-danger-soft:#442722; --admin-warning:#f4cf72; --admin-warning-soft:#3c3320; --admin-success:#8de2a5; --admin-success-soft:#1c382b; --admin-overlay:rgb(0 0 0 / .72); --admin-shadow:none; color-scheme:dark; }
 }
@@ -44,12 +44,12 @@
 .admin-root .admin-nav-item[aria-current='page'] { background:var(--admin-primary-soft); color:var(--admin-primary); font-weight:600; border-color:var(--admin-primary-soft); box-shadow:inset 3px 0 var(--admin-primary); }
 .admin-root .admin-sidebar-footer { border-top:1px solid var(--admin-border); padding:12px; }
 .admin-root .admin-layout { margin-left:224px; }
-.admin-root .admin-header { position:sticky; top:0; z-index:15; display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:80px; padding:12px 24px; border-bottom:1px solid var(--admin-border); background:var(--admin-surface); }
+.admin-root .admin-header { position:sticky; top:0; z-index:15; display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:64px; padding:8px 24px; border-bottom:1px solid var(--admin-border); background:var(--admin-surface); }
 .admin-root .admin-header-title { display:flex; align-items:center; gap:12px; min-width:0; }
 .admin-root .admin-header-title > div { min-width:0; }
 .admin-root .admin-breadcrumb { display:flex; align-items:center; gap:6px; color:var(--admin-muted); font-size:12px; }
 .admin-root .admin-breadcrumb svg { width:12px; height:12px; }
-.admin-root .admin-header h1 { margin:4px 0 0; font-size:24px; line-height:1.3; font-weight:600; letter-spacing:-.02em; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.admin-root .admin-header h1 { margin:2px 0 0; font-size:20px; line-height:1.3; font-weight:600; letter-spacing:-.02em; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .admin-root .admin-header-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .admin-root .admin-account { display:grid; justify-items:end; gap:4px; margin-right:8px; }
 /* 绿色胶囊在全绿的主题里是最响的一块，而它只在"一切正常"时出现。
@@ -259,7 +259,9 @@
 .admin-root .admin-community-filters { display:grid; grid-template-columns:minmax(220px,1fr) 180px auto; gap:12px; align-items:end; margin:16px 0; }
 .admin-root .admin-community-filters label { display:grid; gap:6px; color:var(--admin-muted); font-size:12px; }
 .admin-root .admin-community-filters :is(input,select) { min-height:44px; min-width:0; padding:8px 12px; border:1px solid var(--admin-border); border-radius:8px; color:var(--admin-ink); background:var(--admin-surface); font:inherit; font-size:14px; }
-.admin-root .admin-community-layout { display:grid; grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr); gap:16px; align-items:start; }
+/* 未选中帖子时只有一栏（右栏整块不渲染）；选中后再让出 380px 给详情。 */
+.admin-root .admin-community-layout { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; align-items:start; }
+.admin-root .admin-community-layout[data-detail='true'] { grid-template-columns:minmax(0,1.45fr) minmax(280px,.8fr); }
 .admin-root .admin-community-table-wrap { overflow-x:auto; }
 .admin-root .admin-community-table-wrap table { min-width:680px; }
 .admin-root .admin-community-cards { display:none; }
@@ -296,7 +298,10 @@
 .admin-root .admin-code-actions p { margin:8px 0 0; font-size:12px; }
 .admin-root .admin-code-feedback { color:var(--admin-success); }
 .admin-root .admin-code-feedback--pending { color:var(--admin-warning); }
-.admin-root .admin-code-row--sale-marked > td, .admin-root .admin-code-row--sale-marked:hover > td { background:var(--admin-warning-soft); }
+/* 「已标记发售」是状态不是警告：整行铺黄底会让人以为出错。
+   改成左侧 3px 琥珀条，行底保持白色，hover 仍是通用浅底。 */
+.admin-root .admin-code-row--sale-marked > td:first-child { box-shadow:inset 3px 0 var(--admin-warning); }
+.admin-root .admin-code-row--sale-marked > td { background:transparent; }
 /* 原来每个"已标记发售"的行都挂一句"仅表示发售标记，不代表真实付款"，外加把删除等待拆成标记+日期两行：
    一列最多四行，行高被撑到 110px，而页面脚注已经解释过"不等于真实支付"。收成一行两个标记。 */
 .admin-root .admin-code-sale-cell { display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-width:150px; }
@@ -388,9 +393,9 @@
 .admin-root .admin-toolbar-copy { flex:1 1 220px; }
 .admin-root .admin-toolbar-actions { flex:0 1 auto; align-items:center; }
 .admin-root .admin-toolbar-actions:empty { display:none; }
-.admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) {
-  display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:12px; align-items:end;
-}
+/* 只给没有专用列定义的 .admin-filters 兜底。之前这里用 auto-fit 覆盖了用户/兑换码/日志/社区
+   自己的 grid-template-columns，导致「查询」按钮被 1fr 拉成 280px。 */
+.admin-root .admin-filters { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:12px; align-items:end; }
 .admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) > * { min-width:0; }
 .admin-root .admin-field { display:grid; gap:6px; min-width:0; color:var(--admin-muted); font-size:12px; }
 .admin-root :is(.admin-field,.admin-filters) :is(input,select,textarea):not([type=checkbox]):not([type=radio]) {
@@ -445,7 +450,7 @@
   .admin-root .admin-stage-panel { padding:14px; }
   .admin-root .admin-toolbar-copy { flex-basis:auto; }
   .admin-root .admin-toolbar-actions { width:100%; }
-  .admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) { grid-template-columns:minmax(0,1fr); }
+  .admin-root .admin-filters { grid-template-columns:minmax(0,1fr); }
   /* 3 个 tab 被 50% 一挤就是 2+1 的锯齿；让它们按内容宽度排，放不下再换行。 */
   .admin-root .admin-module-tabs .admin-button { flex-basis:auto; padding-inline:12px; }
   .admin-root :is(.admin-dialog-header,.admin-dialog-body,.admin-dialog-footer) { padding:14px; }
@@ -470,3 +475,59 @@
   .admin-root .admin-code-generation { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
   .admin-root .admin-code-generation > :last-child { grid-column:1 / -1; }
 }
+
+/* ================= 控制台重构：深色导航 + 浅色工作区 ================= */
+.admin-root .admin-sidebar { background:#0f172a; border-right:1px solid #1e293b; }
+.admin-root .admin-brand { border-bottom-color:#1e293b; }
+.admin-root .admin-brand strong { color:#f8fafc; letter-spacing:.01em; }
+.admin-root .admin-brand small { color:#8ea0b8; }
+.admin-root .admin-brand-mark { background:rgb(99 102 241 / .16); color:#a5b4fc; }
+.admin-root .admin-nav-group h2 { color:#7c8da6; font-size:11px; font-weight:600; letter-spacing:.1em; }
+.admin-root .admin-nav-item { color:#c3cede; }
+.admin-root .admin-nav-item svg { color:#8ea0b8; }
+.admin-root .admin-nav-item:hover { background:#16233a; color:#fff; }
+.admin-root .admin-nav-item:hover svg { color:#c3cede; }
+.admin-root .admin-nav-item[aria-current='page'] { background:var(--admin-primary); color:#fff; border-color:transparent; box-shadow:none; }
+.admin-root .admin-nav-item[aria-current='page'] svg { color:#fff; }
+.admin-root .admin-nav-item:focus-visible { outline-color:#a5b4fc; }
+.admin-root .admin-sidebar-footer { border-top-color:#1e293b; }
+.admin-root .admin-sidebar-footer .admin-button { color:#c3cede; border-color:#2a3a52; }
+.admin-root .admin-sidebar-footer .admin-button:hover:not(:disabled) { background:#16233a; color:#fff; }
+
+/* 卡片统一 10px，表格表头弱化、hover 用主色浅底 */
+.admin-root .admin-metric, .admin-root .admin-chart, .admin-root .admin-telemetry, .admin-root .admin-stage-panel { border-radius:10px; }
+.admin-root .admin-stage-table thead th { background:var(--admin-subtle); color:var(--admin-muted); font-size:12px; font-weight:600; }
+.admin-root .admin-stage-table tbody tr:hover { background:var(--admin-primary-soft); }
+
+/* 空态不再画虚线大框：居中图标 + 文案 + 主按钮 */
+.admin-root .admin-state { border:0; background:transparent; min-height:200px; }
+.admin-root .admin-state svg { width:28px; height:28px; opacity:.55; }
+
+/* KPI 可点击下钻 */
+.admin-root button.admin-metric { position:relative; display:block; width:100%; text-align:left; font:inherit; color:inherit; cursor:pointer; transition:border-color 150ms, box-shadow 150ms, transform 150ms; }
+.admin-root button.admin-metric:hover { border-color:var(--admin-primary); box-shadow:0 0 0 3px var(--admin-primary-soft); }
+.admin-root button.admin-metric:active { transform:translateY(1px); }
+.admin-root button.admin-metric:focus-visible { outline:2px solid var(--admin-primary); outline-offset:3px; }
+.admin-root .admin-metric-open { position:absolute; right:14px; bottom:14px; width:16px; height:16px; color:var(--admin-primary); opacity:0; transition:opacity 150ms; }
+.admin-root button.admin-metric:hover .admin-metric-open, .admin-root button.admin-metric:focus-visible .admin-metric-open { opacity:1; }
+
+/* 运行状态：原来 4 张大 KPI 卡 + 一条绿色横幅，合并成一条 */
+.admin-root .admin-ops { display:flex; flex-wrap:wrap; align-items:center; gap:12px 28px; padding:12px 16px; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-surface); }
+.admin-root .admin-ops > div { display:flex; align-items:baseline; gap:8px; }
+.admin-root .admin-ops span { color:var(--admin-muted); font-size:12px; }
+.admin-root .admin-ops strong { font-size:18px; font-weight:600; font-variant-numeric:tabular-nums; }
+.admin-root .admin-ops-note { display:inline-flex; align-items:center; gap:6px; margin:0 0 0 auto; color:var(--admin-success); font-size:12px; }
+.admin-root .admin-ops-note[data-tone='muted'] { color:var(--admin-muted); }
+.admin-root .admin-ops-note svg { width:14px; height:14px; }
+
+/* 全 0 的趋势不再各占一张大卡，合并成一行说明 */
+.admin-root .admin-charts { grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); }
+.admin-root .admin-chart, .admin-root .admin-chart:nth-last-child(2):nth-child(4), .admin-root .admin-chart:last-child { grid-column:auto; }
+.admin-root .admin-zero-note { margin:16px 0 0; padding:12px 16px; border:1px dashed var(--admin-border); border-radius:10px; color:var(--admin-muted); font-size:13px; background:var(--admin-surface); }
+
+/* 筛选区最后一列的提交按钮被 auto-fit 的 1fr 拉成整列宽（社区页「查询」有 280px）。
+   让按钮按内容宽度靠左，留白交给网格。 */
+.admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) > .admin-button { justify-self:start; }
+
+/* 36 位 UID 是内部标识，不是运营的检索入口：退到第三层，只留前 12 位，完整值在 title 里。 */
+.admin-root .admin-uid { font-size:11px; color:var(--admin-muted); letter-spacing:0; }

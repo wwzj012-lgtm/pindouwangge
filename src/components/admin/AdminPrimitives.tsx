@@ -11,7 +11,7 @@ interface ButtonProps {
   type?: 'button' | 'submit' | 'reset';
   onClick?: (event: unknown) => void;
   [attribute: string]: unknown;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-quiet';
   busy?: boolean;
   iconOnly?: boolean;
 }

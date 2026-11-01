@@ -117,7 +117,7 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
   const mutationNotice = <>{writeError && <p className="admin-brand-message admin-brand-message--error" role="alert">{writeError}</p>}
     {unknown && <div className="admin-brand-message" role="status"><p>待核对操作：<code>{unknown.id}</code></p><p>核对前暂停其他写入，请勿刷新页面后重复新建。</p><AdminButton busy={busy} onClick={() => void reconcile()} disabled={readOnly}>核对结果 / 重试同一操作</AdminButton></div>}</>;
   return <section className="admin-brands" aria-label="品牌与子颜色管理" aria-busy={loading || busy}>
-    <div className="admin-brand-heading"><div><p className="admin-brand-eyebrow">COLOR LIBRARY</p><h2>品牌与颜色</h2><p>管理实际用于新转换的品牌目录。历史图纸始终保留自己的颜色快照。</p></div><AdminButton onClick={() => void load()} busy={loading} disabled={busy || Boolean(unknown)}><RefreshCw aria-hidden="true" />刷新目录</AdminButton></div>
+    <div className="admin-brand-heading"><div><h2>品牌目录</h2><p>共 {brands.length} 个品牌；每个品牌的色号分别维护。</p></div><AdminButton onClick={() => void load()} busy={loading} disabled={busy || Boolean(unknown)}><RefreshCw aria-hidden="true" />刷新目录</AdminButton></div>
     {readOnly && <p className="admin-brand-message" aria-label="品牌权限状态">当前操作者 {operatorUid || '当前账号'} 已确认 colors.read，但缺少 colors.write；新增、编辑、删除操作已禁用。请联系角色授权人申请品牌管理权限。</p>}
     {loadError && <AdminErrorState message={loadError} retry={() => void load()} busy={loading} />}
     {!editor && !deletion && mutationNotice}
@@ -139,7 +139,7 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
         <p className="admin-brand-muted" role="status">{colors.length} 个匹配颜色 · 每页 48 色</p>
         {colors.length ? <div className="admin-brand-color-grid">{colors.slice(currentPage * 48, (currentPage + 1) * 48).map(color => <article className="admin-brand-color" key={color.id}>
           <div className="admin-brand-swatch" style={{ backgroundColor: color.hex }} role="img" aria-label={`颜色 ${color.code} ${color.hex}`} />
-          <div className="admin-brand-color-copy"><strong>{color.code}</strong><span title={color.name}>{color.name}</span><code>{color.hex}</code>{color.screenReferenceOnly && <small>特殊材质 · 屏幕参考</small>}</div>
+          <div className="admin-brand-color-copy"><strong>{color.code}</strong>{color.name.trim() !== color.code.trim() && <span title={color.name}>{color.name}</span>}<code>{color.hex}</code>{color.screenReferenceOnly && <small>特殊材质 · 屏幕参考</small>}</div>
           <div className="admin-brand-color-actions"><AdminButton iconOnly variant="ghost" aria-label={`编辑颜色 ${color.code}`} disabled={locked} onClick={() => openEditor({ kind: 'color', brand, color })}><Edit3 aria-hidden="true" /></AdminButton><AdminButton iconOnly variant="ghost" aria-label={`删除颜色 ${color.code}`} disabled={locked || (brand.protected && brand.colorCount <= 1)} title={brand.protected && brand.colorCount <= 1 ? '默认 MARD 不能删除最后一个颜色' : '删除颜色'} onClick={() => { setWriteError(''); setDeletion({ brand, color }); }}><Trash2 aria-hidden="true" /></AdminButton></div>
         </article>)}</div> : <AdminEmptyState title={colorSearch ? '没有匹配的颜色' : '这个品牌还没有颜色'} description={colorSearch ? '试试其他色号、名称或 HEX。' : '添加颜色后，前台即可使用这个品牌。'} />}
         {pages > 1 && <div className="admin-brand-pagination"><span>{currentPage + 1} / {pages}</span><div><AdminButton disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</AdminButton><AdminButton disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>下一页</AdminButton></div></div>}

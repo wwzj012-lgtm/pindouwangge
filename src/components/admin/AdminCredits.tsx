@@ -162,18 +162,18 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
       <AdminButton onClick={checkResult} busy={checking} disabled={!canAdjust||busy}>查询原请求结果</AdminButton>
       <AdminButton onClick={()=>setConfirm({body:recovery,retry:true})} disabled={!canAdjust||busy||checking||!!storageError}>原样重试（同一请求）</AdminButton>
     </section>}
-    {writeError && <p role="alert">{writeError}</p>}
-    {success && <p role="status" data-credit-success>调整已完成：用户 {success.uid} 的可用积分 {formatCreditUnits(success.beforeAvailableUnits)} → {formatCreditUnits(success.afterAvailableUnits)}；冻结 {formatCreditUnits(success.heldUnits)} 积分。审计编号 {success.id}</p>}
     <div className="admin-credits-columns">
       <section className="admin-credits-card" aria-label="用户积分账户"><h3>用户积分账户</h3>
         {accountLoading && <p role="status">正在读取账户…</p>}{accountError && <p role="alert">{accountError} <AdminButton onClick={()=>setRevision(v=>v+1)}>重试</AdminButton></p>}
         {accounts && <><div className="admin-credits-table"><table><thead><tr><th>用户</th><th>可用积分</th><th>冻结积分</th><th>操作</th></tr></thead><tbody>
-          {accounts.items.map(a=><tr key={a.uid}><td><strong>{name(a)}</strong><small>{a.email}</small><small>{a.uid}</small></td><td>{formatCreditUnits(a.availableUnits)}</td><td>{formatCreditUnits(a.heldUnits)}</td>
+          {accounts.items.map(a=><tr key={a.uid}><td><strong>{name(a)}</strong><small>{a.email}</small><small>{a.uid}</small></td><td data-label="可用">{formatCreditUnits(a.availableUnits)}</td><td data-label="冻结">{formatCreditUnits(a.heldUnits)}</td>
             <td><AdminButton data-credit-user={a.uid} onClick={()=>{setAccount(null);setUid(a.uid);setLedgerPage(0);setAmount('');setReason('');setWriteError('');setSuccess(null); if (uid===a.uid) void readAccount(a.uid);}}>查看</AdminButton></td></tr>)}
         </tbody></table></div>{accounts.items.length===0 && <p>未找到符合条件的用户。</p>}
         <CreditPagination page={accountPage} total={accounts.total} loading={accountLoading} onChange={setAccountPage} label="账户" /></>}
       </section>
       <section className="admin-credits-card" aria-label="积分调整" data-empty={!uid || undefined}><h3>积分调整</h3>
+        {writeError && <p role="alert">{writeError}</p>}
+        {success && <p role="status" data-credit-success>调整已完成：用户 {success.uid} 的可用积分 {formatCreditUnits(success.beforeAvailableUnits)} → {formatCreditUnits(success.afterAvailableUnits)}；冻结 {formatCreditUnits(success.heldUnits)} 积分。审计编号 {success.id}</p>}
         {!uid && <p className="admin-credits-hint">从左侧选一位用户，可查看余额明细与冻结积分，填写原因后提交调整。</p>}{detailLoading && <p role="status">正在读取最新余额…</p>}
         {detailError && <p role="alert">{detailError} <AdminButton onClick={()=>void readAccount(uid)}>重新读取</AdminButton></p>}
         {account && <><p data-credit-selected><strong>{name(account)}</strong> · {account.email} · {account.uid}</p>

@@ -1,3 +1,12 @@
+/* 帖子 ID 和作者 UID 都是 36 位内部标识，整串铺开会把「状态」「审核版本」
+   挤成竖排、把行高撑到两行。固定列宽 + 单行省略，完整值留在 title 里。 */
+.admin-root .admin-community-table-wrap table { table-layout:fixed; }
+.admin-root .admin-community-table-wrap th:nth-child(1), .admin-root .admin-community-table-wrap td:nth-child(1) { width:38%; }
+.admin-root .admin-community-table-wrap th:nth-child(2), .admin-root .admin-community-table-wrap td:nth-child(2) { width:22%; }
+.admin-root .admin-community-table-wrap th:nth-child(3), .admin-root .admin-community-table-wrap td:nth-child(3) { width:16%; white-space:nowrap; }
+.admin-root .admin-community-table-wrap th:nth-child(4), .admin-root .admin-community-table-wrap td:nth-child(4) { width:10%; }
+.admin-root .admin-community-table-wrap th:nth-child(5), .admin-root .admin-community-table-wrap td:nth-child(5) { width:14%; }
+.admin-root .admin-community-table-wrap td .admin-mono { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .admin-root .admin-module:has(> .admin-community-posts) { background:transparent; color:var(--admin-ink); color-scheme:inherit; border:0; padding:0; }
 .admin-root .admin-community-posts { color:var(--admin-ink); }
 .admin-root .community-admin-filters { display:grid; grid-template-columns:minmax(240px,1fr) 180px auto; gap:12px; align-items:end; padding:16px; margin-bottom:16px; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-surface); }
@@ -60,3 +69,6 @@
   .admin-root .community-admin-detail-facts { grid-template-columns:minmax(0,1fr); }
 }
 @media (prefers-reduced-motion:reduce) { .admin-root .community-admin-thumb span { animation:none; } }
+
+/* 手机卡片里 36 位帖子 ID 会独占一整行，截断成单行，完整值在 title 里。 */
+.admin-root .admin-community-card .admin-mono { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -332,15 +332,30 @@ function AdminConsoleSession(_props: { key?: string }) {
     } finally { setLoggingOut(false); }
   };
 
-  if (access !== 'ready') return <div className="admin-root"><main className="admin-access"><section className="admin-access-card" aria-busy={checking}>
-    <span className="admin-brand-mark"><ShieldCheck aria-hidden="true" /></span><h1>管理工作台</h1>
-    <p>{access === 'checking' ? '正在验证后台会话。' : access === 'forbidden' ? '当前账号没有后台访问权限。' : access === 'signed-out' ? '请先登录正式账号。' : access === 'session-required' ? '当前后台会话不可用，请重新进入。' : '暂时无法连接后台服务。'}</p>
-    {access === 'checking' ? <AdminLoading label="正在验证后台会话…" /> : <>{accessError && <AdminErrorState title={access === 'forbidden' ? '无后台访问权限' : '会话尚未就绪'} message={accessError} retry={() => void verifySession()} busy={checking} />}
-      <div className="admin-access-actions">{access === 'session-required' && <><label className="admin-check"><input type="checkbox" checked={trustedDevice} onChange={event => setTrustedDevice(event.target.checked)} />信任此设备30天</label><AdminButton variant="primary" busy={checking} onClick={() => void createSession()}>重新进入后台</AdminButton></>}
-        {!accessError && <AdminButton onClick={() => void verifySession()} busy={checking}>重试</AdminButton>}
-        <AdminButton onClick={() => window.location.assign('/workspace')}>返回前台登录</AdminButton><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton>
-      </div></>}
-  </section></main></div>;
+  if (access !== 'ready') {
+    // 四种进不来的原因要分开说：没登录却被告知"会话已过期"是最容易让人卡住的一种。
+    const gate = access === 'forbidden'
+      ? { title: '无后台访问权限', message: accessError || '当前账号没有后台访问权限，授权以服务端结果为准。' }
+      : access === 'signed-out'
+        ? { title: '还没有登录', message: '后台只对正式账号开放，登录后回到这个页面即可。' }
+        : access === 'session-required'
+          ? { title: '后台会话已过期', message: '为安全起见后台会话会定时失效。重新进入即可继续，不需要重新登录。' }
+          : access === 'unavailable'
+            ? { title: '暂时连不上后台', message: accessError || '无法连接后台服务，请检查网络后重试。' }
+            : null;
+    return <div className="admin-root"><main className="admin-access"><section className="admin-access-card" aria-busy={checking}>
+      <span className="admin-brand-mark"><ShieldCheck aria-hidden="true" /></span><h1>管理工作台</h1>
+      <p>{access === 'checking' ? '正在验证后台会话。' : access === 'forbidden' ? '当前账号没有后台访问权限。' : access === 'signed-out' ? '请先登录正式账号。' : access === 'session-required' ? '当前后台会话不可用，请重新进入。' : '暂时无法连接后台服务。'}</p>
+      {access === 'checking' ? <AdminLoading label="正在验证后台会话…" /> : <>
+        {gate && <AdminErrorState title={gate.title} message={gate.message} retry={access === 'signed-out' ? undefined : () => void verifySession()} busy={checking} />}
+        <div className="admin-access-actions">
+          {access === 'session-required' && <><label className="admin-check"><input type="checkbox" checked={trustedDevice} onChange={event => setTrustedDevice(event.target.checked)} />信任此设备30天</label><AdminButton variant="primary" busy={checking} onClick={() => void createSession()}>重新进入后台</AdminButton></>}
+          {access === 'signed-out' && <AdminButton variant="primary" onClick={() => window.location.assign('/workspace')}>去登录</AdminButton>}
+          {access === 'unavailable' && <AdminButton onClick={() => void verifySession()} busy={checking}>重试</AdminButton>}
+          <AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton>
+        </div></>}
+    </section></main></div>;
+  }
 
   const busy = dashboardLoading || modulePending > 0;
   const module = activeSection === 'users' || activeSection === 'roles' ? <AdminUsersRoles mode={activeSection} request={moduleRequest} />
@@ -362,7 +377,7 @@ function AdminConsoleSession(_props: { key?: string }) {
     <div className="admin-layout"><header className="admin-header"><div className="admin-header-title">
       <AdminButton className="admin-mobile-menu" iconOnly variant="ghost" aria-label="打开菜单" aria-expanded={mobileNavigation} onClick={() => setMobileNavigation(true)}><Menu aria-hidden="true" /></AdminButton>
       <div><nav className="admin-breadcrumb" aria-label="面包屑"><span>管理工作台</span><ChevronRight aria-hidden="true" /><span>{GROUPS.find(group => group.id === section.group)?.label}</span></nav><h1>{section.label}</h1></div>
-    </div><div className="admin-header-actions"><div className="admin-account"><span className="admin-account-name">{currentUser?.displayName || currentUser?.email || '管理员'}</span><AdminBadge tone="success"><CheckCircle2 aria-hidden="true" />后台会话有效</AdminBadge></div>
+    </div><div className="admin-header-actions"><div className="admin-account"><span className="admin-account-name">{currentUser?.displayName || currentUser?.email || '管理员'}</span><span className="admin-account-session" title="后台会话有效；会话会定时失效，届时需重新进入"><i aria-hidden="true" />会话有效</span></div>
       <AdminButton data-admin-refresh data-admin-focus-fallback iconOnly variant="ghost" aria-label={'刷新' + section.label} title={'只刷新' + section.label} busy={busy} onClick={() => queueAction({ kind: 'refresh' })}>{!busy && <RefreshCw aria-hidden="true" />}</AdminButton>
       <AdminButton iconOnly variant="ghost" aria-label="退出后台会话" title="退出后台会话" onClick={() => { setLogoutError(''); setLogoutOpen(true); }}><LogOut aria-hidden="true" /></AdminButton>
     </div></header>

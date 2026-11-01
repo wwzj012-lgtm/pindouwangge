@@ -177,23 +177,23 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     return <div className="admin-code-actions"><div>
       <AdminButton data-code-copy={code.id} iconOnly aria-label="复制兑换码" disabled={busy} onClick={() => void copyCode(code)}><Copy aria-hidden="true" /></AdminButton>
       <AdminButton data-code-mark={code.id} className={code.copied ? 'admin-code-mark-button--active' : ''} disabled={busy} busy={lockView.rows.has(code.id)} onClick={() => reviewRow(code, 'mark')}><KeyRound aria-hidden="true" />{code.copied ? '取消发售标记' : '标记为发售'}</AdminButton>
-      <AdminButton data-code-delete={code.id} iconOnly variant="danger" aria-label={code.deletePendingAt ? '撤销删除申请' : '申请删除'} disabled={busy} onClick={() => reviewRow(code, code.deletePendingAt ? 'restore' : 'delete')}>{code.deletePendingAt ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}</AdminButton>
+      <AdminButton data-code-delete={code.id} iconOnly variant="danger-quiet" aria-label={code.deletePendingAt ? '撤销删除申请' : '申请删除'} disabled={busy} onClick={() => reviewRow(code, code.deletePendingAt ? 'restore' : 'delete')}>{code.deletePendingAt ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}</AdminButton>
     </div>{feedback?.error && <p className="admin-field-error" role="alert" data-code-feedback={code.id}>{feedback.error}</p>}{feedback?.success && <p className="admin-code-feedback" role="status" data-code-feedback={code.id}>{feedback.success}</p>}{feedback?.warning && <p className="admin-code-feedback admin-code-feedback--pending" role="status" data-code-feedback={code.id}>{feedback.warning}</p>}</div>;
   };
   const anyWrite = lockView.batch || lockView.rows.size > 0;
   return <section>
-    <AdminToolbar actions={<AdminButton busy={loading} disabled={anyWrite} onClick={refresh}>刷新兑换数据</AdminButton>}><h2>兑换码发行与管理</h2><p>复制与发售标记分离；批次独占，同一行只允许一笔写，不同行可并行。</p></AdminToolbar>
+    <AdminToolbar actions={<AdminButton busy={loading} disabled={anyWrite} onClick={refresh}>刷新兑换数据</AdminButton>}><h2>兑换码发行与管理</h2><p>复制和发售标记是两件事；同一张码同一时间只处理一项，不同码可以同时处理。</p></AdminToolbar>
     <form className="admin-stage-panel admin-code-generation" key={generationForm} onSubmit={event => { event.preventDefault(); previewGeneration(); }}>
       <label>权益类型<select data-generation-type value={generation.memberType} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, memberType: Number(event.target.value) as 1 | 2 }))}><option value={1}>普通VIP</option><option value={2} disabled={generation.days === 7}>商家Pro</option></select></label>
       <label>开通时长<select data-generation-days value={generation.days} disabled={anyWrite} onChange={event => { const days = Number(event.target.value); setGeneration(value => ({ ...value, days, memberType: days === 7 ? 1 : value.memberType })); }}>{[7,30,90,365].map(days => <option key={days} value={days}>{days}天{days === 7 ? '体验卡（仅VIP）' : ''}</option>)}</select></label>
       <label>生成数量<input data-generation-count type="number" min={1} max={500} value={generation.count} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, count: Number(event.target.value) }))} /></label>
-      <label>发行渠道<input data-generation-channel value={generation.channel} maxLength={100} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, channel: event.target.value }))} placeholder="可选，仅记录既有渠道" /></label>
+      <label>发行渠道<input data-generation-channel value={generation.channel} maxLength={100} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, channel: event.target.value }))} placeholder="可选" title="不填则沿用既有渠道，系统不会新建渠道" /></label>
       <AdminButton data-generation-review type="submit" variant="primary" disabled={anyWrite}>确认参数并生成</AdminButton>
-      <p className="admin-code-scope">本次：{generation.memberType === 2 ? '商家Pro' : '普通VIP'} · {generation.days}天 · 数量 {number(generation.count)}。使用资格沿既有服务端兑换规则；不新增渠道/账号限制。7天只支持VIP，最多500张。</p>
+      <p className="admin-code-scope">本次：{generation.memberType === 2 ? '商家Pro' : '普通VIP'} · {generation.days}天 · 数量 {number(generation.count)}。7天体验卡只支持普通VIP，单批最多 500 张。</p>
     </form>
     {error && <AdminErrorState title="兑换码未更新" message={error + ' 输入与上次成功列表保留。'} retry={refresh} busy={loading || anyWrite} />}
     <div className="admin-code-statistics" aria-label="服务端筛选统计">{[['筛选总数',snapshot?.stats?.total],['可用',snapshot?.stats?.available],['已兑换',snapshot?.stats?.redeemed],['删除等待',snapshot?.stats?.deletePending],['发售标记',snapshot?.stats?.copied]].map(([label,value]) => <div className="admin-stage-panel" key={String(label)}><small>{label}</small><strong>{number(value)}</strong></div>)}</div>
-    <p className="admin-stage-footnote">统计为服务端读取快照，修改完成后重读；未知为—，发售标记不代表真实支付收入。</p>
+    <p className="admin-stage-footnote">上面四个数字是打开页面时的统计，改动后点「刷新兑换数据」才会更新；「发售标记」不等于真实支付。</p>
     <div className="admin-stage-panel admin-code-filters" role="search" aria-label="兑换码查询">
       <label>卡密搜索<input data-code-search value={draft.search} onChange={event => setDraft(value => ({ ...value, search: event.target.value }))} placeholder="卡密搜索" /></label><label>发行渠道<input value={draft.channel} onChange={event => setDraft(value => ({ ...value, channel: event.target.value }))} /></label>
       <label>权益<select value={draft.memberType} onChange={event => setDraft(value => ({ ...value, memberType: event.target.value as CodeQuery['memberType'] }))}><option value="all">全部</option><option value="1">普通VIP</option><option value="2">商家Pro</option></select></label>
@@ -203,7 +203,7 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     </div>
     <section className="admin-stage-panel" aria-busy={loading}><h2 className="admin-detail-title">兑换码列表</h2>{loading && snapshot && <p role="status" className="admin-result-caption">正在读取，旧列表保留…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
-        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} className={codeSaleRowClassName(code.copied)} data-code-row={code.id}><td><span className="admin-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td>{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td className="admin-code-sale-cell"><AdminBadge tone={code.copied ? 'warning' : 'neutral'}>{codeSaleLabel(code.copied)}</AdminBadge>{code.copied && <small>仅表示发售标记，不代表真实付款</small>}{code.deletePendingAt && <><AdminBadge tone="danger">删除等待</AdminBadge><small>至 {dateText(code.deletePendingAt)}</small></>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
+        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} className={codeSaleRowClassName(code.copied)} data-code-row={code.id}><td><span className="admin-mono admin-code-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td className="admin-code-term">{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td className="admin-code-sale-cell"><AdminBadge tone={code.copied ? 'warning' : 'neutral'}>{codeSaleLabel(code.copied)}</AdminBadge>{code.copied && <small className="admin-code-sale-note">仅表示发售标记，不代表真实付款</small>}{code.deletePendingAt && <AdminBadge tone="danger">删除等待至 {dateText(code.deletePendingAt).split(' ')[0]}</AdminBadge>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
         <Pager page={snapshot.page ?? query.page} total={snapshot.total} loading={loading || anyWrite || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
       </> : <AdminEmptyState title="没有匹配兑换码" description="调整已提交筛选或重置后重试。" />}
     </section>
@@ -215,9 +215,14 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     <AdminConfirmDialog open={Boolean(review)} title={review?.kind === 'generation' ? '确认生成这一批兑换码' : review?.label ?? '确认操作'} description="参数在打开确认时冻结，请核对范围后提交。"
       subject={review?.kind === 'generation' ? '新发行批次 · ' + number(review.value.quantity) + ' 张兑换码' : review ? maskCardCode(review.code.code) + ' · 记录 ID：' + review.code.id + ' · 本次仅 1 条' : undefined}
       impact={review?.kind === 'row' ? review.impact : '按冻结的数量、权益与渠道生成兑换码，使用资格沿现有服务端规则。'}
-      reason={review?.kind === 'row' ? review.label : '确认本次发行参数'}
+      reason={undefined}
       confirmLabel="确认提交" pending={lockView.batch} onClose={() => { if (!lockView.batch) setReview(null); }} onConfirm={() => void confirm()}>
-      {review?.kind === 'generation' ? <div className="admin-change-summary"><p>数量：{review.value.quantity}张；{review.value.memberType === 2 ? '商家Pro' : '普通VIP'} · {review.value.days}天</p><p>渠道：{review.value.channel || '未指定'}</p><p>使用范围：沿现有兑换资格规则；不是新增定向授权或销售收入。</p></div> : review && <div className="admin-change-summary"><p>当前发售标记：{review.code.copied ? '有' : '无'}；删除等待：{dateText(review.code.deletePendingAt)}</p><p>待提交：{JSON.stringify(review.updates)}</p><p>影响：{review.impact}</p></div>}
+      {review?.kind === 'generation'
+        ? <div className="admin-change-summary"><p>数量：{review.value.quantity}张；{review.value.memberType === 2 ? '商家Pro' : '普通VIP'} · {review.value.days}天</p><p>渠道：{review.value.channel || '未指定'}</p></div>
+        : review && <div className="admin-change-summary">
+          {'copied' in review.updates && <p>发售标记：{review.code.copied ? '有' : '无'} → {review.updates.copied ? '有' : '无'}</p>}
+          {'deletePendingAt' in review.updates && <p>删除等待：{review.code.deletePendingAt ? dateText(review.code.deletePendingAt) : '未设置'} → {review.updates.deletePendingAt ? dateText(review.updates.deletePendingAt) : '未设置'}</p>}
+        </div>}
       {reviewError && <AdminErrorState message={reviewError} />}
     </AdminConfirmDialog>
     <AdminDrawer open={Boolean(result)} title="本批生成结果" description={result ? '服务端确认数量：' + number(result.confirmed) + '；本次提交明文 ' + result.codes.length + '条。' : undefined} onClose={() => { if (copiedAll) setResult(null); else setCloseResult(true); }} className="admin-code-result-drawer">

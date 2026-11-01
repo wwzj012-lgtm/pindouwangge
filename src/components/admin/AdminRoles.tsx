@@ -3,6 +3,7 @@ import { useAuth } from '../../context/AuthContext';
 import type { AdminRequest } from './adminRequest';
 import { AdminPermissionTree } from './AdminPermissionTree';
 import { adminRoleLabel } from './adminPresentation';
+import { permissionDisplayLabel, permissionModuleLabel } from './adminPermissionTreeModel';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { LatestRequest, SYSTEM_ROLE_MINIMUMS, dateText, permissionDelta, requestError } from './adminUserModel';
 import { unknownGrantedCodes } from './adminPermissionTreeModel';
@@ -26,6 +27,12 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
   const [actionError, setActionError] = useState(''), [success, setSuccess] = useState('');
   const [uid, setUid] = useState(''), [assignmentRoleId, setAssignmentRoleId] = useState(''), [formVersion, setFormVersion] = useState(0);
   const [pending, setPending] = useState<Pending | null>(null), [busy, setBusy] = useState(false);
+  // 目录里的 displayName 是英文（Publish announcements），复核弹窗改用权限树同一套
+  // "模块 · 动作" 中文标签，运营看到的名字和勾选时一致。
+  const nameOfPermission = (code: string) => {
+    const item = permissions?.find(entry => entry.code === code);
+    return permissionModuleLabel(code.split('.')[0] ?? '') + ' · ' + (item ? permissionDisplayLabel(item) : code);
+  };
   const [confirmedGrants, setConfirmedGrants] = useState<Set<string>>(new Set()), [confirmedRevocations, setConfirmedRevocations] = useState<Set<string>>(new Set());
   const epoch = useRef(new LatestRequest()), detailEpoch = useRef(new LatestRequest()), writing = useRef(false);
   const role = roles.find(item => item.id === selectedId);
@@ -85,7 +92,7 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
       else if (pending.kind === 'grant') result = await request('/api/admin/admin-user-roles', { method: 'POST', body: JSON.stringify({ userUid: pending.uid, roleId: pending.role.id }) });
       else result = await request('/api/admin/admin-user-roles?userUid=' + encodeURIComponent(pending.assignment.userUid) + '&roleId=' + encodeURIComponent(pending.assignment.roleId), { method: 'DELETE' });
       if (!result.ok) { setActionError(requestError(result, pending.kind === 'save' ? '保存角色权限' : pending.kind === 'grant' ? '授予后台角色' : '撤销后台角色')); return; }
-      if (pending.kind === 'save') { setSelection({ id: pending.role.id, before: pending.codes, codes: new Set(pending.codes) }); setSuccess('权限已保存；正在重读服务端配置。'); await readPermissions(); }
+      if (pending.kind === 'save') { setSelection({ id: pending.role.id, before: pending.codes, codes: new Set(pending.codes) }); setSuccess('权限已保存；服务端配置已重新读取。'); await readPermissions(); }
       if (pending.kind === 'grant') { setConfirmedGrants(value => new Set([...value, pending.uid + ':' + pending.role.id])); setUid(''); setFormVersion(value => value + 1); setSuccess('已授予指定后台角色，未修改旧角色字段或付费资格。'); }
       if (pending.kind === 'revoke') { setConfirmedRevocations(value => new Set([...value, pending.assignment.userUid + ':' + pending.assignment.roleId])); setSuccess('指定角色已撤销；以服务端关系列表刷新结果为准。'); }
       setPending(null); await load();
@@ -106,7 +113,7 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
     {success && <p className="admin-success-message" role="status">{success}</p>}
     {actionError && !pending && <AdminErrorState title="操作未完成" message={actionError} />}
     <div className="admin-roles-layout"><aside className="admin-stage-panel admin-role-list" aria-label="后台角色列表"><h2>角色列表</h2>
-      {roles.length ? roles.map(item => <button type="button" key={item.id} data-role-select={item.id} className="admin-role-choice" aria-pressed={selectedId === item.id} disabled={busy} onClick={() => choose(item.id)}><strong>{adminRoleLabel(item.code,item.displayName)}</strong><small className="admin-mono">{item.code}</small><small>目录返回 {item.permissionCount} 项权限{item.system ? ' · 系统角色' : ''}</small></button>) : loading ? <AdminLoading label="正在读取角色…" /> : <AdminEmptyState title="暂无可读取角色" />}
+      {roles.length ? roles.map(item => <button type="button" key={item.id} data-role-select={item.id} className="admin-role-choice" title={'角色标识：' + item.code} aria-pressed={selectedId === item.id} disabled={busy} onClick={() => choose(item.id)}><strong>{adminRoleLabel(item.code,item.displayName)}</strong><small>共 {item.permissionCount} 项权限{item.system ? ' · 系统角色' : ''}</small></button>) : loading ? <AdminLoading label="正在读取角色…" /> : <AdminEmptyState title="暂无可读取角色" />}
     </aside><section className="admin-stage-panel admin-role-permissions"><AdminToolbar actions={<><AdminButton onClick={retryPermissions} disabled={!role || busy || permissionLoading}>重读权限</AdminButton><AdminButton data-role-save variant="primary" disabled={!role || !current || !permissions || !dirty || busy || permissionLoading || role.code === 'super_admin'} onClick={saveReview}>保存权限</AdminButton></>}><h2>{role ? adminRoleLabel(role.code,role.displayName) : '选择角色'}</h2><p>{role?.description && /[\u3400-\u9fff]/u.test(role.description) ? role.description : '具体能力以服务端配置为准。'}</p></AdminToolbar>
       {role?.code === 'super_admin' && <p className="admin-info-box">超级管理员角色只读，必须保留全部目录权限，不可削权。</p>}
       {role?.code !== 'super_admin' && locked.length > 0 && <p className="admin-info-box">系统最低授权共 {locked.length} 项，已在树中锁定不可取消。</p>}
@@ -130,8 +137,8 @@ export function AdminRoles({ request }: { request: AdminRequest }) {
       </form>{selfTarget && <p className="admin-field-error" role="alert">不能为当前登录账号自行授予或提升后台角色。</p>}{assigned && <p className="admin-stage-footnote">服务端列表或本次已成功请求表明该关系已存在，不重复授予。</p>}
       {assignments === null ? loading ? <AdminLoading label="正在读取账号角色…" /> : <AdminEmptyState title="尚无成功读取结果" /> : assignments.length ? <div className="admin-assignment-table-wrap"><table className="admin-stage-table" aria-label="管理员账号角色"><thead><tr><th>用户UID</th><th>后台角色</th><th>授予时间</th><th>操作</th></tr></thead><tbody>{assignments.map(item => <tr key={item.userUid + ':' + item.roleId}><td className="admin-mono">{item.userUid}</td><td><AdminBadge>{adminRoleLabel(item.roleCode,item.roleName)}</AdminBadge><small className="admin-mono">{item.roleCode}</small></td><td>{dateText(item.assignedAt)}</td><td><AdminButton data-role-revoke={item.userUid + ':' + item.roleId} variant="danger" disabled={busy || confirmedRevocations.has(item.userUid + ':' + item.roleId) || item.userUid === currentUser?.uid} title={item.userUid === currentUser?.uid ? '不能撤销当前账号自己的后台角色' : undefined} onClick={() => { setActionError(''); setPending({ kind: 'revoke', assignment: item }); }}>撤销此角色</AdminButton>{item.userUid === currentUser?.uid && <small className="admin-muted">当前账号 · 防自锁</small>}</td></tr>)}</tbody></table></div> : <AdminEmptyState title="暂无管理员角色关系" description="授予前将再次确认目标UID与角色。" />}
     </section>
-    <AdminConfirmDialog open={Boolean(pending)} title={pending?.kind === 'save' ? '确认角色权限差异' : pending?.kind === 'grant' ? '确认授予后台角色' : pending?.kind === 'revoke' ? '确认撤销后台角色' : '放弃未保存权限？'} description={pending?.kind === 'save' ? adminRoleLabel(pending.role.code,pending.role.displayName) + '（' + pending.role.code + '）' : pending?.kind === 'grant' ? '目标UID：' + pending.uid + '；角色：' + adminRoleLabel(pending.role.code,pending.role.displayName) : pending?.kind === 'revoke' ? '目标UID：' + pending.assignment.userUid + '；角色：' + adminRoleLabel(pending.assignment.roleCode,pending.assignment.roleName) : '取消会保留当前选择，确认才切换或重读。'} confirmLabel="确认操作" pending={busy} onClose={() => { if (!writing.current) setPending(null); }} onConfirm={() => void confirm()}>
-      {pending?.kind === 'save' && <div className="admin-change-summary"><p>新增：{pending.added.join('、') || '无'}</p><p>移除：{pending.removed.join('、') || '无'}</p><p>影响：更新该角色的权限集合；不改变其它角色，不把目录当作当前操作者权限范围。</p></div>}
+    <AdminConfirmDialog open={Boolean(pending)} title={pending?.kind === 'save' ? '确认角色权限差异' : pending?.kind === 'grant' ? '确认授予后台角色' : pending?.kind === 'revoke' ? '确认撤销后台角色' : '放弃未保存权限？'} description={pending?.kind === 'save' ? adminRoleLabel(pending.role.code,pending.role.displayName) + '：只改这一组权限' : pending?.kind === 'grant' ? '目标UID：' + pending.uid + '；角色：' + adminRoleLabel(pending.role.code,pending.role.displayName) : pending?.kind === 'revoke' ? '目标UID：' + pending.assignment.userUid + '；角色：' + adminRoleLabel(pending.assignment.roleCode,pending.assignment.roleName) : '取消会保留当前选择，确认才切换或重读。'} confirmLabel="确认操作" pending={busy} onClose={() => { if (!writing.current) setPending(null); }} onConfirm={() => void confirm()}>
+      {pending?.kind === 'save' && <div className="admin-change-summary"><p>新增：{pending.added.map(nameOfPermission).join('、') || '无'}</p><p>移除：{pending.removed.map(nameOfPermission).join('、') || '无'}</p><p>影响：更新该角色的权限集合；不影响其它角色，也不改变账号已有的角色。</p></div>}
       {pending?.kind === 'grant' && <p>影响：为这个UID新增所选后台角色关系；实际能力以服务端RBAC为准，不修改付费资格。</p>}
       {pending?.kind === 'revoke' && <p>影响：移除这个UID的指定角色关系；是否仍有其它后台权限由服务端决定，不删除账号。</p>}
       {actionError && <AdminErrorState title="服务端操作未完成" message={actionError} />}

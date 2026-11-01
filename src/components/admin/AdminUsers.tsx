@@ -173,10 +173,10 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
     <AdminConfirmDialog open={Boolean(confirmation)} title={confirmTitle} description="请核对目标用户、影响与待提交值。"
       subject={userLabel(user) + ' · ' + user.email + ' · UID：' + user.uid}
       impact={confirmation?.kind === 'moderation' ? '改变该用户的账号限制；保留用户、图纸和会员字段。' : confirmation?.kind === 'membership' ? '覆盖该用户的付费级别与到期字段；角色提供的 Pro 权益保持原规则。' : '仅移除该用户的标签关联，保留标签目录。'}
-      reason={confirmation?.kind === 'moderation' ? confirmation.payload.reason || '解除账号限制' : undefined}
+      reason={confirmation?.kind === 'moderation' ? confirmation.payload.reason || undefined : undefined}
       pending={busy} confirmLabel="确认提交" onClose={() => setConfirmation(null)} onConfirm={submitConfirmation}>
       {confirmation?.kind === 'membership' && <div className="admin-change-summary" data-membership-confirm><p>当前接口级别：{memberLabel(confirmation.proposal.beforeType)}</p><p>当前到期：{confirmation.proposal.beforeExpiry === null ? 'null（空/永久，结合级别）' : dateText(confirmation.proposal.beforeExpiry)}</p><hr /><p>将提交级别：{confirmation.proposal.type === '' ? '未提供' : memberLabel(confirmation.proposal.type)}</p><p>将提交到期：{confirmation.proposal.expiry === null ? 'null（永久/免费清空）' : dateText(confirmation.proposal.expiry)}</p><p>member_expire：{String(confirmation.proposal.expiry)}</p><p>影响：覆盖该用户付费字段；不改变角色或角色提供的 Pro 权益。</p>{view.caveat && <p>{view.caveat}</p>}</div>}
-      {confirmation?.kind === 'moderation' && <div className="admin-change-summary"><p>动作：{confirmation.payload.action === 'ban' ? '封禁账号' : confirmation.payload.action === 'suspend' ? '暂停账号' : '解除限制'}</p><p>原因：{confirmation.payload.reason || '解除限制'}</p><p>到期：{dateText(confirmation.payload.expiresAt)}</p><p>影响：请求服务端改变账号限制；不删除用户或图纸。</p></div>}
+      {confirmation?.kind === 'moderation' && confirmation.payload.action === 'suspend' && <div className="admin-change-summary"><p>限制到期：{dateText(confirmation.payload.expiresAt)}</p></div>}
       {confirmation?.kind === 'tag' && <p>仅移除该用户与“{confirmation.name}”的标签关联，不删除标签目录。</p>}
       {error && <AdminErrorState message={error} />}
     </AdminConfirmDialog>
@@ -194,7 +194,7 @@ export function UserOperationsOverview({ detail }: { detail: UserDetail }) {
       <div><dt>积分账户更新时间</dt><dd>{dateText(detail.credits?.updatedAt)}</dd></div>
       <div><dt>图纸数（未删除）</dt><dd>{summary.works}</dd></div><div><dt>公开社区帖数</dt><dd>{summary.posts}</dd></div>
       <div><dt>最近内容活动</dt><dd>{summary.activity}</dd></div>
-      <div><dt>会员有效权益</dt><dd>{membership.effective}</dd></div><div><dt>付费级别 / 到期</dt><dd>{membership.paid} / {membership.expiry}</dd></div>
+      <div><dt>会员有效权益</dt><dd>{membership.effective}</dd></div><div><dt>付费级别 / 到期</dt><dd>{membership.paid} / {membership.expiry === '空到期值' ? '无到期限制' : membership.expiry}</dd></div>
       <div><dt>账号限制</dt><dd><StatusBadge status={detail.moderation.status} />{detail.moderation.reason && <p>{detail.moderation.reason}</p>}<p>限制到期：{detail.moderation.expiresAt == null ? '无到期时间' : dateText(detail.moderation.expiresAt)}</p></dd></div>
       <div><dt>注册方式 / 当前认证来源</dt><dd>{summary.provider}</dd></div>
       <div><dt>注册时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div>

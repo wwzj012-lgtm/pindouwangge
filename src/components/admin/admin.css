@@ -18,6 +18,8 @@
 .admin-root .admin-button--primary:hover:not(:disabled) { background:var(--admin-primary-hover); }
 .admin-root .admin-button--danger { background:var(--admin-danger); color:var(--admin-surface); border-color:var(--admin-danger); }
 .admin-root .admin-button--danger:hover:not(:disabled) { background:var(--admin-danger); color:var(--admin-surface); }
+.admin-root .admin-button--danger-quiet { background:var(--admin-surface); border-color:#e7b4ae; color:#a3342b; }
+.admin-root .admin-button--danger-quiet:hover:not(:disabled) { background:#fdf2f1; border-color:#d9988f; color:#8f2a22; }
 .admin-root .admin-button--ghost { background:transparent; border-color:transparent; color:var(--admin-muted); }
 .admin-root .admin-button--icon { width:44px; flex-shrink:0; padding:10px; }
 .admin-root .admin-button:disabled { opacity:.55; cursor:not-allowed; }
@@ -50,19 +52,23 @@
 .admin-root .admin-header h1 { margin:4px 0 0; font-size:24px; line-height:1.3; font-weight:600; letter-spacing:-.02em; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
 .admin-root .admin-header-actions { display:flex; align-items:center; gap:8px; flex-shrink:0; }
 .admin-root .admin-account { display:grid; justify-items:end; gap:4px; margin-right:8px; }
+/* 绿色胶囊在全绿的主题里是最响的一块，而它只在"一切正常"时出现。
+   改成 6px 圆点 + 11px 灰字：需要时能看见，不需要时不抢注意力。 */
+.admin-root .admin-account-session { display:inline-flex; align-items:center; gap:5px; color:var(--admin-muted); font-size:11px; }
+.admin-root .admin-account-session i { width:6px; height:6px; border-radius:50%; background:var(--admin-success); }
 .admin-root .admin-account-name { max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; }
 .admin-root .admin-mobile-menu { display:none; }
 .admin-root .admin-main { max-width:1680px; margin:auto; padding:24px; }
 .admin-root .admin-toolbar { display:flex; justify-content:space-between; gap:16px; align-items:center; margin-bottom:14px; }
 .admin-root .admin-toolbar-copy { display:flex; flex-wrap:wrap; align-items:baseline; gap:4px 12px; color:var(--admin-muted); }
-.admin-root .admin-toolbar-copy h2 { color:var(--admin-ink); margin:0; font-size:16px; font-weight:600; }
+.admin-root .admin-toolbar-copy h2 { color:var(--admin-ink); margin:0; font-size:16px; font-weight:600; letter-spacing:-.01em; }
 .admin-root .admin-toolbar-copy p { margin:0; }
 .admin-root .admin-toolbar-actions { display:flex; flex-wrap:wrap; gap:8px; }
 .admin-root .admin-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:16px; }
 .admin-root .admin-metric, .admin-root .admin-chart, .admin-root .admin-telemetry { background:var(--admin-surface); border:1px solid var(--admin-border); border-radius:8px; padding:16px; box-shadow:var(--admin-shadow); }
 .admin-root .admin-metric-head { display:flex; justify-content:space-between; align-items:center; gap:12px; color:var(--admin-muted); font-size:13px; }
 .admin-root .admin-metric-head svg { width:18px; height:18px; color:var(--admin-primary); }
-.admin-root .admin-metric-value { margin:12px 0 8px; font-size:28px; line-height:1.2; font-weight:600; font-variant-numeric:tabular-nums; }
+.admin-root .admin-metric-value { margin:8px 0 4px; font-size:32px; line-height:1.15; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
 .admin-root .admin-metric p:last-child { color:var(--admin-muted); font-size:12px; margin:0; }
 .admin-root .admin-dashboard-section { margin-top:28px; }
 /* 六个网格列：普通图表占 2 列（=三栏），最后两张各占 3 列（=两栏），
@@ -74,7 +80,7 @@
 .admin-root .admin-chart-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
 .admin-root .admin-chart-head p { display:flex; align-items:baseline; gap:6px; margin:0; color:var(--admin-muted); font-size:11px; }
 .admin-root .admin-chart-head strong { color:var(--admin-ink); font-size:17px; font-weight:600; font-variant-numeric:tabular-nums; }
-.admin-root .admin-chart-plot { position:relative; height:104px; }
+.admin-root .admin-chart-plot { position:relative; height:128px; }
 .admin-root .admin-chart-plot svg { display:block; width:100%; height:100%; overflow:visible; }
 .admin-root .admin-chart-grid { stroke:var(--admin-border); stroke-dasharray:3 4; stroke-width:1; }
 .admin-root .admin-chart-area { fill:var(--admin-primary); fill-opacity:.12; }
@@ -207,6 +213,8 @@
 @media (max-width:639px) { .admin-root .admin-stage-panel { padding:16px 12px; } .admin-root .admin-user-filters, .admin-root .admin-user-cards, .admin-root .admin-form-grid { grid-template-columns:minmax(0,1fr); } .admin-root .admin-detail-facts { gap:12px; } .admin-root .admin-user-results { padding:12px; } }
 .admin-root .admin-roles-layout { display:grid; grid-template-columns:220px minmax(0,1fr); gap:16px; }
 .admin-root .admin-role-list h2 { margin:0 0 12px; font-size:16px; font-weight:600; }
+/* 中文在窄卡片里会被逐字断开（“系 / 统角色”），keep-all 让词组整体换行。 */
+.admin-root .admin-role-choice small { word-break:keep-all; }
 .admin-root .admin-role-choice { display:block; width:100%; padding:12px; margin-bottom:8px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-surface); color:var(--admin-ink); text-align:left; cursor:pointer; min-width:0; }
 .admin-root .admin-role-choice[aria-pressed=true] { border-color:var(--admin-primary); background:var(--admin-primary-soft); }
 .admin-root .admin-role-choice strong, .admin-root .admin-role-choice small { display:block; overflow-wrap:anywhere; }
@@ -271,21 +279,34 @@
 .admin-root .admin-code-generation { display:grid; grid-template-columns:130px 170px 110px minmax(160px,1fr) auto; gap:12px; align-items:end; }
 .admin-root .admin-code-scope { grid-column:1/-1; color:var(--admin-muted); font-size:12px; margin:4px 0 0; }
 .admin-root .admin-code-filters { display:grid; grid-template-columns:minmax(160px,1fr) minmax(140px,1fr) 110px 120px 130px auto; align-items:end; gap:12px; }
-.admin-root .admin-code-statistics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
-.admin-root .admin-code-statistics .admin-stage-panel { margin-bottom:0; padding:16px; }
+/* 五张独立卡片各 175×76，只放一个数字，一屏里最占地方的就是它。
+   改成一条带分隔线的统计条：同样的数字，高度 76 → 56，视觉上从"五个卡片"变成"一行事实"。 */
+.admin-root .admin-code-statistics { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:0; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-surface); overflow:hidden; }
+.admin-root .admin-code-statistics .admin-stage-panel { margin:0; padding:10px 16px; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.admin-root .admin-code-statistics .admin-stage-panel + .admin-stage-panel { border-left:1px solid var(--admin-border); }
 .admin-root .admin-code-statistics small { display:block; color:var(--admin-muted); font-size:12px; }
-.admin-root .admin-code-statistics strong { display:block; margin-top:8px; font-size:24px; font-variant-numeric:tabular-nums; }
+.admin-root .admin-code-statistics strong { display:block; margin-top:2px; font-size:21px; line-height:1.25; font-variant-numeric:tabular-nums; }
 .admin-root .admin-table-scroll { overflow-x:auto; max-width:100%; }
 .admin-root .admin-codes-logs .admin-table-scroll table { min-width:850px; }
-.admin-root .admin-code-actions { min-width:220px; }
-.admin-root .admin-code-actions > div { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+/* 三个按钮（复制 / 标记 / 删除）刚好 220px，单元格再减掉 24px padding 就放不下，
+   于是每行都折成两行、行高翻倍。这里让它在同一行排开，列宽交给表格自己撑。 */
+.admin-root .admin-code-actions { min-width:0; }
+.admin-root .admin-code-actions > div { display:flex; align-items:center; flex-wrap:nowrap; gap:8px; }
+.admin-root .admin-code-actions .admin-button { white-space:nowrap; }
 .admin-root .admin-code-actions p { margin:8px 0 0; font-size:12px; }
 .admin-root .admin-code-feedback { color:var(--admin-success); }
 .admin-root .admin-code-feedback--pending { color:var(--admin-warning); }
 .admin-root .admin-code-row--sale-marked > td, .admin-root .admin-code-row--sale-marked:hover > td { background:var(--admin-warning-soft); }
-.admin-root .admin-code-sale-cell { min-width:180px; }
+/* 原来每个"已标记发售"的行都挂一句"仅表示发售标记，不代表真实付款"，外加把删除等待拆成标记+日期两行：
+   一列最多四行，行高被撑到 110px，而页面脚注已经解释过"不等于真实支付"。收成一行两个标记。 */
+.admin-root .admin-code-sale-cell { display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-width:150px; }
+.admin-root .admin-code-mono { white-space:nowrap; }
+.admin-root .admin-code-term { white-space:nowrap; }
 .admin-root .admin-code-sale-cell .admin-badge--warning { border:1px solid var(--admin-warning); font-weight:700; }
-.admin-root .admin-code-sale-cell .admin-badge--danger { margin-top:8px; }
+.admin-root .admin-code-sale-cell .admin-badge--danger { margin-top:0; }
+/* 这句话是产品口径（标记 ≠ 收款），每行都要有，但压成 10px 的小字跟在标记后面，
+   不再单独占一行 —— 原来一行四段，行高 110px。 */
+.admin-root .admin-code-sale-note { flex-basis:100%; font-size:10px; line-height:1.3; color:var(--admin-muted); }
 .admin-root .admin-code-mark-button--active { background:var(--admin-warning-soft); color:var(--admin-warning); border-color:var(--admin-warning); }
 .admin-root .admin-code-mark-button--active:hover:not(:disabled) { background:var(--admin-warning); color:var(--admin-surface); }
 .admin-root .admin-module-tabs { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
@@ -294,7 +315,11 @@
 .admin-root .admin-log-payload { padding:16px; margin:16px 0; background:var(--admin-subtle); border:1px solid var(--admin-border); border-radius:8px; color:var(--admin-ink); white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.7 ui-monospace,Consolas,monospace; }
 .admin-root .admin-code-result-drawer, .admin-root .admin-log-drawer { width:min(600px,100vw); max-width:600px; }
 @media (max-width:1279px) { .admin-root .admin-code-generation, .admin-root .admin-code-filters, .admin-root .admin-log-filters { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media (max-width:639px) { .admin-root .admin-code-generation, .admin-root .admin-code-filters, .admin-root .admin-log-filters { grid-template-columns:minmax(0,1fr); } .admin-root .admin-code-statistics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:639px) { .admin-root .admin-code-generation, .admin-root .admin-code-filters, .admin-root .admin-log-filters { grid-template-columns:minmax(0,1fr); } .admin-root .admin-code-statistics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .admin-root .admin-code-statistics small { font-size:11px; }
+  /* 5 个数字放两列必然有空位：去掉竖分隔线，空位看起来只是留白，不是缺一格。 */
+  .admin-root .admin-code-statistics .admin-stage-panel + .admin-stage-panel { border-left:0; } }
+
 
 /* Stage 4: concrete component namespace only. */
 .admin-root .admin-module:has(> .admin-final-modules) { color:var(--admin-ink); background:transparent; color-scheme:inherit; border:0; padding:0; }
@@ -318,6 +343,11 @@
 .admin-root .admin-final-impact { color:var(--admin-warning); }
 .admin-root .admin-final-diff { display:grid; gap:16px; }
 .admin-root .admin-final-diff h3 { margin:0 0 8px; font-size:14px; }
+.admin-root .admin-frozen-fields { display:grid; gap:2px; margin:0; padding:10px 12px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-subtle); }
+.admin-root .admin-frozen-fields > div { display:grid; grid-template-columns:88px minmax(0,1fr); gap:10px; padding:3px 0; }
+.admin-root .admin-frozen-fields dt { color:var(--admin-muted); font-size:12px; }
+.admin-root .admin-frozen-fields dd { margin:0; color:var(--admin-ink); font-size:12px; line-height:1.5; word-break:break-word; }
+.admin-root .admin-frozen-text { margin:0; padding:10px 12px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-subtle); color:var(--admin-muted); font-size:12px; }
 .admin-root .admin-final-diff pre { padding:12px; border:1px solid var(--admin-border); background:var(--admin-subtle); border-radius:8px; white-space:pre-wrap; overflow-wrap:anywhere; font:12px/1.6 ui-monospace,Consolas,monospace; max-height:220px; overflow:auto; }
 .admin-root .admin-final-modules table { width:100%; border-collapse:collapse; font-size:13px; color:var(--admin-ink); }
 .admin-root .admin-final-modules table th { text-align:left; padding:12px; border-bottom:1px solid var(--admin-border); background:var(--admin-subtle); color:var(--admin-muted); font-weight:500; }
@@ -368,8 +398,9 @@
 }
 .admin-root :is(input,select,textarea):focus-visible { outline:2px solid var(--admin-primary); outline-offset:2px; }
 .admin-root :is(.admin-filter-actions,.admin-pagination > div) { flex-wrap:wrap; }
-.admin-root .admin-module-tabs { width:100%; gap:4px; padding:4px; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-subtle); align-items:stretch; }
-.admin-root .admin-module-tabs .admin-button { flex:1 1 150px; border-color:transparent; background:transparent; color:var(--admin-muted); }
+/* 分段控件按内容宽度收起来，别铺满整行：5 个筛选项各占 170px 会抢走整页的视觉重心。 */
+.admin-root .admin-module-tabs { width:fit-content; max-width:100%; gap:4px; padding:4px; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-subtle); align-items:stretch; }
+.admin-root .admin-module-tabs .admin-button { flex:0 1 auto; padding-inline:18px; border-color:transparent; background:transparent; color:var(--admin-muted); }
 .admin-root .admin-module-tabs .admin-button[aria-pressed=true] { color:var(--admin-primary); background:var(--admin-surface); border-color:var(--admin-border); box-shadow:var(--admin-shadow); font-weight:600; }
 .admin-root .admin-table-scroll { min-width:0; overscroll-behavior-inline:contain; border:1px solid var(--admin-border); border-radius:8px; }
 .admin-root .admin-stage-table { font-variant-numeric:tabular-nums; }
@@ -415,9 +446,27 @@
   .admin-root .admin-toolbar-copy { flex-basis:auto; }
   .admin-root .admin-toolbar-actions { width:100%; }
   .admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) { grid-template-columns:minmax(0,1fr); }
-  .admin-root .admin-module-tabs .admin-button { flex-basis:calc(50% - 4px); padding-inline:8px; }
+  /* 3 个 tab 被 50% 一挤就是 2+1 的锯齿；让它们按内容宽度排，放不下再换行。 */
+  .admin-root .admin-module-tabs .admin-button { flex-basis:auto; padding-inline:12px; }
   .admin-root :is(.admin-dialog-header,.admin-dialog-body,.admin-dialog-footer) { padding:14px; }
   .admin-root .admin-dialog-footer .admin-dialog-actions { flex-direction:column-reverse; }
   .admin-root .admin-dialog-actions > .admin-button { width:100%; flex:auto; }
 }
 @media (prefers-reduced-motion:reduce) { .admin-root .admin-drawer { animation:none; } }
+
+/* 手机上筛选项一条一个往下排，一屏就被表单吃完了：用户页 3 个字段 + 按钮 ≈ 370px，
+   兑换码页 5 个 ≈ 500px。窄屏改成两列：搜索占满一行，两个选择器并排，按钮回到一行。 */
+@media (max-width:639px) {
+  .admin-root .admin-user-filters,
+  .admin-root .admin-code-filters,
+  .admin-root .admin-log-filters { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .admin-root .admin-user-filters > label:first-child,
+  .admin-root .admin-code-filters > label:first-child,
+  .admin-root .admin-log-filters > label:first-child { grid-column:1 / -1; }
+  .admin-root .admin-user-filters > :last-child,
+  .admin-root .admin-code-filters > :last-child,
+  .admin-root .admin-log-filters > :last-child { grid-column:1 / -1; }
+  /* 生成表单四个字段在手机上也排成两列：权益 | 时长、数量 | 渠道，按钮独占一行。 */
+  .admin-root .admin-code-generation { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+  .admin-root .admin-code-generation > :last-child { grid-column:1 / -1; }
+}

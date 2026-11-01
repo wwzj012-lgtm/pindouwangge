@@ -5,6 +5,48 @@ import { AdminConfirmDialog, AdminDrawer, AdminErrorState } from './AdminPrimiti
 import { requestError } from './adminUserModel';
 import { contentRecoveryFor, contentScope } from './adminWriteRecovery';
 
+/** 复核弹窗里"变更前 / 将提交"两块原来直接 JSON.stringify，运营看到的是
+ *  {"title":"…","status":"draft","pinned":false}。这里换成字段表：
+ *  已知字段翻译成中文，长文本截断（完整值留在 title），body/content 同值时去重。 */
+const fieldLabels: Record<string, string> = {
+  title: '标题', body: '内容', content: '内容', status: '状态', publishAt: '发布时间', expireAt: '结束时间',
+  audience: '受众', pinned: '置顶', name: '名称', key: '键', description: '说明', url: '地址',
+  enabled: '开关', value: '取值', channel: '渠道', memberType: '权益类型', days: '时长', quantity: '数量',
+  sortOrder: '排序', roleId: '角色', permissions: '权限', code: '兑换码', label: '标签',
+};
+// 这些键本身就是动作名（服务端用 publish:true / withdraw:true 表达意图），值是布尔时别显示成"是"
+const verbLabels: Record<string, string> = {
+  publish: '发布', withdraw: '撤回', pin: '置顶', unpin: '取消置顶', delete: '删除', restore: '恢复', enabled: '启用',
+};
+// 操作对象那一行已经写了记录 ID，这里再列一遍是噪音
+const hiddenKeys = new Set(['id', 'uid', 'createdAt', 'updatedAt']);
+const valueLabels: Record<string, string> = {
+  draft: '草稿', scheduled: '定时发布', published: '已发布', withdrawn: '已撤回',
+  all: '所有用户', vip: 'VIP', pro: '商家Pro', true: '是', false: '否', null: '未设置',
+};
+const fieldLabel = (key: string) => fieldLabels[key] ?? key;
+function textValue(value: unknown): string {
+  if (value === null || value === undefined) return '未设置';
+  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'string') return valueLabels[value] ?? value;
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.length ? value.map(textValue).join('、') : '空';
+  return JSON.stringify(value);
+}
+function FrozenFields({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <p className="admin-frozen-text">新建 / 未提供</p>;
+  if (typeof value !== 'object' || Array.isArray(value)) return <p className="admin-frozen-text">{textValue(value)}</p>;
+  const entries = Object.entries(value as Record<string, unknown>)
+    .filter(([key, item]) => !hiddenKeys.has(key) && !(key === 'content' && 'body' in value && item === (value as Record<string, unknown>).body));
+  if (!entries.length) return <p className="admin-frozen-text">新建 / 未提供</p>;
+  return <dl className="admin-frozen-fields">{entries.map(([key, item]) => {
+    const verb = verbLabels[key];
+    const full = verb && typeof item === 'boolean' ? item ? '执行' : '不执行' : textValue(item);
+    const shown = full.length > 60 ? full.slice(0, 60) + '…' : full;
+    return <div key={key}><dt>{verb ?? fieldLabel(key)}</dt><dd title={full.length > 60 ? full : undefined}>{shown}</dd></div>;
+  })}</dl>;
+}
+
 export function frozenValue<T>(value: T): T { return value === undefined ? value : JSON.parse(JSON.stringify(value)) as T; }
 export function jsonDraftText(value: unknown): string { return JSON.stringify(value === undefined ? {} : value, null, 2); }
 export function parseJsonDraft(raw: string): { value?: unknown; error: string } { try { return { value: JSON.parse(raw), error: '' }; } catch { return { error: 'JSON格式无效，请修正后再提交。' }; } }
@@ -43,7 +85,7 @@ export function useContentWrite(request: AdminRequest, options?: { canWrite: (sc
     finally { lock.current = false; setBusy(false); }
   };
   const confirmation = <>{!pending && error && <AdminErrorState title="操作结果提醒" message={error} />}<AdminConfirmDialog open={Boolean(pending)} title={pending?.title ?? '复核变更'} description="参数在打开确认时冻结，请核对变更前后的值。" subject={pending?.object} impact={pending?.impact} confirmLabel="确认提交" confirmDisabled={Boolean(pending && (recovery.isUncertain(pending.path) || !canWrite(pending.path)))} pending={busy} onClose={() => { if (!lock.current) setPending(null); }} onConfirm={() => void confirm()}>
-    {pending && <><p className="admin-final-impact">作用范围：{pending.impact}</p><div className="admin-final-diff"><section><h3>变更前 / 读取值</h3><pre>{JSON.stringify(pending.before ?? '新建 / 未提供', null, 2)}</pre></section><section><h3>将提交值</h3><pre data-content-frozen>{JSON.stringify(pending.after ?? '删除指定记录', null, 2)}</pre></section></div></>}
+    {pending && <><div className="admin-final-diff"><section><h3>变更前</h3><FrozenFields value={pending.before} /></section><section><h3>将提交</h3><div data-content-frozen><FrozenFields value={pending.after ?? '删除指定记录'} /></div></section></div></>}
     {error && <AdminErrorState title="实际操作未完成" message={error} />}
   </AdminConfirmDialog></>;
   return { busy, error, success, review, confirmation, beginRead: recovery.beginRead, readSucceeded: recovery.readSucceeded };

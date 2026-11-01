@@ -99,8 +99,7 @@ export function AdminPasswordReset({ user, currentUserUid, request, onClose }: {
         </div>}
         <AdminButton variant="primary" onClick={close}>完成并关闭</AdminButton>
       </section> : <>
-        <div className="admin-info-box"><p>重置后，目标用户的现有登录会话将被撤销，需要使用新密码重新登录。</p>
-          <p>需要 users.write 权限；重置管理员还需要 admins.write。权限以服务端判定为准。</p></div>
+        <div className="admin-info-box"><p>重置后，目标用户的现有登录会话会被立即撤销，需要用新密码重新登录。此操作不可撤销。</p></div>
         {self && <AdminErrorState message="不能重置当前管理员自己的密码。" />}
         <label className="admin-stage-field">重置方式<select aria-label="重置方式" value={mode} disabled={busy || self} onChange={event => changeMode(event.target.value as Mode)}>
           <option value="random">随机生成临时密码</option><option value="custom">指定新密码</option>
@@ -120,8 +119,6 @@ export function AdminPasswordReset({ user, currentUserUid, request, onClose }: {
     <AdminConfirmDialog open={review} title="确认重置此用户密码？" description="请核对目标账号与重置方式。确认摘要不会展示密码内容。"
       subject={userLabel(user) + ' · ' + user.email + ' · UID：' + user.uid} impact="立即替换登录密码，并撤销该用户现有登录会话。此操作不可撤销。" reason={mode === 'random' ? '随机生成临时密码，仅本次展示' : '指定新密码，密码内容不进入确认摘要'}
       pending={busy} confirmDisabled={Boolean(error)} confirmLabel="确认重置密码" onClose={() => { if (!writing.current) { setReview(false); setError(''); } }} onConfirm={() => void submit()}>
-      <div className="admin-change-summary"><p>方式：{mode === 'random' ? '随机生成临时密码' : '指定新密码（不展示密码内容）'}</p>
-        <p>影响：立即替换登录密码，并撤销该用户现有登录会话。此操作不可撤销。</p></div>
       {error && <><AdminErrorState title="密码重置尚未确认" message={error} /><AdminButton disabled={busy} onClick={() => { setReview(false); setError(''); }}>返回设置并重新核对</AdminButton></>}
     </AdminConfirmDialog>
   </>;

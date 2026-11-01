@@ -358,23 +358,37 @@ function AdminConsoleSession(_props: { key?: string }) {
     const gate = access === 'forbidden'
       ? { title: '无后台访问权限', message: accessError || '当前账号没有后台访问权限，授权以服务端结果为准。' }
       : access === 'signed-out'
-        ? { title: '还没有登录', message: '后台只对正式账号开放，登录后回到这个页面即可。' }
+        ? { title: '还没有登录', message: '请先登录正式账号。后台只对正式账号开放，登录后回到这个页面即可。' }
         : access === 'session-required'
           ? { title: '后台会话已过期', message: '为安全起见后台会话会定时失效。重新进入即可继续，不需要重新登录。' }
           : access === 'unavailable'
             ? { title: '暂时连不上后台', message: accessError || '无法连接后台服务，请检查网络后重试。' }
             : null;
+    // 门页原来是一张 460px 的白卡浮在大片空白上：品牌、状态、操作三层挤在 240px 宽里，
+    // 红色错误块和主按钮互相抢。改成"深色品牌栏 + 浅色操作栏"，状态标题直接当 h1。
     return <div className="admin-root"><main className="admin-access"><section className="admin-access-card" aria-busy={checking}>
-      <span className="admin-brand-mark"><ShieldCheck aria-hidden="true" /></span><h1>管理工作台</h1>
-      <p>{access === 'checking' ? '正在验证后台会话。' : access === 'forbidden' ? '当前账号没有后台访问权限。' : access === 'signed-out' ? '请先登录正式账号。' : access === 'session-required' ? '当前后台会话不可用，请重新进入。' : '暂时无法连接后台服务。'}</p>
-      {access === 'checking' ? <AdminLoading label="正在验证后台会话…" /> : <>
-        {gate && <AdminErrorState title={gate.title} message={gate.message} retry={access === 'signed-out' ? undefined : () => void verifySession()} busy={checking} />}
-        <div className="admin-access-actions">
-          {access === 'session-required' && <><label className="admin-check"><input type="checkbox" checked={trustedDevice} onChange={event => setTrustedDevice(event.target.checked)} />信任此设备30天</label><AdminButton variant="primary" busy={checking} onClick={() => void createSession()}>重新进入后台</AdminButton></>}
+      <aside className="admin-gate-brand">
+        <div className="admin-gate-lockup"><span className="admin-gate-mark"><ShieldCheck aria-hidden="true" /></span><div><strong>拼豆管理工作台</strong><span>运营与平台管理</span></div></div>
+        <ul className="admin-gate-scope"><li>用户与会员</li><li>卡密与积分</li><li>内容与色彩</li></ul>
+        <p className="admin-gate-note">仅限授权运营人员使用。后台会话会定时失效，到时重新进入即可。</p>
+      </aside>
+      <div className="admin-gate-panel">
+        <h1>{gate ? gate.title : '正在验证会话'}</h1>
+        <p className="admin-gate-lead" role={gate ? 'alert' : undefined}>{gate ? gate.message : '正在确认后台会话，请稍候。'}</p>
+        {checking ? <AdminLoading label="正在验证后台会话…" /> : <div className="admin-gate-actions">
+          {access === 'session-required' && <>
+            <label className="admin-check admin-gate-trust"><input type="checkbox" checked={trustedDevice} onChange={event => setTrustedDevice(event.target.checked)} /><span>信任此设备 30 天<small>仅对当前浏览器生效，期间免去重复进入。</small></span></label>
+            <AdminButton variant="primary" busy={checking} onClick={() => void createSession()}>重新进入后台</AdminButton>
+          </>}
           {access === 'signed-out' && <AdminButton variant="primary" onClick={() => window.location.assign('/workspace')}>去登录</AdminButton>}
-          {access === 'unavailable' && <AdminButton onClick={() => void verifySession()} busy={checking}>重试</AdminButton>}
-          <AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton>
-        </div></>}
+          {access === 'unavailable' && <AdminButton variant="primary" onClick={() => void verifySession()} busy={checking}>重试连接</AdminButton>}
+          {access === 'forbidden' && <AdminButton variant="primary" onClick={() => void verifySession()} busy={checking}>重新验证权限</AdminButton>}
+          <div className="admin-gate-secondary">
+            {(access === 'forbidden' || access === 'session-required') && <AdminButton variant="ghost" onClick={() => void verifySession()} busy={checking}>重新验证会话</AdminButton>}
+            <AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton>
+          </div>
+        </div>}
+      </div>
     </section></main></div>;
   }
 

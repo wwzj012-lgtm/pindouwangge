@@ -111,10 +111,32 @@
 /* All modules share semantic surfaces; component guards remain independent. */
 .admin-root .admin-module { background:transparent; color:var(--admin-ink); color-scheme:inherit; min-width:0; }
 .admin-root .admin-access, .admin-root.admin-entry-loading { min-height:100vh; display:grid; place-items:center; padding:24px; }
-.admin-root .admin-access-card { width:100%; max-width:460px; padding:28px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-surface); box-shadow:var(--admin-shadow); }
-.admin-root .admin-access-card h1 { margin:16px 0 8px; font-size:24px; font-weight:600; }
-.admin-root .admin-access-card > p { color:var(--admin-muted); margin:0 0 20px; }
-.admin-root .admin-access-actions { display:flex; flex-direction:column; gap:12px; }
+/* 门页：一张 460px 白卡浮在整片空白上，品牌/状态/操作挤在 240px 里，红块和主按钮互相抢。
+   改成深色品牌栏 + 浅色操作栏，状态直接当 h1。 */
+.admin-root .admin-access { background:radial-gradient(900px 460px at 16% -12%, #e9ebff 0%, transparent 62%), var(--admin-bg); }
+.admin-root .admin-access-card { width:100%; max-width:960px; display:grid; grid-template-columns:minmax(0,.88fr) minmax(0,1fr); padding:0; overflow:hidden; border:1px solid var(--admin-border); border-radius:16px; background:var(--admin-surface); box-shadow:0 24px 64px -30px rgb(15 23 42 / .38); }
+.admin-root .admin-gate-brand { display:flex; flex-direction:column; gap:22px; padding:36px 32px; background:#0f172a; color:#c7d2e0; }
+.admin-root .admin-gate-lockup { display:flex; align-items:center; gap:12px; }
+.admin-root .admin-gate-mark { display:grid; place-items:center; width:40px; height:40px; flex-shrink:0; border-radius:10px; background:rgb(99 102 241 / .18); color:#a5b4fc; }
+.admin-root .admin-gate-mark svg { width:20px; height:20px; }
+.admin-root .admin-gate-lockup strong { display:block; color:#f8fafc; font-size:15px; font-weight:600; }
+.admin-root .admin-gate-lockup span { display:block; margin-top:2px; color:#8ea0b8; font-size:12px; }
+.admin-root .admin-gate-scope { display:grid; gap:10px; margin:0; padding:0; list-style:none; color:#c7d2e0; font-size:13px; }
+.admin-root .admin-gate-scope li { position:relative; padding-left:18px; }
+.admin-root .admin-gate-scope li::before { content:''; position:absolute; left:0; top:8px; width:6px; height:6px; border-radius:50%; background:#6366f1; }
+.admin-root .admin-gate-note { margin:auto 0 0; padding-top:18px; border-top:1px solid #1e293b; color:#7c8da6; font-size:12px; line-height:1.7; }
+.admin-root .admin-gate-panel { display:flex; flex-direction:column; padding:36px 40px; }
+.admin-root .admin-gate-eyebrow { margin:0; color:var(--admin-muted); font-size:12px; }
+.admin-root .admin-gate-panel h1 { margin:0 0 10px; font-size:27px; font-weight:600; letter-spacing:-.02em; }
+.admin-root .admin-gate-lead { margin:0 0 24px; color:var(--admin-muted); font-size:13px; line-height:1.75; }
+.admin-root .admin-gate-actions { display:flex; flex-direction:column; gap:12px; margin-top:26px; }
+.admin-root .admin-gate-trust { align-items:flex-start; gap:10px; padding:12px 14px; border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-subtle); }
+.admin-root .admin-gate-trust input { margin-top:2px; }
+.admin-root .admin-gate-trust span { display:grid; gap:2px; color:var(--admin-ink); font-size:13px; }
+.admin-root .admin-gate-trust small { color:var(--admin-muted); font-size:11px; }
+.admin-root .admin-gate-secondary { display:flex; flex-wrap:wrap; gap:8px; margin-top:4px; }
+@media (prefers-color-scheme:dark) { .admin-root .admin-access { background:radial-gradient(900px 460px at 16% -12%, #1b2140 0%, transparent 62%), var(--admin-bg); } }
+@media (max-width:860px) { .admin-root .admin-access-card { grid-template-columns:minmax(0,1fr); max-width:520px; } .admin-root .admin-gate-brand { padding:24px; gap:14px; } .admin-root .admin-gate-scope { display:none; } .admin-root .admin-gate-panel { padding:26px 24px; } }
 .admin-root .admin-check { display:flex; align-items:center; gap:8px; min-height:44px; color:var(--admin-muted); }
 .admin-root .admin-check input { accent-color:var(--admin-primary); }
 .admin-root .admin-overlay { position:fixed; inset:0; z-index:100; isolation:isolate; display:flex; align-items:center; justify-content:center; padding:24px; }

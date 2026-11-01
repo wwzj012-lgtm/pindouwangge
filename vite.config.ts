@@ -29,10 +29,11 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/api': {
-          // Use the current production Pages API gateway for local UI work.
-          // Set VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8787 when intentionally
-          // running the Worker locally.
-          target: process.env.VITE_DEV_API_PROXY_TARGET ?? 'https://ff02bb0e.stellabean.pages.dev',
+          // Use the production Pages API gateway for local UI work.
+          // The pinned preview host (ff02bb0e...) no longer serves Functions - it
+          // returns index.html, which the admin console reads as "无效响应".
+          // Set VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8787 when running the Worker locally.
+          target: process.env.VITE_DEV_API_PROXY_TARGET ?? 'https://stellabean.pages.dev',
           changeOrigin: true,
           secure: true,
         },

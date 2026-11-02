@@ -532,7 +532,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {language === 'zh' ? '将低反差的小色块整片并入相邻主色，减少频繁换色，保留主要明暗关系。' : 'Merge low-contrast small patches into adjacent dominant regions; reduce color changes while retaining major shading.'}
+                  {language === 'zh' ? '将低反差的小色块整片并入相邻主色，并对全图用色做轻度归并。' : 'Merge low-contrast patches into dominant regions and lightly condense the palette.'}
                 </p>
               </button>
 
@@ -552,7 +552,7 @@ export const SmartBeadReducerModal: React.FC<SmartBeadReducerModalProps> = ({
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 mt-1">
-                  {language === 'zh' ? '允许相邻较大近似色块合并，明显减少渐变与碎色；细节损失更大，请先对照预览。' : 'Merge larger adjacent similar regions to simplify gradients; more detail may be lost, so compare before applying.'}
+                  {language === 'zh' ? '强力合并近似色块，并大幅压缩全图用色种数；细节损失更大，请先对照预览。' : 'Merge larger similar regions and strongly condense the palette; more detail may be lost, so compare first.'}
                 </p>
               </button>
             </div>

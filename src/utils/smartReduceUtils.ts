@@ -484,12 +484,26 @@ export function smartReduceGrid(
   }
 
   // -------------------------------------------------------------
+  // Step 6.5: Palette Condensation (档位挂钩的全局用色压缩)
+  // -------------------------------------------------------------
+  // 区域归并发生在降采样之前的原图上，而降采样的加权投票会吞掉大部分档位差异，
+  // 导致 1/2/3 档的减豆与观感几乎一致。这一步在降采样之后按档位压缩全图用色，
+  // light 保持细节不做压缩，medium 轻度归并（deltaE 8），strong 大幅压缩（deltaE 14）。
+  if (options.downscaleRatio < 0.98 && options.mergeMinorColors) {
+    const condenseDelta = options.intensity === 'strong' ? 14 : options.intensity === 'medium' ? 8 : 0;
+    if (condenseDelta > 0) {
+      condensePalette(workGrid, paletteMap, condenseDelta, options.protectVibrantColors);
+    }
+  }
+
+  // -------------------------------------------------------------
   // Step 7: Auto-Crop Outer Empty Border
   // -------------------------------------------------------------
   let finalGrid = workGrid;
-  // A saving target promises a specific resized canvas. Cropping is only an
-  // explicit, unscaled cleanup action and cannot change that target.
-  if (options.autoCropEmptyBorder && options.downscaleRatio >= 0.98) {
+  // 裁掉四周纯空白对任何档位都是白赚的省豆：它不改变已承诺的目标画布换算
+  // （那一承诺只约束降采样比例），只让最终成品更贴近实际内容。此前把裁切
+  // 限制在"未降采样"的图纸上，等于选了省豆目标的用户永远拿不到这份免费减豆。
+  if (options.autoCropEmptyBorder) {
     const curH = workGrid.length;
     const curW = workGrid[0].length;
     let minX = curW, maxX = 0, minY = curH, maxY = 0;
@@ -1189,6 +1203,121 @@ function isProtectedColorCell(
 ): boolean {
   return structure.protectedMask[y][x]
     || (options.protectVibrantColors && structure.vibrantMask[y][x]);
+}
+
+/**
+ * 全局色板精简（Step 6.5，降采样之后执行）。
+ *
+ * 区域归并发生在降采样之前的原图上，而降采样的加权投票本身就会吞掉大部分
+ * 细小差异——这就是"三个档位效果一样"的根源。把与档位挂钩的全局用色压缩
+ * 放到降采样之后，1/2/3 档最终才会得到明显不同的用色种数。
+ *
+ * 规则：
+ * - 只把用量少的颜色并入更大众的近色（deltaE2000 ≤ maxDelta），不发明新颜色；
+ * - 颜色一经合并不再传播（避免 A→B→C 长链把误差滚大）；
+ * - protectVibrantColors 开启时，鲜艳色（C* > 25，与 vibrantMask 同阈值）
+ *   永远不做合并源，保证点睛色在强档位下也存活。
+ *
+ * 返回被改写的格子数（0 表示图内没有可合并的近色）。
+ */
+export function condensePalette(
+  grid: (string | null)[][],
+  palette: Map<string, BeadColor>,
+  maxDelta: number,
+  protectVibrantColors: boolean,
+): number {
+  if (maxDelta <= 0) return 0;
+  const counts = new Map<string, number>();
+  for (const row of grid) {
+    for (const cid of row) {
+      if (cid) counts.set(cid, (counts.get(cid) ?? 0) + 1);
+    }
+  }
+  if (counts.size < 2) return 0;
+
+  const isVibrant = (cid: string): boolean => {
+    if (!protectVibrantColors) return false;
+    const color = palette.get(cid);
+    if (!color) return true; // 色板外的颜色来历不明，宁可不动
+    const rgb = color.rgb;
+    const [lightness, greenRed, blueYellow] = rgbToLab(rgb[0], rgb[1], rgb[2]);
+    return Math.max(rgb[0], rgb[1], rgb[2]) - Math.min(rgb[0], rgb[1], rgb[2]) > 25
+      || Math.hypot(greenRed, blueYellow) > 25;
+  };
+
+  const labs = new Map<string, [number, number, number]>();
+  for (const cid of counts.keys()) {
+    const color = palette.get(cid);
+    if (color) labs.set(cid, rgbToLab(color.rgb[0], color.rgb[1], color.rgb[2]));
+  }
+  const distances = new Map<string, number>();
+  const distance = (a: string, b: string): number => {
+    if (a === b) return 0;
+    const la = labs.get(a), lb = labs.get(b);
+    if (!la || !lb) return Infinity;
+    const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+    const cached = distances.get(key);
+    if (cached !== undefined) return cached;
+    const result = deltaE2000(la, lb);
+    distances.set(key, result);
+    return result;
+  };
+
+  // 用量升序处理：小众色先找归宿；合并目标必须仍是独立颜色。
+  const order = [...counts.entries()].sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]));
+  const mapping = new Map<string, string>();
+  for (const [cid] of order) {
+    if (mapping.has(cid) || isVibrant(cid)) continue;
+    let best: string | null = null;
+    let bestCount = -1;
+    let bestDelta = Infinity;
+    for (const [other, count] of counts) {
+      if (other === cid || mapping.has(other)) continue;
+      const delta = distance(cid, other);
+      if (delta > maxDelta) continue;
+      // 并入更大众的颜色；同量时取更近的，保证确定性。
+      if (count > bestCount || (count === bestCount && delta < bestDelta)) {
+        best = other;
+        bestCount = count;
+        bestDelta = delta;
+      }
+    }
+    if (best) mapping.set(cid, best);
+  }
+  if (mapping.size === 0) return 0;
+
+  // 质量优先：逐格替换前做"感知安全"检查。色板级合并只看全局 deltaE，无法区分
+  // "背景渐变里两个近色"（可并）和"主体上一条 deltaE 8 的关键分界"（不可并）。
+  // 规则与区域归并的对比保护一致：若某个邻居与原色构成强对比（ΔE ≥ 25），
+  // 而替换成目标色会把这条对比削弱到 70% 以下，则这一格保留原色。
+  // 渐变区的邻居 deltaE 都远低于 25，照常合并；速度只多一次每格 4 邻的查表。
+  const source = grid.map(row => [...row]);
+  const height = grid.length;
+  const width = grid[0]?.length ?? 0;
+  const erodesContrast = (x: number, y: number, from: string, to: string): boolean => {
+    for (const [nx, ny] of cardinalNeighbours(x, y, width, height)) {
+      const neighbor = source[ny]?.[nx];
+      if (!neighbor || neighbor === from) continue;
+      const before = distance(from, neighbor);
+      if (before >= 25 && distance(to, neighbor) < before * 0.7) return true;
+    }
+    return false;
+  };
+
+  let rewritten = 0;
+  for (let y = 0; y < height; y++) {
+    const row = grid[y];
+    for (let x = 0; x < width; x++) {
+      const original = source[y][x];
+      if (!original) continue;
+      const target = mapping.get(original);
+      if (!target) continue;
+      if (erodesContrast(x, y, original, target)) continue;
+      row[x] = target;
+      rewritten++;
+    }
+  }
+  return rewritten;
 }
 
 function collectColorComponent(

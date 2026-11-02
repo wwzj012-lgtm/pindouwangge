@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { BeadColor } from '../types';
 import {
+  condensePalette,
   getReducedGridDimensions,
   savingPercentToScale,
   smartReduceGrid,
@@ -394,6 +395,81 @@ describe('membership bead-saving targets', () => {
       ['light', 'red', 'dark', null],
     ];
     expect(smartReduceGrid(grid, palette, modalDefaults(0)).optimizedGrid).toEqual(grid);
+  });
+
+
+  it('condenses the global palette further as intensity rises after downsampling', () => {
+    // 标定过的灰阶（对 g128 的 deltaE2000）：g148=7.1 g156=9.6 g162=11.5 g170=13.8 g178=16.0。
+    // medium 的全局压缩阈值是 8，strong 是 14，因此三档用色种数必须严格递减。
+    const shades: BeadColor[] = [128, 148, 156, 162, 170, 178].map(value => ({
+      id: `grey-${value}`, code: `${value}`, name: 'grey',
+      hex: `#${value.toString(16).repeat(3)}`, rgb: [value, value, value], brand: 'MARD',
+    }));
+    const grid: (string | null)[][] = Array.from({ length: 40 }, () => Array<string | null>(40).fill('grey-128'));
+    const spots: [number, string][] = [[4, 'grey-148'], [10, 'grey-156'], [16, 'grey-162'], [22, 'grey-170'], [28, 'grey-178']];
+    for (const [offset, id] of spots) {
+      for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) grid[offset + dy][offset + dx] = id;
+    }
+    const results = (['light', 'medium', 'strong'] as const).map(intensity => smartReduceGrid(grid, shades, {
+      ...modalDefaults(25), intensity,
+      protectSaliencyAndContours: true, protectVibrantColors: false,
+    }));
+    const counts = results.map(report => report.optimizedColorTypesCount);
+    console.log('palette-condense counts:', counts.join(' / '));
+    expect(counts[1]).toBeLessThan(counts[0]);
+    expect(counts[2]).toBeLessThan(counts[1]);
+    expect(counts[2]).toBeLessThanOrEqual(3);
+  });
+
+  it('keeps vivid accents alive under strong condensation when vibrant protection is on', () => {
+    const shades: BeadColor[] = [
+      { id: 'grey-128', code: '128', name: 'grey', hex: '#808080', rgb: [128, 128, 128], brand: 'MARD' },
+      { id: 'red', code: 'R', name: 'Red', hex: '#E23B3B', rgb: [226, 59, 59], brand: 'MARD' },
+      { id: 'red-close', code: 'R2', name: 'Red close', hex: '#E2513B', rgb: [226, 81, 59], brand: 'MARD' },
+    ];
+    const grid: (string | null)[][] = Array.from({ length: 30 }, () => Array<string | null>(30).fill('grey-128'));
+    for (let y = 4; y < 10; y++) for (let x = 4; x < 10; x++) grid[y][x] = 'red';
+    for (let y = 16; y < 20; y++) for (let x = 16; x < 20; x++) grid[y][x] = 'red-close';
+    const common = { ...modalDefaults(25), intensity: 'strong' as const };
+    const withProtection = smartReduceGrid(grid, shades, { ...common, protectVibrantColors: true });
+    const withoutProtection = smartReduceGrid(grid, shades, { ...common, protectVibrantColors: false });
+    console.log('vivid types protected/unprotected:',
+      withProtection.optimizedColorTypesCount, '/', withoutProtection.optimizedColorTypesCount);
+    expect(withProtection.optimizedColorTypesCount).toBeGreaterThan(withoutProtection.optimizedColorTypesCount);
+  });
+
+
+  it('never lets palette condensation erode an existing strong contrast edge', () => {
+    // 标定（deltaE2000）：g60→g96 = 12.4（≤14 可合并）；g60→g170 = 43.5（强对比）；
+    // 合并后 g96→g170 = 27.3，对比削弱 37%（>30%）——正是要拦下的情况。
+    const shades: BeadColor[] = [60, 96, 170].map(value => ({
+      id: `grey-${value}`, code: `${value}`, name: 'grey',
+      hex: `#${value.toString(16).repeat(3)}`, rgb: [value, value, value], brand: 'MARD',
+    }));
+    const grid: (string | null)[][] = Array.from({ length: 24 }, () => Array<string | null>(24).fill('grey-96'));
+    for (let y = 0; y < 24; y++) grid[y][17] = 'grey-170';   // 竖直分界线
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) grid[4 + dy][4 + dx] = 'grey-60';    // 远离分界
+    for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) grid[12 + dy][15 + dx] = 'grey-60';  // 紧贴分界
+    condensePalette(grid, new Map(shades.map(c => [c.id, c])), 14, false);
+    // 远离分界的碎色照常合并；贴着分界的格子保留原色，分界对比不被吃掉。
+    expect(grid[4][4]).toBe('grey-96');
+    expect(grid[12][15]).toBe('grey-96');   // 块的左列：邻居都是 g96，无对比可保护
+    expect(grid[12][16]).toBe('grey-60');   // 右列紧贴 g170 分界线 → 保留
+    expect(grid[13][16]).toBe('grey-60');
+  });
+
+  it('crops empty borders on downsampled saving targets too', () => {
+    const grid: (string | null)[][] = Array.from({ length: 40 }, () => Array<string | null>(40).fill(null));
+    for (let y = 26; y < 36; y++) for (let x = 26; x < 36; x++) grid[y][x] = 'light';
+    const report = smartReduceGrid(grid, palette, { ...options(25), autoCropEmptyBorder: true, intensity: 'medium', mergeMinorColors: true });
+    console.log('cropped size:', report.optimizedGrid.length, 'x', report.optimizedGrid[0].length);
+    // 裁切把 35×35 的目标画布再收成 10×10 的内容包围盒；豆数预算按面积比例分配，
+    // 因此内容格数允许低于原始 100 格，但尺寸必须明显小于未裁切的目标画布。
+    const targetH = getReducedGridDimensions(40, 40, savingPercentToScale(25)).height;
+    expect(report.optimizedGrid.length).toBeLessThan(targetH);
+    expect(report.optimizedGrid[0].length).toBeLessThan(getReducedGridDimensions(40, 40, savingPercentToScale(25)).width);
+    expect(report.optimizedTotalBeads).toBeLessThanOrEqual(100);
+    expect(report.optimizedTotalBeads).toBeGreaterThan(0);
   });
 
   it('does not flood-delete a near-background subject highlight attached to a protected border contour', () => {

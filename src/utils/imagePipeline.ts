@@ -1,5 +1,6 @@
 import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
 import { consolidateStrayBeans } from './strayBeanConsolidation';
+import { analyzeBackgroundIslands } from './backgroundIslandCleanup';
 import { projectCartoonInk } from './cartoonSampling';
 import { clusterCellColors, cellForeground, resolveCellForeground, enclosedSourceWhite, sourceHasTransparency, type CellColorBin, type CellForeground } from './sourceSampling';
 import { selectPerceptualPalette } from './perceptualPalette';
@@ -1547,6 +1548,37 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       },
     }, 'standard', { mode: pipeline, intent: 'auto' });
     for (let row = 0; row < grid.length; row += 1) grid[row] = consolidated[row];
+  }
+
+  // An auto-removed background leaves small detached noise components in the
+  // formerly background area: JPEG noise and vignette bands that sat just
+  // beyond the mask tolerance. Island topology alone cannot separate such
+  // specks from small legitimate motifs, so removal additionally requires
+  // EVERY source cell of the component to sit near the inferred background
+  // colour in CIEDE2000. Measured separation on real conversions: JPEG/vignette
+  // noise stays within ~6.6 of the background while even a pure black dot on a
+  // dark grey background sits at 10.5 and a red accent at 41, so the threshold
+  // matches the mask's own tolerance magnitude. The island module's own guards
+  // (exterior-touching, size cap, subject bounds, near-subject distance)
+  // still apply first. With the background kept there are no transparent
+  // cells, which makes the candidate set empty and this pass a no-op.
+  if (backgroundResult.inference) {
+    const backgroundLab = rgbToLab(hexToRgb(backgroundResult.inference.color));
+    const islandAnalysis = analyzeBackgroundIslands(grid, { maxIslandSize: 4 });
+    for (const component of islandAnalysis.components) {
+      if (!component.candidate) continue;
+      const allNearBackground = component.indices.every((index) => {
+        const source = sourceLabs[index];
+        return Boolean(source) && deltaE2000(source!, backgroundLab) <= 8;
+      });
+      if (!allNearBackground) continue;
+      for (const index of component.indices) {
+        const y = Math.floor(index / settings.width);
+        const x = index % settings.width;
+        grid[y][x] = null;
+        matches[y][x] = null;
+      }
+    }
   }
 
   if (settings.outlineBoost) {

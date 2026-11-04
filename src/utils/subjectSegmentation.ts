@@ -92,6 +92,79 @@ export function thresholdSubjectMask(probability: Float32Array, threshold = SUBJ
   return mask;
 }
 
+// Hysteresis refinement. A plain 0.5 cut carves bays out of dark subject
+// regions the model is unsure about (the street-boy boombox lost most of its
+// body while pure background sits at exactly 0 probability). Strong seeds grow
+// through weak pixels, then every hole fully enclosed by the result is filled,
+// which keeps genuinely dark subject parts without opening a path into the
+// background.
+const STRONG_PROBABILITY = 0.5;
+const WEAK_PROBABILITY = 0.1;
+
+/**
+ * Refine a normalised [0,1] probability map (any resolution) into a binary
+ * subject mask: 0.5-strong seeds, flood through >=0.1 weak pixels, fill
+ * enclosed holes. 1 = subject, 0 = background.
+ */
+export function refineSubjectMask(probability: Float32Array, width: number, height: number): Uint8Array {
+  const size = width * height;
+  const mask = new Uint8Array(size);
+  const stack = new Int32Array(size);
+  let top = 0;
+  for (let index = 0; index < size; index += 1) {
+    if (probability[index] >= STRONG_PROBABILITY) {
+      mask[index] = 1;
+      stack[top++] = index;
+    }
+  }
+  const grow = (index: number) => {
+    if (!mask[index] && probability[index] >= WEAK_PROBABILITY) {
+      mask[index] = 1;
+      stack[top++] = index;
+    }
+  };
+  while (top > 0) {
+    const index = stack[--top];
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x > 0) grow(index - 1);
+    if (x < width - 1) grow(index + 1);
+    if (y > 0) grow(index - width);
+    if (y < height - 1) grow(index + width);
+  }
+  // Hole fill: flood the background from the image border; every unreached
+  // non-subject pixel is enclosed by subject and belongs to it.
+  const visited = new Uint8Array(size);
+  top = 0;
+  const push = (index: number) => {
+    if (!visited[index] && !mask[index]) {
+      visited[index] = 1;
+      stack[top++] = index;
+    }
+  };
+  for (let x = 0; x < width; x += 1) {
+    push(x);
+    push((height - 1) * width + x);
+  }
+  for (let y = 0; y < height; y += 1) {
+    push(y * width);
+    push(y * width + width - 1);
+  }
+  while (top > 0) {
+    const index = stack[--top];
+    const x = index % width;
+    const y = Math.floor(index / width);
+    if (x > 0) push(index - 1);
+    if (x < width - 1) push(index + 1);
+    if (y > 0) push(index - width);
+    if (y < height - 1) push(index + width);
+  }
+  for (let index = 0; index < size; index += 1) {
+    if (!visited[index]) mask[index] = 1;
+  }
+  return mask;
+}
+
 function drawToCanvas(source: HTMLImageElement | HTMLCanvasElement, width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -146,19 +219,20 @@ export async function computeSubjectMask(source: HTMLImageElement | HTMLCanvasEl
     const probability = normalizeMinmax(new Float32Array(primary.data as Float32Array));
 
     // Upsample the 320x320 saliency map to source resolution bilinearly, then
-    // threshold. Grayscale round-trip through canvas keeps the upsample cheap.
+    // refine with hysteresis + hole filling. Grayscale round-trip through
+    // canvas keeps the upsample cheap; the red channel encodes probability.
     const maskCanvas = drawToCanvas(probabilityToCanvas(probability), sourceWidth, sourceHeight);
     const maskContext = maskCanvas.getContext('2d', { willReadFrequently: true });
     if (!maskContext) return null;
     const upsampled = maskContext.getImageData(0, 0, sourceWidth, sourceHeight).data;
-    const mask = new Uint8Array(sourceWidth * sourceHeight);
+    const upsampledProbability = new Float32Array(sourceWidth * sourceHeight);
+    for (let index = 0; index < upsampledProbability.length; index += 1) {
+      upsampledProbability[index] = upsampled[index * 4] / 255;
+    }
+    const mask = refineSubjectMask(upsampledProbability, sourceWidth, sourceHeight);
     let subjectCount = 0;
     for (let index = 0; index < mask.length; index += 1) {
-      // Red channel of the grayscale upsample encodes the probability.
-      if (upsampled[index * 4] >= SUBJECT_THRESHOLD * 255) {
-        mask[index] = 1;
-        subjectCount += 1;
-      }
+      subjectCount += mask[index];
     }
     const coverage = subjectCount / mask.length;
     if (coverage < MIN_SUBJECT_COVERAGE || coverage > MAX_SUBJECT_COVERAGE) return null;

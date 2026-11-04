@@ -392,7 +392,108 @@ export interface HardDominanceOptions {
   minSeparation?: number;
 }
 
-export interface HardDominanceVerdict { rgb: Rgb }
+export interface HardDominanceVerdict {
+  rgb: Rgb;
+  /** Primary cluster share of the cell's weighted pixels. */
+  share: number;
+  /** Runner-up block colour when it is a real alternative (may be null). */
+  secondaryRgb: Rgb | null;
+  secondaryShare: number;
+}
+
+/**
+ * Decide committed hard-dominance colours with neighbour support.
+ *
+ * A boundary cell can be a genuine coin flip (a white strip against a navy
+ * background, each ~45% of the cell); picking the larger block by pixel count
+ * is then arbitrary, and an isolated wrong-side pick reads as a speckle.
+ * Neighbours break the tie. Every candidate exposes its primary block and,
+ * when substantial, its runner-up block; support means a 4-neighbour whose
+ * own committed choice (candidate primary/runner-up, or its area-average
+ * colour when it has no candidate) sits within `maxSupportDistance`. A cell
+ * keeps its primary unless that primary is unsupported while its own
+ * runner-up is supported AND the runner-up really outweighs it (cluster
+ * merging inflates a primary that stitches two same-hue bins together while
+ * the true pixel majority went to a split runner-up) — or the split is
+ * near-even with no support at all, in which case the safer area average
+ * stays.
+ */
+export interface HardDominanceCell {
+  index: number;
+  verdict: HardDominanceVerdict;
+}
+
+export interface HardDominanceSupportOptions {
+  maxSupportDistance?: number;
+  /** Same-lightness-camp neighbours may also support each other within this gap. */
+  maxCampDistance?: number;
+  /** Below this share the primary is treated as a non-majority coin flip. */
+  minMajorityShare?: number;
+  /** Runner-up blocks below this share are not credible alternatives. */
+  minSecondaryShare?: number;
+}
+
+export function resolveHardDominanceSupport(cells: HardDominanceCell[],
+  colours: ReadonlyArray<{ r: number; g: number; b: number; alpha: number }>,
+  columns: number, rows: number, options: HardDominanceSupportOptions = {}): Map<number, Rgb | null> {
+  const {
+    maxSupportDistance = 24, maxCampDistance = 80,
+    minMajorityShare = 0.5, minSecondaryShare = 0.35,
+  } = options;
+  const byIndex = new Map(cells.map((cell) => [cell.index, cell.verdict]));
+  // Support is about which side of a boundary the neighbour sits on, not an
+  // exact colour match: a black neighbour still backs a deep-navy primary.
+  // Same lightness camp within a generous gap counts; different camps need
+  // an actual colour match.
+  const camp = (rgb: Rgb) => (rgb[0] + rgb[1] * 2 + rgb[2]) / 4 < 128 ? 0 : 1;
+  const close = (a: Rgb, b: Rgb) => {
+    const d = distance(a, b);
+    return d <= maxSupportDistance || (d <= maxCampDistance && camp(a) === camp(b));
+  };
+
+  // Colour pool of each candidate's 4-neighbourhood: the neighbour's committed
+  // intent — its own candidate blocks when it has one, else its current colour.
+  const pools = new Map<number, { pool: Rgb[]; hasCandidateNeighbour: boolean }>();
+  for (const cell of cells) {
+    const x = cell.index % columns, y = Math.floor(cell.index / columns);
+    const pool: Rgb[] = [];
+    let hasCandidateNeighbour = false;
+    for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || nx >= columns || ny < 0 || ny >= rows) continue;
+      const nIndex = ny * columns + nx;
+      const verdict = byIndex.get(nIndex);
+      if (verdict) {
+        hasCandidateNeighbour = true;
+        pool.push(verdict.rgb);
+        if (verdict.secondaryRgb && verdict.secondaryShare >= minSecondaryShare) pool.push(verdict.secondaryRgb);
+      } else {
+        const colour = colours[nIndex];
+        if (colour?.alpha) pool.push([colour.r, colour.g, colour.b]);
+      }
+    }
+    pools.set(cell.index, { pool, hasCandidateNeighbour });
+  }
+
+  const decisions = new Map<number, Rgb | null>();
+  for (const cell of cells) {
+    const { rgb, share, secondaryRgb, secondaryShare } = cell.verdict;
+    const context = pools.get(cell.index);
+    if (!context?.hasCandidateNeighbour) continue; // lone flip: no commit
+    const { pool } = context;
+    const primarySupported = pool.some((colour) => close(rgb, colour));
+    const coinFlip = share < minMajorityShare;
+    if (primarySupported || !coinFlip) { decisions.set(cell.index, rgb); continue; }
+    // Cluster merging can inflate the primary: two same-hue bins stitch into
+    // one group while the true majority split across runner-up bins. Only a
+    // runner-up that really outweighs the primary may take over.
+    const runnerUpWins = !!secondaryRgb && secondaryShare > share
+      && secondaryShare >= minSecondaryShare
+      && pool.some((colour) => close(secondaryRgb, colour));
+    decisions.set(cell.index, runnerUpWins ? secondaryRgb : null);
+  }
+  return decisions;
+}
 
 /**
  * Hard-edged artwork (vector exports, flat sprites) splits an output cell into
@@ -418,7 +519,12 @@ export function detectCellHardDominance(bins: Iterable<CellColorBin>, totalWeigh
   const primaryRgb = primary.rgb.map(v => clampByte(v / primary.weight)) as Rgb;
   const secondaryRgb = secondary.rgb.map(v => clampByte(v / secondary.weight)) as Rgb;
   if (distance(primaryRgb, secondaryRgb) < minSeparation) return null;
-  return { rgb: primaryRgb };
+  return {
+    rgb: primaryRgb,
+    share: primary.weight / totalWeight,
+    secondaryRgb,
+    secondaryShare: secondary.weight / totalWeight,
+  };
 }
 
 function clampByte(value: number): number {

@@ -15,8 +15,14 @@
 //               same small size and blurred, approximating the artwork seen
 //               from viewing distance where beads merge into continuous tone.
 //               This is the perceptual metric: it rewards what a viewer sees.
+//  pixelDeltaE  every opaque source pixel (subsampled) is compared with the
+//               bead colour of the cell covering it, at full resolution with
+//               no averaging or blur. This is the fair metric for hard-edged
+//               art: the other two use blend references that structurally
+//               reward turning hard edges into mush, and therefore punished
+//               dominant-colour sampling even though it looks better.
 //
-// Both are reported as mean and p95. The p95 tail catches halo/outline damage
+// All are reported as mean and p95. The p95 tail catches halo/outline damage
 // that a mean happily averages away.
 
 import { createServer } from 'vite';
@@ -200,6 +206,24 @@ async function main() {
       }
       viewDe.sort((a, b) => a - b);
 
+      // --- metric 3: per-pixel deltaE at full source resolution ---
+      // No averaging, no blur: each opaque source pixel is compared against
+      // the bead colour of the cell that covers it. Fair to hard-edged art.
+      const PX_STRIDE = 2;
+      const pxDe = [];
+      for (let y = 0; y < srcH; y += PX_STRIDE) {
+        const gy = Math.min(rows - 1, Math.floor((y * rows) / srcH));
+        for (let x = 0; x < srcW; x += PX_STRIDE) {
+          const [pr, pg, pb, pa] = px(x, y);
+          if (pa < 128) continue;
+          const gx = Math.min(cols - 1, Math.floor((x * cols) / srcW));
+          const id = grid[gy][gx];
+          const rgb = id ? colorById.get(id).rgb : bg;
+          pxDe.push(deltaE2000(rgbToLab(pr, pg, pb), rgbToLab(rgb[0], rgb[1], rgb[2])));
+        }
+      }
+      pxDe.sort((a, b) => a - b);
+
       // --- side-by-side visual ---
       const visH = 420;
       const visW = Math.round((visW_safe(cols, rows, visH)));
@@ -229,12 +253,17 @@ async function main() {
           mean: round(viewDe.reduce((s, v) => s + v, 0) / viewDe.length),
           p95: round(percentile(viewDe, 95)),
         },
+        pixelDeltaE: {
+          mean: round(pxDe.reduce((s, v) => s + v, 0) / pxDe.length),
+          p95: round(percentile(pxDe, 95)),
+        },
       };
       results.push(entry);
       console.log(
         `${file.padEnd(22)} ${entry.pipeline.padEnd(8)} ${entry.grid.padEnd(8)}`
         + ` cellΔE ${entry.cellDeltaE.mean}/${entry.cellDeltaE.p95}`
         + `  viewΔE ${entry.viewDeltaE.mean}/${entry.viewDeltaE.p95}`
+        + `  pixelΔE ${entry.pixelDeltaE.mean}/${entry.pixelDeltaE.p95}`
         + `  ${convertMs}ms`,
       );
     }
@@ -248,13 +277,16 @@ async function main() {
       cellP95: round(avg(results.map((r) => r.cellDeltaE.p95))),
       viewMean: round(avg(results.map((r) => r.viewDeltaE.mean))),
       viewP95: round(avg(results.map((r) => r.viewDeltaE.p95))),
+      pixelMean: round(avg(results.map((r) => r.pixelDeltaE.mean))),
+      pixelP95: round(avg(results.map((r) => r.pixelDeltaE.p95))),
       results,
     };
 
     const latestPath = path.join(RESULTS_DIR, 'latest.json');
     await writeFile(latestPath, JSON.stringify(aggregate, null, 2));
     console.log(`\nrev ${aggregate.rev} | cellΔE ${aggregate.cellMean} (p95 ${aggregate.cellP95})`
-      + ` | viewΔE ${aggregate.viewMean} (p95 ${aggregate.viewP95}) | -> benchmark/results/latest.json`);
+      + ` | viewΔE ${aggregate.viewMean} (p95 ${aggregate.viewP95})`
+      + ` | pixelΔE ${aggregate.pixelMean} (p95 ${aggregate.pixelP95}) | -> benchmark/results/latest.json`);
 
     if (saveBaseline) {
       await copyFile(latestPath, path.join(RESULTS_DIR, 'baseline.json'));
@@ -279,8 +311,16 @@ async function main() {
         const dCell = r.cellDeltaE.mean - b.cellDeltaE.mean;
         const dView = r.viewDeltaE.mean - b.viewDeltaE.mean;
         const mark = (v) => (v <= -0.15 ? 'BETTER' : v >= 0.15 ? 'WORSE' : '~same');
-        console.log(`  ${r.image}: cellΔE ${b.cellDeltaE.mean} -> ${r.cellDeltaE.mean} (${sign(dCell)}, ${mark(dCell)})`
-          + ` | viewΔE ${b.viewDeltaE.mean} -> ${r.viewDeltaE.mean} (${sign(dView)}, ${mark(dView)})`);
+        let line = `  ${r.image}: cellΔE ${b.cellDeltaE.mean} -> ${r.cellDeltaE.mean} (${sign(dCell)}, ${mark(dCell)})`
+          + ` | viewΔE ${b.viewDeltaE.mean} -> ${r.viewDeltaE.mean} (${sign(dView)}, ${mark(dView)})`;
+        if (r.pixelDeltaE && b.pixelDeltaE) {
+          const dPx = r.pixelDeltaE.mean - b.pixelDeltaE.mean;
+          line += `\n    pixelΔE ${b.pixelDeltaE.mean} -> ${r.pixelDeltaE.mean} (${sign(dPx)}, ${mark(dPx)})`
+            + ` | p95 ${b.pixelDeltaE.p95} -> ${r.pixelDeltaE.p95}`;
+        } else {
+          line += ' | pixelΔE: no baseline value';
+        }
+        console.log(line);
       }
     }
   } finally {

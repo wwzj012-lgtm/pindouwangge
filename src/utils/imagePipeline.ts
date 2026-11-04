@@ -3,7 +3,7 @@ import { consolidateStrayBeans } from './strayBeanConsolidation';
 import { analyzeBackgroundIslands } from './backgroundIslandCleanup';
 import { projectCartoonInk } from './cartoonSampling';
 import { detectPixelGrid, snapToPixelGrid, type PixelGridDetection } from './pixelGrid';
-import { clusterCellColors, cellForeground, resolveCellForeground, enclosedSourceWhite, sourceHasTransparency, detectCellHardDominance, type CellColorBin, type CellForeground } from './sourceSampling';
+import { clusterCellColors, cellForeground, resolveCellForeground, enclosedSourceWhite, sourceHasTransparency, detectCellHardDominance, resolveHardDominanceSupport, type CellColorBin, type CellForeground, type HardDominanceCell, type HardDominanceVerdict } from './sourceSampling';
 import { selectPerceptualPalette } from './perceptualPalette';
 import {
   classifyGridRegions,
@@ -1268,7 +1268,7 @@ export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: 
   const cellCandidates: Array<CellForeground | null> = [];
   const representedInk = pipeline !== 'photo' ? new Uint8Array(settings.width * settings.height) : null;
   const protectedEmpty = new Uint8Array(settings.width * settings.height);
-  const hardDominanceCandidates = new Map<number, Rgb>();
+  const hardDominanceCandidates = new Map<number, HardDominanceVerdict>();
   const scaleX = sourceWidth / settings.width;
   const scaleY = sourceHeight / settings.height;
   for (let gridY = 0; gridY < settings.height; gridY += 1) {
@@ -1443,7 +1443,7 @@ export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: 
       if (pipeline === 'photo') {
         const verdict = detectCellHardDominance(dominant.values(), weightedValid);
         if (verdict) {
-          hardDominanceCandidates.set(gridY * settings.width + gridX, verdict.rgb);
+          hardDominanceCandidates.set(gridY * settings.width + gridX, verdict);
         }
       }
       targetPixels.push({ r: adjusted[0], g: adjusted[1], b: adjusted[2], alpha: 255 });
@@ -1454,18 +1454,17 @@ export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: 
   // candidate cells, and at least one equally hard neighbour per cell (a lone
   // flip is noise, a run of them is a real boundary). The replacement keeps
   // the source's own flat colour instead of the cross-boundary average.
+  // Which flat colour wins is then a neighbour-support decision: a coin-flip
+  // boundary cell (white strip vs navy background, each ~45%) follows the side
+  // its neighbours committed to, and a near-even split with no committed side
+  // at all keeps the area average instead of speckling a wrong-side pick.
   const hardShareThreshold = 0.08;
   if (hardDominanceCandidates.size >= Math.max(24, targetPixels.length * hardShareThreshold)) {
-    for (const [index, rgb] of hardDominanceCandidates) {
-      const x = index % settings.width;
-      const y = Math.floor(index / settings.width);
-      let supported = false;
-      for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || nx >= settings.width || ny < 0 || ny >= settings.height) continue;
-        if (hardDominanceCandidates.has(ny * settings.width + nx)) { supported = true; break; }
-      }
-      if (!supported) continue;
+    const cells: HardDominanceCell[] = [...hardDominanceCandidates]
+      .map(([index, verdict]) => ({ index, verdict }));
+    const decisions = resolveHardDominanceSupport(cells, targetPixels, settings.width, settings.height);
+    for (const [index, rgb] of decisions) {
+      if (!rgb) continue;
       const pixel = targetPixels[index];
       if (pixel.alpha === 0) continue;
       const adjusted = adjustColor(rgb, settings);

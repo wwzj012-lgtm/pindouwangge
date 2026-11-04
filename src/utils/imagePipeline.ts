@@ -2,6 +2,7 @@ import type { BeadColor, ColorMatchAlgo, ConvertSettings } from '../types';
 import { consolidateStrayBeans } from './strayBeanConsolidation';
 import { analyzeBackgroundIslands } from './backgroundIslandCleanup';
 import { projectCartoonInk } from './cartoonSampling';
+import { detectPixelGrid, snapToPixelGrid, type PixelGridDetection } from './pixelGrid';
 import { clusterCellColors, cellForeground, resolveCellForeground, enclosedSourceWhite, sourceHasTransparency, type CellColorBin, type CellForeground } from './sourceSampling';
 import { selectPerceptualPalette } from './perceptualPalette';
 import {
@@ -49,6 +50,8 @@ export interface ColorMatchDiagnostic {
 export interface ConversionDiagnostics extends ImageClassification {
   detectedPipeline: ConversionPipeline;
   pipelineOverridden: boolean;
+  /** Present when the source was snapped back to its detected native pixel grid. */
+  nativeGrid: { cell: number; cols: number; rows: number; confidence: number } | null;
   backgroundPixelsRemoved: number;
   background: BackgroundInference | null;
   meanSourceLightness: number;
@@ -1174,6 +1177,7 @@ function emptyResult(): ConversionResult {
       pipeline: 'photo',
       detectedPipeline: 'photo',
       pipelineOverridden: false,
+      nativeGrid: null,
       effectiveColorCount: 0,
       confidence: 0,
       backgroundPixelsRemoved: 0,
@@ -1187,13 +1191,15 @@ function emptyResult(): ConversionResult {
   };
 }
 
-export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: number, sourceHeight: number, settings: ConvertSettings, palette: BeadColor[]): ConversionResult {
-  if (!hasExpectedImageData(data, sourceWidth, sourceHeight)
+export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: number, sourceHeight: number, settings: ConvertSettings, palette: BeadColor[]): ConversionResult {
+  if (!hasExpectedImageData(rawData, sourceWidth, sourceHeight)
     || !isPositiveInteger(settings.width)
     || !isPositiveInteger(settings.height)
     || !Array.isArray(palette)) return emptyResult();
   const activePalette = preparePalette(palette);
   if (activePalette.length === 0) return emptyResult();
+
+  let data = rawData;
 
   const alphaCutoff = normalizeAlphaCutoff(settings.transparentCutoff);
   // Detect before preprocessing. Explicit cartoon, photo, and logo requests
@@ -1203,6 +1209,23 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
   const override = settings.pipelineOverride ?? 'auto';
   const requestedPipeline = override === 'auto' ? detected.pipeline : override;
   const pipeline: ConversionPipeline = requestedPipeline;
+  // Pixel-art sources are authored on a native logical grid and usually arrive
+  // resampled to display size; area averaging then blends neighbouring logical
+  // pixels before any colour decision runs. When the native grid is detected
+  // with high confidence, snap the source back to the author's flat colours so
+  // preprocessing, background inference and cell sampling all work on exact
+  // input instead of a blur of it. The detector returns null for photos and
+  // anti-aliased art, so this is a no-op for everything else. Classification
+  // above intentionally ran on the raw source to keep pipeline choice stable.
+  let nativeGrid: PixelGridDetection | null = null;
+  if (pipeline !== 'photo') {
+    const detection = detectPixelGrid(data, sourceWidth, sourceHeight);
+    if (detection && detection.cols >= 4 && detection.rows >= 4
+      && detection.cols <= settings.width && detection.rows <= settings.height) {
+      data = snapToPixelGrid(data, sourceWidth, sourceHeight, detection);
+      nativeGrid = detection;
+    }
+  }
   // One consistent premultiplied-light regime for genuinely alpha-bearing
   // sources; fully opaque inputs retain A's display-colour averaging.
   // Less than one output cell of missing alpha cannot switch every opaque
@@ -1616,6 +1639,9 @@ export function convertImageDataToGrid(data: Uint8ClampedArray, sourceWidth: num
       pipeline,
       detectedPipeline: detected.pipeline,
       pipelineOverridden: override !== 'auto',
+      nativeGrid: nativeGrid
+        ? { cell: nativeGrid.cell, cols: nativeGrid.cols, rows: nativeGrid.rows, confidence: nativeGrid.confidence }
+        : null,
       effectiveColorCount: detected.effectiveColorCount,
       confidence: detected.confidence,
       backgroundPixelsRemoved: backgroundResult.mask.reduce((sum, value) => sum + value, 0),

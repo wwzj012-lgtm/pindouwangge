@@ -166,6 +166,7 @@ export function imageToGridWithDiagnostics(
         pipeline: 'photo',
         detectedPipeline: 'photo',
         pipelineOverridden: false,
+        nativeGrid: null,
         effectiveColorCount: 0,
         confidence: 0,
         backgroundPixelsRemoved: 0,

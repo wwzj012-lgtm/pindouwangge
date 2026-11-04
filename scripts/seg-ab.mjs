@@ -42,42 +42,73 @@ console.log('source:', W, 'x', H);
 
 const session = await ort.InferenceSession.create(MODEL);
 const inputName = session.inputNames[0] ?? 'input.1';
-const t0 = performance.now();
-const small = await sharp(SRC_IMAGE).removeAlpha().resize(SEG, SEG, { fit: 'fill' }).raw().toBuffer();
-let maxIntensity = 0;
-for (let i = 0; i < small.length; i++) if (small[i] > maxIntensity) maxIntensity = small[i];
-const scale = maxIntensity > 0 ? 1 / maxIntensity : 1;
-const pixels = SEG * SEG;
-const tensorData = new Float32Array(pixels * 3);
-for (let i = 0; i < pixels; i++) {
-  tensorData[i] = (small[i * 3] * scale - MEAN[0]) / STD[0];
-  tensorData[pixels + i] = (small[i * 3 + 1] * scale - MEAN[1]) / STD[1];
-  tensorData[pixels * 2 + i] = (small[i * 3 + 2] * scale - MEAN[2]) / STD[2];
-}
-const outputs = await session.run({ [inputName]: new ort.Tensor('float32', tensorData, [1, 3, SEG, SEG]) });
-const d0 = outputs[session.outputNames[0] ?? Object.keys(outputs)[0]].data;
-let min = Infinity, max = -Infinity;
-for (let i = 0; i < d0.length; i++) { if (d0[i] < min) min = d0[i]; if (d0[i] > max) max = d0[i]; }
-const range = max - min;
-const prob = new Float32Array(d0.length);
-for (let i = 0; i < d0.length; i++) prob[i] = range > 1e-6 ? (d0[i] - min) / range : 0;
-const segMs = Math.round(performance.now() - t0);
+const ZOOM_PADDING = 0.12;
 
-// 掩码上采样回源分辨率（双线性）+ 与生产一致 refineSubjectMask 精修。
+async function infer320(rawRgb) {
+  let maxIntensity = 0;
+  for (let i = 0; i < rawRgb.length; i++) if (rawRgb[i] > maxIntensity) maxIntensity = rawRgb[i];
+  const scale = maxIntensity > 0 ? 1 / maxIntensity : 1;
+  const pixels = SEG * SEG;
+  const tensorData = new Float32Array(pixels * 3);
+  for (let i = 0; i < pixels; i++) {
+    tensorData[i] = (rawRgb[i * 3] * scale - MEAN[0]) / STD[0];
+    tensorData[pixels + i] = (rawRgb[i * 3 + 1] * scale - MEAN[1]) / STD[1];
+    tensorData[pixels * 2 + i] = (rawRgb[i * 3 + 2] * scale - MEAN[2]) / STD[2];
+  }
+  const outputs = await session.run({ [inputName]: new ort.Tensor('float32', tensorData, [1, 3, SEG, SEG]) });
+  const d0 = outputs[session.outputNames[0] ?? Object.keys(outputs)[0]].data;
+  let min = Infinity, max = -Infinity;
+  for (let i = 0; i < d0.length; i++) { if (d0[i] < min) min = d0[i]; if (d0[i] > max) max = d0[i]; }
+  const range = max - min;
+  const prob = new Float32Array(d0.length);
+  for (let i = 0; i < d0.length; i++) prob[i] = range > 1e-6 ? (d0[i] - min) / range : 0;
+  return prob;
+}
+
+// 掩码上采样回目标分辨率（双线性）+ 与生产一致 refineSubjectMask 精修。
 // 注意 sharp resize 默认把单通道扩成 3 通道，必须 toColourspace('b-w') 保证
 // raw 输出仍是 1 通道，否则逐字节阈值读到的是 RGB 交错数据，掩码整体错乱。
-const probGray = Buffer.alloc(pixels);
-for (let i = 0; i < pixels; i++) probGray[i] = Math.max(0, Math.min(255, Math.round(prob[i] * 255)));
-const upsampled = await sharp(probGray, { raw: { width: SEG, height: SEG, channels: 1 } })
-  .resize(W, H, { kernel: 'cubic' }).toColourspace('b-w').raw().toBuffer();
-const { refineSubjectMask } = await vite.ssrLoadModule('/src/utils/subjectSegmentation.ts');
-const upProb = new Float32Array(W * H);
-for (let i = 0; i < upProb.length; i++) upProb[i] = upsampled[i] / 255;
-const subjectMask = refineSubjectMask(upProb, W, H);
+async function upsampleAndRefine(prob, cw, ch, segUtils) {
+  const pixels = prob.length;
+  const probGray = Buffer.alloc(pixels);
+  for (let i = 0; i < pixels; i++) probGray[i] = Math.max(0, Math.min(255, Math.round(prob[i] * 255)));
+  const upsampled = await sharp(probGray, { raw: { width: SEG, height: SEG, channels: 1 } })
+    .resize(cw, ch, { kernel: 'cubic' }).toColourspace('b-w').raw().toBuffer();
+  const upProb = new Float32Array(cw * ch);
+  for (let i = 0; i < upProb.length; i++) upProb[i] = upsampled[i] / 255;
+  return segUtils.refineSubjectMask(upProb, cw, ch);
+}
+
+const t0 = performance.now();
+const { refineSubjectMask, subjectBoundingBox, mergeConnectedSubject } = await vite.ssrLoadModule('/src/utils/subjectSegmentation.ts');
+const segUtils = { refineSubjectMask };
+
+// Pass 1：全图推理
+const small = await sharp(SRC_IMAGE).removeAlpha().resize(SEG, SEG, { fit: 'fill' }).raw().toBuffer();
+const prob = await infer320(small);
+const subjectMask = await upsampleAndRefine(prob, W, H, segUtils);
+
+// Pass 2：主体 bbox 外扩后二次推理（放大使小物体跨过显著性门槛），连通融合
+const bbox = subjectBoundingBox(subjectMask, W, H);
+if (bbox) {
+  const pad = Math.round(Math.max(bbox.x1 - bbox.x0, bbox.y1 - bbox.y0) * ZOOM_PADDING);
+  const cx0 = Math.max(0, bbox.x0 - pad), cy0 = Math.max(0, bbox.y0 - pad);
+  const cw = Math.min(W, bbox.x1 + pad) - cx0, ch = Math.min(H, bbox.y1 + pad) - cy0;
+  if (cw > 0 && ch > 0 && (cw < W || ch < H)) {
+    const crop = await sharp(SRC_IMAGE).removeAlpha().extract({ left: cx0, top: cy0, width: cw, height: ch })
+      .resize(SEG, SEG, { fit: 'fill' }).raw().toBuffer();
+    const cropProb = await infer320(crop);
+    const cropMask = await upsampleAndRefine(cropProb, cw, ch, segUtils);
+    const added = mergeConnectedSubject(subjectMask, W, H, cropMask, cw, ch, cx0, cy0);
+    console.log('zoom pass: crop', cw, 'x', ch, '| added', added, 'px');
+  }
+}
+const segMs = Math.round(performance.now() - t0);
+
 let subjectCount = 0;
 for (let i = 0; i < subjectMask.length; i++) subjectCount += subjectMask[i];
 const coverage = subjectCount / subjectMask.length;
-console.log(`u2netp 掩码: coverage = ${(coverage * 100).toFixed(1)}% | 推理+上采样 ${segMs}ms`);
+console.log(`u2netp 掩码(两遍): coverage = ${(coverage * 100).toFixed(1)}% | 推理+上采样 ${segMs}ms`);
 if (coverage < 0.015 || coverage > 0.985) { console.error('掩码退化，模型输出不可用'); process.exit(1); }
 
 // 掩码可视化：白=保留主体，黑=移除背景（半透明叠加在源图上）
@@ -192,7 +223,7 @@ const html = `<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><title>
 </table>
 <p class="note">读法：street-boy 的人物与背景同为 navy 色系，颜色启发式只能靠边缘连通性保守去背，大量背景残留成为珠子；
 u2netp 按「语义主体」分割，背景整体移除。meanΔE 的参考格色仍取自含背景的源格，AI 版因剔除低置信背景格，平均保真度提升。
-转换耗时多出的分割在浏览器端同样只需一次 320×320 推理（约 100-300ms，模型 4.4MB 首次加载后缓存）。</p>
+转换耗时多出的分割在浏览器端为两次 320×320 推理（全图 + 主体 bbox 放大二次推理，约 200-600ms，模型 4.4MB 首次加载后缓存）。</p>
 </body></html>`;
 await writeFile(`${OUT}/seg_ab.html`, html, 'utf8');
 console.log('A 启发式: meanΔE', deHe.mean.toFixed(3), '| filled', mHe.filled, '| colors', mHe.colors, '| bg', heuristic.diagnostics.background?.source, '| removed', heuristic.diagnostics.backgroundPixelsRemoved);

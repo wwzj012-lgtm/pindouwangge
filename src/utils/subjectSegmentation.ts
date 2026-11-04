@@ -104,6 +104,11 @@ const STRONG_PROBABILITY = 0.5;
 // 0.05 recovers ~67% of the boombox bbox with zero background leakage, because
 // true background sits at ~0 probability. 0.03 adds almost nothing beyond it.
 const WEAK_PROBABILITY = 0.05;
+// Second pass: re-run the model on the subject bounding box (plus padding) so
+// small dark accessories (the street-boy boombox) fill more of the 320x320
+// input and cross the saliency threshold. The pass only ever ADDS pixels that
+// are connected to the first-pass subject, so clean background cannot leak in.
+const ZOOM_PADDING = 0.12;
 
 /**
  * Refine a normalised [0,1] probability map (any resolution) into a binary
@@ -169,7 +174,105 @@ export function refineSubjectMask(probability: Float32Array, width: number, heig
   return mask;
 }
 
-function drawToCanvas(source: HTMLImageElement | HTMLCanvasElement, width: number, height: number): HTMLCanvasElement {
+export interface SubjectBoundingBox {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/** Tight bounding box of subject pixels, or null for an empty mask. */
+export function subjectBoundingBox(mask: Uint8Array, width: number, height: number): SubjectBoundingBox | null {
+  let x0 = width;
+  let y0 = height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) {
+      if (mask[row + x]) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1, y1 };
+}
+
+/**
+ * Merge a zoom-pass mask (computed on the crop at [offsetX, offsetY]) into the
+ * full-resolution mask: pixels the zoom pass calls subject are added only when
+ * 8-connected to the existing subject, so stray background blobs the zoom pass
+ * might hallucinate far from the subject never enter the mask.
+ */
+export function mergeConnectedSubject(
+  mask: Uint8Array,
+  width: number,
+  height: number,
+  addition: Uint8Array,
+  cropWidth: number,
+  cropHeight: number,
+  offsetX: number,
+  offsetY: number,
+): number {
+  const cropSize = cropWidth * cropHeight;
+  const enqueued = new Uint8Array(cropSize);
+  const queue = new Int32Array(cropSize);
+  let rear = 0;
+  for (let y = 0; y < cropHeight; y += 1) {
+    const cropRow = y * cropWidth;
+    const fullRow = (offsetY + y) * width;
+    for (let x = 0; x < cropWidth; x += 1) {
+      if (mask[fullRow + offsetX + x]) {
+        enqueued[cropRow + x] = 1;
+        queue[rear++] = cropRow + x;
+      }
+    }
+  }
+  const visit = (cropIndex: number) => {
+    if (!enqueued[cropIndex] && addition[cropIndex]) {
+      enqueued[cropIndex] = 1;
+      queue[rear++] = cropIndex;
+    }
+  };
+  let head = 0;
+  while (head < rear) {
+    const cropIndex = queue[head++];
+    const x = cropIndex % cropWidth;
+    const y = Math.floor(cropIndex / cropWidth);
+    if (x > 0) visit(cropIndex - 1);
+    if (x < cropWidth - 1) visit(cropIndex + 1);
+    if (y > 0) visit(cropIndex - cropWidth);
+    if (y < cropHeight - 1) visit(cropIndex + cropWidth);
+    if (x > 0 && y > 0) visit(cropIndex - cropWidth - 1);
+    if (x < cropWidth - 1 && y > 0) visit(cropIndex - cropWidth + 1);
+    if (x > 0 && y < cropHeight - 1) visit(cropIndex + cropWidth - 1);
+    if (x < cropWidth - 1 && y < cropHeight - 1) visit(cropIndex + cropWidth + 1);
+  }
+  let added = 0;
+  for (let cropIndex = 0; cropIndex < cropSize; cropIndex += 1) {
+    if (addition[cropIndex] && enqueued[cropIndex]) {
+      const fullIndex = (offsetY + Math.floor(cropIndex / cropWidth)) * width + offsetX + (cropIndex % cropWidth);
+      if (!mask[fullIndex]) {
+        mask[fullIndex] = 1;
+        added += 1;
+      }
+    }
+  }
+  return added;
+}
+
+function drawToCanvas(
+  source: HTMLImageElement | HTMLCanvasElement,
+  width: number,
+  height: number,
+  sourceX = 0,
+  sourceY = 0,
+  sourceWidth = source instanceof HTMLImageElement ? source.naturalWidth || source.width : source.width,
+  sourceHeight = source instanceof HTMLImageElement ? source.naturalHeight || source.height : source.height,
+): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = width;
   canvas.height = height;
@@ -177,8 +280,54 @@ function drawToCanvas(source: HTMLImageElement | HTMLCanvasElement, width: numbe
   if (!context) throw new Error('canvas 2d unavailable');
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
-  context.drawImage(source, 0, 0, width, height);
+  context.drawImage(source, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
   return canvas;
+}
+
+/** Run one u2netp inference on a 320x320 canvas; returns the min-max normalised d0 map. */
+async function runInference(
+  session: import('onnxruntime-web/wasm').InferenceSession,
+  ort: OrtModule,
+  inputCanvas: HTMLCanvasElement,
+): Promise<Float32Array> {
+  const context = inputCanvas.getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('canvas 2d unavailable');
+  const raw = context.getImageData(0, 0, SEGMENTATION_SIZE, SEGMENTATION_SIZE).data;
+  let maxIntensity = 0;
+  for (let index = 0; index < raw.length; index += 4) {
+    if (raw[index] > maxIntensity) maxIntensity = raw[index];
+    if (raw[index + 1] > maxIntensity) maxIntensity = raw[index + 1];
+    if (raw[index + 2] > maxIntensity) maxIntensity = raw[index + 2];
+  }
+  const scale = maxIntensity > 0 ? 1 / maxIntensity : 1;
+  const pixels = SEGMENTATION_SIZE * SEGMENTATION_SIZE;
+  const tensorData = new Float32Array(pixels * 3);
+  for (let index = 0; index < pixels; index += 1) {
+    const offset = index * 4;
+    tensorData[index] = (raw[offset] * scale - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
+    tensorData[pixels + index] = (raw[offset + 1] * scale - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
+    tensorData[pixels * 2 + index] = (raw[offset + 2] * scale - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
+  }
+  const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, SEGMENTATION_SIZE, SEGMENTATION_SIZE]);
+  const inputName = session.inputNames[0] ?? 'input.1';
+  const outputs = await session.run({ [inputName]: inputTensor });
+  const primaryName = session.outputNames[0] ?? Object.keys(outputs)[0];
+  const primary = outputs[primaryName];
+  if (!primary || !primary.data || primary.data.length !== pixels) throw new Error('unexpected model output');
+  return normalizeMinmax(new Float32Array(primary.data as Float32Array));
+}
+
+/** Upsample a normalised 320x320 probability map to width x height (bilinear via canvas). */
+function upsampleProbability(probability: Float32Array, width: number, height: number): Float32Array {
+  const context = drawToCanvas(probabilityToCanvas(probability), width, height).getContext('2d', { willReadFrequently: true });
+  if (!context) throw new Error('canvas 2d unavailable');
+  const upsampled = context.getImageData(0, 0, width, height).data;
+  const result = new Float32Array(width * height);
+  for (let index = 0; index < result.length; index += 1) {
+    // Red channel of the grayscale upsample encodes the probability.
+    result[index] = upsampled[index * 4] / 255;
+  }
+  return result;
 }
 
 /**
@@ -193,47 +342,30 @@ export async function computeSubjectMask(source: HTMLImageElement | HTMLCanvasEl
 
     const [ort, session] = await Promise.all([loadOrt(), loadSession()]);
 
-    // Preprocess: squashed 320x320 RGB, /max scale, ImageNet mean/std.
+    // Pass 1: whole image at 320x320, upsampled back and refined.
     const inputCanvas = drawToCanvas(source, SEGMENTATION_SIZE, SEGMENTATION_SIZE);
-    const inputContext = inputCanvas.getContext('2d', { willReadFrequently: true });
-    if (!inputContext) return null;
-    const raw = inputContext.getImageData(0, 0, SEGMENTATION_SIZE, SEGMENTATION_SIZE).data;
-    let maxIntensity = 0;
-    for (let index = 0; index < raw.length; index += 4) {
-      if (raw[index] > maxIntensity) maxIntensity = raw[index];
-      if (raw[index + 1] > maxIntensity) maxIntensity = raw[index + 1];
-      if (raw[index + 2] > maxIntensity) maxIntensity = raw[index + 2];
-    }
-    const scale = maxIntensity > 0 ? 1 / maxIntensity : 1;
-    const pixels = SEGMENTATION_SIZE * SEGMENTATION_SIZE;
-    const tensorData = new Float32Array(pixels * 3);
-    for (let index = 0; index < pixels; index += 1) {
-      const offset = index * 4;
-      tensorData[index] = (raw[offset] * scale - IMAGENET_MEAN[0]) / IMAGENET_STD[0];
-      tensorData[pixels + index] = (raw[offset + 1] * scale - IMAGENET_MEAN[1]) / IMAGENET_STD[1];
-      tensorData[pixels * 2 + index] = (raw[offset + 2] * scale - IMAGENET_MEAN[2]) / IMAGENET_STD[2];
-    }
-    const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, SEGMENTATION_SIZE, SEGMENTATION_SIZE]);
-    const inputName = session.inputNames[0] ?? 'input.1';
-    const outputs = await session.run({ [inputName]: inputTensor });
-    const primaryName = session.outputNames[0] ?? Object.keys(outputs)[0];
-    const primary = outputs[primaryName];
-    if (!primary || !primary.data || primary.data.length !== pixels) return null;
+    const probability = normalizeMinmax(await runInference(session, ort, inputCanvas));
+    const mask = refineSubjectMask(upsampleProbability(probability, sourceWidth, sourceHeight), sourceWidth, sourceHeight);
 
-    const probability = normalizeMinmax(new Float32Array(primary.data as Float32Array));
-
-    // Upsample the 320x320 saliency map to source resolution bilinearly, then
-    // refine with hysteresis + hole filling. Grayscale round-trip through
-    // canvas keeps the upsample cheap; the red channel encodes probability.
-    const maskCanvas = drawToCanvas(probabilityToCanvas(probability), sourceWidth, sourceHeight);
-    const maskContext = maskCanvas.getContext('2d', { willReadFrequently: true });
-    if (!maskContext) return null;
-    const upsampled = maskContext.getImageData(0, 0, sourceWidth, sourceHeight).data;
-    const upsampledProbability = new Float32Array(sourceWidth * sourceHeight);
-    for (let index = 0; index < upsampledProbability.length; index += 1) {
-      upsampledProbability[index] = upsampled[index * 4] / 255;
+    // Pass 2: re-run on the subject bounding box (plus padding). Small dark
+    // accessories fill more of the 320x320 input and cross the saliency
+    // threshold; additions merge only where 8-connected to the subject.
+    const bbox = subjectBoundingBox(mask, sourceWidth, sourceHeight);
+    if (bbox) {
+      const pad = Math.round(Math.max(bbox.x1 - bbox.x0, bbox.y1 - bbox.y0) * ZOOM_PADDING);
+      const cropX = Math.max(0, bbox.x0 - pad);
+      const cropY = Math.max(0, bbox.y0 - pad);
+      const cropWidth = Math.min(sourceWidth, bbox.x1 + pad) - cropX;
+      const cropHeight = Math.min(sourceHeight, bbox.y1 + pad) - cropY;
+      if (cropWidth > 0 && cropHeight > 0 && (cropWidth < sourceWidth || cropHeight < sourceHeight)) {
+        const cropCanvas = drawToCanvas(source, SEGMENTATION_SIZE, SEGMENTATION_SIZE, cropX, cropY, cropWidth, cropHeight);
+        const cropProbability = normalizeMinmax(await runInference(session, ort, cropCanvas));
+        const cropMask = refineSubjectMask(upsampleProbability(cropProbability, cropWidth, cropHeight), cropWidth, cropHeight);
+        const added = mergeConnectedSubject(mask, sourceWidth, sourceHeight, cropMask, cropWidth, cropHeight, cropX, cropY);
+        if (import.meta.env.DEV) console.info(`[subjectSegmentation] zoom pass: crop ${cropWidth}x${cropHeight}, +${added}px`);
+      }
     }
-    const mask = refineSubjectMask(upsampledProbability, sourceWidth, sourceHeight);
+
     let subjectCount = 0;
     for (let index = 0; index < mask.length; index += 1) {
       subjectCount += mask[index];

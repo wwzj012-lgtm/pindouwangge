@@ -125,7 +125,6 @@ try {
     console.log('console:', consoleLines.slice(-8));
   }
   console.log('browser probe:', JSON.stringify(probe));
-  if (consoleLines.length) console.log('console:', consoleLines.slice(-8));
   if (!probe.ok || probe.coverage === null) {
     console.error('FAIL:', probe.error ?? 'mask null');
     process.exitCode = 1;

@@ -29,12 +29,6 @@ const settings = {
 
 await mkdir(OUT, { recursive: true });
 
-// vite SSR：加载真实的 src 管线代码（含 subjectSegmentation 的 refineSubjectMask）
-const vite = await createServer({
-  root, appType: 'custom', server: { middlewareMode: true }, logLevel: 'error',
-  optimizeDeps: { noDiscovery: true }, configFile: 'vite.config.ts',
-});
-
 // ---------- 1. u2netp 分割（Node 侧，与浏览器实现同口径） ----------
 const source = await sharp(SRC_IMAGE).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 const W = source.info.width, H = source.info.height;
@@ -63,19 +57,16 @@ const prob = new Float32Array(d0.length);
 for (let i = 0; i < d0.length; i++) prob[i] = range > 1e-6 ? (d0[i] - min) / range : 0;
 const segMs = Math.round(performance.now() - t0);
 
-// 掩码上采样回源分辨率（双线性）+ 与生产一致 refineSubjectMask 精修。
-// 注意 sharp resize 默认把单通道扩成 3 通道，必须 toColourspace('b-w') 保证
-// raw 输出仍是 1 通道，否则逐字节阈值读到的是 RGB 交错数据，掩码整体错乱。
+// 掩码上采样回源分辨率（双线性）+ 二值化
 const probGray = Buffer.alloc(pixels);
 for (let i = 0; i < pixels; i++) probGray[i] = Math.max(0, Math.min(255, Math.round(prob[i] * 255)));
 const upsampled = await sharp(probGray, { raw: { width: SEG, height: SEG, channels: 1 } })
+  // sharp resize 默认把单通道扩成 3 通道，必须锁回单通道，否则逐字节阈值读到
+  // 的是 RGB 交错数据，掩码会整体错乱。
   .resize(W, H, { kernel: 'cubic' }).toColourspace('b-w').raw().toBuffer();
-const { refineSubjectMask } = await vite.ssrLoadModule('/src/utils/subjectSegmentation.ts');
-const upProb = new Float32Array(W * H);
-for (let i = 0; i < upProb.length; i++) upProb[i] = upsampled[i] / 255;
-const subjectMask = refineSubjectMask(upProb, W, H);
+const subjectMask = new Uint8Array(W * H);
 let subjectCount = 0;
-for (let i = 0; i < subjectMask.length; i++) subjectCount += subjectMask[i];
+for (let i = 0; i < subjectMask.length; i++) { if (upsampled[i] >= THRESHOLD * 255) { subjectMask[i] = 1; subjectCount++; } }
 const coverage = subjectCount / subjectMask.length;
 console.log(`u2netp 掩码: coverage = ${(coverage * 100).toFixed(1)}% | 推理+上采样 ${segMs}ms`);
 if (coverage < 0.015 || coverage > 0.985) { console.error('掩码退化，模型输出不可用'); process.exit(1); }
@@ -92,6 +83,10 @@ for (let i = 0; i < W * H; i++) {
 await sharp(overlay, { raw: { width: W, height: H, channels: 3 } }).resize(600, 600).png().toFile(`${OUT}/ai_mask_overlay.png`);
 
 // ---------- 2. 同参数跑两条管线 ----------
+const vite = await createServer({
+  root, appType: 'custom', server: { middlewareMode: true }, logLevel: 'error',
+  optimizeDeps: { noDiscovery: true }, configFile: 'vite.config.ts',
+});
 const { convertImageDataToGrid } = await vite.ssrLoadModule('/src/utils/imagePipeline.ts');
 const { MARD_PALETTE } = await vite.ssrLoadModule('/src/data/palettes.ts');
 const { deltaE2000, rgbToLab } = await vite.ssrLoadModule('/src/utils/colorUtils.ts');

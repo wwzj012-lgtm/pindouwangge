@@ -9,7 +9,8 @@ const OUT = 'C:/Users/Plout/Desktop/pindouwangge/pattern_compare/detail';
 const VERSIONS = [
   { prefix: 'avg', label: 'A. 旧版·面积平均' },
   { prefix: 'dom2', label: 'B. 主色采样 v2' },
-  { prefix: 'dom6', label: 'C. 邻居裁决·当前版' },
+  { prefix: 'dom6', label: 'C. 邻居裁决·嘴轮廓消失' },
+  { prefix: 'dom7', label: 'D. 细线支持·当前版' },
 ];
 
 const labelSvg = (text, w) => Buffer.from(
@@ -44,7 +45,7 @@ const srcPng = await sharp(`${OUT}/avg_${FACE.name}_src.png`)
   .png().toBuffer();
 crops.push({ buf: srcPng, w: srcMeta.width, h: srcMeta.height });
 
-for (const v of ['avg', 'dom2', 'dom6']) {
+for (const v of ['avg', 'dom2', 'dom7']) {
   const p = `${OUT}/${v}_${FACE.name}.png`;
   try {
     const meta = await sharp(p).metadata();
@@ -62,7 +63,7 @@ const totalW = crops.reduce((s, c) => s + c.w, 0) + GAP * (crops.length - 1) + P
 const totalH = rowH + PAD * 2 + 50;
 // 标题
 const titleSvg = Buffer.from(
-  `<svg width="${totalW}" height="50"><rect width="100%" height="100%" fill="#333"/><text x="${PAD}" y="35" font-family="Microsoft YaHei, sans-serif" font-size="28" font-weight="bold" fill="#ffd54a">street-boy 脸部特写对比（左→右：原图 / 旧版 / 主色v2 / 邻居裁决）</text></svg>`
+  `<svg width="${totalW}" height="50"><rect width="100%" height="100%" fill="#333"/><text x="${PAD}" y="35" font-family="Microsoft YaHei, sans-serif" font-size="28" font-weight="bold" fill="#ffd54a">street-boy 脸部特写对比（左→右：原图 / 旧版 / 主色v2 / 细线支持(当前)）</text></svg>`
 );
 const comp = sharp({ create: { width: totalW, height: totalH, channels: 3, background: { r: 255, g: 255, b: 255 } } })
   .composite([

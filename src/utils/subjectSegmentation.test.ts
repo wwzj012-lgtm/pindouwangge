@@ -60,4 +60,20 @@ describe('refineSubjectMask', () => {
     const mask = refineSubjectMask(new Float32Array(values), 5, 5);
     expect(mask.every(value => value === 0)).toBe(true);
   });
+
+  it('recovers very weak (0.06) subject parts the model is unsure about', () => {
+    // Regression: the street-boy boombox body sits at 0.13-0.15 and was carved
+    // out when the weak threshold was 0.1. Dark subject parts must survive.
+    const values = [
+      0.9, 0.06, 0.0,
+      0.06, 0.06, 0.0,
+      0.0, 0.0, 0.0,
+    ];
+    const mask = refineSubjectMask(new Float32Array(values), 3, 3);
+    expect(mask[0]).toBe(1);
+    expect(mask[1]).toBe(1);
+    expect(mask[3]).toBe(1);
+    expect(mask[4]).toBe(1);
+    expect(mask[8]).toBe(0);
+  });
 });

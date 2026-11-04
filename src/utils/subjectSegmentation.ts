@@ -99,11 +99,7 @@ export function thresholdSubjectMask(probability: Float32Array, threshold = SUBJ
 // which keeps genuinely dark subject parts without opening a path into the
 // background.
 const STRONG_PROBABILITY = 0.5;
-// 0.1 keeps only ~33% of the street-boy boombox (dark parts sit at 0.13-0.15
-// and the seam below the sleeve drops under 0.1, so growth cannot reach it);
-// 0.05 recovers ~67% of the boombox bbox with zero background leakage, because
-// true background sits at ~0 probability. 0.03 adds almost nothing beyond it.
-const WEAK_PROBABILITY = 0.05;
+const WEAK_PROBABILITY = 0.1;
 
 /**
  * Refine a normalised [0,1] probability map (any resolution) into a binary

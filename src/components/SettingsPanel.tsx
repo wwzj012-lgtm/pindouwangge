@@ -170,13 +170,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span>V2 {conversionDiagnostics.pipeline.toUpperCase()}</span>
           <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
           <span>ΔE {conversionDiagnostics.meanDeltaE.toFixed(1)}</span>
-          {conversionDiagnostics.background?.source === 'ai' && (
-            <span title={isEn
-              ? 'Background removed by the on-device saliency model (u2netp), not by colour heuristics.'
-              : '背景由端侧显著性模型（u2netp）识别移除，未使用颜色启发式。'}>
-              ✂AI
-            </span>
-          )}
           {conversionDiagnostics.nativeGrid && (
             <span title={isEn
               ? `Pixel grid detected: ${conversionDiagnostics.nativeGrid.cols}x${conversionDiagnostics.nativeGrid.rows} logical cells (block ${conversionDiagnostics.nativeGrid.cell}px). Source resampled to the author's native lattice before sampling.`

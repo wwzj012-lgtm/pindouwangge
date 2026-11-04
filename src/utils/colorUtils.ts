@@ -157,7 +157,6 @@ export function imageToGridWithDiagnostics(
   img: HTMLImageElement | HTMLCanvasElement,
   settings: ConvertSettings,
   palette: BeadColor[],
-  precomputedSubjectMask?: Uint8Array,
 ): ConversionResult {
   const source = renderConversionSource(img);
   if (!source) {
@@ -180,7 +179,7 @@ export function imageToGridWithDiagnostics(
       },
     };
   }
-  return convertImageDataToGrid(source.data, source.width, source.height, settings, palette, precomputedSubjectMask);
+  return convertImageDataToGrid(source.data, source.width, source.height, settings, palette);
 }
 
 export function imageToGrid(

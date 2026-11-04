@@ -170,6 +170,13 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <span>V2 {conversionDiagnostics.pipeline.toUpperCase()}</span>
           <span>LΔ {conversionDiagnostics.lightnessBias >= 0 ? '+' : ''}{conversionDiagnostics.lightnessBias.toFixed(1)}</span>
           <span>ΔE {conversionDiagnostics.meanDeltaE.toFixed(1)}</span>
+          {conversionDiagnostics.nativeGrid && (
+            <span title={isEn
+              ? `Pixel grid detected: ${conversionDiagnostics.nativeGrid.cols}x${conversionDiagnostics.nativeGrid.rows} logical cells (block ${conversionDiagnostics.nativeGrid.cell}px). Source resampled to the author's native lattice before sampling.`
+              : `检出像素网格：${conversionDiagnostics.nativeGrid.cols}×${conversionDiagnostics.nativeGrid.rows} 逻辑格（块 ${conversionDiagnostics.nativeGrid.cell}px），取样前已吸附到原生格`}>
+              ⚡GRID {conversionDiagnostics.nativeGrid.cell}·{conversionDiagnostics.nativeGrid.cols}²
+            </span>
+          )}
         </div>
       )}
 

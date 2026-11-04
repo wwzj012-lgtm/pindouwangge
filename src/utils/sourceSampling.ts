@@ -431,6 +431,13 @@ export interface HardDominanceSupportOptions {
   minMajorityShare?: number;
   /** Runner-up blocks below this share are not credible alternatives. */
   minSecondaryShare?: number;
+  /**
+   * Neighbour secondaries above this share join the support pool: several
+   * adjacent cells all holding the same minority block are the signature of
+   * a coherent thin structure (a mouth outline crossing every cell at ~30%),
+   * and that structure backs the primary of the cell where it peaks.
+   */
+  minPoolSecondaryShare?: number;
 }
 
 export function resolveHardDominanceSupport(cells: HardDominanceCell[],
@@ -438,7 +445,7 @@ export function resolveHardDominanceSupport(cells: HardDominanceCell[],
   columns: number, rows: number, options: HardDominanceSupportOptions = {}): Map<number, Rgb | null> {
   const {
     maxSupportDistance = 24, maxCampDistance = 80,
-    minMajorityShare = 0.5, minSecondaryShare = 0.35,
+    minMajorityShare = 0.5, minSecondaryShare = 0.35, minPoolSecondaryShare = 0.25,
   } = options;
   const byIndex = new Map(cells.map((cell) => [cell.index, cell.verdict]));
   // Support is about which side of a boundary the neighbour sits on, not an
@@ -466,7 +473,7 @@ export function resolveHardDominanceSupport(cells: HardDominanceCell[],
       if (verdict) {
         hasCandidateNeighbour = true;
         pool.push(verdict.rgb);
-        if (verdict.secondaryRgb && verdict.secondaryShare >= minSecondaryShare) pool.push(verdict.secondaryRgb);
+        if (verdict.secondaryRgb && verdict.secondaryShare >= minPoolSecondaryShare) pool.push(verdict.secondaryRgb);
       } else {
         const colour = colours[nIndex];
         if (colour?.alpha) pool.push([colour.r, colour.g, colour.b]);
@@ -474,6 +481,7 @@ export function resolveHardDominanceSupport(cells: HardDominanceCell[],
     }
     pools.set(cell.index, { pool, hasCandidateNeighbour });
   }
+
 
   const decisions = new Map<number, Rgb | null>();
   for (const cell of cells) {

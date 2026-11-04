@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-const SRC_IMAGE = 'C:/Users/Plout/.workbuddy/clipboard-images/clipboard-2026-11-04T02-40-08-594Z-fbc96fc5.jpg';
+const SRC_IMAGE = 'benchmark/images/street-boy.jpg';
 const OUT = 'C:/Users/Plout/Desktop/pindouwangge/pattern_compare';
 const LOCAL_JSON = 'C:/Users/Plout/Desktop/pindouwangge/pattern_100x100/pattern_data.json';
 

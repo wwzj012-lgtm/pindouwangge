@@ -181,8 +181,7 @@ export function compactStructureGrayCandidate(
 }
 
 /** Histogram bins are storage only: nearby colours share their actual coverage. */
-export function clusterCellColors(bins: Iterable<CellColorBin>): CellColorBin[] {
-  const groups: CellColorBin[] = [];
+export function clusterCellColors(bins: Iterable<CellColorBin>): CellColorBin[] {  const groups: CellColorBin[] = [];
   for (const bin of [...bins].sort((a, b) => b.weight - a.weight)) {
     const rgb = bin.rgb.map(v => v / bin.weight) as Rgb;
     const group = groups.find(g => distance(rgb, g.rgb.map(v => v / g.weight) as Rgb) <= 16);
@@ -386,4 +385,42 @@ export function projectSourceStrokes(data: Uint8ClampedArray, width: number, hei
     if (!represented) output[target] = rgb;
   }
   return output;
+}
+
+export interface HardDominanceOptions {
+  minPrimary?: number;
+  minSeparation?: number;
+}
+
+export interface HardDominanceVerdict { rgb: Rgb }
+
+/**
+ * Hard-edged artwork (vector exports, flat sprites) splits an output cell into
+ * a few flat colour blocks separated by sharp boundaries. Area averaging turns
+ * such a cell into a muddy intermediate that exists nowhere in the source;
+ * the correct representative is the dominant block's own colour — even when
+ * two other blocks split the rest (an eye cell is purple + highlight + outline,
+ * and blending them erases the eye). A cell qualifies when the largest merged
+ * colour group covers a clear plurality and sits far from the runner-up: the
+ * gap rejects gradient cells (adjacent bands stay close) and keeps near-tie
+ * splits on the safer average. Smooth photo cells never produce such a
+ * dominant/far-second pair, so the caller can gate the whole feature on how
+ * often cells do.
+ */
+export function detectCellHardDominance(bins: Iterable<CellColorBin>, totalWeight: number,
+  options: HardDominanceOptions = {}): HardDominanceVerdict | null {
+  const { minPrimary = 0.35, minSeparation = 40 } = options;
+  if (!(totalWeight > 0)) return null;
+  const groups = clusterCellColors(bins);
+  if (groups.length < 2) return null;
+  const [primary, secondary] = groups;
+  if (primary.weight / totalWeight < minPrimary) return null;
+  const primaryRgb = primary.rgb.map(v => clampByte(v / primary.weight)) as Rgb;
+  const secondaryRgb = secondary.rgb.map(v => clampByte(v / secondary.weight)) as Rgb;
+  if (distance(primaryRgb, secondaryRgb) < minSeparation) return null;
+  return { rgb: primaryRgb };
+}
+
+function clampByte(value: number): number {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }

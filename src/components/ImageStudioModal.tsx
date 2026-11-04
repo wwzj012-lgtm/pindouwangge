@@ -1035,7 +1035,7 @@ export const ImageStudioModal: React.FC<ImageStudioModalProps> = ({
                 <div className="flex-1">
                   <div className="text-[11px] font-bold text-slate-800">
                     {localSettings.backgroundRemovalEnabled
-                      ? (pickedChromaColor ? (isEn ? `Removing: ${pickedChromaColor}` : `扣除颜色: ${pickedChromaColor}`) : (isEn ? 'Smart background removal is on' : '智能去背景已开启'))
+                      ? (pickedChromaColor ? (isEn ? `Removing: ${pickedChromaColor}` : `扣除颜色: ${pickedChromaColor}`) : (isEn ? 'AI background removal is on' : 'AI 智能去背景已开启'))
                       : (isEn ? 'Background removal is off' : '背景移除已关闭')}
                   </div>
                   <div className="text-[10px] text-slate-500">

@@ -16,6 +16,7 @@ import { useBrandCatalog } from './hooks/useBrandCatalog';
 import { BrandCatalogUnavailableError, conversionPalette, getBrandCatalogSnapshot, paletteForNewConversion, refreshBrandCatalog } from './data/brandCatalog';
 import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
+import { computeSubjectMask } from './utils/subjectSegmentation';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
 import { smartCropSubject } from './utils/cropUtils';
 import { resetBackgroundRemovalForNewImage } from './utils/imageStudioControls';
@@ -1291,6 +1292,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       setIsConverting(true);
       setTimeout(() => {
         if (!isCurrentImageRequest(requestToken)) return;
+        void (async () => {
         let targetW = currentSettings.width;
         let targetH = currentSettings.height;
 
@@ -1304,7 +1306,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
         try {
           const effectiveSettings = { ...currentSettings, width: targetW, height: targetH };
-          const conversion = imageToGridWithDiagnostics(img, effectiveSettings, livePalette);
+          // Smart background removal upgrades to saliency-model segmentation when
+          // available: a trained model separates subject from background by
+          // semantics, which colour heuristics cannot do when both share a colour
+          // family. Any failure resolves to null and the edge-connected heuristic
+          // inside the pipeline takes over unchanged.
+          let subjectMask: Uint8Array | undefined;
+          if (effectiveSettings.backgroundRemovalEnabled === true && !effectiveSettings.chromaKeyColor) {
+            const segmentation = await computeSubjectMask(img);
+            if (segmentation && isCurrentImageRequest(requestToken)) subjectMask = segmentation.mask;
+          }
+          if (!isCurrentImageRequest(requestToken)) return;
+          const conversion = imageToGridWithDiagnostics(img, effectiveSettings, livePalette, subjectMask);
           const newGrid = conversion.grid;
 
           if (isCurrentImageRequest(requestToken)) {
@@ -1323,6 +1336,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         } finally {
           finishImageRequest(requestToken);
         }
+        })();
       }, 50);
     },
     [applyGridChange, beginImageRequest, finishImageRequest, isCurrentImageRequest, isEn, showCatalogToast]

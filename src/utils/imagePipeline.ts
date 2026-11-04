@@ -19,7 +19,7 @@ export type Lab = [number, number, number];
 type Rgb = [number, number, number];
 
 export type ConversionPipeline = 'cartoon' | 'logo' | 'photo';
-export type BackgroundInferenceSource = 'auto' | 'manual';
+export type BackgroundInferenceSource = 'auto' | 'manual' | 'ai';
 
 export interface ImageClassification {
   pipeline: ConversionPipeline;
@@ -444,6 +444,43 @@ function inferEdgeBackgroundCandidate(data: Uint8ClampedArray, width: number, he
 
 export function inferEdgeBackground(data: Uint8ClampedArray, width: number, height: number, alphaCutoff = 16): BackgroundInference | null {
   return inferEdgeBackgroundCandidate(data, width, height, alphaCutoff)?.inference ?? null;
+}
+
+// Saliency-model subject mask (1 = subject) straight from subjectSegmentation.
+// The colour heuristic is bypassed entirely: every pixel the model does not
+// call subject is background, which is what makes same-colour families
+// (navy-on-navy) separable at all. The inferred background colour is only
+// recovered for diagnostics and the downstream island-cleanup guard.
+function createSubjectBackgroundMask(
+  subjectMask: Uint8Array,
+  data: Uint8ClampedArray,
+  width: number,
+  height: number,
+): BackgroundMaskResult {
+  const mask = new Uint8Array(width * height);
+  let removedCount = 0;
+  let sumR = 0;
+  let sumG = 0;
+  let sumB = 0;
+  for (let index = 0; index < mask.length; index += 1) {
+    if (subjectMask[index]) continue;
+    mask[index] = 1;
+    removedCount += 1;
+    const offset = index * 4;
+    if (data[offset + 3] < 1) continue;
+    sumR += data[offset];
+    sumG += data[offset + 1];
+    sumB += data[offset + 2];
+  }
+  if (removedCount === 0) return { mask, inference: null };
+  return {
+    mask,
+    inference: {
+      color: rgbToHex([Math.round(sumR / removedCount), Math.round(sumG / removedCount), Math.round(sumB / removedCount)]),
+      confidence: 1,
+      source: 'ai',
+    },
+  };
 }
 
 function resolveBackgroundCandidate(
@@ -1191,7 +1228,7 @@ function emptyResult(): ConversionResult {
   };
 }
 
-export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: number, sourceHeight: number, settings: ConvertSettings, palette: BeadColor[]): ConversionResult {
+export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: number, sourceHeight: number, settings: ConvertSettings, palette: BeadColor[], precomputedSubjectMask?: Uint8Array): ConversionResult {
   if (!hasExpectedImageData(rawData, sourceWidth, sourceHeight)
     || !isPositiveInteger(settings.width)
     || !isPositiveInteger(settings.height)
@@ -1252,14 +1289,16 @@ export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: 
   const sampleScaleY = sampleHeight / sourceHeight;
 
   const backgroundResult = settings.backgroundRemovalEnabled === true
-    ? createEdgeConnectedBackgroundMask(
-      data,
-      sourceWidth,
-      sourceHeight,
-      settings.chromaKeyColor,
-      normalizedSetting(settings.chromaKeyTolerance),
-      alphaCutoff,
-    )
+    ? (precomputedSubjectMask && precomputedSubjectMask.length === sourceWidth * sourceHeight
+      ? createSubjectBackgroundMask(precomputedSubjectMask, data, sourceWidth, sourceHeight)
+      : createEdgeConnectedBackgroundMask(
+        data,
+        sourceWidth,
+        sourceHeight,
+        settings.chromaKeyColor,
+        normalizedSetting(settings.chromaKeyTolerance),
+        alphaCutoff,
+      ))
     : { mask: new Uint8Array(sourceWidth * sourceHeight), inference: null };
   const sourceWhite = pipeline === 'photo' ? null
     : enclosedSourceWhite(data, sourceWidth, sourceHeight, alphaCutoff, backgroundResult.mask);

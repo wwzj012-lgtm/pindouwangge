@@ -30,6 +30,8 @@ const { MARD_PALETTE } = await vite.ssrLoadModule('/src/data/palettes.ts');
 
 const source = await sharp(SRC_IMAGE).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
 const W = source.info.width, H = source.info.height;
+// 与应用层一致：keepAspectRatio 时按图宽高比推导网格高度（App.tsx:1297）
+if (settings.keepAspectRatio) settings.height = Math.max(10, Math.round(settings.width * H / W));
 const clamped = new Uint8ClampedArray(source.data.buffer, source.data.byteOffset, source.data.length);
 const result = convertImageDataToGrid(clamped, W, H, settings, MARD_PALETTE);
 const cols = result.grid[0].length, rows = result.grid.length;

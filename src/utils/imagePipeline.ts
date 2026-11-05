@@ -369,7 +369,11 @@ export function classifyImageColors(data: Uint8ClampedArray, width: number, heig
     && effectiveColorCount > 5
     // Richly shaded scenes also contain flat walls/clothing and dark edges.
     // Keep their broad tonal range instead of collapsing them into flat inks.
-    && effectiveColorCount <= 32
+    // The ceiling is generous because flat cartoons decorate their fills with
+    // gradient glows, bubbles and sparkles that each contribute a few colour
+    // clusters (a SpongeBob-style scene measures ~41) while the flat/edge
+    // ratios below still separate them from photographic texture.
+    && effectiveColorCount <= 48
     && flatRatio >= 0.78
     && strongEdgeRatio >= 0.025
     && darkOutlineRatio >= 0.006;

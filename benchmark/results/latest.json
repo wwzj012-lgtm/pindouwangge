@@ -1,6 +1,6 @@
 {
-  "rev": "4dd6d9a",
-  "ranAt": "2026-11-04T11:01:15.329Z",
+  "rev": "cbd1d1e",
+  "ranAt": "2026-11-05T03:40:35.927Z",
   "settings": {
     "width": 100,
     "height": 100,
@@ -23,20 +23,20 @@
     "quantizationStrength": 28,
     "pipelineOverride": "auto"
   },
-  "samples": 2,
-  "cellMean": 7.367,
-  "cellP95": 17.829,
-  "viewMean": 3.24,
-  "viewP95": 10.723,
-  "pixelMean": 4.364,
-  "pixelP95": 15.73,
+  "samples": 3,
+  "cellMean": 9.291,
+  "cellP95": 24.689,
+  "viewMean": 4.401,
+  "viewP95": 15.573,
+  "pixelMean": 6.104,
+  "pixelP95": 28.658,
   "results": [
     {
       "image": "pixel-sprite.jpg",
       "pipeline": "cartoon",
       "grid": "100x100",
       "filledCells": 4701,
-      "convertMs": 6632,
+      "convertMs": 8041,
       "cellDeltaE": {
         "mean": 4.672,
         "p95": 11.815
@@ -51,22 +51,41 @@
       }
     },
     {
+      "image": "spongebob-patrick.jpg",
+      "pipeline": "cartoon",
+      "grid": "100x100",
+      "filledCells": 5984,
+      "convertMs": 4395,
+      "cellDeltaE": {
+        "mean": 13.071,
+        "p95": 38.19
+      },
+      "viewDeltaE": {
+        "mean": 6.726,
+        "p95": 25.238
+      },
+      "pixelDeltaE": {
+        "mean": 9.581,
+        "p95": 54.359
+      }
+    },
+    {
       "image": "street-boy.jpg",
       "pipeline": "photo",
       "grid": "100x100",
       "filledCells": 3961,
-      "convertMs": 8118,
+      "convertMs": 9584,
       "cellDeltaE": {
-        "mean": 10.061,
-        "p95": 23.842
+        "mean": 10.131,
+        "p95": 24.062
       },
       "viewDeltaE": {
-        "mean": 4.149,
-        "p95": 13.06
+        "mean": 4.146,
+        "p95": 13.096
       },
       "pixelDeltaE": {
-        "mean": 6.018,
-        "p95": 24.524
+        "mean": 6.02,
+        "p95": 24.679
       }
     }
   ]

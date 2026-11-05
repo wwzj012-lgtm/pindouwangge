@@ -134,6 +134,21 @@ describe('CIEDE2000', () => {
   });
 });
 
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  if (s === 0) { const v = Math.round(l * 255); return [v, v, v]; }
+  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+  const p = 2 * l - q;
+  const channel = (t: number) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  return [Math.round(channel(h + 1 / 3) * 255), Math.round(channel(h) * 255), Math.round(channel(h - 1 / 3) * 255)];
+}
+
 describe('pipeline classification and palette matching', () => {
   it('routes five effective colours to logo and six to photo', () => {
     const five = makePixels(5, 1);
@@ -159,6 +174,41 @@ describe('pipeline classification and palette matching', () => {
       }
     }
     expect(classifyImageColors(data, 64, 64).pipeline).toBe('cartoon');
+  });
+
+  it('still classifies a flat cartoon with rich gradient decorations as cartoon', () => {
+    // Large flat fills + a partial dark contour like real character artwork,
+    // plus a hue-stepped ornament band whose bands each survive the 0.3%
+    // significance filter — pushing effectiveColorCount past the old 32
+    // ceiling (a real SpongeBob-style scene measures ~41).
+    const data = makePixels(128, 128, [245, 164, 72]);
+    const fills: Array<[number, number, number]> = [[242, 242, 242], [210, 55, 70], [70, 140, 220], [240, 205, 60], [70, 175, 110], [180, 90, 190]];
+    for (let y = 8; y < 120; y += 1) {
+      for (let x = 8; x < 120; x += 1) {
+        if (x >= 56 && y >= 10 && y < 62) continue; // ornament band area
+        const outline = x === 8 || y === 119; // partial contour: left + bottom
+        const col = Math.min(2, Math.floor((x - 8) / 37));
+        const row = y < 64 ? 0 : 1;
+        const fill = fills[row * 3 + col];
+        setPixel(data, 128, x, y, outline ? [12, 12, 16, 255] : [...fill, 255]);
+      }
+    }
+    const bandColours: Array<[number, number, number]> = [];
+    for (let band = 0; band < 26; band += 1) {
+      const hue = band * 13.85;
+      const lightness = band % 2 === 0 ? 0.35 : 0.65;
+      const [r, g, b] = hslToRgb(hue / 360, 0.75, lightness);
+      bandColours.push([r, g, b]);
+    }
+    for (let y = 10; y < 62; y += 1) {
+      const band = Math.floor((y - 10) / 2);
+      for (let x = 56; x < 88; x += 1) {
+        setPixel(data, 128, x, y, [...bandColours[band], 255]);
+      }
+    }
+    const classification = classifyImageColors(data, 128, 128);
+    expect(classification.effectiveColorCount).toBeGreaterThan(32);
+    expect(classification.pipeline).toBe('cartoon');
   });
 
   it('flattens a small cartoon colour island without touching the explicit photo path', () => {

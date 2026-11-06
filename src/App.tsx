@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Bell, Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useAuth } from './context/AuthContext';
 import { useLanguage } from './context/LanguageContext';
 import {
@@ -14,10 +14,8 @@ import {
 import { BRAND_PALETTES as INITIAL_PALETTES } from './data/palettes';
 import { useBrandCatalog } from './hooks/useBrandCatalog';
 import { BrandCatalogUnavailableError, conversionPalette, getBrandCatalogSnapshot, paletteForNewConversion, refreshBrandCatalog } from './data/brandCatalog';
-import { SAMPLE_IMAGES } from './data/samples';
 import { imageToGridWithDiagnostics } from './utils/colorUtils';
 import type { ConversionDiagnostics } from './utils/imagePipeline';
-import { smartCropSubject } from './utils/cropUtils';
 import { resetBackgroundRemovalForNewImage } from './utils/imageStudioControls';
 import { createImageRequestGate } from './utils/imageRequestGate';
 import { resolveCanvasReset } from './utils/canvasReset';
@@ -124,11 +122,6 @@ interface CompletionQuoteState {
   input: PatternCompletionInput;
   quote: PatternCompletionQuote;
   idempotencyKey: string;
-}
-
-function formatCreditPoints(value: number): string {
-  if (!Number.isFinite(value)) return '—';
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 function getCompletionChargePoints(quote: PatternCompletionQuote): number | null {
@@ -680,7 +673,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const completionSubmissionRef = useRef(false);
   const completionEditRevisionRef = useRef(0);
   const legacyMigrationAttemptedUsersRef = useRef<Set<string>>(new Set());
-  const [alignedPixels, setAlignedPixels] = useState<Uint8ClampedArray | undefined>(undefined);
+  const [, setAlignedPixels] = useState<Uint8ClampedArray | undefined>(undefined);
   const [replaceSourceColor, setReplaceSourceColor] = useState<BeadColor | null>(null);
   const [erasedColorCoords, setErasedColorCoords] = useState<Map<string, [number, number][]>>(() => new Map<string, [number, number][]>());
 

@@ -118,6 +118,7 @@ export interface SavePatternResult {
 export type PatternDeletionAction = 'local' | 'cloud-and-local';
 
 const CLOUD_CHUNK_CONCURRENCY = 5;
+const CLOUD_PATTERN_PAGE_SIZE = 20;
 
 interface CloudRenameResponse {
   id: string;
@@ -471,6 +472,42 @@ export async function mapWithConcurrency<T, R>(
   return output;
 }
 
+/** Fetches a complete cloud pattern list while requiring forward progress on every page. */
+export async function fetchAllCloudPatternPages<T extends { id: string }>(
+  fetchPage: (offset: number, limit: number) => Promise<readonly T[] | null>,
+): Promise<T[] | null> {
+  const records: T[] = [];
+  const seenIds = new Set<string>();
+  let offset = 0;
+
+  while (true) {
+    let page: readonly T[] | null;
+    try {
+      page = await fetchPage(offset, CLOUD_PATTERN_PAGE_SIZE);
+    } catch {
+      return null;
+    }
+    if (!Array.isArray(page) || page.length > CLOUD_PATTERN_PAGE_SIZE) return null;
+    if (page.length === 0) break;
+
+    let added = 0;
+    for (const record of page) {
+      if (!record || typeof record.id !== 'string' || record.id.length === 0) return null;
+      if (seenIds.has(record.id)) continue;
+      seenIds.add(record.id);
+      records.push(record);
+      added += 1;
+    }
+    // A repeated full page means the server did not advance its offset; stop instead of looping forever.
+    if (added === 0) return null;
+    if (page.length < CLOUD_PATTERN_PAGE_SIZE) break;
+    offset += CLOUD_PATTERN_PAGE_SIZE;
+    if (!Number.isSafeInteger(offset)) return null;
+  }
+
+  return records;
+}
+
 export async function getPatternProject(id: string, userId: string | null = null): Promise<StoredPatternProject> {
   const local = await getLocal(id);
   if (local?.userId === null || local?.userId === userId) return cloneProject(local.project);
@@ -519,9 +556,15 @@ export async function getPatternHistory(userId: string | null): Promise<PatternR
   const merged = new Map<string, PatternRecordSummary>(localRecords.map((record) => [record.id, toSummary(record)]));
 
   if (userId) {
-    const cloud = await apiGet<CloudPatternSummary[]>('/api/user-patterns');
-    if (cloud.ok && Array.isArray(cloud.data)) {
-      for (const remote of cloud.data) {
+    const cloud = await fetchAllCloudPatternPages<CloudPatternSummary>(async (offset, limit) => {
+      const page = await apiGet<CloudPatternSummary[]>('/api/user-patterns', {
+        limit: String(limit),
+        offset: String(offset),
+      });
+      return page.ok && Array.isArray(page.data) ? page.data : null;
+    });
+    if (cloud) {
+      for (const remote of cloud) {
         const local = merged.get(remote.id);
         const localRecord = localRecordsById.get(remote.id);
         if (!Number.isInteger(remote.revision) || remote.revision < 1) continue;
@@ -706,5 +749,8 @@ export function mergePatternRecordSummaries(records: readonly PatternRecordSumma
       hasCloudCopy: existing.hasCloudCopy || record.hasCloudCopy,
     });
   }
-  return [...merged.values()].sort((left, right) => right.updatedAt - left.updatedAt);
+  return [...merged.values()].sort((left, right) => (
+    right.updatedAt - left.updatedAt
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  ));
 }

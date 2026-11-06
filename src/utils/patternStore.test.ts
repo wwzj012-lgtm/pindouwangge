@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  fetchAllCloudPatternPages,
   mapWithConcurrency,
   mergeRenamedPatternSummary,
   mergePatternRecordSummaries,
@@ -48,6 +49,14 @@ describe('pattern history list merging', () => {
       summary({ id: 'newer', updatedAt: 2 }),
     ]);
     expect(merged.map((record) => record.id)).toEqual(['newer', 'older']);
+  });
+
+  it('uses the id as a deterministic tie-breaker for equal update times', () => {
+    const merged = mergePatternRecordSummaries([
+      summary({ id: 'zulu', updatedAt: 2 }),
+      summary({ id: 'alpha', updatedAt: 2 }),
+    ]);
+    expect(merged.map((record) => record.id)).toEqual(['alpha', 'zulu']);
   });
 
   it('keeps both local and cloud availability when cloud metadata is newer', () => {
@@ -145,5 +154,47 @@ describe('pattern history list merging', () => {
     });
     expect(peak).toBeLessThanOrEqual(3);
     expect(result).toEqual([0, 2, 4, 6, 8, 10, 12]);
+  });
+
+  it('fetches owner gallery pages past the first page and preserves every record', async () => {
+    const offsets: number[] = [];
+    const records = await fetchAllCloudPatternPages(async (offset, limit) => {
+      offsets.push(offset);
+      expect(limit).toBe(20);
+      if (offset === 0) return Array.from({ length: 20 }, (_, index) => ({ id: `work-${index}` }));
+      if (offset === 20) return Array.from({ length: 3 }, (_, index) => ({ id: `work-${20 + index}` }));
+      return [];
+    });
+
+    expect(offsets).toEqual([0, 20]);
+    expect(records?.map((record) => record.id)).toEqual(Array.from({ length: 23 }, (_, index) => `work-${index}`));
+  });
+
+  it('stops on an empty page and returns null for a failed or non-progressing page', async () => {
+    let calls = 0;
+    const emptyAfterFullPage = await fetchAllCloudPatternPages(async (offset) => {
+      calls += 1;
+      return offset === 0 ? Array.from({ length: 20 }, (_, index) => ({ id: `work-${index}` })) : [];
+    });
+    expect(emptyAfterFullPage).toHaveLength(20);
+    expect(calls).toBe(2);
+
+    calls = 0;
+    const failed = await fetchAllCloudPatternPages(async (offset) => {
+      calls += 1;
+      if (offset === 0) return Array.from({ length: 20 }, (_, index) => ({ id: `work-${index}` }));
+      throw new Error('network');
+    });
+    expect(failed).toBeNull();
+    expect(calls).toBe(2);
+
+    calls = 0;
+    const repeatedPage = Array.from({ length: 20 }, (_, index) => ({ id: `work-${index}` }));
+    const nonProgressing = await fetchAllCloudPatternPages(async () => {
+      calls += 1;
+      return repeatedPage;
+    });
+    expect(nonProgressing).toBeNull();
+    expect(calls).toBe(2);
   });
 });

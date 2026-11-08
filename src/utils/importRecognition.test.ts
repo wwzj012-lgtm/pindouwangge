@@ -532,4 +532,43 @@ describe('import recognition', () => {
     expect(progress).toEqual([0, 100]);
   });
 
+  it('pulls shadow-split bead cells back to their colour reference', () => {
+    // 10 列 × 1 行、8px 格：cell 0-4 是亮红豆（参考色来源），cell 5 是
+    // "半亮半暗"的阴影劈裂格（暗半占多数 → 原判深红，必然低置信），
+    // cell 6-9 是纯深红（有资格给深红出参考色）。
+    // 合法校正是"拉亮"：被阴影压进深档的豆由亮参考还原（gain ≥ 1）。
+    // 注意颜色各通道都要避开 ≤5 / ≥250 的"贴边"区间——贴边像素不参与增益。
+    const shadowPalette: BeadColor[] = [
+      { id: 'red', code: 'R', name: 'Red', hex: '#f43c3c', rgb: [244, 60, 60], brand: 'CUSTOM' },
+      { id: 'darkred', code: 'DR', name: 'DarkRed', hex: '#aa2828', rgb: [170, 40, 40], brand: 'CUSTOM' },
+    ];
+    const cellShade = (column: number, x: number): Rgba => {
+      if (column <= 4) return [244, 60, 60, 255];
+      if (column === 5) return x % 8 < 3 ? [244, 60, 60, 255] : [170, 40, 40, 255];
+      return [170, 40, 40, 255];
+    };
+    const source = image(80, 8, (x, _y) => cellShade(Math.floor(x / 8), x));
+    const shadowCalibration: ImportGridCalibration = {
+      originX: 0, originY: 0, cellWidth: 8, cellHeight: 8, columns: 10, rows: 1,
+    };
+    const before = recognizeImportImage(source, shadowCalibration, shadowPalette, 'precision', undefined, { beadPhoto: true, shadingReference: false });
+    expect(before.shadingRefine).toBeUndefined();
+    const muddy = before.cells[0][5];
+    expect(muddy.status).toBe('mapped');
+    expect(muddy.dominantRatio ?? 0).toBeLessThan(0.8);
+
+    const after = recognizeImportImage(source, shadowCalibration, shadowPalette, 'precision', undefined, {
+      beadPhoto: true, shadingReference: true,
+    });
+    expect(after.shadingRefine).toBeDefined();
+    expect(after.shadingRefine!.references).toBeGreaterThanOrEqual(2);
+    expect(after.shadingRefine!.refined).toBeGreaterThanOrEqual(1);
+    const pulled = after.cells[0][5];
+    expect(pulled.status).toBe('mapped');
+    expect(pulled.dominantRatio ?? 0).toBeGreaterThanOrEqual(0.85);
+    // 高置信格不动：亮红与深红参考格保持原判。
+    expect(after.cells[0][0].colorId).toBe('red');
+    expect(after.cells[0][9].colorId).toBe('darkred');
+  });
+
 });

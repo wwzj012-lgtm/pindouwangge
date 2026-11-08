@@ -1,6 +1,6 @@
 {
-  "rev": "cbd1d1e",
-  "ranAt": "2026-11-05T03:40:35.927Z",
+  "rev": "35cbd46",
+  "ranAt": "2026-11-08T13:58:28.142Z",
   "settings": {
     "width": 100,
     "height": 100,
@@ -36,7 +36,7 @@
       "pipeline": "cartoon",
       "grid": "100x100",
       "filledCells": 4701,
-      "convertMs": 8041,
+      "convertMs": 6940,
       "cellDeltaE": {
         "mean": 4.672,
         "p95": 11.815
@@ -55,7 +55,7 @@
       "pipeline": "cartoon",
       "grid": "100x100",
       "filledCells": 5984,
-      "convertMs": 4395,
+      "convertMs": 3847,
       "cellDeltaE": {
         "mean": 13.071,
         "p95": 38.19
@@ -74,7 +74,7 @@
       "pipeline": "photo",
       "grid": "100x100",
       "filledCells": 3961,
-      "convertMs": 9584,
+      "convertMs": 8523,
       "cellDeltaE": {
         "mean": 10.131,
         "p95": 24.062

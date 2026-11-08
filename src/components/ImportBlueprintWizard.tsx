@@ -122,6 +122,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   // 三项都默认关闭：网格对准、图是数字原图时，任何"额外校正"都只会把颜色推偏。
   const [beadPhoto, setBeadPhoto] = useState(false);
   const [smoothNoise, setSmoothNoise] = useState(false);
+  const [symbolAssist, setSymbolAssist] = useState(false);
   const [pitchHint, setPitchHint] = useState<string | null>(null);
   const [autoColorBalance, setAutoColorBalance] = useState(false);
   const [autoAlign, setAutoAlign] = useState(false);
@@ -392,7 +393,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         undefined,
         { signal: controller.signal, onProgress: value => {
           if (mountedRef.current && openRef.current && recognitionControllerRef.current === controller && !controller.signal.aborted) setRecognitionProgress(Math.floor(value));
-        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise },
+        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise, symbolAssist },
       );
       if (!mountedRef.current || !openRef.current || recognitionControllerRef.current !== controller || controller.signal.aborted) return;
       setRecognition(result);
@@ -413,7 +414,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         setIsRecognizing(false);
       }
     }
-  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
+  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, symbolAssist, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
 
   const backgroundCorrections = useMemo(() => recognitionBackgroundCorrections(backgroundHistory), [backgroundHistory]);
   const effectiveCorrections = useMemo(() => ({ ...corrections, ...backgroundCorrections }), [corrections, backgroundCorrections]);
@@ -730,12 +731,18 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
                 <label className="ir-check"><input type="checkbox" checked={autoColorBalance} onChange={event => { invalidateRecognition(); setAutoColorBalance(event.target.checked); }} />校正整体色偏（需要画面里有白色或灰白区域）</label>
                 <label className="ir-check"><input type="checkbox" checked={autoAlign} onChange={event => { invalidateRecognition(); setAutoAlign(event.target.checked); }} />对齐整体偏移（整张图都框歪了再用）</label>
                 <label className="ir-check"><input type="checkbox" checked={smoothNoise} onChange={event => { invalidateRecognition(); setSmoothNoise(event.target.checked); }} />去除杂色（糊掉的孤立格按周围多数修正）</label>
+                <label className="ir-check"><input type="checkbox" checked={symbolAssist} onChange={event => { invalidateRecognition(); setSymbolAssist(event.target.checked); }} />图纸色号辅助（格子里印着色号文字的图纸；文字直接定色号，白底空格不放豆）</label>
               </div>
               <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、并按画面白点归一曝光。</p>
               {recognition && describeAutoCorrection(recognition) && (
                 <p className="ir-help ir-autocorrect" role="status">
                   <strong>本次自动校正：</strong>{describeAutoCorrection(recognition)}
                   <span>（抽样 {recognition.autoCorrection?.sampledCells ?? 0} 格估计；关闭校正可在识别设置里取消勾选）</span>
+                </p>
+              )}
+              {recognition?.symbolAssist && (
+                <p className="ir-help ir-autocorrect" role="status">
+                  <strong>色号辅助：</strong>检出文字 {recognition.symbolAssist.textCells} 格，读出色号 {recognition.symbolAssist.resolved} 格（其中 {recognition.symbolAssist.overridden} 格以文字为准{recognition.symbolAssist.conflicts > 0 ? `，${recognition.symbolAssist.conflicts} 格文字与颜色不符、按颜色处理` : ''}），纸底空格 {recognition.symbolAssist.blanks} 格不放豆。
                 </p>
               )}
             </section>

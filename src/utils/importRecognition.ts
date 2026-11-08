@@ -2,6 +2,7 @@ import type { BeadColor } from '../types';
 import { deltaE2000, preparePaletteLab, rgbToLab, type PreparedPaletteColor } from './colorUtils';
 import { NEUTRAL_GAINS, estimateChannelGains, isClippedRgb, type ChannelGains } from './importColorBalance';
 import type { ImportGridCalibration } from './importGridCalibration';
+import { extractBeadSymbols } from './importSymbolOCR';
 
 /** Precision integrates all intersecting pixels; fast estimates area with uniform strata. */
 export type ImportRecognitionMode = 'fast' | 'precision';
@@ -64,6 +65,14 @@ export interface ImportRecognitionResult {
   smoothing?: { changed: number; threshold: number };
   /** 双胞胎归一改写了多少格；未开启时不存在。 */
   twinUnification?: { remapped: number };
+  /** 局部阴影再参考改写了多少格；未开启时不存在。 */
+  shadingRefine?: { refined: number; references: number };
+  /**
+   * 图纸色号辅助（symbolAssist）的结果统计；未开启时不存在。
+   * textCells=检出文字的格子，resolved=OCR 解析到色板的格子，
+   * overridden=最终覆写了识别结果的格子，blanks=判为纸底空格的格子。
+   */
+  symbolAssist?: { textCells: number; resolved: number; overridden: number; conflicts: number; blanks: number };
   /** 自适应校正的实际结果；未触发时保留中性值，界面据此解释"这次做了什么"。 */
   autoCorrection?: {
     colorGains: ChannelGains | null;
@@ -104,11 +113,28 @@ export interface ImportRecognitionOptions {
    */
   unifyTwins?: boolean;
   /**
+   * 图纸色号辅助：图纸（而非实物照片）的格子里印着色号文字时，
+   * OCR 读出文字直接确定色号——文字是作者标注的标准答案，
+   * 比印刷颜色更可靠，还能区分印刷色几乎一样的相近色号。
+   * 同时把"底色接近纸底且无文字"的格子判为空格（不放豆）。
+   * 开启后跳过 shading/smooth/unify 等实物照片特化步骤。
+   */
+  symbolAssist?: boolean;
+  /**
    * 去杂色：把主色占比很低的格子换成周围 8 格里出现最多的色号。
    * 照片识别最大的观感问题是"胡椒盐"式的孤立错格，而拼豆作品本身大面积连续。
    * **默认关闭**：会抹掉真正的单颗细节。
    */
   smooth?: boolean;
+  /**
+   * 局部阴影再参考：照片的照明在空间上不均匀（晕影、中央亮斑、局部阴影），
+   * 全局通道增益救不了——同一支豆在画面不同位置读出不同颜色，像素被劈到
+   * 相邻色号上，主色占比掉到复核队列里。两阶段处理：先用全图高置信格反推
+   * 每支色号在**这张照片里**的参考色，再对低置信格按 参考色/自身采样色 的
+   * 逐通道增益拉回参考位置重新分类。只有主色占比确实上升才采纳，所以
+   * 第一遍的猜测即使错了，最坏也只是保持原答案。**默认跟随 `beadPhoto`**。
+   */
+  shadingReference?: boolean;
 }
 
 /** 全局网格偏移，单位是"格"：{ x: -0.16, y: 0 } 表示整张图向左偏了 16% 格。 */
@@ -149,6 +175,18 @@ const BEAD_TRIM_MIN_SAMPLES = 16;
 const BEAD_LIGHTNESS_WEIGHT = 0.55;
 /** 比面积之前先合并 ΔE 小于这个值的色号：同一颗豆的明暗条纹不该劈成两个颜色。 */
 const GROUP_MERGE_RADIUS = 4;
+/**
+ * 格内"色相轴宽容合并"：两组的 a 轴与 b 轴都差得不多（色相与饱和度一致），
+ * 且明度差不超过 `GROUP_LIGHTNESS_MERGE` 时，视为同一颗豆的明暗条纹。
+ * 实物豆板一格只有一颗豆，豆面像素的明度差几乎全是光照产物（顶面亮、
+ * 边缘暗，实测豆面明度跨度小于 15），而"按最近色板色分组"会把这些条纹
+ * 劈到浅/中/深三支灰色号上——亮像素分票 20%+20%+15%，暗像素却集中投
+ * 一支深色，浅色豆反而输给暗缝。这是头发白区黑噪点的根因。
+ * 明度护栏是必须的：没有它，近中性灰系（H2 到 H9 色相全一致）会链式
+ * 合并成一组，明度差 50 的深浅两支豆被平均成一团糊色。
+ */
+const GROUP_CHROMA_MERGE_RADIUS = 5;
+const GROUP_LIGHTNESS_MERGE = 15;
 /** 实物照片：只采圆豆本体。外边界取 r=0.92（避开豆缘与缝），中心 r=0.22 挖掉孔洞。 */
 const BEAD_BODY_RADIUS2 = 0.85;
 const BEAD_HOLE_RADIUS2 = 0.05;
@@ -162,10 +200,58 @@ const SMOOTH_MIN_VOTES = 5;
 const SMOOTH_MIN_SEPARATION = 4;
 /** 以及打平到什么程度（主次占比差）。 */
 const SMOOTH_MAX_GAP = 0.12;
+/**
+ * 结构保留：与自己在上下左右有 ≥2 个同色邻居的格子是**结构的一部分**
+ * （发丝、衣服边缘都是 2-3 格宽的连续条带），不是孤立噪声。吞掉它们
+ * 的直接后果就是"细结构被背景海洋淹没"——用户看到的头发/衣服整片
+ * 消失成背景色，就是这 627 个 H4→H5。
+ */
+const SMOOTH_STRUCTURE_NEIGHBORS = 2;
+/**
+ * 大跳变禁改：改写目标色号与当前色号的 ΔE 超过这个值就不许换答案。
+ * 注意口径必须是**色号对色号**——发丝格采样色混了背景本来就偏深，
+ * 用"采样色到目标"的距离会让 H4→H5（ΔE≈20）伪装成小步改写溜过去。
+ * 邻域投票修的是"同一片区域里的近似色号归位"（ΔE 4~12）；
+ * 跨档改写几乎总是把有结构的格子吞进背景，而不是消噪。
+ */
+const SMOOTH_MAX_JUMP = 12;
 /** 定标白平衡至少需要的可信格数。 */
 const MIN_BALANCE_CELLS = 8;
 /** 校正后平均色差至少要降到原来的这个比例以下，才认为白平衡成立。 */
 const GAIN_ACCEPT_RATIO = 0.98;
+/** 局部阴影再参考：只有这么高置信的格才有资格给同色号当"照片内参考色"。 */
+const REF_MIN_DOMINANCE = 0.85;
+const REF_MAX_DISTANCE = 8;
+/** 一个色号的参考色至少要这么多格投票，孤证不立。 */
+const REF_MIN_CELLS = 4;
+/** 逐格增益的钳制范围：阴影再深也不该把一颗豆拉过一个数量级。 */
+const REF_GAIN_MIN = 0.72;
+const REF_GAIN_MAX = 1.4;
+/**
+ * 重判的距离守卫：重判结果的 ΔE 不允许比原判明显变差。
+ * alignmentScore 里 dist 只占 1/200 权重——一个"把亮豆拉暗后像素突然集中"
+ * 的假高分（dom 暴涨、dist 48）能轻易骗过它。深度约束单独守门：
+ * 同一支豆的光照校正不该把颜色搬出原判断的邻域。
+ */
+const REF_DIST_SLACK = 3;
+/**
+ * 色号档位守卫：重判结果与原判色号的 ΔE 超过这个值就不许换答案——
+ * 除非增益是**全通道拉亮**（gain ≥ 1）。
+ * 只有它拦得住"拉暗到刚好贴住目标色"的绕行——那种候选的 dist 是按
+ * 拉暗后的颜色算的，自然贴（dist 甚至比原判还好），距离守卫形同虚设。
+ * 不对称的物理依据：照片的系统性偏差以变暗为主（阴影、暗缝、晕影），
+ * 过曝的亮端已被 clipped 守卫排除——所以"被阴影压进深档的豆被亮参考
+ * 拉亮还原"（这是 refine 要修的核心场景）放行；"浅格被深参考拉暗吞进
+ * 背景档"（头发/衣服消失的元凶）拦截。
+ */
+const REF_MAX_JUMP = 12;
+/** 与中性增益偏差小于这个值就不必重判（省一遍重采样）。 */
+const REF_GAIN_DEADZONE = 0.03;
+/** 重判结果至少要高出这么多才采纳：换答案必须带来真实的把握提升。 */
+const REF_ACCEPT_MARGIN = 0.02;
+/** 低于这个主色占比（或质量不到 good）的格才会进入重判。 */
+const REFINE_MAX_DOMINANCE = 0.8;
+const REFINE_MAX_DISTANCE = 8;
 
 function isValidSource(source: ImportImagePixels): boolean {
   return Number.isInteger(source.width)
@@ -179,6 +265,64 @@ function qualityFor(confidence: number, distance: number): ImportQuality {
   if (confidence + RATIO_EPSILON < LOW_CONFIDENCE || distance > 15) return 'poor';
   if (confidence < 0.8 || distance > 8) return 'fair';
   return 'good';
+}
+
+/**
+ * 图纸色号辅助：OCR 读出的色号直接覆写识别结果。
+ * - OCR 命中（code 在色板中）且与颜色判定一致 → 覆写 colorId，dominantRatio=1；
+ *   distance 保留"采样色→色号色"的真实差，供界面展示印刷色与豆色的偏差。
+ * - OCR 与颜色判定冲突 → 信颜色。真实 JPEG 图纸上小字号印刷文字的字形误读率
+ *   远高于印刷色块的颜色匹配（实测妲己图：OCR 命中格 65% 对 vs 颜色 83% 对，
+ *   冲突格信颜色净收益 +252 格）——OCR 只在双方一致时提供确证。
+ * - 纸底空格 → status='blank'（不放豆）。
+ * 图纸是印刷品而非照片，shading/smooth/unify 的实物先验不适用，调用方应跳过。
+ */
+function applySymbolAssist(
+  source: ImportImagePixels,
+  calibration: ImportGridCalibration,
+  palette: BeadColor[],
+  cells: ImportRecognitionCell[][],
+): { textCells: number; resolved: number; overridden: number; conflicts: number; blanks: number } {
+  const sym = extractBeadSymbols(source, calibration, palette);
+  const byCode = new Map(palette.map((c) => [c.code, c]));
+  let overridden = 0;
+  let conflicts = 0;
+  for (const [key, symbol] of sym.codes) {
+    const sep = key.indexOf(':');
+    const row = Number(key.slice(0, sep)), column = Number(key.slice(sep + 1));
+    const cell = cells[row]?.[column];
+    const color = byCode.get(symbol.code);
+    if (!cell || !color || cell.status !== 'mapped') continue;
+    if (cell.colorId && cell.colorId !== color.id) {
+      // 颜色判定与 OCR 字形不一致：颜色证据（整格面积投票）比小字号 OCR 可靠，
+      // 保留颜色判定，只记一次冲突供界面提示"该格色号文字可能干扰识别"。
+      conflicts += 1;
+      continue;
+    }
+    const distance = cell.sampleRgb
+      ? deltaE2000(rgbToLab(...cell.sampleRgb), rgbToLab(...color.rgb))
+      : 0;
+    cells[row][column] = {
+      ...cell,
+      color,
+      colorId: color.id,
+      dominantRatio: 1,
+      runnerUpRatio: 0,
+      distance,
+      quality: qualityFor(1, distance),
+    };
+    overridden += 1;
+  }
+  let blanks = 0;
+  for (const key of sym.blankCells) {
+    const sep = key.indexOf(':');
+    const row = Number(key.slice(0, sep)), column = Number(key.slice(sep + 1));
+    const cell = cells[row]?.[column];
+    if (!cell) continue;
+    cells[row][column] = { ...cell, status: 'blank', color: null, colorId: null, sampleRgb: null };
+    blanks += 1;
+  }
+  return { textCells: sym.textCellCount, resolved: sym.resolvedCount, overridden, conflicts, blanks };
 }
 
 interface SampleMatch {
@@ -263,6 +407,8 @@ interface RecognitionContext {
   offset: ImportGridOffset;
   autoAlign: boolean;
   beadPhoto: boolean;
+  /** 图纸模式（symbolAssist）：印刷色块而非实物照片，采样/合并/仲裁策略都要换轨。 */
+  chartMode: boolean;
   invalidCells?: ImportRecognitionCell[][];
 }
 
@@ -283,6 +429,7 @@ function createRecognitionContext(
     source, alphaCutoff, calibration: outputCalibration, mode, edgeInsetRatio, preparedPalette,
     gains: NEUTRAL_GAINS, offset: { x: 0, y: 0 },
     autoAlign: options.autoAlign === true, beadPhoto: options.beadPhoto === true,
+    chartMode: options.symbolAssist === true,
   };
   if (preparedPalette.length === 0) {
     return { ...base, matchCache: new Map(), invalidCells: createInvalidCells(outputCalibration) };
@@ -480,13 +627,20 @@ function* sampleCellGen(
   // 合并"肉眼几乎一样"的组：同一颗豆被拍出明暗条纹时，像素会分投到两支相近色号上，
   // 面积被劈成 60/35 两半——按色号比面积就变成了"两个颜色打平"，于是整格被判为待核对。
   // 先按 ΔE 半径做一次并查集合并，再比面积，才是"这颗豆到底是什么颜色"。
-  const merged = mergeNearbyGroups(groups);
+  // 图纸模式例外：印刷色块均匀，不存在明暗条纹；而印刷文字（黑字+抗锯齿过渡）会产生
+  // 一条从底色滑向文字色的中间色带，把底色组和它的近邻组合并后，加权均值恰好漂到
+  // 近邻一侧（实测 H2 纸白 254 被 AA 灰 239 拖成 245 → H9）。跳过合并，让纯底色组直接胜出。
+  const merged = context.chartMode ? [...groups.values()] : mergeNearbyGroups(groups);
   const ordered = merged.sort((a, b) => b.area - a.area
     || a.distance / a.area - b.distance / b.area || a.match.paletteIndex - b.match.paletteIndex);
   const dominant = ordered[0];
-  const color = dominant.match.prepared.color;
+  // 合并组的色号由**整组面积加权平均色**重新分类决定——并查集根组是遍历
+  // 顺序的产物，用它当色号等于把答案交给运气（尤其色相轴合并可以横跨
+  // 多支色号时）。distance 同样用平均色重算，保证它仍然描述"采样离色号多远"。
   const sampleRgb = dominant.rgb.map(value => Math.round(value / dominant.area)) as [number, number, number];
-  const distance = dominant.distance / dominant.area;
+  const rematch = classifySample(sampleRgb, preparedPalette, context.beadPhoto ? BEAD_LIGHTNESS_WEIGHT : 1);
+  const color = rematch.prepared.color;
+  const distance = rematch.distance;
   const dominantRatio = Math.min(1, dominant.area / coverage);
   const runnerUpRatio = Math.min(1, (ordered[1]?.area ?? 0) / coverage);
   const runnerUp = ordered[1];
@@ -511,7 +665,12 @@ function mergeNearbyGroups(groups: Map<string, ColorArea>): ColorArea[] {
   const find = (index: number): number => (parent[index] === index ? index : (parent[index] = find(parent[index])));
   for (let i = 0; i < list.length; i += 1) {
     for (let j = i + 1; j < list.length; j += 1) {
-      if (deltaE2000(list[i].match.prepared.lab, list[j].match.prepared.lab) >= GROUP_MERGE_RADIUS) continue;
+      const labA = list[i].match.prepared.lab;
+      const labB = list[j].match.prepared.lab;
+      const sameBeadShading = Math.abs(labA[1] - labB[1]) <= GROUP_CHROMA_MERGE_RADIUS
+        && Math.abs(labA[2] - labB[2]) <= GROUP_CHROMA_MERGE_RADIUS
+        && Math.abs(labA[0] - labB[0]) <= GROUP_LIGHTNESS_MERGE;
+      if (deltaE2000(labA, labB) >= GROUP_MERGE_RADIUS && !sameBeadShading) continue;
       const a = find(i);
       const b = find(j);
       if (a !== b) parent[b] = a;
@@ -731,6 +890,110 @@ function runCells(context: RecognitionContext): ImportRecognitionCell[][] {
 }
 
 /**
+ * 局部阴影再参考：照片照明在空间上不均匀（晕影、中央亮斑、局部阴影），
+ * 全局白平衡救不了。同一支豆在暗处读出深一档的颜色，像素被劈到相邻的
+ * 深色色号上，主色占比掉下去——这正是实物照片识别"杂乱"的主要来源。
+ *
+ * 两阶段：
+ *  1. 收集参考色——每支色号取全图高置信格（占比≥0.85 且色差小）的采样色
+ *     平均值，得到"这支豆在这张照片里通常长什么样"。参考色来自该色号
+ *     自己的格子，不假设画面内容，白区/黑区都不会被误"纠正"。
+ *  2. 低置信格重判——按 参考色/自身采样色 的逐通道增益（钳制在 0.6~1.6）
+ *     把格子像素拉回参考位置，整格重采样重分类；自身色号与次选色号的
+ *     参考色都试，取对齐分最高者，且必须比原结果真正变好才采纳。
+ *
+ * 采纳门槛保证了安全性：第一遍的判断即使错了（参考色因此有偏），
+ * 最坏情况也只是保持原答案，不会把错误放大成片。
+ */
+function rescoreWithLocalShading(
+  cells: ImportRecognitionCell[][],
+  context: RecognitionContext,
+): { cells: ImportRecognitionCell[][]; refined: number; references: number } {
+  // 阶段 1：收集每支色号的照片内参考色。
+  const refs = new Map<string, { r: number; g: number; b: number; n: number }>();
+  for (const row of cells) {
+    for (const cell of row) {
+      if (cell.status !== 'mapped' || !cell.sampleRgb) continue;
+      if ((cell.dominantRatio ?? 0) < REF_MIN_DOMINANCE || (cell.distance ?? 99) > REF_MAX_DISTANCE) continue;
+      const entry = refs.get(cell.colorId!) ?? { r: 0, g: 0, b: 0, n: 0 };
+      entry.r += cell.sampleRgb[0];
+      entry.g += cell.sampleRgb[1];
+      entry.b += cell.sampleRgb[2];
+      entry.n += 1;
+      refs.set(cell.colorId!, entry);
+    }
+  }
+  const references = new Map<string, [number, number, number]>();
+  for (const [id, entry] of refs) {
+    if (entry.n < REF_MIN_CELLS) continue;
+    references.set(id, [entry.r / entry.n, entry.g / entry.n, entry.b / entry.n]);
+  }
+  if (references.size === 0) return { cells, refined: 0, references: 0 };
+  const paletteById = new Map(context.preparedPalette.map(entry => [entry.color.id, entry]));
+
+  // 阶段 2：低置信格带增益重判。
+  let refined = 0;
+  const output = cells.map((row, rowIndex) => row.map((cell, columnIndex) => {
+    if (cell.status !== 'mapped' || !cell.sampleRgb) return cell;
+    const muddy = (cell.dominantRatio ?? 1) < REFINE_MAX_DOMINANCE || (cell.distance ?? 0) > REFINE_MAX_DISTANCE;
+    if (!muddy) return cell;
+    const baseScore = alignmentScore(cell);
+    if (baseScore < 0) return cell;
+    let bestCell = cell;
+    let bestScore = baseScore;
+    for (const refId of [cell.colorId, cell.runnerUpColorId]) {
+      if (!refId) continue;
+      const ref = references.get(refId);
+      if (!ref) continue;
+      // 采样色某通道为 0（黑）时该通道没有阴影信息可推：0×任意增益仍是 0，
+      // 抬升只会伪造颜色。置 1 保持中性，只在有信息的通道上做校正。
+      const gainChannel = (refValue: number, sampleValue: number) => sampleValue < 1
+        ? 1
+        : Math.min(REF_GAIN_MAX, Math.max(REF_GAIN_MIN, refValue / sampleValue));
+      const gain: ChannelGains = {
+        r: gainChannel(ref[0], cell.sampleRgb![0]),
+        g: gainChannel(ref[1], cell.sampleRgb![1]),
+        b: gainChannel(ref[2], cell.sampleRgb![2]),
+      };
+      if (Math.abs(gain.r - 1) < REF_GAIN_DEADZONE && Math.abs(gain.g - 1) < REF_GAIN_DEADZONE
+        && Math.abs(gain.b - 1) < REF_GAIN_DEADZONE) continue;
+      const derived: RecognitionContext = {
+        ...context,
+        // 参考色与采样色都是在全局增益空间里测的，逐格增益必须**乘在全局增益之上**，
+        // 不能替换——替换会把全局白平衡整个丢掉，等价于给全图换了一组错误的光。
+        gains: {
+          r: context.gains.r * gain.r,
+          g: context.gains.g * gain.g,
+          b: context.gains.b * gain.b,
+        },
+      };
+      const candidate = sampleCellSync(derived, rowIndex, columnIndex);
+      const score = alignmentScore(candidate);
+      // 三重守门：
+      // ① 对齐分要真正提升；
+      // ② 颜色不能变差（"拉暗后 dom 暴涨但 ΔE 48"的假高分）；
+      // ③ 色号不许跨档（"拉暗到刚好贴住目标色"的绕行——候选的 dist 按
+      //    拉暗后的颜色算，自然贴，②拦不住；档位约束才拦得住）。
+      //    唯一例外：全通道拉亮——那是"被阴影压进深档的豆被还原"的合法场景。
+      const distFloor = Math.max(cell.distance ?? 99, REF_MAX_DISTANCE) + REF_DIST_SLACK;
+      const originLab = paletteById.get(cell.colorId!)?.lab;
+      const candidateLab = paletteById.get(candidate.colorId!)?.lab;
+      const brightening = gain.r >= 1 && gain.g >= 1 && gain.b >= 1;
+      const jumped = originLab && candidateLab
+        ? deltaE2000(originLab, candidateLab) > REF_MAX_JUMP
+        : candidate.colorId !== cell.colorId;
+      if (score > bestScore + REF_ACCEPT_MARGIN && (candidate.distance ?? 99) <= distFloor && (!jumped || brightening)) {
+        bestCell = candidate;
+        bestScore = score;
+      }
+    }
+    if (bestCell !== cell) refined += 1;
+    return bestCell;
+  }));
+  return { cells: output, refined, references: references.size };
+}
+
+/**
  * 去杂色：把低置信格的色号替换为邻域多数色号。
  *
  * 只动"本来就没把握"的格子（主色占比 < 0.75），高置信格一个都不碰——
@@ -804,6 +1067,14 @@ function smoothCells(
     const ambiguous = (cell.runnerUpSeparation ?? 0) >= SMOOTH_MIN_SEPARATION
       && (cell.dominantRatio ?? 1) - (cell.runnerUpRatio ?? 0) < SMOOTH_MAX_GAP;
     if (!muddy && !ambiguous) return cell;
+    // 结构保留：上下左右有 ≥2 个同色邻居 → 这是发丝/衣服边缘的内部格，
+    // 邻域票再多也不许吞（它们的邻居本来就该是背景色）。
+    let sameNeighbors = 0;
+    if (ids[rowIndex - 1]?.[columnIndex] === cell.colorId) sameNeighbors += 1;
+    if (ids[rowIndex + 1]?.[columnIndex] === cell.colorId) sameNeighbors += 1;
+    if (ids[rowIndex]?.[columnIndex - 1] === cell.colorId) sameNeighbors += 1;
+    if (ids[rowIndex]?.[columnIndex + 1] === cell.colorId) sameNeighbors += 1;
+    if (sameNeighbors >= SMOOTH_STRUCTURE_NEIGHBORS) return cell;
     const votes = new Map<string, number>();
     for (let dr = -1; dr <= 1; dr += 1) {
       for (let dc = -1; dc <= 1; dc += 1) {
@@ -818,6 +1089,9 @@ function smoothCells(
     if (!winnerId || winnerId === cell.colorId || winnerVotes < SMOOTH_MIN_VOTES) return cell;
     const target = byId.get(winnerId);
     if (!target) return cell;
+    const current = byId.get(cell.colorId);
+    // 大跳变禁改：口径是色号对色号（见 SMOOTH_MAX_JUMP 注释）。
+    if (current && deltaE2000(current.lab, target.lab) > SMOOTH_MAX_JUMP) return cell;
     changed += 1;
     const distance = deltaE2000(rgbToLab(...cell.sampleRgb), target.lab);
     return {
@@ -852,12 +1126,26 @@ export function recognizeImportImage(
     offset: probe.offset,
   };
   const cells = runCells(tuned);
-  const smoothed = options.smooth === true ? smoothCells(cells, tuned) : null;
+  if (options.symbolAssist === true) {
+    const symbolStats = applySymbolAssist(source, tuned.calibration, palette, cells);
+    const result = createRecognitionResult(mode, context.calibration, cells, context.edgeInsetRatio, {
+      colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
+    });
+    result.symbolAssist = symbolStats;
+    return result;
+  }
+  const wantsShading = options.shadingReference === true || (options.shadingReference === undefined && options.beadPhoto === true);
+  const shading = wantsShading ? rescoreWithLocalShading(cells, tuned) : null;
+  const smoothed = options.smooth === true ? smoothCells(shading?.cells ?? cells, tuned) : null;
   const unify = options.unifyTwins ?? (options.beadPhoto === true);
-  const unified = unify ? unifyTwinColors(smoothed?.cells ?? cells, tuned) : null;
-  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? cells, context.edgeInsetRatio, {
+  const unified = unify ? unifyTwinColors(smoothed?.cells ?? shading?.cells ?? cells, tuned) : null;
+  // fallback 链必须包含 shading：smooth 与 twin 都关闭时，refine 的输出
+  // 只能靠这一链传递——漏掉它会让"局部阴影再参考"静默失效，
+  // 而界面还照常报告 refined 计数（修过一次的老坑，别再踩）。
+  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
+  if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
   return result;
@@ -931,12 +1219,27 @@ export async function recognizeImportImageAsync(
     }
   }
   throwIfAborted(options.signal);
-  const smoothed = options.smooth === true ? smoothCells(cells, tuned) : null;
+  if (options.symbolAssist === true) {
+    const symbolStats = applySymbolAssist(source, tuned.calibration, palette, cells);
+    const result = createRecognitionResult(mode, context.calibration, cells, context.edgeInsetRatio, {
+      colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
+    });
+    result.symbolAssist = symbolStats;
+    report(100);
+    return result;
+  }
+  const wantsShading = options.shadingReference === true || (options.shadingReference === undefined && options.beadPhoto === true);
+  const shading = wantsShading ? rescoreWithLocalShading(cells, tuned) : null;
+  throwIfAborted(options.signal);
+  const smoothed = options.smooth === true ? smoothCells(shading?.cells ?? cells, tuned) : null;
   const unify = options.unifyTwins ?? (options.beadPhoto === true);
-  const unified = unify ? unifyTwinColors(smoothed?.cells ?? cells, tuned) : null;
-  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? cells, context.edgeInsetRatio, {
+  const unified = unify ? unifyTwinColors(smoothed?.cells ?? shading?.cells ?? cells, tuned) : null;
+  // fallback 链必须包含 shading（与同步入口同坑）：smooth 与 twin 都关闭时
+  // refine 的输出只能靠这一链传递，漏掉会让"局部阴影再参考"静默失效。
+  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
+  if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
   report(100);

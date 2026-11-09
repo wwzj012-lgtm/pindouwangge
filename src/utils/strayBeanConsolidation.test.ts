@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { consolidateStrayBeans, type RgbColor, type StrayBeanGridAdapter } from './strayBeanConsolidation';
+import { clearIsolatedBeans, consolidateStrayBeans, type RgbColor, type StrayBeanGridAdapter } from './strayBeanConsolidation';
 
 type Cell = { id: string; color: RgbColor; alpha?: number } | null;
 
@@ -280,4 +280,74 @@ describe('consolidateStrayBeans', () => {
     expect(reads).toBeLessThanOrEqual(size * size * 3);
     expect(elapsed).toBeLessThan(15000);
   }, 20000);
+
+  describe('clearIsolatedBeans', () => {
+    const clearAdapter = {
+      isFilled: (cell: Cell): boolean => cell !== null,
+      getColorKey: (cell: Cell): string => (cell ? `${cell.color.r},${cell.color.g},${cell.color.b}` : ''),
+      clearCell: () => null,
+    };
+
+    function blankCanvas(size: number): Cell[][] {
+      // 清除工具的语义是"离散残点"：残渣远离主体（不与任何大簇相邻）。
+      // 测试画布用空白打底，主体 patch 在中央，残渣放四角。
+      return Array.from({ length: size }, () => Array.from({ length: size }, (): Cell => null));
+    }
+
+    it('clears disconnected residue specks but keeps the main pattern', () => {
+      // 6×6 主体 + 两个 1 格残渣 + 一个 2×2 残渣簇（标准档 ≤5 全清）
+      const grid = blankCanvas(14);
+      patch(grid, 36, WHITE, 4, 4); // 主体：36 格最大块，永不清
+      grid[1][1] = bean('residue-a', LIGHT_GREY);
+      grid[12][12] = bean('residue-b', MID_GREY);
+      patch(grid, 4, DARK_GREY, 9, 11); // 2×2 残渣簇，与主体隔开空白
+      const { grid: next, stats } = clearIsolatedBeans(grid, clearAdapter, 'standard');
+      expect(stats).toEqual({ removed: 6, clusters: 3, threshold: 5 }); // 1 + 1 + 2×2 簇 = 6 颗
+      expect(next[1][1]).toBeNull();
+      expect(next[12][12]).toBeNull();
+      expect(next[11][9]).toBeNull();
+      expect(countColour(next, WHITE)).toBe(36); // 主体原样
+      expect(grid[1][1]).not.toBeNull(); // 输入不被修改
+    });
+
+    it('protects small clusters touching a large region (embedded details, not residue)', () => {
+      const grid = blankCanvas(14);
+      patch(grid, 36, WHITE, 4, 4);
+      grid[1][1] = bean('speck-a', LIGHT_GREY); // 远离主体的残点 → 清
+      grid[3][10] = bean('detail', MID_GREY); // 贴着主体右缘 (4..9,4..9) 的细节点 → 保护
+      const { grid: next, stats } = clearIsolatedBeans(grid, clearAdapter, 'standard');
+      expect(stats).toEqual({ removed: 1, clusters: 1, threshold: 5 });
+      expect(next[1][1]).toBeNull();
+      expect(next[3][10]?.color).toEqual(MID_GREY);
+    });
+
+    it('respects strength caps and custom size in both directions', () => {
+      const grid = blankCanvas(12);
+      patch(grid, 30, WHITE, 3, 3);
+      patch(grid, 2, LIGHT_GREY, 0, 0);
+      // 轻度（≤1）：2 颗的簇保留
+      expect(clearIsolatedBeans(grid, clearAdapter, 'light').stats).toBeNull();
+      // 自定义 ≤2：清掉
+      const { stats } = clearIsolatedBeans(grid, clearAdapter, 'light', { maxClusterSize: 2 });
+      expect(stats).toEqual({ removed: 2, clusters: 1, threshold: 2 });
+    });
+
+    it('protects thin line details and never clears the largest component', () => {
+      const grid = blankCanvas(14);
+      patch(grid, 25, WHITE, 5, 5);
+      for (let x = 2; x < 9; x += 1) grid[2][x] = bean('line', LIGHT_GREY); // 7 格细线（1×7，lineDetail）
+      const { grid: next, stats } = clearIsolatedBeans(grid, clearAdapter, 'strong');
+      expect(stats).toBeNull(); // 细线 + 最大块全保留 → 无可清
+      expect(countColour(next, LIGHT_GREY)).toBe(7);
+    });
+
+    it('diagonal touching counts as connected for the residue cluster', () => {
+      const grid = blankCanvas(10);
+      patch(grid, 16, WHITE, 2, 2);
+      grid[7][7] = bean('d1', LIGHT_GREY);
+      grid[8][8] = bean('d2', LIGHT_GREY); // 对角相触 → 一个 2 颗簇
+      const { stats } = clearIsolatedBeans(grid, clearAdapter, 'light', { maxClusterSize: 2 });
+      expect(stats).toEqual({ removed: 2, clusters: 1, threshold: 2 });
+    });
+  });
 });

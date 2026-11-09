@@ -1,6 +1,6 @@
 /** Post-background-removal grid cleanup; palette IDs are opaque, only null is empty. */
 export type BackgroundIslandGrid = readonly (readonly (string | null)[])[];
-export type BackgroundIslandProtection = 'subject' | 'enclosed' | 'subject-bounds' | 'near-subject';
+export type BackgroundIslandProtection = 'subject' | 'enclosed' | 'near-subject';
 
 export interface BackgroundIslandOptions {
   /** Inclusive component size in beads, defaults to 4. Zero disables removal. */
@@ -9,8 +9,6 @@ export interface BackgroundIslandOptions {
   connectivity?: 4 | 8;
   /** Chebyshev distance between bead centers; 2 protects a one-blank-cell gap. */
   nearSubjectDistance?: number;
-  /** Conservatively preserve details inside any subject's individual bounds. */
-  protectSubjectBounds?: boolean;
 }
 
 export interface BackgroundIslandComponent {
@@ -74,9 +72,13 @@ function nonnegativeInteger(value: number, name: string): number {
  * pairwise component comparisons, per-subject full-grid scans or recursive fill.
  * Subjects are every component above the removal threshold, plus substantial
  * components (at least 8 beads and 10% of the largest) even at high thresholds.
- * Each subject keeps its own bounding box, not one box spanning multiple subjects.
  * Small detached motifs cannot be distinguished semantically from noise: preview
- * and explicit user protection remain necessary. Input must be rectangular.
+ * and explicit user protection remain necessary. Interior details are guarded by
+ * `enclosed` (closed cavity) and `near-subject` (adjacency) instead of subject
+ * bounding rectangles — a rectangle spans the whole figure's reach, and real
+ * residual specks in open whitespace routinely fall inside it, which made the
+ * cleanup report zero candidates (2026-11-09 real-user report). Input must be
+ * rectangular.
  */
 export function analyzeBackgroundIslands(
   grid: BackgroundIslandGrid,
@@ -86,7 +88,6 @@ export function analyzeBackgroundIslands(
     maxIslandSize: nonnegativeInteger(options.maxIslandSize ?? 4, 'maxIslandSize'),
     connectivity: options.connectivity ?? 8,
     nearSubjectDistance: nonnegativeInteger(options.nearSubjectDistance ?? 2, 'nearSubjectDistance'),
-    protectSubjectBounds: options.protectSubjectBounds ?? true,
   };
   if (resolved.connectivity !== 4 && resolved.connectivity !== 8) throw new RangeError('connectivity must be 4 or 8');
   const height = grid.length;
@@ -171,27 +172,6 @@ export function analyzeBackgroundIslands(
     }
   }
 
-  // Rectangle union via a 2D difference array: overlapping subject bounds do
-  // not multiply the amount of work. No global multi-subject bounding box.
-  const stride = width + 1;
-  const boundsCoverage = new Int32Array(total && resolved.protectSubjectBounds ? stride * (height + 1) : 0);
-  if (boundsCoverage.length) {
-    for (const component of components) {
-      if (!component.isSubject) continue;
-      const { minX, minY, maxX, maxY } = component.bounds;
-      boundsCoverage[minY * stride + minX] += 1;
-      boundsCoverage[minY * stride + maxX + 1] -= 1;
-      boundsCoverage[(maxY + 1) * stride + minX] -= 1;
-      boundsCoverage[(maxY + 1) * stride + maxX + 1] += 1;
-    }
-    for (let y = 0; y < height; y += 1) for (let x = 0; x < width; x += 1) {
-      const index = y * stride + x;
-      boundsCoverage[index] += (x ? boundsCoverage[index - 1] : 0)
-        + (y ? boundsCoverage[index - stride] : 0)
-        - (x && y ? boundsCoverage[index - stride - 1] : 0);
-    }
-  }
-
   // One bounded multi-source BFS gives distance to every subject together.
   const distance = new Int32Array(total);
   distance.fill(-1);
@@ -215,14 +195,12 @@ export function analyzeBackgroundIslands(
     }
   }
 
-  const insideBounds = new Uint8Array(components.length);
   const nearSubject = new Uint8Array(components.length);
   for (let index = 0; index < total; index += 1) {
     const id = labels[index];
     if (!id) continue;
     const component = components[id - 1];
     const y = Math.floor(index / width), x = index % width;
-    if (boundsCoverage.length && boundsCoverage[y * stride + x] > 0) insideBounds[id - 1] = 1;
     if (distance[index] >= 0) nearSubject[id - 1] = 1;
     if (component.touchesBoundary && coloredCells < total) component.touchesExterior = true;
     for (const [dx, dy] of backgroundOffsets) {
@@ -242,7 +220,6 @@ export function analyzeBackgroundIslands(
     const reasons: BackgroundIslandProtection[] = [];
     if (component.isSubject) { reasons.push('subject'); stats.subjectCount += 1; }
     if (!component.touchesExterior) reasons.push('enclosed');
-    if (!component.isSubject && insideBounds[component.id - 1]) reasons.push('subject-bounds');
     if (!component.isSubject && nearSubject[component.id - 1]) reasons.push('near-subject');
     component.protectionReasons = reasons;
     component.eligible = component.size <= resolved.maxIslandSize && !component.isSubject && component.touchesExterior;

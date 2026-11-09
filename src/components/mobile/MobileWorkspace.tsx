@@ -87,6 +87,7 @@ export interface MobileWorkspaceProps {
   beginHistoryTransaction: () => void;
   finishHistoryTransaction: () => void;
   handleApplyShape: (tool: ToolType, r1: number, c1: number, r2: number, c2: number) => void;
+  handleLassoClear: (points: { x: number; y: number }[]) => void;
   handleReferenceImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleResetCurrentCanvas: () => void;
   handleClearOuterBackground: () => void;
@@ -96,6 +97,7 @@ export interface MobileWorkspaceProps {
   openExportModal: () => void;
   openSmartReduce: () => void;
   onConsolidateStrayBeads?: (strength: 'light' | 'standard' | 'strong', maxClusterSize?: number) => void;
+  onClearIsolatedBeans?: (strength: 'light' | 'standard' | 'strong', maxClusterSize?: number) => void;
   isConverting: boolean;
   isEn: boolean;
 
@@ -164,6 +166,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   beginHistoryTransaction,
   finishHistoryTransaction,
   handleApplyShape,
+  handleLassoClear,
   handleReferenceImageUpload,
   handleResetCurrentCanvas,
   handleClearOuterBackground,
@@ -173,6 +176,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   openExportModal,
   openSmartReduce,
   onConsolidateStrayBeads,
+  onClearIsolatedBeans,
   isConverting,
   isEn,
   onOpenPatternsModal,
@@ -253,13 +257,18 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         onChange={handleImageFileInputChange}
       />
       {/* Main Screen View Area */}
-      {backgroundCleanup?.preview && <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />}
       <div className="flex-1 relative overflow-hidden flex flex-col min-h-0">
         {/* Tab 1: Immersive Fullscreen Mobile Canvas */}
         <div
           className={`w-full h-full relative ${currentTab === 'canvas' ? 'block' : 'hidden'}`}
           onPointerDownCapture={() => setIsColorTrayOpen(false)}
         >
+          {/* Floating preview card: overlays the canvas without shifting layout. */}
+          {backgroundCleanup?.preview && currentTab === 'canvas' && (
+            <div className="pointer-events-none absolute top-2 inset-x-2 z-30 flex justify-center">
+              <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />
+            </div>
+          )}
           <GridCanvas
             cleanupPreview={backgroundCleanup?.preview}
             symmetryAxes={editorActions?.axes}
@@ -292,6 +301,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             onHistoryTransactionStart={beginHistoryTransaction}
             onHistoryTransactionEnd={finishHistoryTransaction}
             onApplyShape={handleApplyShape}
+            onLassoClear={handleLassoClear}
             onEyedropColor={color => setSelectedColor(color)}
             onReferenceImageUpload={handleReferenceImageUpload}
             onResetCanvas={handleResetCurrentCanvas}
@@ -384,6 +394,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               onRestoreColor={handleRestoreColor}
               erasedColorCoords={erasedColorCoords}
               onConsolidateStrayBeads={onConsolidateStrayBeads}
+              onClearIsolatedBeans={onClearIsolatedBeans}
             />
           </div>
         </div>
@@ -679,6 +690,11 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           setActiveTool('region_clear');
         }}
         isRegionClearActive={activeTool === 'region_clear'}
+        onSelectLassoClear={() => {
+          setCurrentTab('canvas');
+          setActiveTool('lasso_clear');
+        }}
+        isLassoClearActive={activeTool === 'lasso_clear'}
         beadShape={beadShape}
         setBeadShape={setBeadShape}
         showSymbols={showSymbols}

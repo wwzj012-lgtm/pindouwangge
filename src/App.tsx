@@ -27,6 +27,7 @@ import {
   type GridSnapshot,
 } from './utils/historyTransactions';
 import {
+  clearIsolatedBeans,
   consolidateStrayBeans,
   type StrayBeanStrength,
 } from './utils/strayBeanConsolidation';
@@ -1226,6 +1227,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return applyGridChange(nextGrid, false);
   }, [applyGridChange, paletteMap, settings.pipelineOverride, conversionDiagnostics?.pipeline]);
 
+  /** Explicitly turn isolated residue clusters (after erasing / background removal) blank. */
+  const handleClearIsolatedBeans = useCallback((strength: StrayBeanStrength = 'standard', maxClusterSize?: number) => {
+    const currentGrid = gridRef.current;
+    const { grid: nextGrid, stats } = clearIsolatedBeans(currentGrid, {
+      isFilled: cell => cell !== null && paletteMap.has(cell),
+      getColorKey: cell => String(cell),
+      clearCell: () => null,
+    }, strength, { maxClusterSize });
+    if (!stats) return false;
+    return applyGridChange(nextGrid, false);
+  }, [applyGridChange, paletteMap]);
+
   const beginHistoryTransaction = useCallback(() => {
     if (!historyTransactionRef.current) {
       historyTransactionRef.current = gridRef.current.map(row => [...row]);
@@ -1680,6 +1693,21 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     applyGridChange(newGrid);
   };
 
+  // Lasso erase handler from GridCanvas: clear every bead inside the freehand region.
+  const handleLassoClear = (points: { x: number; y: number }[]) => {
+    if (isPracticeMode || backgroundCleanup.preview || points.length === 0) return;
+    const newGrid = gridRef.current.map(row => [...row]);
+    let cleared = 0;
+    for (const pt of points) {
+      if (pt.x < 0 || pt.x >= settings.width || pt.y < 0 || pt.y >= settings.height) continue;
+      if (newGrid[pt.y][pt.x] !== null) {
+        newGrid[pt.y][pt.x] = null;
+        cleared += 1;
+      }
+    }
+    if (cleared > 0) applyGridChange(newGrid);
+  };
+
   // Replace all instances of sourceColorId with targetColorId or erase if TRANSPARENT_ERASE
   const handleExecuteReplace = (sourceId: string, targetId: string) => {
     const newGrid = gridRef.current.map(row =>
@@ -2035,6 +2063,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       else if (key === 'i') setActiveTool('eyedropper');
       else if (key === 'e') setActiveTool('eraser');
       else if (key === 'u') setActiveTool('region_clear');
+      else if (key === 'o') setActiveTool('lasso_clear');
       else if (key === 'r') setActiveTool('replace');
     };
 
@@ -2339,6 +2368,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               beginHistoryTransaction={beginHistoryTransaction}
               finishHistoryTransaction={finishHistoryTransaction}
               handleApplyShape={handleApplyShape}
+              handleLassoClear={handleLassoClear}
               handleReferenceImageUpload={handleReferenceImageUpload}
               handleResetCurrentCanvas={handleResetCurrentCanvas}
               handleClearOuterBackground={handleClearOuterBackground}
@@ -2350,6 +2380,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               isEn={isEn}
               onOpenPatternsModal={openProfileLibrary}
               onConsolidateStrayBeads={handleConsolidateStrayBeads}
+              onClearIsolatedBeans={handleClearIsolatedBeans}
             />
           ) : (
             <MobileWorkspace
@@ -2407,6 +2438,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               beginHistoryTransaction={beginHistoryTransaction}
               finishHistoryTransaction={finishHistoryTransaction}
               handleApplyShape={handleApplyShape}
+              handleLassoClear={handleLassoClear}
               handleReferenceImageUpload={handleReferenceImageUpload}
               handleResetCurrentCanvas={handleResetCurrentCanvas}
               handleClearOuterBackground={handleClearOuterBackground}

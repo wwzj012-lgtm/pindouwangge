@@ -68,12 +68,14 @@ export interface DesktopWorkspaceProps {
   handleRestoreColor: (colorId: string) => void;
   erasedColorCoords: Map<string, [number, number][]>;
   onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
+  onClearIsolatedBeans?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
 
   // Callbacks
   handleCellClick: (row: number, col: number, overrideColorId?: string) => void;
   beginHistoryTransaction: () => void;
   finishHistoryTransaction: () => void;
   handleApplyShape: (tool: ToolType, r1: number, c1: number, r2: number, c2: number) => void;
+  handleLassoClear: (points: { x: number; y: number }[]) => void;
   handleReferenceImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleResetCurrentCanvas: () => void;
   handleClearOuterBackground: () => void;
@@ -137,10 +139,12 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   handleRestoreColor,
   erasedColorCoords,
   onConsolidateStrayBeads,
+  onClearIsolatedBeans,
   handleCellClick,
   beginHistoryTransaction,
   finishHistoryTransaction,
   handleApplyShape,
+  handleLassoClear,
   handleReferenceImageUpload,
   handleResetCurrentCanvas,
   handleClearOuterBackground,
@@ -215,7 +219,12 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
 
         {/* Center Main Canvas Viewport */}
         <main className="flex-1 h-full relative min-w-0 bg-slate-100 flex flex-col overflow-hidden">
-          {backgroundCleanup?.preview && <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />}
+          {/* Floating preview card: overlays the canvas without shifting layout. */}
+          {backgroundCleanup?.preview && (
+            <div className="pointer-events-none absolute top-3 inset-x-0 z-30 flex justify-center px-3">
+              <BackgroundCleanupPanel control={backgroundCleanup} isEn={isEn} />
+            </div>
+          )}
           <div className="relative min-h-0 flex-1">
           <GridCanvas
             cleanupPreview={backgroundCleanup?.preview}
@@ -249,6 +258,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             onHistoryTransactionStart={beginHistoryTransaction}
             onHistoryTransactionEnd={finishHistoryTransaction}
             onApplyShape={handleApplyShape}
+            onLassoClear={handleLassoClear}
             onEyedropColor={color => setSelectedColor(color)}
             onReferenceImageUpload={handleReferenceImageUpload}
             onResetCanvas={handleResetCurrentCanvas}
@@ -297,6 +307,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             onRestoreColor={handleRestoreColor}
             erasedColorCoords={erasedColorCoords}
             onConsolidateStrayBeads={onConsolidateStrayBeads}
+            onClearIsolatedBeans={onClearIsolatedBeans}
           />
           </>}
         </aside>

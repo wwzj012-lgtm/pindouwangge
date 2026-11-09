@@ -1620,7 +1620,7 @@ export function convertImageDataToGrid(rawData: Uint8ClampedArray, sourceWidth: 
   // noise stays within ~6.6 of the background while even a pure black dot on a
   // dark grey background sits at 10.5 and a red accent at 41, so the threshold
   // matches the mask's own tolerance magnitude. The island module's own guards
-  // (exterior-touching, size cap, subject bounds, near-subject distance)
+  // (exterior-touching, size cap, enclosed cavity, near-subject distance)
   // still apply first. With the background kept there are no transparent
   // cells, which makes the candidate set empty and this pass a no-op.
   if (backgroundResult.inference) {

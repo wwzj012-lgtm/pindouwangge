@@ -9,6 +9,7 @@ import {
   Grid2x2,
   Hand,
   Hash,
+  Lasso,
   Layers,
   Minus,
   PaintBucket,
@@ -183,6 +184,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
     { id: 'eraser', label: isEn ? 'Eraser (E)' : '橡皮擦 (E)', icon: <Eraser className="h-3.5 w-3.5" /> },
     { id: 'eyedropper', label: isEn ? 'Color Picker (I)' : '吸管 (I)', icon: <Pipette className="h-3.5 w-3.5" /> },
     { id: 'region_clear', label: isEn ? 'Clear Region (U)' : '区域清除 (U)', icon: <Trash2 className="h-3.5 w-3.5" /> },
+    { id: 'lasso_clear', label: isEn ? 'Lasso Erase (O)' : '套索擦除 (O)', icon: <Lasso className="h-3.5 w-3.5" /> },
   ];
   const shapeTools: { id: ToolType; label: string; icon: React.ReactNode }[] = [
     { id: 'line', label: isEn ? 'Line' : '直线', icon: <Minus className="h-3.5 w-3.5" /> },

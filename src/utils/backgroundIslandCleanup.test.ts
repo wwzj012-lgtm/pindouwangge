@@ -88,7 +88,7 @@ describe('background island component analysis', () => {
 
   it('hard-protects an isolated eye in an enclosed transparent cavity', () => {
     const grid = ringScene();
-    const analysis = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0, protectSubjectBounds: false });
+    const analysis = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0 });
     const eye = componentAt(analysis, 6, 6);
     expect(eye.touchesExterior).toBe(false);
     expect(eye.protectionReasons).toContain('enclosed');
@@ -106,24 +106,38 @@ describe('background island component analysis', () => {
       if (Math.abs(x - 7) + Math.abs(y - 7) === 5) grid[y][x] = 'contour';
     }
     grid[7][7] = 'eye'; grid[0][0] = 'noise';
-    const analysis = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0, protectSubjectBounds: false });
+    const analysis = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0 });
     expect(componentAt(analysis, 7, 7).protectionReasons).toContain('enclosed');
     expect(applyBackgroundIslandCleanup(grid, analysis)[7][7]).toBe('eye');
     expect(analysis.stats.candidateCells).toBe(1);
   });
 
-  it('protects an eye inside an open contour bounds without filling edge holes', () => {
+  it('leaves open-contour interior details to explicit user protection', () => {
     const grid = ringScene();
     grid[3][6] = null;
     const analysis = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0 });
     const eye = componentAt(analysis, 6, 6);
     expect(eye.touchesExterior).toBe(true);
-    expect(eye.protectionReasons).toEqual(['subject-bounds']);
-    const result = applyBackgroundIslandCleanup(grid, analysis);
-    expect(result[6][6]).toBe('eye');
-    expect(result[3][6]).toBeNull();
-    const unprotected = analyzeBackgroundIslands(grid, { nearSubjectDistance: 0, protectSubjectBounds: false });
-    expect(componentAt(unprotected, 6, 6).candidate).toBe(true);
+    expect(eye.candidate).toBe(true);
+    // The preview's tap-to-protect interaction is what keeps such details.
+    expect(applyBackgroundIslandCleanup(grid, analysis, { protectedComponentIds: [eye.id] })[6][6]).toBe('eye');
+    expect(applyBackgroundIslandCleanup(grid, analysis)[6][6]).toBeNull();
+    expect(applyBackgroundIslandCleanup(grid, analysis)[3][6]).toBeNull();
+  });
+
+  it('no longer shields distant specks behind a subject bounding rectangle', () => {
+    // Regression (2026-11-09 real-user report): a wide character's bounding
+    // rectangle used to protect residual specks floating in open whitespace,
+    // so the preview always reported zero removable blocks.
+    const grid = empty(40, 20);
+    fill(grid, 4, 6, 3, 8);   // body
+    fill(grid, 7, 12, 20, 2); // long shadow stretching the bounding rectangle
+    grid[8][20] = 'speck';    // inside the rectangle, far from every bead
+    const analysis = analyzeBackgroundIslands(grid);
+    const speck = componentAt(analysis, 20, 8);
+    expect(speck.protectionReasons).toEqual([]);
+    expect(speck.candidate).toBe(true);
+    expect(applyBackgroundIslandCleanup(grid, analysis)[8][20]).toBeNull();
   });
 
   it('does not create a global bounding box across separate subjects', () => {
@@ -246,7 +260,7 @@ describe('background island preview and immutable application', () => {
     const grid = ringScene(); grid[3][6] = null; grid[1][6] = 'accent';
     const analysis = analyzeBackgroundIslands(grid);
     const eye = componentAt(analysis, 6, 6), accent = componentAt(analysis, 6, 1);
-    expect(eye.candidate).toBe(false); expect(accent.candidate).toBe(false);
+    expect(eye.candidate).toBe(true); expect(accent.candidate).toBe(false);
     const selection = { selectedComponentIds: [eye.id, accent.id], protectedComponentIds: [accent.id] };
     expect(count(createBackgroundIslandMask(analysis, selection))).toBe(1);
     const result = applyBackgroundIslandCleanup(grid, analysis, selection);

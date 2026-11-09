@@ -38,6 +38,7 @@ export type ToolType =
   | 'eyedropper'
   | 'eraser'
   | 'region_clear'
+  | 'lasso_clear'
   | 'replace'
   | 'hand';
 

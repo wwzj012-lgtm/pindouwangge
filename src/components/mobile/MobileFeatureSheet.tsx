@@ -26,6 +26,7 @@ import {
   ZoomOut,
   Maximize2,
   Trash2,
+  Lasso,
   Timer,
 } from 'lucide-react';
 import { BeadShape, SymmetryMode, CanvasBackdrop } from '../../types';
@@ -53,6 +54,8 @@ export interface MobileFeatureSheetProps {
   residualCleanupDisabled?: boolean;
   onSelectRegionClear?: () => void;
   isRegionClearActive?: boolean;
+  onSelectLassoClear?: () => void;
+  isLassoClearActive?: boolean;
 
   // View states
   beadShape: BeadShape;
@@ -97,6 +100,8 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
   residualCleanupDisabled = false,
   onSelectRegionClear,
   isRegionClearActive = false,
+  onSelectLassoClear,
+  isLassoClearActive = false,
   beadShape,
   setBeadShape,
   showSymbols,
@@ -473,6 +478,29 @@ export const MobileFeatureSheet: React.FC<MobileFeatureSheetProps> = ({
                 <p>{isEn ? 'Clear region' : '区域清除'}</p>
                 <p className={`text-xs font-medium ${isRegionClearActive ? 'text-rose-50' : 'text-rose-700'}`}>
                   {isRegionClearActive ? (isEn ? 'Active — tap canvas' : '已开启 · 点击画布生效') : (isEn ? 'Remove linked same color' : '清除连通同色区域')}
+                </p>
+              </div>
+            </button>
+          )}
+
+          {onSelectLassoClear && (
+            <button
+              onClick={() => {
+                onClose();
+                onSelectLassoClear();
+              }}
+              aria-pressed={isLassoClearActive}
+              className={`min-h-12 min-w-0 p-3 rounded-2xl border font-black text-xs flex items-center gap-2.5 active:scale-95 transition-transform cursor-pointer ${
+                isLassoClearActive
+                  ? 'bg-rose-600 border-rose-600 text-white'
+                  : 'bg-rose-50 border-rose-200 text-rose-950'
+              }`}
+            >
+              <Lasso className={`w-5 h-5 shrink-0 ${isLassoClearActive ? 'text-white' : 'text-rose-600'}`} aria-hidden="true" />
+              <div className="min-w-0 text-left">
+                <p>{isEn ? 'Lasso erase' : '套索擦除'}</p>
+                <p className={`text-xs font-medium ${isLassoClearActive ? 'text-rose-50' : 'text-rose-700'}`}>
+                  {isLassoClearActive ? (isEn ? 'Active — circle the dots' : '已开启 · 圈住残点松手') : (isEn ? 'Draw a circle to erase inside' : '画一圈清除圈内豆子')}
                 </p>
               </div>
             </button>

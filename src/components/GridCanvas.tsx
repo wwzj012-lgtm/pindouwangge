@@ -65,6 +65,8 @@ interface GridCanvasProps {
   onHistoryTransactionEnd?: () => void;
   onMultiCellClick?: (points: { x: number; y: number }[]) => void;
   onApplyShape?: (points: { x: number; y: number }[]) => void;
+  /** Lasso erase: clears every filled cell inside the closed freehand region. */
+  onLassoClear?: (points: { x: number; y: number }[]) => void;
   onEyedropColor: (color: BeadColor) => void;
   symmetryMode?: SymmetryMode;
   canvasBackdrop?: CanvasBackdrop;
@@ -101,6 +103,45 @@ export interface BoardNavApi {
   focusBoard: (index: number) => void;
   /** Frame the whole pattern and clear the focused board. */
   showWholePattern: () => void;
+}
+
+/**
+ * Lasso erase geometry. Points are cell indices the pointer travelled through;
+ * fast drags are re-connected with Bresenham so the "circle" has no gaps that
+ * would leak the even-odd fill. Cell centres sit at (x + 0.5, y + 0.5): the
+ * polygon is lifted by half a cell so trace cells land ON the boundary, and
+ * inclusion is decided strictly inside + explicitly on the path.
+ */
+function getLassoClearCells(points: { x: number; y: number }[]): { x: number; y: number }[] {
+  if (points.length === 0) return [];
+  const path = new Set<string>();
+  const addPath = (x: number, y: number) => path.add(`${x},${y}`);
+  for (let i = 0; i + 1 < points.length; i += 1) {
+    for (const p of getLinePoints(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y)) addPath(p.x, p.y);
+  }
+  addPath(points[points.length - 1].x, points[points.length - 1].y);
+  if (points.length < 3) return [...path].map(key => { const [x, y] = key.split(',').map(Number); return { x, y }; });
+
+  const poly = points.map(p => ({ x: p.x + 0.5, y: p.y + 0.5 }));
+  const minY = Math.floor(Math.min(...poly.map(p => p.y)));
+  const maxY = Math.ceil(Math.max(...poly.map(p => p.y)));
+  for (let y = Math.max(0, minY); y <= maxY; y += 1) {
+    const center = y + 0.5;
+    const crossings: number[] = [];
+    for (let i = 0; i < poly.length; i += 1) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      if ((a.y <= center && b.y > center) || (b.y <= center && a.y > center)) {
+        crossings.push(a.x + (center - a.y) / (b.y - a.y) * (b.x - a.x));
+      }
+    }
+    crossings.sort((u, v) => u - v);
+    for (let k = 0; k + 1 < crossings.length; k += 2) {
+      for (let x = Math.ceil(crossings[k] - 0.5); x <= Math.floor(crossings[k + 1] - 0.5 - 1e-9); x += 1) {
+        if (x >= 0) addPath(x, y);
+      }
+    }
+  }
+  return [...path].map(key => { const [x, y] = key.split(',').map(Number); return { x, y }; });
 }
 
 // Bresenham's Line Algorithm
@@ -231,6 +272,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
   onHistoryTransactionEnd,
   onMultiCellClick,
   onApplyShape,
+  onLassoClear,
   onEyedropColor,
   symmetryMode = 'none',
   canvasBackdrop = 'dark_grid',
@@ -258,6 +300,9 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
 
   // Remember last drawing tool before switching to hand
   const [lastDrawTool, setLastDrawTool] = useState<ToolType>('pencil');
+
+  // Freehand lasso erase path (cell indices the pointer travelled through)
+  const [lassoPoints, setLassoPoints] = useState<{ x: number; y: number }[]>([]);
 
   // Original image reference preview state
   const effectiveImage = sourceImage || overlayImage;
@@ -1475,6 +1520,28 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     ctx.lineWidth = frameWidth;
     ctx.strokeRect(startX, startY, gridPixelWidth, gridPixelHeight);
 
+    // 8.5 Lasso erase preview: rose-tinted cells that will be cleared, plus a
+    // dashed stroke tracing the pointer path through the cell centres.
+    if (activeTool === 'lasso_clear' && lassoPoints.length > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(244, 63, 94, 0.26)';
+      for (const c of getLassoClearCells(lassoPoints)) {
+        if (c.x < 0 || c.x >= width || c.y < 0 || c.y >= height) continue;
+        ctx.fillRect(startX + c.x * cellSize, startY + c.y * cellSize, cellSize, cellSize);
+      }
+      ctx.beginPath();
+      lassoPoints.forEach((p, index) => {
+        const px = startX + (p.x + 0.5) * cellSize;
+        const py = startY + (p.y + 0.5) * cellSize;
+        if (index === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.strokeStyle = '#f43f5e';
+      ctx.lineWidth = Math.max(1.5, cellSize * 0.12);
+      ctx.setLineDash([Math.max(3, cellSize * 0.55), Math.max(2, cellSize * 0.35)]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Render rulers last: adjacent boards and their spotlight must not cover them.
     if (showCoordinates) {
       if (focusRect) {
@@ -1555,6 +1622,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     isDrawing,
     shapeStartCell,
     hoverCell,
+    lassoPoints,
     applySymmetryToPoints,
     axes.x,
     axes.y,
@@ -1640,6 +1708,7 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
     setShapeStartCell(cell);
     e.currentTarget.setPointerCapture?.(e.pointerId);
     activePointerIdRef.current = e.pointerId;
+    if (activeTool === 'lasso_clear') setLassoPoints([cell]);
 
     if (activeTool === 'pencil' || activeTool === 'eraser') {
       onHistoryTransactionStart?.();
@@ -1693,6 +1762,12 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
         } else {
           onCellClick(cell.x, cell.y);
         }
+      } else if (activeTool === 'lasso_clear') {
+        setLassoPoints(prev => {
+          const last = prev[prev.length - 1];
+          if (last && last.x === cell.x && last.y === cell.y) return prev;
+          return [...prev, cell];
+        });
       }
     }
   };
@@ -1735,9 +1810,14 @@ export const GridCanvas: React.FC<GridCanvasProps> = ({
       }
     }
 
+    if (applyShape && isDrawing && activeTool === 'lasso_clear' && lassoPoints.length > 0) {
+      onLassoClear?.(getLassoClearCells(lassoPoints));
+    }
+
     setIsPanning(false);
     setIsDrawing(false);
     setShapeStartCell(null);
+    setLassoPoints([]);
     finishHistoryTransaction();
   };
 

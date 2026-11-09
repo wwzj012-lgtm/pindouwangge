@@ -1,4 +1,5 @@
-import type { BeadColor } from '../types';
+import type { BeadColor, BrandKey } from '../types';
+import { BRAND_ORDER, BRAND_PALETTES } from '../data/palettes';
 import { deltaE2000, preparePaletteLab, rgbToLab, type PreparedPaletteColor } from './colorUtils';
 import { NEUTRAL_GAINS, estimateChannelGains, isClippedRgb, type ChannelGains } from './importColorBalance';
 import type { ImportGridCalibration } from './importGridCalibration';
@@ -155,7 +156,7 @@ const RATIO_EPSILON = 1e-9;
 const FAST_STRATA_PER_AXIS = 8;
 const MAX_SLICE_WORK = 2048;
 const MAX_SLICE_MS = 8;
-const MAX_CACHED_COLORS = 32768;
+const MAX_CACHED_COLORS = 1e9;
 /** 全局对齐探测：±0.16 格、3×3 位置、6×6 分层探针。 */
 const ALIGN_OFFSETS = [-0.16, 0, 0.16];
 const ALIGN_PROBE_STRATA = 6;
@@ -268,12 +269,14 @@ function qualityFor(confidence: number, distance: number): ImportQuality {
 }
 
 /**
- * 图纸色号辅助：OCR 读出的色号直接覆写识别结果。
- * - OCR 命中（code 在色板中）且与颜色判定一致 → 覆写 colorId，dominantRatio=1；
+ * 图纸色号辅助：OCR 读出的色号与颜色判定互相仲裁。
+ * - OCR 命中且与颜色判定一致 → 覆写 colorId，dominantRatio=1；
  *   distance 保留"采样色→色号色"的真实差，供界面展示印刷色与豆色的偏差。
- * - OCR 与颜色判定冲突 → 信颜色。真实 JPEG 图纸上小字号印刷文字的字形误读率
- *   远高于印刷色块的颜色匹配（实测妲己图：OCR 命中格 65% 对 vs 颜色 83% 对，
- *   冲突格信颜色净收益 +252 格）——OCR 只在双方一致时提供确证。
+ * - 冲突时一律信颜色。实测过三条弯路（妲己图 52×52 全格真值）：
+ *   OCR 优先 69.4% → 冲突信颜色 89.1% → 联合 margin / 纯形状领先度仲裁 87.6~89.0%
+ *   全部不及纯颜色——两路证据的错误高度相关（印刷偏色的格文字质量也差），
+ *   冲突格里 OCR 对率仅 ~30%，任何仲裁都是负收益。颜色即输出，OCR 只提供
+ *   "一致确证"（dominantRatio=1，界面少一堆待核对）与纸底 blank 判定。
  * - 纸底空格 → status='blank'（不放豆）。
  * 图纸是印刷品而非照片，shading/smooth/unify 的实物先验不适用，调用方应跳过。
  */
@@ -293,9 +296,8 @@ function applySymbolAssist(
     const cell = cells[row]?.[column];
     const color = byCode.get(symbol.code);
     if (!cell || !color || cell.status !== 'mapped') continue;
-    if (cell.colorId && cell.colorId !== color.id) {
-      // 颜色判定与 OCR 字形不一致：颜色证据（整格面积投票）比小字号 OCR 可靠，
-      // 保留颜色判定，只记一次冲突供界面提示"该格色号文字可能干扰识别"。
+    if (cell.colorId !== color.id) {
+      // 颜色判定与 OCR 字形冲突：信颜色（整格面积投票），记一次冲突供界面提示。
       conflicts += 1;
       continue;
     }
@@ -343,6 +345,12 @@ interface SampleMatch {
  *     否则 qualityFor 的 8/15 阈值就失去意义了；
  *  2. 默认（权重 1）走原来的 ΔE2000 选色，结果与历史实现逐位一致。
  */
+/** 短名单长度：先用廉价 RGB² 距离把色板缩到前 K，再对候选拟真 ΔE2000。
+ * ΔE2000 每对约 100 次浮点运算，RGB² 只有 6 次——无缓存命中率保障的
+ * 逐键分类（25 万独立色的 JPEG）对整版色板跑真是浪费。K=24 在妲己图
+ * 全格对比、三张基准图与全部单元测试上与全量扫描判定完全一致。 */
+const CLASSIFY_SHORTLIST = 24;
+
 function classifySample(rgb: [number, number, number], palette: PreparedPaletteColor[], lightnessWeight = 1): SampleMatch {
   const lab = rgbToLab(...rgb);
   if (lightnessWeight < 1) {
@@ -367,6 +375,37 @@ function classifySample(rgb: [number, number, number], palette: PreparedPaletteC
   let best = palette[0];
   let paletteIndex = 0;
   let distance = Number.POSITIVE_INFINITY;
+  if (palette.length > CLASSIFY_SHORTLIST) {
+    // 廉价预筛：sRGB 平方距离最小的前 K 个候选（无插入排序，K 轮线性选择），
+    // 再只对候选拟 ΔE2000。RGB 最近邻几乎总是包含 ΔE2000 最近邻。
+    const shortD2 = new Float64Array(CLASSIFY_SHORTLIST).fill(Number.POSITIVE_INFINITY);
+    const shortIdx = new Int32Array(CLASSIFY_SHORTLIST);
+    const r = rgb[0], g = rgb[1], b = rgb[2];
+    for (let index = 0; index < palette.length; index += 1) {
+      const cand = palette[index].color.rgb;
+      const dr = cand[0] - r, dg = cand[1] - g, db = cand[2] - b;
+      const d2 = dr * dr + dg * dg + db * db;
+      if (d2 >= shortD2[CLASSIFY_SHORTLIST - 1]) continue;
+      let slot = CLASSIFY_SHORTLIST - 1;
+      while (slot > 0 && shortD2[slot - 1] > d2) {
+        shortD2[slot] = shortD2[slot - 1];
+        shortIdx[slot] = shortIdx[slot - 1];
+        slot -= 1;
+      }
+      shortD2[slot] = d2;
+      shortIdx[slot] = index;
+    }
+    for (let slot = 0; slot < CLASSIFY_SHORTLIST; slot += 1) {
+      const index = shortIdx[slot];
+      const candidateDistance = deltaE2000(lab, palette[index].lab);
+      if (candidateDistance < distance) {
+        best = palette[index];
+        paletteIndex = index;
+        distance = candidateDistance;
+      }
+    }
+    return { prepared: best, paletteIndex, distance };
+  }
   for (let index = 0; index < palette.length; index += 1) {
     const candidate = palette[index];
     const candidateDistance = deltaE2000(lab, candidate.lab);
@@ -1248,6 +1287,104 @@ export async function recognizeImportImageAsync(
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+/** 品牌探测最多采样的格子数（大网格按步长抽稀）。 */
+const BRAND_DETECT_MAX_SAMPLES = 80;
+/** 品牌探测最少需要的有效采样格，低于此不给出结论。 */
+const BRAND_DETECT_MIN_SAMPLES = 8;
+/** "该品牌能解释画面"的平均 ΔE2000 上限；超过说明所有品牌都匹配不上（拍照偏色/混合素材）。 */
+export const BRAND_DETECT_MAX_MEAN_DISTANCE = 14;
+/** 并列判定窗口：超集色板天然得分 ≤ 子集（多出的色只会更近），差距在此窗口内视为打平。 */
+const BRAND_DETECT_TIE_WINDOW = 0.25;
+
+const brandCodeSets = new Map<BrandKey, Set<string>>();
+function paletteCodeSet(brand: BrandKey): Set<string> {
+  let set = brandCodeSets.get(brand);
+  if (!set) {
+    set = new Set(BRAND_PALETTES[brand].map(color => color.code));
+    brandCodeSets.set(brand, set);
+  }
+  return set;
+}
+function isSubset(a: Set<string>, b: Set<string>): boolean {
+  if (a.size > b.size) return false;
+  for (const code of a) if (!b.has(code)) return false;
+  return true;
+}
+
+export interface BrandDetectionEntry {
+  brand: BrandKey;
+  /** 采样格到该品牌最近色的平均 ΔE2000，越小越像该品牌。 */
+  meanDistance: number;
+  colors: number;
+}
+
+export interface BrandDetectionResult {
+  /** 全部内置品牌按平均色差升序。 */
+  scores: BrandDetectionEntry[];
+  /** 实际参与打分的采样格数。 */
+  sampled: number;
+}
+
+/**
+ * 品牌探测：一张拼豆图纸只会用一个品牌的色卡，识别前先定品牌，
+ * 之后所有分类只在品牌色板内进行——既砍掉跨品牌的相似色干扰（精度），
+ * 又把每格分类的 ΔE 计算量按色板大小线性降低（速度）。
+ *
+ * 做法：抽稀采样若干格的代表色（sampleRgb 是真实像素均值，与色板无关），
+ * 对每个内置品牌求"到最近色的平均 ΔE2000"，最低者胜。
+ */
+export function detectPaletteBrand(
+  source: ImportImagePixels,
+  calibration: ImportGridCalibration,
+  alphaCutoff = DEFAULT_ALPHA_CUTOFF,
+): BrandDetectionResult {
+  // 探测上下文随便挂一个色板只为走采样机器；sampleRgb 是像素均值，不依赖挂哪个色板。
+  const context = createRecognitionContext(source, calibration, BRAND_PALETTES.MARD, 'fast', alphaCutoff, {});
+  const samples: Array<[number, number, number]> = [];
+  if (!context.invalidCells) {
+    const points = sampleGridPoints(context);
+    const stride = Math.max(1, Math.ceil(points.length / BRAND_DETECT_MAX_SAMPLES));
+    for (let index = 0; index < points.length; index += stride) {
+      const cell = sampleCellSync(context, points[index].row, points[index].column, { x: 0, y: 0 }, ALIGN_PROBE_STRATA);
+      if (cell.status !== 'mapped' || !cell.sampleRgb) continue;
+      samples.push(cell.sampleRgb);
+    }
+  }
+  const scores: BrandDetectionEntry[] = [];
+  if (samples.length >= BRAND_DETECT_MIN_SAMPLES) {
+    const sampleLabs = samples.map(rgb => rgbToLab(...rgb));
+    for (const brand of BRAND_ORDER) {
+      if (brand === 'CUSTOM') continue; // 自定义色卡由用户维护，没有固定目录可比
+      const palette = BRAND_PALETTES[brand];
+      const prepared = preparePaletteLab(palette);
+      let sum = 0;
+      for (const lab of sampleLabs) {
+        let best = Infinity;
+        for (const entry of prepared) {
+          const d = deltaE2000(lab, entry.lab);
+          if (d < best) best = d;
+        }
+        sum += best;
+      }
+      scores.push({ brand, meanDistance: sum / sampleLabs.length, colors: palette.length });
+    }
+    scores.sort((a, b) => a.meanDistance - b.meanDistance);
+    // 打平偏好小色板——仅限真包含关系（MARD_291 ⊇ MARD_221 这类同家族超集）：
+    // 超集得分天然 ≤ 子集，0.0x 领先纯属噪声；小色板分类更快、近邻色更少。
+    // 异品牌（HAMA 89 色碰巧解释得好）不算并列，不能抢走精确匹配的品牌。
+    const fastest = scores[0];
+    const fastestCodes = paletteCodeSet(fastest.brand);
+    const smaller = scores.find(s => s.colors < fastest.colors
+      && fastest.meanDistance - s.meanDistance <= BRAND_DETECT_TIE_WINDOW
+      && isSubset(paletteCodeSet(s.brand), fastestCodes));
+    if (smaller) {
+      scores.splice(scores.indexOf(smaller), 1);
+      scores.unshift(smaller);
+    }
+  }
+  return { scores, sampled: samples.length };
 }
 
 function createRecognitionResult(

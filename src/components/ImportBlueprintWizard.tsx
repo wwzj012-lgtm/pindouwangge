@@ -22,6 +22,7 @@ import type { BeadColor, BrandKey } from '../types';
 import { BRAND_NAMES, BRAND_ORDER, BRAND_PALETTES } from '../data/palettes';
 import { applyRecognitionCorrections, getRecognitionReviewCells, recognitionCellKey, type ImportRecognitionCorrections } from '../utils/importRecognitionReview';
 import { ImportRecognitionCanvas, ImportSourceCellCrop } from './ImportRecognitionCanvas';
+import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import { getRecognitionBackgroundCandidate, getRecognitionBackgroundCells, recognitionBackgroundCorrections, releaseRecognitionBackgroundCell } from '../utils/recognitionBackground';
 import './ImportBlueprintWizard.css';
 import { confirmRecognitionResult, type ConfirmedRecognitionDraft } from '../utils/confirmedRecognition';
@@ -41,6 +42,8 @@ import {
   type ImportImageDimensions,
 } from '../utils/importGridCalibration';
 import {
+  BRAND_DETECT_MAX_MEAN_DISTANCE,
+  detectPaletteBrand,
   recognizeImportImageAsync,
   recognitionResultToCodeMatrix,
   type ImportRecognitionMode,
@@ -137,9 +140,15 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const [confirmation, setConfirmation] = useState<{ result: ImportRecognitionResult; draft: ConfirmedRecognitionDraft } | null>(null);
   const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
   const [isSavingRecognition, setIsSavingRecognition] = useState(false);
+  // 丢弃确认：识别结果只活在向导内存里，关闭/换图即丢。重跑一次识别要
+  // 校准+等待+逐格复核，成本不低——用应用内确认框替代"静默丢弃"，
+  // 也避免浏览器原生 confirm 的丑样式。
+  const [pendingDiscard, setPendingDiscard] = useState<null | { kind: 'close' } | { kind: 'file'; file: File }>(null);
   const saveBusyRef = useRef(false);
   const currentConfirmationIdRef = useRef<string | null>(null);
   const mountedRef = useRef(true);
+  // 用户是否手动选过色板品牌——选过就不再自动检测覆盖用户的选择。
+  const paletteTouchedRef = useRef(false);
   const openRef = useRef(isOpen);
   const wasOpenRef = useRef(false);
   const imageLoadIdRef = useRef(0);
@@ -385,10 +394,26 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
       const context = canvas.getContext('2d', { willReadFrequently: true });
       if (!context) throw new Error('无法读取图片像素，请重新选择图片。');
       context.drawImage(imageElement, 0, 0, imageDimensions.width, imageDimensions.height);
+      const pixels = context.getImageData(0, 0, imageDimensions.width, imageDimensions.height);
+      // 一张图纸只用一个品牌的色卡：先探测品牌，再只在品牌色板内识别——
+      // 砍掉跨品牌相似色干扰，也把分类计算量按色板大小线性降下来。
+      // 用户手动选过品牌就不覆盖他的选择。
+      let palette = localPalette;
+      let detectedBrandName = '';
+      if (!paletteTouchedRef.current) {
+        const detection = detectPaletteBrand({ data: pixels.data, ...imageDimensions }, snapshot.calibration);
+        const top = detection.scores[0];
+        if (top && top.meanDistance <= BRAND_DETECT_MAX_MEAN_DISTANCE && initialPaletteChoice(localPalette) !== top.brand) {
+          palette = BRAND_PALETTES[top.brand];
+          detectedBrandName = BRAND_NAMES[top.brand];
+          setLocalPalette(palette);
+          setPaletteChoice(top.brand);
+        }
+      }
       const result = await recognizeImportImageAsync(
-        { data: context.getImageData(0, 0, imageDimensions.width, imageDimensions.height).data, ...imageDimensions },
+        { data: pixels.data, ...imageDimensions },
         snapshot.calibration,
-        localPalette,
+        palette,
         recognitionMode,
         undefined,
         { signal: controller.signal, onProgress: value => {
@@ -401,7 +426,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
       const qualityLabel = result.summary.quality === 'good' ? '较好' : result.summary.quality === 'fair' ? '一般' : '较低，请核对预览';
       setStatus({
         tone: result.summary.quality === 'good' ? 'success' : 'neutral',
-        message: `识别完成，主色区分度${qualityLabel}：${result.summary.mapped} 格已匹配，${result.summary.blank} 格为空白，${result.summary.lowConfidence} 格主色不够明显，请核对。`,
+        message: `${detectedBrandName ? `已自动识别图纸色卡：${detectedBrandName}。` : ''}识别完成，主色区分度${qualityLabel}：${result.summary.mapped} 格已匹配，${result.summary.blank} 格为空白，${result.summary.lowConfidence} 格主色不够明显，请核对。`,
       });
     } catch (error) {
       if (!mountedRef.current || !openRef.current || recognitionControllerRef.current !== controller || controller.signal.aborted) return;
@@ -434,6 +459,19 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
       if (mountedRef.current && openRef.current) setStatus({ tone: 'error', message: '复制失败，请检查浏览器剪贴板权限。' });
     }
   }, [effectiveRecognition]);
+
+  // 关闭/换图前的丢弃确认：已有识别结果时先询问，确认后才真正执行。
+  // （识别结果只活在向导内存里，关闭或换图即丢；重跑一次识别要校准、
+  // 等待、逐格复核，成本不低。）
+  const requestClose = useCallback(() => {
+    if (effectiveRecognition) { setPendingDiscard({ kind: 'close' }); return; }
+    closeWizard();
+  }, [effectiveRecognition, closeWizard]);
+
+  const requestLoadFile = useCallback((file: File | undefined) => {
+    if (file && effectiveRecognition) { setPendingDiscard({ kind: 'file', file }); return; }
+    loadFile(file);
+  }, [effectiveRecognition, loadFile]);
 
   const backToEdit = useCallback(() => {
     if (!alignment || !region) return;
@@ -482,6 +520,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
 
   const changePalette = (value: PaletteChoice) => {
     if (value === paletteChoice) return;
+    paletteTouchedRef.current = true;
     invalidateRecognition();
     setPaletteChoice(value);
     setLocalPalette(value === 'ACTIVE' ? activePalette : BRAND_PALETTES[value]);
@@ -613,9 +652,13 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
       setPitchHint(`${summary}。置信度太低，没有套用，请手动微调。`);
       return;
     }
-    setAlignmentValue({ ...alignment, cellSize: estimate.cell });
+    // 格距和相位一起套用：只给格距的话，网格线周期对但相位仍可能偏半格，
+    // 用户看到青线与图纸格线错开，会以为估算没生效。
+    setAlignmentValue({ ...alignment, cellSize: estimate.cell, originX: estimate.originX, originY: estimate.originY });
     updateDraft('cellSize', String(Number(estimate.cell.toFixed(1))));
-    setPitchHint(`${summary}。已套用到方格边长。`);
+    updateDraft('originX', String(Number(estimate.originX.toFixed(1))));
+    updateDraft('originY', String(Number(estimate.originY.toFixed(1))));
+    setPitchHint(`${summary}。已套用到方格边长并按格线相位对齐原点；绿色区域即实际识别范围，如个别线仍偏移可拖红点微调。`);
   };
 
   const renderNumberField = (key: keyof NumericDrafts, label: string, min: number | undefined, max: number | undefined, stepValue: number) => (
@@ -643,7 +686,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const swatchInk = swatchRgb && swatchRgb[0] * .299 + swatchRgb[1] * .587 + swatchRgb[2] * .114 < 150 ? '#ffffff' : '#271d32';
 
   return <div ref={dialogRef} className="ir-workbench" role="dialog" aria-modal="true" aria-labelledby="import-blueprint-title" onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'Escape') { event.preventDefault(); closeWizard(); return; }
+    if (event.key === 'Escape') { event.preventDefault(); requestClose(); return; }
     if (event.key !== 'Tab') return;
     const focusable = (Array.from(event.currentTarget.querySelectorAll('button:not(:disabled), input:not(:disabled):not([hidden]), select:not(:disabled), summary, canvas[tabindex="0"]')) as HTMLElement[])
       .filter(element => element.getClientRects().length > 0);
@@ -652,10 +695,10 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
   }}>
-    <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图纸图片" hidden onChange={event => { loadFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
+    <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" aria-label="选择图纸图片" hidden onChange={event => { requestLoadFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
     <header className="ir-header">
       <div className="ir-heading"><span className="ir-mark"><ScanSearch size={21} /></span><div><h1 id="import-blueprint-title">网格颜色识别</h1><p>对齐原图，识别色号，逐格核对。</p></div></div>
-      <div className="ir-header-actions">{imageUrl && <button type="button" className="ir-button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={15} />更换图片</button>}<button type="button" className="ir-icon-button" onClick={closeWizard} aria-label="关闭颜色识别" title="关闭"><X size={18} /></button></div>
+      <div className="ir-header-actions">{imageUrl && <button type="button" className="ir-button" onClick={() => fileInputRef.current?.click()}><ImagePlus size={15} />更换图片</button>}<button type="button" className="ir-icon-button" onClick={requestClose} aria-label="关闭颜色识别" title="关闭"><X size={18} /></button></div>
     </header>
     <nav className="ir-steps" aria-label="颜色识别步骤">
       {(['upload', 'calibrate', 'recognize'] as WizardStep[]).map((item, index) => {
@@ -667,7 +710,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
       {step === 'upload' ? <section className="ir-upload">
         <div className="ir-upload-main">
         <span className="ir-eyebrow">COLOR RECOGNITION</span><h2>从一张图纸，<br />还原每一格的颜色。</h2><p>选择已有的网格图纸，对齐实际行列，识别本地色板中的颜色代码，再用原图逐格核对。</p>
-        <div className="ir-upload-drop" data-dragging={isDraggingFile} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFile(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFile(false); }} onDrop={event => { event.preventDefault(); setIsDraggingFile(false); loadFile(event.dataTransfer.files[0]); }}>
+        <div className="ir-upload-drop" data-dragging={isDraggingFile} onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; setIsDraggingFile(true); }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFile(false); }} onDrop={event => { event.preventDefault(); setIsDraggingFile(false); requestLoadFile(event.dataTransfer.files[0]); }}>
           <ImagePlus size={35} strokeWidth={1.4} /><h3>拖入图纸，或从本地选择</h3><p>PNG / JPG / WebP · 最大 15 MB</p><button type="button" className="ir-button ir-primary" onClick={() => fileInputRef.current?.click()}><Upload size={16} />选择本地图片</button>
         </div><p className="ir-upload-note"><Lock size={16} className="shrink-0" />图片只在本次浏览器会话内处理。识别结果可复核、修正，并复制为颜色代码矩阵。</p>
         {status && <p role={status.tone === 'error' ? 'alert' : 'status'} className="ir-status" data-tone={status.tone}>{status.message}</p>}
@@ -742,7 +785,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
               )}
               {recognition?.symbolAssist && (
                 <p className="ir-help ir-autocorrect" role="status">
-                  <strong>色号辅助：</strong>检出文字 {recognition.symbolAssist.textCells} 格，读出色号 {recognition.symbolAssist.resolved} 格（其中 {recognition.symbolAssist.overridden} 格以文字为准{recognition.symbolAssist.conflicts > 0 ? `，${recognition.symbolAssist.conflicts} 格文字与颜色不符、按颜色处理` : ''}），纸底空格 {recognition.symbolAssist.blanks} 格不放豆。
+                  <strong>色号辅助：</strong>检出文字 {recognition.symbolAssist.textCells} 格，读出色号 {recognition.symbolAssist.resolved} 格（其中 {recognition.symbolAssist.overridden} 格与颜色一致、以文字确证{recognition.symbolAssist.conflicts > 0 ? `，${recognition.symbolAssist.conflicts} 格文字与颜色不符、按颜色处理` : ''}），纸底空格 {recognition.symbolAssist.blanks} 格不放豆。
                 </p>
               )}
             </section>
@@ -800,5 +843,19 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         </aside>
       </div>}
     </main>
+    <UnsavedChangesDialog
+      open={pendingDiscard !== null}
+      title="丢弃识别结果？"
+      description="关闭或更换图片会丢弃当前识别结果与逐格复核记录；重新识别需要重新校准并等待整图跑完。"
+      confirmLabel="丢弃并继续"
+      onCancel={() => setPendingDiscard(null)}
+      onConfirm={() => {
+        const target = pendingDiscard;
+        setPendingDiscard(null);
+        if (!target) return;
+        if (target.kind === 'close') closeWizard();
+        else loadFile(target.file);
+      }}
+    />
   </div>;
 }

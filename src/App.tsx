@@ -48,6 +48,7 @@ import { UserGuideModal } from './components/UserGuideModal';
 import { AuthModal } from './components/AuthModal';
 import { VipPrivilegesModal } from './components/VipPrivilegesModal';
 import { UserProfileModal } from './components/UserProfileModal';
+import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { AccountManagementModal } from './components/AccountManagementModal';
 import { HomeView, type HeroExample } from './components/HomeView';
 import { LandingView } from './components/LandingView';
@@ -451,6 +452,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [isSaveNameDialogOpen, setIsSaveNameDialogOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState('');
   const [saveNameError, setSaveNameError] = useState<string | null>(null);
+  // 未保存修改守卫：把「浏览器原生 confirm」换成应用内确认框。
+  // 拦截到的动作存进这里，用户确认后原样执行（同步调用方返回 false 时
+  // 不产生任何副作用，动作只在用户点头后才真正发生）。
+  const [unsavedGuardAction, setUnsavedGuardAction] = useState<null | { description: string; confirmLabel?: string; action: () => void }>(null);
   const [imageLoadMessage, setImageLoadMessage] = useState<string | null>(null);
   const announcement = useAnnouncements();
   const [publicFeatureFlags, setPublicFeatureFlags] = useState<Record<PublicFeatureKey, boolean>>(() => ({ ...PUBLIC_FEATURE_DEFAULTS }));
@@ -1820,6 +1825,21 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     applyGridChange(newGrid);
   }, [applyGridChange, settings]);
 
+  // 画板是否有未保存修改——与应用内确认守卫共用同一个判定口径
+  // （patternEditingSnapshot 对比 savedBaseline，与保存/离开检测完全一致）。
+  const hasUnsavedPatternEdits = (): boolean =>
+    patternEditingSnapshot(gridRef.current, settings, brand, activePalette, projectName) !== savedPatternBaselineRef.current;
+
+  /** 有未保存修改时弹应用内确认框并暂存动作；无修改或确认后才真正执行。 */
+  const guardUnsavedChanges = (description: string, action: () => void, confirmLabel?: string): boolean => {
+    if (!hasUnsavedPatternEdits()) {
+      action();
+      return true;
+    }
+    setUnsavedGuardAction({ description, confirmLabel, action });
+    return false;
+  };
+
   const handleRestorePattern = (project: EditablePatternProject): boolean => {
     // Local copies need the same integrity checks as decoded cloud projects.
     // Validate and prepare everything before touching the current draft or URL.
@@ -1838,10 +1858,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     });
     const nextBaseline = patternEditingSnapshot(restoredGrid, restoredSettings, project.brand, project.palette, project.name);
     const studioUrl = savedPatternStudioUrl(window.location.href);
-    if (patternEditingSnapshot(gridRef.current, settings, brand, activePalette, projectName) !== savedPatternBaselineRef.current
-      && !window.confirm(isEn ? 'Replace the current unsaved pattern? Unsaved changes will be lost.' : '当前图纸有未保存的修改，继续载入将替换这些修改。是否继续？')) {
-      return false;
-    }
     beginNewCompletionDraft();
     // This is a restored identity, not a newly-created draft. Keep its valid
     // stored entitlement when the work-key effect observes the new ID.
@@ -1945,12 +1961,14 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   };
 
   const handleEditRecognition = (draft: ConfirmedRecognitionDraft, saved: boolean): boolean => {
-    const previousBaseline = savedPatternBaselineRef.current;
-    if (!handleRestorePattern(recognitionDraftToProject(draft, settings))) return false;
-    // Loading for editing is not a save: preserve unsaved-change detection.
-    if (!saved) savedPatternBaselineRef.current = previousBaseline;
-    setIsImportBlueprintOpen(false);
-    return true;
+    const proceed = () => {
+      const previousBaseline = savedPatternBaselineRef.current;
+      handleRestorePattern(recognitionDraftToProject(draft, settings));
+      // Loading for editing is not a save: preserve unsaved-change detection.
+      if (!saved) savedPatternBaselineRef.current = previousBaseline;
+      setIsImportBlueprintOpen(false);
+    };
+    return guardUnsavedChanges('继续编辑将替换当前画板上未保存的修改。', proceed);
   };
 
   const openSaveNameDialog = (): void => {
@@ -2040,7 +2058,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       }
       // A public copy has a new draft identity and cannot inherit the author's
       // saved work ID, ownership, or paid completion metadata.
-      return handleRestorePattern(communityDraft({ ...pattern.project, name: pattern.title }, createDraftId()));
+      const source = pattern.project;
+      return guardUnsavedChanges(`载入社区作品「${pattern.title}」将替换当前画板上未保存的修改。`, () => {
+        handleRestorePattern(communityDraft({ ...source, name: pattern.title }, createDraftId()));
+      });
     }
     setProjectName(pattern.title);
     setSettings(prev => ({
@@ -2471,6 +2492,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         onClose={() => setIsGuideModalOpen(false)}
       />
 
+      <UnsavedChangesDialog
+        open={unsavedGuardAction !== null}
+        description={unsavedGuardAction?.description ?? ''}
+        confirmLabel={unsavedGuardAction?.confirmLabel}
+        onCancel={() => setUnsavedGuardAction(null)}
+        onConfirm={() => {
+          const pending = unsavedGuardAction;
+          setUnsavedGuardAction(null);
+          pending?.action();
+        }}
+      />
+
       {isSaveNameDialogOpen && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-md">
           <div className="w-full max-w-sm rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
@@ -2561,7 +2594,10 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
         onOpenAdminPanel={() => window.location.assign('/admin')}
         onOpenVipModal={() => setIsVipModalOpen(true)}
         onSelectPattern={handleRemixPattern}
-        onContinueEditing={handleRestorePattern}
+        onContinueEditing={(project) => guardUnsavedChanges(
+          `继续编辑「${project.name}」将替换当前画板上未保存的修改。`,
+          () => { handleRestorePattern(project); },
+        )}
         onOpenCommunity={() => {
           if (!publicFeatureFlags['public.community']) {
             showDisabledFeature('社区');

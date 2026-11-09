@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { MARD_PALETTE } from '../data/palettes';
+import { BRAND_PALETTES, MARD_PALETTE } from '../data/palettes';
 import type { BeadColor } from '../types';
+import { deltaE2000, preparePaletteLab, rgbToLab } from './colorUtils';
 import type { ImportGridCalibration } from './importGridCalibration';
-import { recognizeImportImage, recognizeImportImageAsync, recognitionResultToCodeMatrix } from './importRecognition';
+import { detectPaletteBrand, recognizeImportImage, recognizeImportImageAsync, recognitionResultToCodeMatrix } from './importRecognition';
 import type { ImportImagePixels } from './importRecognition';
 
 const calibration: ImportGridCalibration = {
@@ -47,6 +48,31 @@ function singleCell(source: ImportImagePixels, patch: Partial<ImportGridCalibrat
 }
 
 describe('import recognition', () => {
+  it('detects the chart brand and prefers the smaller palette when a superset ties', () => {
+    // 选一支对其他所有品牌都最远的 MARD 色：保证异品牌解释不了它，
+    // 而 MARD_291 ⊇ MARD_221 对它打平——按并列偏好小色板应判 MARD（221）。
+    const mard = BRAND_PALETTES.MARD;
+    const otherPrepared = Object.entries(BRAND_PALETTES)
+      .filter(([brand]) => brand !== 'MARD' && brand !== 'CUSTOM')
+      .map(([, palette]) => preparePaletteLab(palette as BeadColor[]));
+    let pick = mard[0];
+    let worst = -1;
+    for (const color of mard) {
+      const lab = rgbToLab(...color.rgb);
+      const nearest = Math.min(...otherPrepared.map(prepared => Math.min(...prepared.map(entry => deltaE2000(lab, entry.lab)))));
+      if (nearest > worst) { worst = nearest; pick = color; }
+    }
+    const source = image(4, 4, () => [...pick.rgb, 255] as Rgba);
+    const detection = detectPaletteBrand(source, singleCell(source, { cellWidth: 1, cellHeight: 1, columns: 4, rows: 4 }));
+    expect(detection.sampled).toBe(16);
+    expect(detection.scores.length).toBe(7); // 除 CUSTOM 外的全部内置品牌
+    expect(detection.scores[0].brand).toBe('MARD');
+    expect(detection.scores[0].meanDistance).toBeLessThan(1);
+    for (let i = 1; i < detection.scores.length; i += 1) {
+      expect(detection.scores[i].meanDistance).toBeGreaterThanOrEqual(detection.scores[i - 1].meanDistance);
+    }
+  });
+
   it('keeps whole-cell statistics by default and excludes grid borders only when requested', async () => {
     const source = image(10, 10, (x, y) => x === 0 || y === 0 || x === 9 || y === 9 ? black : red);
     const grid = singleCell(source);

@@ -328,6 +328,6 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       })}
       {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && <button type="button" className="ir-region-move" style={{ left: clamp((derived.region.x + derived.region.width / 2) * view.zoom + view.x, 25, Math.max(25, size.width - 25)), top: clamp((derived.region.y + derived.region.height / 2) * view.zoom + view.y, 25, Math.max(25, size.height - 25)) }} aria-label="移动识别区域" title="拖动以移动识别区域" onPointerDown={event => startDrag(event, 'region')} {...pointerProps} onKeyDown={event => keyDown(event)}><Move size={18} /></button>}
     </div>
-    <div className="ir-canvas-caption"><span><i className="ir-dot ir-dot-cyan" />周期网格 <i className="ir-dot ir-dot-green" />纳入识别的完整格 <i className="ir-dot ir-dot-amber" />识别区域</span><span>{sparseStride > 1 ? `缩略显示每 ${sparseStride} 条网格线 · ` : ''}实际格距 {Number(alignment.cellSize.toFixed(3))} px</span></div>
+    <div className="ir-canvas-caption"><span><i className="ir-dot ir-dot-cyan" />周期网格 <i className="ir-dot ir-dot-green" />纳入识别的完整格 <i className="ir-dot ir-dot-amber" />识别区域</span><span>{sparseStride > 1 ? `缩略显示每 ${sparseStride} 条网格线 · ` : ''}实际格距 {Number(alignment.cellSize.toFixed(3))} px · 中央青色小块仅为拖拽手柄，识别范围以绿色区域为准</span></div>
   </div>;
 }

@@ -45,38 +45,45 @@ describe('consolidateStrayBeans', () => {
     }
   }
 
-  const percentages = [['light', 0.005], ['standard', 0.01], ['strong', 0.015]] as const;
-  const matrix = percentages.flatMap(([strength, ratio]) => [10, 50, 100].map(size => ({
-    strength, size, threshold: Math.max(2, Math.floor(size * size * ratio)),
-  })));
-
-  it.each(matrix)('percentage inclusive $strength at $size square ($threshold cells), no fixed cap', ({ strength, size, threshold }) => {
-    const grid = solid(size);
-    patch(grid, threshold);
+  const caps = [
+    { strength: 'light', cap: 1 },
+    { strength: 'standard', cap: 5 },
+    { strength: 'strong', cap: 10 },
+  ] as const;
+  it.each(caps)('$strength merges clusters of up to $cap beads', ({ strength, cap }) => {
+    const grid = solid(50);
+    patch(grid, cap);
     expect(countColour(consolidateStrayBeans(grid, adapter, strength), LIGHT_GREY)).toBe(0);
   });
 
-  it.each(matrix)('percentage keeps threshold plus one: $strength at $size square', ({ strength, size, threshold }) => {
-    const grid = solid(size);
-    patch(grid, threshold + 1);
-    expect(countColour(consolidateStrayBeans(grid, adapter, strength), LIGHT_GREY)).toBe(threshold + 1);
+  it.each(caps)('$strength keeps clusters of $cap plus one beads', ({ strength, cap }) => {
+    const grid = solid(50);
+    patch(grid, cap + 1);
+    expect(countColour(consolidateStrayBeans(grid, adapter, strength), LIGHT_GREY)).toBe(cap + 1);
   });
 
-  it('percentage floors a fractional count rather than rounding up', () => {
-    const grid = solid(19); // 361 * 1% = 3.61
-    patch(grid, 4);
-    expect(countColour(consolidateStrayBeans(grid, adapter), LIGHT_GREY)).toBe(4);
+  it('user-defined maxClusterSize overrides the preset caps in both directions', () => {
+    // 自定义 ≤3：标准档（≤5）本会并掉总数 4 的色号，收紧后整体保留
+    const tight = solid(30);
+    patch(tight, 2);
+    patch(tight, 2, LIGHT_GREY, 12, 12);
+    expect(countColour(consolidateStrayBeans(tight, adapter, 'standard', { maxClusterSize: 3 }), LIGHT_GREY)).toBe(4);
+    // 自定义 ≤4：轻度档（≤1）本会保留，放宽后总数 4 的色号整批并入
+    const wide = solid(30);
+    patch(wide, 3);
+    patch(wide, 1, LIGHT_GREY, 12, 12);
+    expect(countColour(consolidateStrayBeans(wide, adapter, 'light', { maxClusterSize: 4 }), LIGHT_GREY)).toBe(0);
   });
 
-  it('blank, transparent and null padding do not increase the percentage denominator', () => {
-    const filled = solid(20); // 400 valid beads -> threshold 4, not 100
-    patch(filled, 5);
+  it('blank, transparent and null padding do not change the absolute bead-count cap', () => {
+    const filled = solid(20); // 标准档 ≤5 颗：6 颗的连通块保留，与画布外留白无关
+    patch(filled, 6);
     const transparent = { id: 'transparent', color: WHITE, alpha: 0 };
     const grid = Array.from({ length: 100 }, (_, y) => Array.from({ length: 100 }, (_, x): Cell => (
       y < 20 && x < 20 ? filled[y][x] : (x % 2 ? null : transparent)
     )));
     const result = consolidateStrayBeans(grid, adapter);
-    expect(countColour(result, LIGHT_GREY)).toBe(5);
+    expect(countColour(result, LIGHT_GREY)).toBe(6);
     expect(result[50][50]).toBe(transparent);
     expect(result[50][51]).toBeNull();
   });
@@ -88,20 +95,42 @@ describe('consolidateStrayBeans', () => {
     expect(consolidateStrayBeans(grid as Cell[][], adapter)).toEqual(grid);
   });
 
-  it('components, not total palette frequency, determine eligibility', () => {
+  it('manual eligibility is decided by total colour count, not per-component size', () => {
+    // 64 颗同色号散点：单块都只有 1 颗，但色号总量 64 远超档位 → 一颗都不动
     const grid = solid(40);
     for (let y = 4; y < 36; y += 4) for (let x = 4; x < 36; x += 4) grid[y][x] = bean('noise', LIGHT_GREY);
-    expect(countColour(grid, LIGHT_GREY)).toBe(64); // total colour count > 16
-    expect(countColour(consolidateStrayBeans(grid, adapter), LIGHT_GREY)).toBe(0);
+    expect(countColour(grid, LIGHT_GREY)).toBe(64);
+    expect(countColour(consolidateStrayBeans(grid, adapter), LIGHT_GREY)).toBe(64);
   });
 
-  it('components preserve the large region but merge a separate island of the same rare colour', () => {
+  it('the same colour is never split: occurrences above the cap all survive', () => {
+    // 用户场景：H2 同时出现在眼睛（小块）和帽子（大块），色号总量 11 > 5
+    // → 眼睛处的 H2 绝不能被单独吞掉
+    const grid = solid(30);
+    patch(grid, 10, LIGHT_GREY, 4, 4);   // 帽子：10 颗的块
+    patch(grid, 1, LIGHT_GREY, 20, 8);   // 眼睛：孤颗
+    const result = consolidateStrayBeans(grid, adapter);
+    expect(countColour(result, LIGHT_GREY)).toBe(11);
+    expect(result[8][20]?.color).toEqual(LIGHT_GREY);
+  });
+
+  it('the same colour is never split: occurrences within the cap all merge', () => {
+    // 色号总量 3 ≤ 5：两处小块（含一处 2 颗）整批并入相邻的相近稳定色
+    const grid = solid(30);
+    patch(grid, 2, LIGHT_GREY, 4, 4);
+    patch(grid, 1, LIGHT_GREY, 20, 8);
+    const result = consolidateStrayBeans(grid, adapter);
+    expect(countColour(result, LIGHT_GREY)).toBe(0);
+    expect(result[4][4]?.color).toEqual(WHITE);
+    expect(result[8][20]?.color).toEqual(WHITE);
+  });
+
+  it('a rare colour merges toward the nearest stable neighbour per occurrence', () => {
     const grid = solid(20);
-    patch(grid, 25);
+    patch(grid, 4);
     grid[15][15] = bean('island', LIGHT_GREY);
     const result = consolidateStrayBeans(grid, adapter);
-    expect(countColour(result, LIGHT_GREY)).toBe(25);
-    expect(result[15][15]?.color).toEqual(WHITE);
+    expect(countColour(result, LIGHT_GREY)).toBe(0);
   });
 
   it('components do not recolour a distant island with no actual filled neighbour', () => {
@@ -155,12 +184,21 @@ describe('consolidateStrayBeans', () => {
     return grid;
   }
 
-  it.each(['auto', 'manual'] as const)('cartoon %s protects a high-contrast contour decoration, but merges ordinary noise', (intent) => {
+  it('cartoon auto protects a high-contrast contour decoration, but merges ordinary noise', (ctx) => {
     const grid = cartoon();
-    const result = consolidateStrayBeans(grid, adapter, 'standard', { mode: 'cartoon', intent });
+    const result = consolidateStrayBeans(grid, adapter, 'standard', { mode: 'cartoon', intent: 'auto' });
     expect(result[14][12]).toBe(grid[14][12]);
     expect(result[25][25]?.color).toEqual(WHITE);
     expect(result[30][30]?.color).toEqual(WHITE);
+  });
+
+  it('cartoon manual: ordinary noise merges; the decoration colour survives by its total count, not by exemption', () => {
+    const grid = cartoon();
+    const result = consolidateStrayBeans(grid, adapter, 'standard', { mode: 'cartoon', intent: 'manual' });
+    // manual 无豁免机制，但黑色总量 30 > 5 → 装饰与暗噪点都因超档保留
+    expect(result[14][12]).toBe(grid[14][12]);
+    expect(result[30][30]).toBe(grid[30][30]);
+    expect(result[25][25]?.color).toEqual(WHITE); // 唯一 rare 的 LIGHT_GREY 照常并入
   });
 
   it('cartoon does not exempt a low-contrast compact noise point merely because it is near a contour', () => {

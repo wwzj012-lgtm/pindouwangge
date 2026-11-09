@@ -18,6 +18,13 @@ import { createPanelScale } from './ui/panelScale';
 
 export type StrayBeadConsolidationStrength = 'light' | 'standard' | 'strong';
 
+/** 与 strayBeanConsolidation.ts 的 CLUSTER_CAPS 一致：各档位并入的连通块颗数上限（含）。 */
+export const STRAY_BEAD_CAPS: Record<StrayBeadConsolidationStrength, number> = {
+  light: 1,
+  standard: 5,
+  strong: 10,
+};
+
 export const PatternDetailsUnlockContext = createContext(false);
 
 interface StatsPanelProps {
@@ -39,7 +46,7 @@ interface StatsPanelProps {
   onRestoreColor?: (colorId: string) => void;
   erasedColorCoords?: Map<string, [number, number][]>;
   onCloseMobile?: () => void;
-  onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength) => void;
+  onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
   detailsUnlocked?: boolean;
   /** 与 SettingsPanel 共用同一套尺度：桌面侧栏 32px 控件，移动抽屉 44px。 */
   variant?: 'sidebar' | 'sheet';
@@ -77,6 +84,12 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   const [search, setSearch] = useState('');
   const [copied, setCopied] = useState(false);
   const [strayBeadStrength, setStrayBeadStrength] = useState<StrayBeadConsolidationStrength>('standard');
+  const [strayBeadCustomSize, setStrayBeadCustomSize] = useState('');
+  const strayBeadCustomCap = (() => {
+    const parsed = Number.parseInt(strayBeadCustomSize, 10);
+    return Number.isFinite(parsed) && parsed >= 1 ? parsed : undefined;
+  })();
+  const strayBeadEffectiveCap = strayBeadCustomCap ?? STRAY_BEAD_CAPS[strayBeadStrength];
   const activeHighlightIds = highlightColorIds ?? (highlightColorId ? [highlightColorId] : []);
 
   // Compute active & erased stats
@@ -283,9 +296,9 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </div>
         <div className="mt-2 grid grid-cols-3 gap-1" role="group" aria-label={isEn ? 'Consolidation strength' : '整合强度'}>
           {([
-            ['light', isEn ? 'Light' : '轻度'],
-            ['standard', isEn ? 'Standard' : '标准'],
-            ['strong', isEn ? 'Strong' : '强力'],
+            ['light', isEn ? 'Light ≤1' : '轻度 ≤1'],
+            ['standard', isEn ? 'Standard ≤5' : '标准 ≤5'],
+            ['strong', isEn ? 'Strong ≤10' : '强力 ≤10'],
           ] as const).map(([strength, label]) => (
             <button
               key={strength}
@@ -302,12 +315,30 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
             </button>
           ))}
         </div>
+        <label className={`mt-1.5 flex items-center gap-1.5 ${sz.control}`}>
+          <span className="shrink-0 text-purple-800">{isEn ? 'Custom cap (beads):' : '自定义颗数：'}</span>
+          <input
+            type="number"
+            min={1}
+            step={1}
+            value={strayBeadCustomSize}
+            onChange={event => setStrayBeadCustomSize(event.target.value)}
+            placeholder={isEn ? 'use preset' : '用档位默认'}
+            aria-label={isEn ? 'Custom cluster size in beads' : '自定义并入的碎块颗数上限'}
+            className={`min-w-0 flex-1 rounded-lg border border-purple-200 bg-white px-2 py-1 text-purple-950 outline-none focus:ring-2 focus:ring-purple-400/30 placeholder-purple-300 ${sz.numberInput}`}
+          />
+        </label>
+        <p className={`mt-1.5 text-purple-800/80 ${sz.rowMeta}`}>
+          {isEn
+            ? `Recolours every bead of colours whose TOTAL count ≤${strayBeadEffectiveCap} into the adjacent colour with the smallest ΔE2000. The same colour is merged everywhere or nowhere — never partially.`
+            : `把全图总颗数 ≤${strayBeadEffectiveCap} 的色号，整批改成相邻色块中颜色最接近的颜色（ΔE2000 选近邻）。同一色号要么全部处理、要么全部保留，绝不部分并入。`}
+        </p>
         <button
           type="button"
-          onClick={() => onConsolidateStrayBeads?.(strayBeadStrength)}
+          onClick={() => onConsolidateStrayBeads?.(strayBeadStrength, strayBeadCustomCap)}
           disabled={!onConsolidateStrayBeads || totalBeads === 0}
           className={`mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-purple-600 px-2 font-bold text-white cursor-pointer transition-colors hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 ${sz.control}`}
-          title={isEn ? 'Clean isolated noise in the current grid' : '清理当前网格中的孤立杂点'}
+          title={isEn ? 'Merge small isolated clusters into their nearest-coloured neighbour' : '把小碎块并入相邻颜色最接近的色块'}
         >
           <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>{isEn ? 'Apply to current grid' : '应用到当前网格'}</span>

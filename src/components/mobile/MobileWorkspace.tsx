@@ -95,7 +95,7 @@ export interface MobileWorkspaceProps {
   isSavingPattern: boolean;
   openExportModal: () => void;
   openSmartReduce: () => void;
-  onConsolidateStrayBeads?: (strength: 'light' | 'standard' | 'strong') => void;
+  onConsolidateStrayBeads?: (strength: 'light' | 'standard' | 'strong', maxClusterSize?: number) => void;
   isConverting: boolean;
   isEn: boolean;
 

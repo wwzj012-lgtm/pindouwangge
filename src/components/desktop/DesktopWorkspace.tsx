@@ -67,7 +67,7 @@ export interface DesktopWorkspaceProps {
   handleEraseColor: (colorId: string) => void;
   handleRestoreColor: (colorId: string) => void;
   erasedColorCoords: Map<string, [number, number][]>;
-  onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength) => void;
+  onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
 
   // Callbacks
   handleCellClick: (row: number, col: number, overrideColorId?: string) => void;

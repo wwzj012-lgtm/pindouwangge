@@ -1207,7 +1207,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   }, [commitGridHistory, invalidateCompletionConfirmation, invalidateImageRequest]);
 
   /** Explicitly merge small connected islands in the current in-memory grid only. */
-  const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard') => {
+  const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard', maxClusterSize?: number) => {
     const currentGrid = gridRef.current;
     const nextGrid = consolidateStrayBeans(currentGrid, {
       isFilled: cell => cell !== null && paletteMap.has(cell),
@@ -1218,6 +1218,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       mode: settings.pipelineOverride && settings.pipelineOverride !== 'auto'
         ? settings.pipelineOverride : conversionDiagnostics?.pipeline ?? 'photo',
       intent: 'manual',
+      maxClusterSize,
     });
 
     // Keep the source image and conversion settings untouched; this is an edit

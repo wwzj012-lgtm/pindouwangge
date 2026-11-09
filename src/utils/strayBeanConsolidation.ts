@@ -1,9 +1,16 @@
+import { deltaE2000, rgbToLab } from './colorUtils';
+
 export type StrayBeanStrength = 'light' | 'standard' | 'strong';
 
 export interface StrayBeanContext {
   mode?: 'photo' | 'cartoon' | 'logo';
   /** Omitted context preserves the explicit/manual tool's historical availability. */
   intent?: 'auto' | 'manual';
+  /**
+   * 自定义并入阈值（颗）：色号**全图总颗数** ≤N 才并入相邻色块，覆盖轻度/
+   * 标准/强力的预设档位。用户界面提供数字输入；省略时用档位默认值。
+   */
+  maxClusterSize?: number;
 }
 
 export interface RgbColor {
@@ -39,11 +46,31 @@ interface Component<T> {
   lineDetail: boolean;
 }
 
-const RATIOS: Record<StrayBeanStrength, number> = {
+/**
+ * 手动档位的并入阈值（绝对颗数，含）：某色号**在全图的总颗数** ≤N 才算
+ * "散豆色号"，该色号的所有豆（无论散落几处）整批并入相邻色块。
+ * 轻度只清全图仅 1 颗的色号，标准清全图 1-5 颗的，强力清到 10 颗。
+ * 判定维度是色号总量而不是单个连通块：同一色号要么整体处理、要么整体不动，
+ * 绝不允许"眼睛处的 H2 被吞、帽子处的 H2 还在"这种撕裂结果。
+ */
+const CLUSTER_CAPS: Record<StrayBeanStrength, number> = {
+  light: 1,
+  standard: 5,
+  strong: 10,
+};
+
+/**
+ * 自动管线（intent: 'auto'）保留旧的按比例阈值：整图转换的清理量应随图纸规模
+ * 自适应（大图允许清更大的块），这是管线验证过的既有行为，不随手动档位改动。
+ */
+const AUTO_RATIOS: Record<StrayBeanStrength, number> = {
   light: 0.005,
   standard: 0.01,
   strong: 0.015,
 };
+
+/** 卡通装饰豁免的"高反差"门槛（ΔE2000）：低于它的杂点照常并入，高于它的小块视为有意点缀。 */
+const DECORATION_MIN_DELTA_E = 15;
 
 const ADJACENT_OFFSETS = [
   [-1, -1], [-1, 0], [-1, 1],
@@ -51,20 +78,25 @@ const ADJACENT_OFFSETS = [
   [1, -1],  [1, 0],  [1, 1],
 ] as const;
 
+/** ΔE2000 感知色距：比 RGB 欧氏距离更符合"肉眼相近"，选并入目标更准。 */
 function colorDistance(left: RgbColor, right: RgbColor): number {
-  const red = left.r - right.r;
-  const green = left.g - right.g;
-  const blue = left.b - right.b;
-  return Math.sqrt(red * red + green * green + blue * blue);
+  return deltaE2000(rgbToLab(left.r, left.g, left.b), rgbToLab(right.r, right.g, right.b));
 }
 
 /**
- * Merge small eight-connected islands, NOT every occurrence of a rare colour.
- * The inclusive threshold is max(2, floor(nonblank beads * strength ratio)), with
- * no fixed upper cap. Stable neighbouring components and thin linework survive.
- * Cached keys, one component flood fill and bounded local geometry keep work O(N)
- * and storage O(N), independent of the number of rare palette colours.
- * Blank cells and all input cells/rows remain untouched; replacements are simultaneous.
+ * Two eligibility semantics, selected by `context.intent`:
+ *
+ * - **manual**（散豆整合按钮）：eligibility is decided per **colour totals** —
+ *   a palette colour whose total bead count across the whole grid is ≤ the cap
+ *   (light ≤1, standard ≤5, strong ≤10, or user-defined `maxClusterSize`) has
+ *   *every* occurrence merged toward the nearest adjacent stable colour. The
+ *   same colour is never split into "merged here, kept there"; occurrences
+ *   without a stable neighbour are safely left untouched.
+ * - **auto**（整图转换管线）：legacy behaviour — per-component size against a
+ *   ratio threshold, with thin-linework and cartoon-decoration exemptions.
+ *
+ * Both paths pick the replacement as the adjacent stable component with the
+ * closest ΔE2000 colour, replace simultaneously, and never mutate input cells.
  */
 export function consolidateStrayBeans<T>(
   beanGrid: readonly (readonly T[])[],
@@ -94,7 +126,21 @@ export function consolidateStrayBeans<T>(
     }
   }
   if (!filled) return result;
-  const threshold = Math.max(2, Math.floor(filled * RATIOS[strength]));
+  // 双语义：auto（整图转换管线）按**连通块**大小清——阈值随全图豆数比例自适应，
+  // 这是管线验证过的既有行为；manual（散豆整合按钮）按**色号全图总颗数**清——
+  // 同一色号要么整批并入、要么整批保留，与它在图上拆成几个连通块无关。
+  const isAuto = context.intent === 'auto';
+  const cap = Math.max(1, Math.floor(context.maxClusterSize ?? CLUSTER_CAPS[strength]));
+  const keyCounts = new Map<string, number>();
+  for (const key of keys) {
+    if (key === null) continue;
+    keyCounts.set(key, (keyCounts.get(key) ?? 0) + 1);
+  }
+  const threshold = isAuto ? Math.max(2, Math.floor(filled * AUTO_RATIOS[strength])) : 0;
+  // manual 下"稳定"= 色号总量超出档位；这些块既是替换目标，也是绝不改写的一方。
+  const stable = (component: Component<T>) => (isAuto
+    ? component.count > threshold || component.lineDetail
+    : (keyCounts.get(component.key) ?? 0) > cap);
   const labels = new Uint32Array(total);
   // All components occupy contiguous spans in this single bounded BFS buffer.
   const queue = new Uint32Array(filled);
@@ -146,9 +192,8 @@ export function consolidateStrayBeans<T>(
     );
   }
 
-  const stable = (component: Component<T>) => component.count > threshold || component.lineDetail;
   const isCartoonDecoration = (source: Component<T>, replacement: Component<T>, contacts: number): boolean => {
-    if (context.mode !== 'cartoon' || colorDistance(source.color, replacement.color) < 64) return false;
+    if (context.mode !== 'cartoon' || colorDistance(source.color, replacement.color) < DECORATION_MIN_DELTA_E) return false;
     const height = source.maxRow - source.minRow + 1;
     const width = source.maxColumn - source.minColumn + 1;
     if (Math.max(width, height) / Math.min(width, height) > 2.5
@@ -166,7 +211,7 @@ export function consolidateStrayBeans<T>(
         if (near < 0 || !labels[near] || labels[near] === labels[index]) continue;
         const contour = components[labels[near] - 1];
         const luma = contour.color.r * 0.2126 + contour.color.g * 0.7152 + contour.color.b * 0.0722;
-        if (stable(contour) && luma <= 80 && colorDistance(contour.color, replacement.color) >= 64) return true;
+        if (stable(contour) && luma <= 80 && colorDistance(contour.color, replacement.color) >= DECORATION_MIN_DELTA_E) return true;
       }
     }
     return false;
@@ -200,7 +245,11 @@ export function consolidateStrayBeans<T>(
         contacts = adjacentCount;
       }
     }
-    if (!replacement || isCartoonDecoration(source, replacement, contacts)) continue;
+    if (!replacement) continue;
+    // 卡通高反差点缀豁免只在自动管线生效：手动按钮是用户主动执行、且 manual
+    // 的判定已升级为色号总量——豁免若同时生效会把同一色号撕成"部分保留"，
+    // 正是手动档位要消灭的不一致。
+    if (isAuto && isCartoonDecoration(source, replacement, contacts)) continue;
     if (adapter.canReplace) {
       let allowed = true;
       for (let cursor = source.start; cursor < source.start + source.count; cursor += 1) {

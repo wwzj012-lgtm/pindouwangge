@@ -70,3 +70,18 @@
   .admin-welfare-rule { grid-template-columns:minmax(0,1fr); }
   .admin-welfare-rule-stats { flex-wrap:wrap; }
 }
+
+
+/* 签到周期设置 */
+.admin-welfare-cycle { display:grid; grid-template-columns:repeat(auto-fit, minmax(110px, 1fr)); gap:12px; align-items:end; }
+.admin-welfare-cycle label { display:grid; gap:6px; font-size:13px; font-weight:600; }
+.admin-welfare-cycle input { border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:10px 12px;
+  background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:44px; box-sizing:border-box; width:100%; }
+.admin-welfare-cycle input:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
+
+/* 规则操作区与确认框 */
+.admin-welfare-rule-actions { display:grid; gap:8px; justify-items:stretch; }
+.admin-welfare-confirm { position:sticky; top:12px; padding:16px 20px; border:1px solid #b58e37;
+  background:var(--admin-warning-surface,#fff9eb); border-radius:10px; z-index:2; }
+.admin-welfare-confirm p { margin:0 0 12px; }
+.admin-welfare-confirm-actions { display:flex; gap:10px; }

@@ -4,7 +4,7 @@ import { AdminButton } from './AdminPrimitives';
 import './AdminWelfare.css';
 
 export interface WelfareRule {
-  id: string; name: string; triggerType: 'signup'; amountUnits: number;
+  id: string; name: string; triggerType: 'signup' | 'manual'; amountUnits: number;
   enabled: boolean; note: string | null; createdBy: string | null;
   createdAt: number; updatedAt: number; grantedUsers: number; grantedUnits: number;
 }
@@ -28,6 +28,12 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const [triggerType, setTriggerType] = useState<'signup' | 'manual'>('signup');
+  const [cycle, setCycle] = useState<number[] | null>(null);
+  const [cycleDraft, setCycleDraft] = useState<string[]>([]);
+  const [cycleBusy, setCycleBusy] = useState(false);
+  const [confirmAll, setConfirmAll] = useState<WelfareRule | null>(null);
+  const [grantingAll, setGrantingAll] = useState(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -41,6 +47,11 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
       const response = await request<{ rules: WelfareRule[] }>('/api/admin/welfare/rules', { method: 'GET' });
       if (!response.ok) throw new Error(response.error ?? '读取失败');
       if (mounted.current) setRules(response.data.rules);
+      const settings = await request<{ cycleUnits: number[] }>('/api/admin/settings/checkin', { method: 'GET' });
+      if (settings.ok && mounted.current) {
+        setCycle(settings.data.cycleUnits);
+        setCycleDraft(settings.data.cycleUnits.map((value) => String(value / 10)));
+      }
     } catch (cause) {
       if (mounted.current) setError(cause instanceof Error ? cause.message : '读取失败');
     } finally {
@@ -63,7 +74,7 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
     try {
       const response = await request<{ rule: WelfareRule }>('/api/admin/welfare/rules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), amountPoints: parsed, note: note.trim() || undefined }),
+        body: JSON.stringify({ name: name.trim(), amountPoints: parsed, note: note.trim() || undefined, triggerType }),
       });
       if (!response.ok) throw new Error(response.error ?? '创建失败');
       if (mounted.current) {
@@ -97,6 +108,51 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
     }
   };
 
+  const grantAll = async (rule: WelfareRule) => {
+    setGrantingAll(true); setError('');
+    try {
+      const response = await request<{ result: { granted: number; skipped: number; total: number } }>('/api/admin/welfare/rules/grant-all', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: rule.id }),
+      });
+      if (!response.ok) throw new Error(response.error ?? '发放失败');
+      if (mounted.current) {
+        const result = response.data.result;
+        setMessage(`全员发放完成：${result.granted} 人到账，${result.skipped} 人已领取过（共 ${result.total} 人）`);
+        setConfirmAll(null);
+        void load();
+      }
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : '发放失败');
+    } finally {
+      if (mounted.current) setGrantingAll(false);
+    }
+  };
+
+  const saveCycle = async () => {
+    const units = cycleDraft.map((value) => Math.round(Number(value) * UNITS_PER_POINT));
+    if (cycleDraft.some((value) => !Number.isFinite(Number(value)) || Number(value) < 0)) {
+      setError('签到积分必须是非负数'); return;
+    }
+    setCycleBusy(true); setError('');
+    try {
+      const response = await request<{ cycleUnits: number[] }>('/api/admin/settings/checkin', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cycleUnits: units }),
+      });
+      if (!response.ok) throw new Error(response.error ?? '保存失败');
+      if (mounted.current) {
+        setCycle(response.data.cycleUnits);
+        setMessage('每日签到奖励已更新：新周期立即对后续签到生效');
+        void load();
+      }
+    } catch (cause) {
+      if (mounted.current) setError(cause instanceof Error ? cause.message : '保存失败');
+    } finally {
+      if (mounted.current) setCycleBusy(false);
+    }
+  };
+
   return <section className="admin-welfare">
     <div className="admin-welfare-hero">
       <h2>福利规则</h2>
@@ -120,10 +176,13 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
           {fieldError.name ? <span className="admin-welfare-field-error" role="alert">{fieldError.name}</span> : <small>建议写清金额，方便在列表里辨认</small>}
         </label>
         <label>触发时机
-          <select value="signup" onChange={() => undefined} aria-describedby="welfare-trigger-hint">
-            <option value="signup">新用户注册时</option>
+          <select value={triggerType} onChange={(event) => setTriggerType(event.target.value as 'signup' | 'manual')} aria-describedby="welfare-trigger-hint">
+            <option value="signup">新用户注册时（自动）</option>
+            <option value="manual">手动全员发放（活动）</option>
           </select>
-          <small id="welfare-trigger-hint">目前支持"新注册"触发；用户完成注册的瞬间自动发放</small>
+          <small id="welfare-trigger-hint">{triggerType === 'signup'
+            ? '用户完成注册的瞬间自动发放'
+            : '创建后卡片上出现"发放全员"按钮，手动点击给所有现有用户各发一次'}</small>
         </label>
         <label>赠送积分
           <input type="number" min={1} max={100000} value={points} onChange={(event) => setPoints(event.target.value)} placeholder="如：20" />
@@ -139,6 +198,28 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
     </div> : <div className="admin-welfare-card"><p>没有调整积分的权限，只能查看规则与发放统计。</p></div>}
 
     <div className="admin-welfare-card">
+      <h3>每日签到奖励</h3>
+      <p>签到按周期循环发放：第 1 天、第 2 天…… 到最后一天后回到第 1 天。修改后立即对后续签到生效。</p>
+      {cycle ? <div className="admin-welfare-cycle">
+        {cycleDraft.map((value, index) => <label key={index}>第 {index + 1} 天
+          <input type="number" min={0} step="0.1" value={value}
+            onChange={(event) => setCycleDraft(cycleDraft.map((v, i) => i === index ? event.target.value : v))} />
+        </label>)}
+        <div className="admin-welfare-submit">
+          <AdminButton variant="primary" busy={cycleBusy} onClick={() => void saveCycle()} disabled={!canAdjust}>保存签到奖励</AdminButton>
+        </div>
+      </div> : <p>读取中…</p>}
+    </div>
+
+    {confirmAll ? <div className="admin-welfare-confirm" role="alertdialog" aria-label="确认全员发放">
+      <p>确定给 <strong>全部现有用户</strong> 每人发放 <strong>{confirmAll.amountUnits / UNITS_PER_POINT} 积分</strong>？已领取过的用户不会重复发放。</p>
+      <div className="admin-welfare-confirm-actions">
+        <AdminButton variant="primary" busy={grantingAll} onClick={() => void grantAll(confirmAll)}>确认发放</AdminButton>
+        <AdminButton onClick={() => setConfirmAll(null)}>取消</AdminButton>
+      </div>
+    </div> : null}
+
+    <div className="admin-welfare-card">
       <h3>规则列表{rules ? <span className="admin-welfare-count">{rules.length} 条</span> : null}</h3>
       {loading && !rules ? <p>读取中…</p>
         : rules && rules.length === 0 ? <p className="admin-welfare-empty">还没有福利规则。用上面的表单创建第一条，新注册用户即可自动获得积分。</p>
@@ -150,7 +231,7 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
               <span className={`admin-welfare-badge${rule.enabled ? '' : ' off'}`}>{rule.enabled ? '启用中' : '已停用'}</span>
             </div>
             <div className="admin-welfare-rule-meta">
-              <span>新注册触发</span><span>赠 {rule.amountUnits / UNITS_PER_POINT} 积分</span>
+              <span>{rule.triggerType === 'manual' ? '手动全员发放' : '新注册触发'}</span><span>赠 {rule.amountUnits / UNITS_PER_POINT} 积分</span>
               {rule.note ? <span title={rule.note}>{rule.note}</span> : null}
               <span>创建于 {dateText(rule.createdAt)}</span>
             </div>
@@ -159,7 +240,10 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
             <div><dt>已发放用户</dt><dd>{rule.grantedUsers}</dd></div>
             <div><dt>累计积分</dt><dd>{rule.grantedUnits / UNITS_PER_POINT}</dd></div>
           </div>
-          {canAdjust ? <AdminButton busy={busyId === rule.id} onClick={() => void toggle(rule)}>{rule.enabled ? '停用' : '启用'}</AdminButton> : null}
+          <div className="admin-welfare-rule-actions">
+            {canAdjust && rule.triggerType === 'manual' && rule.enabled ? <AdminButton busy={grantingAll && confirmAll?.id === rule.id} onClick={() => setConfirmAll(rule)}>发放全员</AdminButton> : null}
+            {canAdjust ? <AdminButton busy={busyId === rule.id} onClick={() => void toggle(rule)}>{rule.enabled ? '停用' : '启用'}</AdminButton> : null}
+          </div>
         </li>)}</ul> : null}
     </div>
   </section>;

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Gift, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { clearAdminSession, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
@@ -7,6 +7,7 @@ import { AdminLogsCodes } from './AdminLogsCodes';
 import { AdminAnnouncementsConfig } from './AdminAnnouncementsConfig';
 import { AdminBrandsColors } from './AdminBrandsColors';
 import { AdminCredits } from './AdminCredits';
+import { AdminWelfare } from './AdminWelfare';
 import { AdminPaletteResources, type AdminAssetPreviewRequest } from './AdminPaletteResources';
 import { AdminCommunityPosts } from './AdminCommunityPosts';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
@@ -26,7 +27,7 @@ export function parseAdminCapabilities(value: unknown, operatorUid: string): Adm
   if (CAPABILITY_KEYS.some(key => typeof candidate.capabilities![key] !== 'boolean')) return null;
   return { operatorUid, capabilities: Object.fromEntries(CAPABILITY_KEYS.map(key => [key, candidate.capabilities![key]])) as Record<CapabilityKey, boolean> };
 }
-type SectionId = 'dashboard' | 'users' | 'roles' | 'logs' | 'codes' | 'credits' | 'announcements' | 'config' | 'brands' | 'resources' | 'community';
+type SectionId = 'dashboard' | 'users' | 'roles' | 'logs' | 'codes' | 'credits' | 'welfare' | 'announcements' | 'config' | 'brands' | 'resources' | 'community';
 type GroupId = 'overview' | 'operations' | 'content' | 'system';
 interface MenuItem { id: SectionId; label: string; group: GroupId; icon: LucideIcon; }
 interface TrendPoint { date: string; count: number; }
@@ -41,6 +42,7 @@ const MENU_ITEMS: MenuItem[] = [
   { id: 'dashboard', label: '数据仪表盘', group: 'overview', icon: LayoutDashboard },
   { id: 'users', label: '用户管理', group: 'operations', icon: Users },
   { id: 'credits', label: '积分管理', group: 'operations', icon: Coins },
+  { id: 'welfare', label: '福利规则', group: 'operations', icon: Gift },
   { id: 'codes', label: '兑换码管理', group: 'operations', icon: KeyRound },
   { id: 'community', label: '社区内容', group: 'content', icon: Activity },
   { id: 'announcements', label: '公告系统', group: 'content', icon: Megaphone },
@@ -54,6 +56,7 @@ const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   dashboard: '查看用户增长、内容数据与服务运行情况；不可用项标记为 —。',
   users: '查找用户，管理账号、会员与访问权限。',
   credits: '查看真实积分余额与消费流水，核对账户快照和原因后调整积分。',
+  welfare: '配置新注册自动赠送等福利规则，查看每条规则的发放统计。',
   roles: '管理角色与权限，授权结果以服务端为准。',
   logs: '按条件检索操作记录与运行日志。',
   codes: '生成、查询与管理兑换码，操作前核对范围。',
@@ -399,6 +402,10 @@ function AdminConsoleSession(_props: { key?: string }) {
     : activeSection === 'credits' ? capabilityError ? <AdminErrorState title="权限尚未确认" message={capabilityError} retry={() => void loadCapabilities()} busy={capabilityLoading} />
       : !capabilities ? <AdminLoading label="正在确认积分管理权限…" />
       : capabilities.capabilities['credits.read'] ? <AdminCredits request={moduleRequest} canRead={capabilities.capabilities['credits.read']} canAdjust={capabilities.capabilities['credits.adjust']} operatorUid={capabilities.operatorUid} />
+      : <AdminErrorState title="无积分读取权限" message="当前操作者缺少 credits.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
+    : activeSection === 'welfare' ? capabilityError ? <AdminErrorState title="权限尚未确认" message={capabilityError} retry={() => void loadCapabilities()} busy={capabilityLoading} />
+      : !capabilities ? <AdminLoading label="正在确认福利规则权限…" />
+      : capabilities.capabilities['credits.read'] ? <AdminWelfare request={moduleRequest} canAdjust={capabilities.capabilities['credits.adjust']} />
       : <AdminErrorState title="无积分读取权限" message="当前操作者缺少 credits.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
     : activeSection === 'brands' ? capabilityError ? <AdminErrorState title="权限尚未确认" message={capabilityError} retry={() => void loadCapabilities()} busy={capabilityLoading} />
       : !capabilities ? <AdminLoading label="正在确认品牌管理权限…" />

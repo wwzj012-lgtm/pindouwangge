@@ -11,7 +11,6 @@ import {
   Trash2,
   RotateCcw,
   Sparkles,
-  Eraser,
 } from 'lucide-react';
 import { BeadColor, ColorStat } from '../types';
 import { useLanguage } from '../context/LanguageContext';
@@ -48,7 +47,6 @@ interface StatsPanelProps {
   erasedColorCoords?: Map<string, [number, number][]>;
   onCloseMobile?: () => void;
   onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
-  onClearIsolatedBeans?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
   detailsUnlocked?: boolean;
   /** 与 SettingsPanel 共用同一套尺度：桌面侧栏 32px 控件，移动抽屉 44px。 */
   variant?: 'sidebar' | 'sheet';
@@ -74,7 +72,6 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
   erasedColorCoords,
   onCloseMobile,
   onConsolidateStrayBeads,
-  onClearIsolatedBeans,
   detailsUnlocked,
   variant = 'sidebar',
 }) => {
@@ -333,8 +330,8 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </label>
         <p className={`mt-1.5 text-purple-800/80 ${sz.rowMeta}`}>
           {isEn
-            ? `Recolours every bead of colours whose TOTAL count ≤${strayBeadEffectiveCap} into the adjacent colour with the smallest ΔE2000. The same colour is merged everywhere or nowhere — never partially.`
-            : `把全图总颗数 ≤${strayBeadEffectiveCap} 的色号，整批改成相邻色块中颜色最接近的颜色（ΔE2000 选近邻）。同一色号要么全部处理、要么全部保留，绝不部分并入。`}
+            ? `Colours with ≤${strayBeadEffectiveCap} total beads merge into their nearest neighbour (ΔE2000). Undoable.`
+            : `总颗数 ≤${strayBeadEffectiveCap} 的色号整批并入相邻最近色（ΔE2000），可撤销。`}
         </p>
         <button
           type="button"
@@ -346,21 +343,6 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
           <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span>{isEn ? 'Apply to current grid' : '应用到当前网格'}</span>
         </button>
-        <button
-          type="button"
-          onClick={() => onClearIsolatedBeans?.(strayBeadStrength, strayBeadCustomCap)}
-          disabled={!onClearIsolatedBeans || totalBeads === 0}
-          className={`mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-purple-300 bg-white px-2 font-bold text-purple-700 cursor-pointer transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50 ${sz.control}`}
-          title={isEn ? 'Turn disconnected residue specks blank (undoable)' : '把与主体不连通的残留小碎块清除为空白（可撤销）'}
-        >
-          <Eraser className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-          <span>{isEn ? 'Clear isolated specks' : '清除孤立点'}</span>
-        </button>
-        <p className={`mt-1 text-slate-500/90 ${sz.rowMeta}`}>
-          {isEn
-            ? `Clear isolated specks: every disconnected cluster of ≤${strayBeadEffectiveCap} beads (residue after erasing / background removal) turns blank. Thin lines and the largest region survive; undoable.`
-            : `清除孤立点：与主体不连通、≤${strayBeadEffectiveCap} 颗的小碎块（擦除/去背景残留）整块清为空白；细长线条与最大色块不受影响；可撤销。`}
-        </p>
       </section>
 
       {/* Search Input */}

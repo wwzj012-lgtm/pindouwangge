@@ -68,7 +68,6 @@ export interface DesktopWorkspaceProps {
   handleRestoreColor: (colorId: string) => void;
   erasedColorCoords: Map<string, [number, number][]>;
   onConsolidateStrayBeads?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
-  onClearIsolatedBeans?: (strength: StrayBeadConsolidationStrength, maxClusterSize?: number) => void;
 
   // Callbacks
   handleCellClick: (row: number, col: number, overrideColorId?: string) => void;
@@ -139,7 +138,6 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   handleRestoreColor,
   erasedColorCoords,
   onConsolidateStrayBeads,
-  onClearIsolatedBeans,
   handleCellClick,
   beginHistoryTransaction,
   finishHistoryTransaction,
@@ -307,7 +305,6 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             onRestoreColor={handleRestoreColor}
             erasedColorCoords={erasedColorCoords}
             onConsolidateStrayBeads={onConsolidateStrayBeads}
-            onClearIsolatedBeans={onClearIsolatedBeans}
           />
           </>}
         </aside>

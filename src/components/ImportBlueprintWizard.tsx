@@ -13,6 +13,7 @@ import {
   ImagePlus,
   Lock,
   ScanSearch,
+  RotateCcw,
   Eraser,
   Undo2,
   Upload,
@@ -50,7 +51,7 @@ import {
   type ImportRecognitionResult,
 } from '../utils/importRecognition';
 import { describeGains } from '../utils/importColorBalance';
-import { estimateBeadPitch } from '../utils/importGridPitch';
+import { estimateBeadPitch, refineGridAlignment } from '../utils/importGridPitch';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
@@ -127,6 +128,8 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const [smoothNoise, setSmoothNoise] = useState(false);
   const [symbolAssist, setSymbolAssist] = useState(false);
   const [pitchHint, setPitchHint] = useState<string | null>(null);
+  // 精修会整体改写格距：留一份手动对齐的备份，用户不满意可一键还原。
+  const [refineBackup, setRefineBackup] = useState<ImportGridAlignment | null>(null);
   const [autoColorBalance, setAutoColorBalance] = useState(false);
   const [autoAlign, setAutoAlign] = useState(false);
   const [corrections, setCorrections] = useState<ImportRecognitionCorrections>({});
@@ -633,7 +636,18 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   // 注意：这里不能用 useCallback。组件在上方有 `if (!isOpen) return null`，
   // 任何写在这个提前返回之后的 Hook 都会让"打开/关闭"两条渲染路径的钩子数量不一致，
   // 触发 "Rendered more hooks than during the previous render" 并整页崩到 ErrorBoundary。
-  const applyEstimatedPitch = () => {
+  /**
+   * 一键自动对齐：全局估算给出格距量级与可信轴相位，随后全图格线精修把
+   * 格距锁准。原来拆成两个按钮（估算 / 精修），用户需要理解先后关系；
+   * 实际两者是同一条流水线的粗调与精调，合并后一次点击即可。
+   *
+   * - 估算失败或置信度低 → 跳过估算，直接以当前对齐为先验尝试精修
+   *   （用户已拖动过时依然有效）；
+   * - 相位只套用证据可信的轴——浅格线/密格距图纸的弱证据相位是文字
+   *   污染下的随机值（初音图 y 轴整格错的实测），套了反而改歪；
+   * - 精修（v3）只修格距、原点保留用户位置；动手前备份，可一键还原。
+   */
+  const autoAlignGrid = () => {
     if (!imageElement || !imageDimensions || !alignment) return;
     const canvas = document.createElement('canvas');
     canvas.width = imageDimensions.width;
@@ -641,24 +655,57 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     const context = canvas.getContext('2d', { willReadFrequently: true });
     if (!context) return;
     context.drawImage(imageElement, 0, 0);
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
-    const estimate = estimateBeadPitch({ data, width: canvas.width, height: canvas.height });
-    if (!estimate) {
-      setPitchHint('没能估算豆距：图片太小或图案过于平滑，请手动填方格边长。');
+    const source = { data: context.getImageData(0, 0, canvas.width, canvas.height).data, width: canvas.width, height: canvas.height };
+
+    const parts: string[] = [];
+    let working = alignment;
+    const estimate = estimateBeadPitch(source);
+    const summary = estimate
+      ? `估算豆距约 ${estimate.cell.toFixed(1)} px（约 ${estimate.columns} × ${estimate.rows} 格，置信度 ${(estimate.confidence * 100).toFixed(0)}%）`
+      : null;
+    if (estimate && estimate.confidence >= 0.15) {
+      const weakAxes: string[] = [];
+      if (!estimate.originTrustedX) weakAxes.push('横向');
+      if (!estimate.originTrustedY) weakAxes.push('纵向');
+      working = {
+        ...alignment,
+        cellSize: estimate.cell,
+        originX: estimate.originTrustedX ? estimate.originX : alignment.originX,
+        originY: estimate.originTrustedY ? estimate.originY : alignment.originY,
+      };
+      parts.push(`${summary}${weakAxes.length === 0 ? '' : `；${weakAxes.join('')}向格线证据弱，该方向位置请手动核对`}`);
+    } else if (summary) {
+      parts.push(`${summary}，置信度太低未采用`);
+    }
+
+    const refinement = refineGridAlignment(source, working);
+    if (refinement.applied) parts.push(refinement.message);
+
+    const changed = working !== alignment || refinement.applied;
+    if (!changed) {
+      setPitchHint('识别不到足够的图纸格线（照片或格线太浅的图纸），请手动拖红点、蓝点对齐。');
       return;
     }
-    const summary = `检测到豆距约 ${estimate.cell.toFixed(1)} px（约 ${estimate.columns} × ${estimate.rows} 格），置信度 ${(estimate.confidence * 100).toFixed(0)}%`;
-    if (estimate.confidence < 0.15) {
-      setPitchHint(`${summary}。置信度太低，没有套用，请手动微调。`);
-      return;
-    }
-    // 格距和相位一起套用：只给格距的话，网格线周期对但相位仍可能偏半格，
-    // 用户看到青线与图纸格线错开，会以为估算没生效。
-    setAlignmentValue({ ...alignment, cellSize: estimate.cell, originX: estimate.originX, originY: estimate.originY });
-    updateDraft('cellSize', String(Number(estimate.cell.toFixed(1))));
-    updateDraft('originX', String(Number(estimate.originX.toFixed(1))));
-    updateDraft('originY', String(Number(estimate.originY.toFixed(1))));
-    setPitchHint(`${summary}。已套用到方格边长并按格线相位对齐原点；绿色区域即实际识别范围，如个别线仍偏移可拖红点微调。`);
+    setRefineBackup(alignment);
+    const finalAlignment = refinement.applied
+      ? { ...working, cellSize: refinement.cell, originX: refinement.originX, originY: refinement.originY }
+      : working;
+    setAlignmentValue(finalAlignment);
+    updateDraft('cellSize', String(Number(finalAlignment.cellSize.toFixed(1))));
+    updateDraft('originX', String(Number(finalAlignment.originX.toFixed(1))));
+    updateDraft('originY', String(Number(finalAlignment.originY.toFixed(1))));
+    setPitchHint(`${parts.join('。')}。如个别线仍偏移，可拖红点微调后再点一次。`);
+  };
+
+  /** 一键还原自动对齐前的手动状态。 */
+  const undoRefinement = () => {
+    if (!refineBackup) return;
+    setAlignmentValue(refineBackup);
+    updateDraft('cellSize', String(Number(refineBackup.cellSize.toFixed(1))));
+    updateDraft('originX', String(Number(refineBackup.originX.toFixed(1))));
+    updateDraft('originY', String(Number(refineBackup.originY.toFixed(1))));
+    setRefineBackup(null);
+    setPitchHint('已还原自动对齐前的手动状态。');
   };
 
   const renderNumberField = (key: keyof NumericDrafts, label: string, min: number | undefined, max: number | undefined, stepValue: number) => (
@@ -720,7 +767,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
             <h3>三步完成</h3>
             <ol className="ir-flow">
               <li><b>1</b><span><strong>导入图纸</strong>支持 PNG / JPG / WebP，最大 15 MB</span></li>
-              <li><b>2</b><span><strong>校准网格</strong>拖动红点对齐位置、蓝点调整格距</span></li>
+              <li><b>2</b><span><strong>校准网格</strong>拖动粗调，或一键自动对齐</span></li>
               <li><b>3</b><span><strong>识别与复核</strong>自动标出可疑格，可逐格手改</span></li>
             </ol>
           </div>
@@ -754,13 +801,16 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
           <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>
           {step === 'calibrate' ? <section className="ir-section">
             <div className="ir-section-title"><h2>网格微调</h2><span className="ir-badge">正方形 · 原图像素</span></div>
-            <p className="ir-help">需要更精确时，可在下方输入格距或锚点坐标；通常直接拖动画布上的彩色控制点即可。</p>
+            <p className="ir-help">拖红点移动网格、蓝点调整格距，大致贴合即可；点「自动对齐网格」由系统按图纸格线精确锁定全图。也可在下方直接输入数值。</p>
             <div className="ir-calibration-readout"><span>当前方格边长</span><strong>{Number(alignment.cellSize.toFixed(1))}<small> px</small></strong><span className="ir-calibration-min">最小 5 px</span></div>
             <details className="ir-details"><summary>精细调整</summary><div className="ir-compact-grid ir-pitch-field">{renderNumberField('cellSize', '方格边长 px', 5, 512, .1)}</div><label className="ir-inset">键盘微调步长<select aria-label="微调步长" value={adjustmentStep} onChange={event => setAdjustmentStep(Number(event.target.value))}><option value={.1}>0.1 像素</option><option value={1}>1 像素</option><option value={10}>10 像素</option></select></label><div className="ir-adjust-row" role="group" aria-label="平移网格微调"><button type="button" className="ir-icon-button" aria-label="网格左移" onClick={() => nudgeGrid(-1, 0)}><ArrowLeft size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格上移" onClick={() => nudgeGrid(0, -1)}><ArrowUp size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格下移" onClick={() => nudgeGrid(0, 1)}><ArrowDown size={16} /></button><button type="button" className="ir-icon-button" aria-label="网格右移" onClick={() => nudgeGrid(1, 0)}><ArrowRight size={16} /></button></div></details>
             <details className="ir-details"><summary>精确调整网格锚点</summary><div className="ir-compact-grid">{renderNumberField('originX', '锚点 X px', undefined, undefined, .1)}{renderNumberField('originY', '锚点 Y px', undefined, undefined, .1)}</div><p className="ir-help">锚点可超出图片边界，所有坐标均为原图像素。</p></details>
-            <button type="button" className="ir-text-button" onClick={applyEstimatedPitch}>按豆距自动估算格数</button>
+            <div className="ir-align-actions">
+              <button type="button" className="ir-button ir-primary" onClick={autoAlignGrid}><ScanSearch size={15} />自动对齐网格</button>
+              <button type="button" className="ir-button" onClick={resetCalibration} aria-label="重置为 5 px 正方形网格" title="恢复为 5 px 正方形网格，识别区域保留"><RotateCcw size={15} />重置网格</button>
+            </div>
+            {refineBackup && <button type="button" className="ir-button ir-quiet" onClick={undoRefinement}><Undo2 size={14} />还原自动对齐前的状态</button>}
             {pitchHint && <p className="ir-help" role="status">{pitchHint}</p>}
-            <button type="button" className="ir-text-button" onClick={resetCalibration}>重置为 5 px 网格</button>
             <details className="ir-details"><summary>精确调整识别区域</summary><div className="ir-compact-grid">{renderRegionNumberField('x', '识别区域 X px', imageDimensions.width)}{renderRegionNumberField('y', '识别区域 Y px', imageDimensions.height)}{renderRegionNumberField('width', '识别区域宽度 px', imageDimensions.width)}{renderRegionNumberField('height', '识别区域高度 px', imageDimensions.height)}</div><p className="ir-help">矩形范围独立于网格相位，超出图片的部分会裁去。</p></details>
             <div className="ir-coverage" aria-live="polite" aria-atomic="true"><div className="ir-section-title"><h3>识别区域内完整格</h3><span className="ir-review-count">{calibration ? `${calibration.columns * calibration.rows} 格` : '0 格'}</span></div><div className="ir-stats"><div><strong>{calibration?.columns ?? '—'}</strong><span>实际列数</span></div><div><strong>{calibration?.rows ?? '—'}</strong><span>实际行数</span></div></div><p className="ir-help">橙框 {Number((derived?.region.width ?? 0).toFixed(2))} × {Number((derived?.region.height ?? 0).toFixed(2))} px · 绿色区域为实际识别范围。仅纳入完整方格，边缘不足一格的像素不参与识别。</p>{derived?.error && <p className="ir-status" data-tone="error" role="alert">{derived.error}</p>}</div>
             <p className="ir-help">聚焦画布后，方向键移动 1 px，Shift + 方向键移动 10 px，Alt + 方向键微调 0.1 px。最小格距为原图 5 px。</p>

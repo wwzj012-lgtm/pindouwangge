@@ -810,8 +810,21 @@
   flex-wrap:wrap;
   gap:8px
 }
-.ir-background-actions .ir-button {
+/* 一键自动对齐 + 重置网格并排等宽；还原为安静态全宽按钮 */
+.ir-align-actions {
+  display:flex;
+  gap:8px;
+  margin:10px 0 2px
+}
+.ir-align-actions>.ir-button {
   flex:1;
+  min-height:44px;
+  white-space:nowrap
+}
+.ir-align-actions+.ir-button {
+  margin-top:4px
+}
+.ir-background-actions .ir-button {  flex:1;
   min-height:44px;
   white-space:nowrap
 }

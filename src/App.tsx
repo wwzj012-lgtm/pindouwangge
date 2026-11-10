@@ -27,7 +27,6 @@ import {
   type GridSnapshot,
 } from './utils/historyTransactions';
 import {
-  clearIsolatedBeans,
   consolidateStrayBeans,
   type StrayBeanStrength,
 } from './utils/strayBeanConsolidation';
@@ -1227,18 +1226,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     return applyGridChange(nextGrid, false);
   }, [applyGridChange, paletteMap, settings.pipelineOverride, conversionDiagnostics?.pipeline]);
 
-  /** Explicitly turn isolated residue clusters (after erasing / background removal) blank. */
-  const handleClearIsolatedBeans = useCallback((strength: StrayBeanStrength = 'standard', maxClusterSize?: number) => {
-    const currentGrid = gridRef.current;
-    const { grid: nextGrid, stats } = clearIsolatedBeans(currentGrid, {
-      isFilled: cell => cell !== null && paletteMap.has(cell),
-      getColorKey: cell => String(cell),
-      clearCell: () => null,
-    }, strength, { maxClusterSize });
-    if (!stats) return false;
-    return applyGridChange(nextGrid, false);
-  }, [applyGridChange, paletteMap]);
-
   const beginHistoryTransaction = useCallback(() => {
     if (!historyTransactionRef.current) {
       historyTransactionRef.current = gridRef.current.map(row => [...row]);
@@ -2380,7 +2367,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               isEn={isEn}
               onOpenPatternsModal={openProfileLibrary}
               onConsolidateStrayBeads={handleConsolidateStrayBeads}
-              onClearIsolatedBeans={handleClearIsolatedBeans}
             />
           ) : (
             <MobileWorkspace

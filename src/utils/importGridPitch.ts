@@ -44,6 +44,18 @@ export interface BeadPitchEstimate {
   /** 格线相位原点（0 ≤ origin < pitch）：真实格线落在 origin + k·pitch 处。 */
   originX: number;
   originY: number;
+  /**
+   * 相位证据是否可信（分轴）。
+   *
+   * 初音图（131×151 格、格距 9.9px）实测教训：格线太浅/太密时暗线证据弱
+   * （y 轴相干 0.641 勉强过线、x 轴覆盖率 0.55 被拒回落色差剖面），两条
+   * 路径给出的相位（originX=0.4/originY=4.6）是文字污染下的垃圾相位——
+   * 格距碰巧对、相位整格错，套用后 152 行 vs 真值 151 行。相位只有在
+   * 强证据（暗线路径、相干×内点 ≥0.7）下才值得交付；弱证据轴应保留
+   * 用户手动对齐的位置。
+   */
+  originTrustedX: boolean;
+  originTrustedY: boolean;
   /** 0~1，自相关强度 × 峰位回归的内点率，越大越可信；低于 0.15 建议不要直接采用。 */
   confidence: number;
   columns: number;
@@ -65,6 +77,8 @@ const LINE_MIN_SPIKES = 6;
 const LINE_COHERENCE_MIN = 0.45;
 /** 覆盖率门槛：选中周期的预期格线列至少要有多少被实际峰占住。 */
 const LINE_COVERAGE_MIN = 0.6;
+/** 相位交付门槛：暗线证据的相干×内点达到此值才把相位交给用户自动套用。 */
+const ORIGIN_TRUST_MIN = 0.7;
 
 /**
  * 一条轴的"颜色差剖面"：相邻像素的通道差绝对值之和，沿另一轴全部累加。
@@ -355,12 +369,19 @@ export function estimateBeadPitch(source: ImportImagePixels): BeadPitchEstimate 
   const round1 = (value: number) => Number(value.toFixed(1));
   // v2.2：暗线证据优先（格线位置是直接观测，不是周期猜测），
   // 峰不足或相干不够时回落 v2 色差剖面路径
-  const x = estimateAxisByLines(source, 'x') ?? estimateAxis(diffProfile(source, 'x'), source.width);
-  const y = estimateAxisByLines(source, 'y') ?? estimateAxis(diffProfile(source, 'y'), source.height);
+  const xLines = estimateAxisByLines(source, 'x');
+  const x = xLines ?? estimateAxis(diffProfile(source, 'x'), source.width);
+  const yLines = estimateAxisByLines(source, 'y');
+  const y = yLines ?? estimateAxis(diffProfile(source, 'y'), source.height);
   if (!x || !y) return null;
   const cellX = round1(x.pitch);
   const cellY = round1(y.pitch);
   const cell = round1((cellX + cellY) / 2);
+  // 相位信任（分轴）：只有暗线路径的强证据（相干×内点 ≥0.7）才交付相位；
+  // 色差剖面的相位被文字污染后是随机的（初音图 originY=4.6 整格错的实测），
+  // 格距碰巧能对、相位不能要——套用方对不信任的轴保留用户手动位置。
+  const originTrustedX = xLines !== null && xLines.origin !== null && xLines.correlation >= ORIGIN_TRUST_MIN;
+  const originTrustedY = yLines !== null && yLines.origin !== null && yLines.correlation >= ORIGIN_TRUST_MIN;
   // 护栏 1（正方形一致）：两轴各锁到差 8% 以上的周期，至少一轴是文字/纹理
   // 伪峰（平均之后两边都不沾）——压到门槛之下不自动套用，交给用户手动校准。
   const axisAgreement = Math.abs(cellX - cellY) / Math.max(cellX, cellY) <= AXIS_AGREEMENT_RATIO;
@@ -377,8 +398,133 @@ export function estimateBeadPitch(source: ImportImagePixels): BeadPitchEstimate 
     cellY,
     originX: wrap(x.origin),
     originY: wrap(y.origin),
+    originTrustedX,
+    originTrustedY,
     confidence: Math.min(x.correlation, y.correlation) * guard,
     columns: Math.max(1, Math.round(source.width / cell)),
     rows: Math.max(1, Math.round(source.height / cell)),
+  };
+}
+
+export interface GridAlignmentRefinement {
+  applied: boolean;
+  cell: number;
+  originX: number;
+  originY: number;
+  /** 0~1，两轴相干度×内点率的较小者；仅供展示。 */
+  confidence: number;
+  coherenceX: number;
+  coherenceY: number;
+  /** 横纵格距差超 1.5%：图大概率被非等比拉伸，正方形网格只能近似对齐。 */
+  stretched: boolean;
+  /** 可直接展示的人话结论（失败原因或成功摘要的统计部分）。 */
+  message: string;
+}
+
+/**
+ * 单轴局部精修：以当前对齐的格距为先验，只在 ±8% 窗口内搜索。
+ *
+ * 为什么不用 estimateBeadPitch 的全范围扫描：全局扫描要面对约数陷阱
+ * （29.6 与 14.8 相位相干同样满分，必须靠覆盖率裁决），而用户已经手动
+ * 对齐过大方向，真周期必然在当前值的 ±8% 内——14.8 距 29.6 有 50%，
+ * 根本进不了窗口，约数陷阱在物理上被排除，覆盖率裁决也不需要了。
+ * 步长 0.01px（印刷图纸格距 29.60 这类小数也能锁准）。
+ *
+ * 相位原点取峰列相位均值（全图所有格线的最优对齐），而非当前 origin——
+ * 用户手动只对齐了局部，远端漂移正是要被这一步抹平的。
+ */
+function refineAxisByLines(source: ImportImagePixels, axis: 'x' | 'y', currentPitch: number): {
+  pitch: number; origin: number; coherence: number; inlierRatio: number;
+} | null {
+  const spikes = lineSpikes(source, axis);
+  if (spikes.length < LINE_MIN_SPIKES) return null;
+  const window = currentPitch * 0.08;
+  let bestPitch = 0;
+  let bestCoherence = 0;
+  for (let p = Math.max(MIN_PITCH, currentPitch - window); p <= currentPitch + window; p += 0.01) {
+    const coherence = phaseCoherence(spikes, p);
+    if (coherence > bestCoherence) { bestCoherence = coherence; bestPitch = p; }
+  }
+  if (bestPitch === 0 || bestCoherence < LINE_COHERENCE_MIN) return null;
+  // 相位均值 → 原点
+  let cosSum = 0;
+  let sinSum = 0;
+  for (const position of spikes) {
+    const angle = (2 * Math.PI * position) / bestPitch;
+    cosSum += Math.cos(angle);
+    sinSum += Math.sin(angle);
+  }
+  let origin = (Math.atan2(sinSum, cosSum) / (2 * Math.PI)) * bestPitch;
+  if (origin < 0) origin += bestPitch;
+  // 内点率：偏离格线列 ≥25% 周期的峰视为离群（与全局估算同口径）
+  let matched = 0;
+  for (const position of spikes) {
+    const k = Math.round((position - origin) / bestPitch);
+    if (k >= 1 && Math.abs(position - (origin + k * bestPitch)) <= bestPitch * REFINE_OUTLIER_RATIO) matched += 1;
+  }
+  const inlierRatio = matched / spikes.length;
+  if (inlierRatio < 0.5) return null;
+  return { pitch: bestPitch, origin, coherence: bestCoherence, inlierRatio };
+}
+
+/**
+ * 「手动对齐了局部、远端漂移」的自动修复：把用户当前对齐当先验，
+ * 用暗线投影在全图峰列上把**格距**精修到位。原点一律不动。
+ *
+ * 原点为什么不动（两版教训）：
+ *  - v1 把原点套用成全图相位均值（wrap 到 [0,pitch)）→ 网格整格"跳走"，
+ *    用户拖的锚点被覆盖。
+ *  - v2 把相位均值折算成离用户原点最近的等价原点（±半格微调）→ 实测
+ *    浅格线图纸（格线浅青、探测不到）的投影峰来自**每格中央的色号文字**
+ *    与深色豆块边界，其相位天然偏真实格线半格——"半格微调"正好把用户
+ *    本来对齐的网格挪到文字中心上，整图错位半格。
+ *  - 结论：用户看得见格线，原点拖得准；拖不准的是格距（蓝点基线只有
+ *    3 格）。精修只修格距：原点在真格线上时，修正格距后近端几乎不动、
+ *    远端逐格收敛到真格线，正是理想行为。
+ *
+ * 输入的对齐只需粗略正确（±8% 内），输出可直接套用；格线证据不足
+ * （照片/截图无印刷网格）时 applied=false 并说明原因，不碰当前对齐。
+ */
+export function refineGridAlignment(
+  source: ImportImagePixels,
+  alignment: { originX: number; originY: number; cellSize: number },
+): GridAlignmentRefinement {
+  const untouched: GridAlignmentRefinement = {
+    applied: false,
+    cell: alignment.cellSize,
+    originX: alignment.originX,
+    originY: alignment.originY,
+    confidence: 0,
+    coherenceX: 0,
+    coherenceY: 0,
+    stretched: false,
+    message: '',
+  };
+  if (!source || !source.data || source.width < 40 || source.height < 40) {
+    return { ...untouched, message: '图片太小，无法精修网格。' };
+  }
+  const base = Math.max(MIN_PITCH, alignment.cellSize);
+  const x = refineAxisByLines(source, 'x', base);
+  const y = refineAxisByLines(source, 'y', base);
+  if (!x || !y) {
+    return { ...untouched, message: '图上检测不到足够的贯穿格线（照片或无格线的截图精修不了），请保持手动微调。' };
+  }
+  const cell = Number(((x.pitch + y.pitch) / 2).toFixed(2));
+  const stretched = Math.abs(x.pitch - y.pitch) / Math.max(x.pitch, y.pitch) > 0.015;
+  const drift = Math.abs(cell - base) / base;
+  return {
+    applied: true,
+    cell,
+    originX: alignment.originX,
+    originY: alignment.originY,
+    confidence: Math.min(x.coherence * x.inlierRatio, y.coherence * y.inlierRatio),
+    coherenceX: x.coherence,
+    coherenceY: y.coherence,
+    stretched,
+    message: `全图格线精修完成：格距 ${base.toFixed(2)} → ${x.pitch.toFixed(2)} / ${y.pitch.toFixed(2)} px，相位相干 ${(x.coherence * 100).toFixed(0)}% / ${(y.coherence * 100).toFixed(0)}%。`
+      + '网格位置保留你拖动的原点，未做任何移动；格线偏移随距离逐渐收敛。'
+      + (drift > 0.03 ? `本次格距修正幅度 ${ (drift * 100).toFixed(1) }% 较大，请核对绿色区域行列数是否与图纸一致。` : '')
+      + (stretched ? '横纵格距相差超过 1.5%，图片可能被非等比拉伸过——正方形网格只能取平均近似。' : '')
+      + '若精修后反而错位（图纸格线太浅、系统读到的是文字边缘），请撤销后以手动对齐为准。',
   };
 }

@@ -97,7 +97,6 @@ export interface MobileWorkspaceProps {
   openExportModal: () => void;
   openSmartReduce: () => void;
   onConsolidateStrayBeads?: (strength: 'light' | 'standard' | 'strong', maxClusterSize?: number) => void;
-  onClearIsolatedBeans?: (strength: 'light' | 'standard' | 'strong', maxClusterSize?: number) => void;
   isConverting: boolean;
   isEn: boolean;
 
@@ -176,7 +175,6 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   openExportModal,
   openSmartReduce,
   onConsolidateStrayBeads,
-  onClearIsolatedBeans,
   isConverting,
   isEn,
   onOpenPatternsModal,
@@ -394,7 +392,6 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
               onRestoreColor={handleRestoreColor}
               erasedColorCoords={erasedColorCoords}
               onConsolidateStrayBeads={onConsolidateStrayBeads}
-              onClearIsolatedBeans={onClearIsolatedBeans}
             />
           </div>
         </div>

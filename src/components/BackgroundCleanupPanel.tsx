@@ -1,6 +1,68 @@
-import React, { useEffect, useRef } from 'react';
-import { Eraser, ShieldCheck, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, Eraser, ShieldCheck, X } from 'lucide-react';
 import type { BackgroundCleanupController } from '../hooks/useBackgroundCleanup';
+
+/** 阈值档位：1~32 粒，覆盖从单粒噪点到中等碎块。 */
+const THRESHOLD_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32];
+
+/**
+ * 阈值下拉：自绘 listbox 菜单而非原生 <select>——原生弹层脱离浮动卡片的
+ * 层叠上下文（系统级渲染），外观与玻璃卡片割裂且无法继承圆角/投影。
+ * 菜单绝对定位在按钮正下方，与卡片同层；点击外部或 Escape 关闭。
+ */
+function ThresholdDropdown({ value, onChange, isEn }: { value: number; onChange: (next: number) => void; isEn: boolean }) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOpen(false); event.stopPropagation(); }
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [open]);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button type="button" aria-haspopup="listbox" aria-expanded={open}
+        aria-label={isEn ? 'Maximum block size' : '小块粒数阈值'}
+        onClick={() => setOpen(previous => !previous)}
+        className="inline-flex min-h-11 items-center gap-1 rounded-xl border border-slate-300 bg-white pl-3 pr-2 text-[13px] font-semibold text-slate-800 transition-colors hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20">
+        {value}{isEn ? ' beads' : ' 粒'}
+        <ChevronDown aria-hidden="true" size={14}
+          className={`text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <ul role="listbox" aria-label={isEn ? 'Maximum block size' : '小块粒数阈值'} tabIndex={-1}
+          className="ir-float-card absolute left-0 top-full z-50 mt-1.5 max-h-64 w-28 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-lg shadow-slate-900/15 ring-1 ring-slate-900/5">
+          {THRESHOLD_OPTIONS.map(size => {
+            const selected = size === value;
+            return (
+              <li key={size}>
+                <button type="button" role="option" aria-selected={selected}
+                  onClick={() => { onChange(size); setOpen(false); }}
+                  className={`flex min-h-9 w-full items-center justify-between rounded-lg px-2.5 text-[13px] font-medium transition-colors ${
+                    selected ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100'
+                  }`}>
+                  <span className="tabular-nums">{size}{isEn ? ' beads' : ' 粒'}</span>
+                  {selected && <Check aria-hidden="true" size={13} />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /**
  * Floating glass card over the canvas (absolutely positioned by the caller, so
@@ -23,11 +85,7 @@ export function BackgroundCleanupPanel({ control, isEn }: { control: BackgroundC
         </span>
         <label className="inline-flex min-h-11 items-center gap-1.5 text-[13px]">
           {isEn ? 'Small blocks ≤' : '小块不超过'}
-          <select aria-label={isEn ? 'Maximum block size' : '小块粒数阈值'} value={control.threshold}
-            onChange={event => control.setThreshold(Number(event.target.value))}
-            className="min-h-11 rounded-xl border border-slate-300 bg-white px-2 text-[13px] font-semibold text-slate-800 transition-colors hover:border-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20">
-            {[1, 2, 4, 8, 16].map(size => <option key={size} value={size}>{size}{isEn ? ' beads' : ' 粒'}</option>)}
-          </select>
+          <ThresholdDropdown value={control.threshold} onChange={next => control.setThreshold(next)} isEn={isEn} />
         </label>
         <span role="status" aria-atomic="true"
           className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold tabular-nums ${

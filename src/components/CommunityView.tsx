@@ -195,9 +195,10 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       if (activeCategory === UNCATEGORIZED_FILTER) return communityPostTags(pattern).length === 0;
       return communityPostTags(pattern).includes(activeCategory);
     };
-    const specMatch = (pattern: CommunityPattern) => {
+    const specMatch = (pattern: CommunityPost) => {
       if (specFilter === 'all') return true;
-      const beads = pattern.beadCount;
+      // 规格来自后端 dto 的 specs 快照；缺失（旧数据/未回填）不进任何非"全部"桶。
+      const beads = pattern.specs?.beadCount;
       if (beads === undefined) return false;
       if (specFilter === 'le500') return beads <= 500;
       if (specFilter === 'le1000') return beads > 500 && beads <= 1000;
@@ -625,9 +626,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 <p className="rounded-xl bg-purple-50 px-3 py-2.5 text-sm leading-relaxed text-purple-950">{selectedPattern.description?.trim() ? selectedPattern.description : '该用户很懒，没有写简介~'}</p>
                 <div className="grid grid-cols-3 gap-2" aria-label="图纸规格">
                   {([
-                    ['画板', `${selectedProject ? selectedProject.width : selectedPattern.width}×${selectedProject ? selectedProject.height : selectedPattern.height} 格`],
-                    ['豆子数量', `${selectedProject ? selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0) : selectedPattern.beadCount} 颗`],
-                    ['颜色数量', `${selectedProject ? new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size : selectedPattern.colorCount} 种`],
+                    ['画板', `${selectedProject ? selectedProject.width : selectedPattern.specs ? `${selectedPattern.specs.gridWidth}×${selectedPattern.specs.gridHeight}` : '未知'} 格`],
+                    ['豆子数量', `${selectedProject ? selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0) : selectedPattern.specs?.beadCount ?? '未知'} 颗`],
+                    ['颜色数量', `${selectedProject ? new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size : selectedPattern.specs?.colorCount ?? '未知'} 种`],
                   ] as const).map(([label, value]) => (
                     <div key={label} className="rounded-xl border border-purple-200 bg-purple-50 px-2 py-2.5 text-center">
                       <div className="text-[11px] font-bold text-purple-600">{label}</div>

@@ -167,4 +167,47 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     button(tree, '载入完整图纸').props.onClick();
     expect(props.onRemixPattern).toHaveBeenCalledWith(expect.objectContaining({ tags: ['人物', '游戏'], project }));
   });
+
+  it('filters posts by the specs bead count and keeps unknown-spec posts only in 全部', () => {
+    feed.posts = [post('1'), post('2'), post('3')];
+    feed.posts[0]!.specs = { gridWidth: 10, gridHeight: 10, beadCount: 400, colorCount: 5 };
+    feed.posts[1]!.specs = { gridWidth: 60, gridHeight: 60, beadCount: 7000, colorCount: 12 };
+    // 规格按钮没有 aria-label；用这一点区分同为"全部"文案的标签筛选按钮。
+    const specButton = (tree: unknown, label: string) => {
+      const node = nodes(tree).find(node => node.type === 'button' && text(node).trim() === label && node.props['aria-label'] === undefined);
+      if (!node) throw Error(`Missing spec button: ${label}`);
+      return node;
+    };
+    specButton(render(), '≤500').props.onClick();
+    let tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    specButton(tree, '≤8k').props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2']);
+    // 规格未知（旧数据未回填）的作品不进任何非"全部"桶。
+    specButton(tree, '>8k').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(0);
+    specButton(tree, '全部').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+  });
+
+  it('falls back to post specs (or 未知) in the detail dialog when no grid project loads', async () => {
+    const withSpecs = { ...feed.posts[0]!, specs: { gridWidth: 12, gridHeight: 34, beadCount: 456, colorCount: 7 } };
+    api.getCommunityPost.mockResolvedValue({ ok: true, data: withSpecs });
+    api.loadCommunityPattern.mockResolvedValue({ project: null, fromOwnerLibrary: false });
+    cards(render())[0].props.onOpen(withSpecs); await flush();
+    let tree = render();
+    const specOf = (dialog: Node) => nodes(dialog).find(node => node.props['aria-label'] === '图纸规格')!;
+    expect(text(specOf(nodes(tree).find(node => node.type === 'dialog')!))).toContain('12×34 格');
+    expect(text(specOf(nodes(tree).find(node => node.type === 'dialog')!))).toContain('456 颗');
+    expect(text(specOf(nodes(tree).find(node => node.type === 'dialog')!))).toContain('7 种');
+    const { specs: _omitted, ...legacy } = withSpecs;
+    void _omitted;
+    api.getCommunityPost.mockResolvedValue({ ok: true, data: legacy });
+    cards(render())[0].props.onOpen(legacy); await flush();
+    tree = render();
+    const specText = text(specOf(nodes(tree).find(node => node.type === 'dialog')!));
+    expect(specText).toContain('未知 格');
+    expect(specText).toContain('未知 颗');
+    expect(specText).toContain('未知 种');
+  });
 });

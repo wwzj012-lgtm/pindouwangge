@@ -22,6 +22,8 @@ export interface CommunityPost {
   favoriteCount: number;
   liked: boolean;
   favorited: boolean;
+  /** 图纸规格快照（后端 dto 提供）；旧数据为 null/缺失，规格筛选与详情兜底使用。 */
+  specs?: CommunityPostSpecs | null;
 }
 
 interface CommunityPostResponse extends Omit<CommunityPost, 'imageUrl' | 'author'> {

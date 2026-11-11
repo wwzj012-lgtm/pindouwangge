@@ -280,7 +280,7 @@ describe('UserPatternsModal community publishing', () => {
     })));
 
     expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-retained', 'user-1', { id: 'post-default', visibility: 'public' });
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-retained', 'user-1', { id: 'post-default', visibility: 'public', description: '', tags: [] });
     expect(buttonByText(tree, 'My Library (1)').props?.className).toContain('bg-sky-600');
     expect(textContent(tree)).toContain('Original work');
     expect(textContent(tree)).not.toContain('Private gallery');
@@ -337,7 +337,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(patternHistory.getPatternProject.mock.invocationCallOrder[0]).toBeLessThan(renderCommunityPattern.mock.invocationCallOrder[0]);
     expect(renderCommunityPattern.mock.invocationCallOrder[0]).toBeLessThan(communityApi.uploadCommunityAsset.mock.invocationCallOrder[0]);
     expect(communityApi.uploadCommunityAsset.mock.invocationCallOrder[0]).toBeLessThan(communityApi.publishCommunityPost.mock.invocationCallOrder[0]);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-id', 'user-1', { id: 'post-default', visibility: 'public' });
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-id', 'user-1', { id: 'post-default', visibility: 'public', description: '', tags: [] });
   });
 
   it.each([
@@ -406,7 +406,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(patternHistory.getPatternProject).toHaveBeenCalledExactlyOnceWith('cloud-after-sync', 'user-1');
     expect(renderCommunityPattern).toHaveBeenCalledExactlyOnceWith(project);
     expect(communityApi.publishCommunityPost).toHaveBeenCalledWith(expect.objectContaining({ workId: 'cloud-after-sync', assetId: 'asset-default' }));
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-after-sync', 'user-1', { id: 'post-default', visibility: 'public' });
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledWith('cloud-after-sync', 'user-1', { id: 'post-default', visibility: 'public', description: '', tags: [] });
   });
 
   it('does not upload or publish when local cloud sync fails', async () => {
@@ -480,7 +480,7 @@ describe('UserPatternsModal community publishing', () => {
 
     expect(communityApi.uploadCommunityAsset).toHaveBeenCalledTimes(1);
     expect(communityApi.publishCommunityPost).toHaveBeenCalledTimes(1);
-    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledExactlyOnceWith('cloud-mark', 'user-1', { id: 'post-default', visibility: 'public' });
+    expect(patternHistory.markExportedPatternPublished).toHaveBeenCalledExactlyOnceWith('cloud-mark', 'user-1', { id: 'post-default', visibility: 'public', description: '', tags: [] });
     expect(textContent(tree)).toContain(isEn
       ? 'Published, but the local library state could not be updated. Please refresh.'
       : '已发布，图库本地状态更新失败，请刷新');
@@ -593,6 +593,7 @@ describe('UserPatternsModal community publishing', () => {
       tags: ['人物'],
       workId: 'cloud-private',
       assetId: 'asset-default',
+      specs: expect.objectContaining({ gridWidth: expect.any(Number), gridHeight: expect.any(Number), beadCount: expect.any(Number), colorCount: expect.any(Number) }),
     });
     expect(textContent(tree)).toContain('Published privately. It will not appear in the public community list.');
     expect(textContent(tree)).not.toContain('Open Community to view it.');
@@ -640,7 +641,7 @@ describe('UserPatternsModal community publishing', () => {
     expect(buttonByText(tree, 'Cancel').props?.disabled).toBe(true);
     expect(findNode(tree, (node) => node.type === 'button' && node.props?.['aria-label'] === 'Close gallery').props?.disabled).toBe(true);
 
-    resolvePublish?.({ ok: true, data: { post: { id: 'post-default', visibility: 'public' } } });
+    resolvePublish?.({ ok: true, data: { post: { id: 'post-default', visibility: 'public', description: '', tags: [] } } as never });
     await flush();
   });
 });

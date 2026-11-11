@@ -123,8 +123,8 @@ describe('UserProfileModal in-place publication', () => {
     tree = render();
     expect(history.getPatternProject).toHaveBeenCalledWith('profile-pattern', 'user-1');
     expect(renderCommunityPattern).toHaveBeenCalledTimes(1);
-    expect(community.publishCommunityPost).toHaveBeenCalledWith({ title: 'Private profile work', description: 'profile dialog', visibility: 'private', tags: ['人物'], workId: 'profile-pattern', assetId: 'asset-profile' });
-    expect(history.markExportedPatternPublished).toHaveBeenCalledWith('profile-pattern', 'user-1', { id: 'community-profile', visibility: 'private' });
+    expect(community.publishCommunityPost).toHaveBeenCalledWith({ title: 'Private profile work', description: 'profile dialog', visibility: 'private', tags: ['人物'], workId: 'profile-pattern', assetId: 'asset-profile', specs: expect.objectContaining({ gridWidth: expect.any(Number), gridHeight: expect.any(Number), beadCount: expect.any(Number), colorCount: expect.any(Number) }) });
+    expect(history.markExportedPatternPublished).toHaveBeenCalledWith('profile-pattern', 'user-1', { id: 'community-profile', visibility: 'private', description: 'profile dialog', tags: ['人物'] });
     expect(text(tree)).toContain('作品已私密发布');
     expect(() => button(tree, '发布')).toThrow();
   });

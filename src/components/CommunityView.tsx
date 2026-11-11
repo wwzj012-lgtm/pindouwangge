@@ -4,6 +4,7 @@ import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
 import { loadCommunityPattern } from '../utils/communityPattern';
+import { COMMUNITY_TAG_OPTIONS } from '../utils/communityPatternPublication';
 import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
 import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
@@ -47,7 +48,7 @@ function remixPattern(post: CommunityPost, project: StoredPatternProject): Commu
   return {
     id: post.id,
     title: post.title,
-    description: `发布于 ${publishedLabel(post.publishedAt)}`,
+    description: post.description?.trim() ? post.description : '该用户很懒，没有写简介~',
     author: { name: post.author.displayName, avatar: post.author.photoUrl ?? '' },
     category: '',
     tags: communityPostTags(post),
@@ -76,6 +77,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const membership = { isVip, isPro };
   const editLimit = canvasLimitForMembership(membership);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
+  const [specFilter, setSpecFilter] = useState<'all' | 'small' | 'medium' | 'large'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
   const [selectedProject, setSelectedProject] = useState<StoredPatternProject | null>(null);
@@ -155,13 +158,31 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   }, [ownerOriginal]);
 
   const availableTags = useMemo(() => [...new Set(patternsState.flatMap(communityPostTags))], [patternsState]);
+  // 预设标签始终展示（运营分类），自定义标签按出现追加；每个标签带作品计数。
+  const tagFilters = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const pattern of patternsState) {
+      for (const tag of communityPostTags(pattern)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+    const ordered: { tag: string; count: number }[] = [];
+    for (const tag of COMMUNITY_TAG_OPTIONS) ordered.push({ tag, count: counts.get(tag) ?? 0 });
+    for (const [tag, count] of counts) {
+      if (!COMMUNITY_TAG_OPTIONS.includes(tag)) ordered.push({ tag, count });
+    }
+    return ordered;
+  }, [patternsState]);
   useEffect(() => {
     if (!isLoading && !feedError && activeCategory !== null && !availableTags.includes(activeCategory)) setActiveCategory(null);
   }, [availableTags, activeCategory, isLoading, feedError]);
 
   const filteredPatterns = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
-    const visible = patternsState.filter(pattern => (activeCategory === null || communityPostTags(pattern).includes(activeCategory)) && (!query
+    const specMatch = (pattern: CommunityPattern) => {
+      if (specFilter === 'all') return true;
+      const beads = pattern.beadCount;
+      return specFilter === 'small' ? beads <= 2000 : specFilter === 'medium' ? beads > 2000 && beads <= 6000 : beads > 6000;
+    };
+    const visible = patternsState.filter(pattern => (activeCategory === null || communityPostTags(pattern).includes(activeCategory)) && specMatch(pattern) && (!query
       || pattern.title.toLocaleLowerCase().includes(query)
       || pattern.author.displayName.toLocaleLowerCase().includes(query)
       || communityPostTags(pattern).some(tag => tag.toLocaleLowerCase().includes(query))));
@@ -170,7 +191,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       if (sortBy === 'favorites') return second.favoriteCount - first.favoriteCount || second.publishedAt - first.publishedAt;
       return second.likeCount - first.likeCount || second.publishedAt - first.publishedAt;
     });
-  }, [patternsState, activeCategory, searchQuery, sortBy]);
+  }, [patternsState, activeCategory, specFilter, searchQuery, sortBy]);
 
   const requireRegisteredCommunityAccount = useCallback((message: string): boolean => {
     const hasFormalLogin = Boolean(currentUser)
@@ -329,7 +350,10 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           {/* Categories — a single swipeable row on phones so a long tag list
               never pushes the first artwork below the fold. */}
           <div role="group" aria-label="按作品标签筛选" className="-mx-4 flex w-[calc(100%+2rem)] flex-nowrap items-center gap-2 overflow-x-auto scrollbar-none px-4 sm:mx-0 sm:w-full sm:flex-wrap sm:overflow-visible sm:px-0">
-            {[null, ...availableTags].map(cat => (
+            {[null, ...tagFilters].map(entry => {
+              const cat = entry === null ? null : entry.tag;
+              const count = entry === null ? patternsState.length : (entry as { tag: string; count: number }).count;
+              return (
               <button
                 type="button"
                 key={cat === null ? 'all' : `tag:${cat}`}
@@ -343,8 +367,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 }`}
               >
                 {cat === null ? '全部' : `#${cat}`}
+                {cat !== null ? <span className="ml-1 opacity-70">({count})</span> : null}
               </button>
-            ))}
+            );})}
           </div>
 
           {/* Sort selection */}
@@ -381,6 +406,22 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             >
               最多收藏
             </button>
+          </div>
+          <div role="group" aria-label="按作品规格筛选" className="flex flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
+            <span className="px-2 font-bold text-purple-900">规格:</span>
+            {([['all', '全部'], ['small', '小型 ≤2000 豆'], ['medium', '中型 2001-6000'], ['large', '大型 >6000 豆']] as const).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                aria-pressed={specFilter === value}
+                onClick={() => setSpecFilter(value)}
+                className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
             aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
@@ -496,9 +537,21 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 {communityPostTags(selectedPattern).length > 0 && <ul aria-label="作品标签" className="flex flex-wrap gap-1.5">
                   {communityPostTags(selectedPattern).map(tag => <li key={tag} className="max-w-full break-words rounded-md border border-purple-200 bg-purple-50 px-2 py-1 text-xs text-purple-800">#{tag}</li>)}
                 </ul>}
+                <p className="rounded-xl bg-purple-50 px-3 py-2.5 text-sm leading-relaxed text-purple-950">{selectedPattern.description?.trim() ? selectedPattern.description : '该用户很懒，没有写简介~'}</p>
+                <div className="grid grid-cols-3 gap-2" aria-label="图纸规格">
+                  {([
+                    ['画板', `${selectedProject ? selectedProject.width : selectedPattern.width}×${selectedProject ? selectedProject.height : selectedPattern.height} 格`],
+                    ['豆子数量', `${selectedProject ? selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0) : selectedPattern.beadCount} 颗`],
+                    ['颜色数量', `${selectedProject ? new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size : selectedPattern.colorCount} 种`],
+                  ] as const).map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-purple-200 bg-purple-50 px-2 py-2.5 text-center">
+                      <div className="text-[11px] font-bold text-purple-600">{label}</div>
+                      <div className="mt-1 text-sm font-black tabular-nums text-purple-950">{value}</div>
+                    </div>
+                  ))}
+                </div>
                 <p className="text-xs text-purple-700 leading-relaxed">完整查看、定位色号与计时拼豆不受图纸大小限制。进入画板编辑时，按你当前账号的尺寸权限创建独立副本。</p>
                 {detailMessage && <p role="status" className="rounded-xl bg-amber-50 px-3 py-2 text-xs leading-relaxed text-amber-800">{detailMessage}</p>}
-                {selectedProject && <p className="text-xs text-purple-700">{selectedProject.width} × {selectedProject.height} 格 · {selectedProject.grid.reduce((sum, row) => sum + row.filter((cell) => cell !== null).length, 0)} 颗豆 · {new Set(selectedProject.grid.flat().filter((cell) => cell !== null)).size} 种颜色</p>}
 
                 {/* 互动条：获赞 / 收藏两格，各自整格可点。
                     发布日期已经在作者行下面写过一次，这里不再重复（原来封面角标 + 作者行 +

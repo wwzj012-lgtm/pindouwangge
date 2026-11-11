@@ -27,6 +27,9 @@ export type PatternCommunityVisibility = 'public' | 'private';
 export interface PatternCommunityPublication {
   id: string;
   visibility: PatternCommunityVisibility;
+  /** 发布时的简介与标签快照：编辑弹窗预填用；旧记录可能缺失，缺失时从详情 API 拉取。 */
+  description?: string;
+  tags?: string[];
 }
 
 export interface PatternRecordSummary {

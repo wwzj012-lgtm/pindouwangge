@@ -105,13 +105,24 @@ export async function publishCommunityPattern(params: {
     // Never create a post after the UI session has moved to another account.
     if (!isSessionCurrent()) return publicationError('账号已切换，本次发布未继续。', true);
     if (!isPatternPublicationUnlocked(latestRecord)) return publicationError('完成图纸后解锁发布。');
-    const published = await publishCommunityPost({ ...validated.metadata, workId: publishRecord.id, assetId: upload.data.asset.id });
+    const gridCells = project.grid.flat();
+    const published = await publishCommunityPost({
+      ...validated.metadata,
+      workId: publishRecord.id,
+      assetId: upload.data.asset.id,
+      specs: {
+        gridWidth: project.width,
+        gridHeight: project.height,
+        beadCount: gridCells.filter((cell) => cell !== null).length,
+        colorCount: new Set(gridCells.filter((cell) => cell !== null)).size,
+      },
+    });
     if (!published.ok) throw new Error(published.error ?? '作品发布失败');
     const post = published.data?.post;
     if (!post?.id || (post.visibility !== 'public' && post.visibility !== 'private')) {
       throw new Error('发布结果缺少作品状态，请刷新图库核实。');
     }
-    const publication = { id: post.id, visibility: post.visibility };
+    const publication = { id: post.id, visibility: post.visibility, description: validated.metadata.description, tags: validated.metadata.tags };
     const publishedRecord: ExportedPatternRecord = {
       ...latestRecord,
       status: publication.visibility === 'public' ? 1 : 0,
@@ -129,4 +140,31 @@ export async function publishCommunityPattern(params: {
   } catch (error) {
     return publicationError(error instanceof Error ? error.message : '作品发布失败。');
   }
+}
+
+
+/** 作者编辑已发布作品：只改标题/简介/标签/可见性，图纸本体不动。 */
+export async function editCommunityPattern(params: {
+  postId: string;
+  metadata: CommunityPublicationMetadata;
+}): Promise<{ ok: true; fields: string[] } | { ok: false; error: string }> {
+  const { postId } = params;
+  const validated = validateCommunityPublicationMetadata(params.metadata);
+  if (validated.ok === false) return { ok: false, error: validated.error };
+  const response = await fetch(`/api/community/posts?id=${encodeURIComponent(postId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({
+      title: validated.metadata.title,
+      description: validated.metadata.description,
+      visibility: validated.metadata.visibility,
+      tags: validated.metadata.tags,
+    }),
+  });
+  if (!response.ok) {
+    const message = await response.json().then((body) => (body as { message?: string }).message).catch(() => null);
+    return { ok: false, error: message ?? `编辑失败（${response.status}）` };
+  }
+  return { ok: true, fields: ['title', 'description', 'visibility', 'tags'] };
 }

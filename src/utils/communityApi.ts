@@ -50,6 +50,13 @@ export interface CommunityPublicationMutationResult {
   withdrawn?: boolean;
 }
 
+export interface CommunityPostSpecs {
+  gridWidth: number;
+  gridHeight: number;
+  beadCount: number;
+  colorCount: number;
+}
+
 export interface CommunityPublishInput {
   title: string;
   description: string;
@@ -57,6 +64,7 @@ export interface CommunityPublishInput {
   tags: string[];
   workId: string;
   assetId?: string;
+  specs?: CommunityPostSpecs;
 }
 
 export type CommunityPublishErrorCode = 'WORK_ASSET_REQUIRED' | (string & {});
@@ -191,6 +199,7 @@ export function publishCommunityPost(
     },
     ...(input.workId ? { workId: input.workId } : {}),
     ...(input.assetId ? { assetId: input.assetId } : {}),
+    ...(input.specs ? { specs: input.specs } : {}),
   }).then(complete);
 }
 

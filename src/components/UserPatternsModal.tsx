@@ -40,7 +40,9 @@ import { PatternConfirmDialog } from './PatternConfirmDialog';
 import { PatternPublicationDialog } from './PatternPublicationDialog';
 import { formatChinaDate } from '../utils/dateUtils';
 import type { ContinueEditingPattern } from '../utils/savedPatternNavigation';
-import { isPatternPublicationUnlocked, publishCommunityPattern } from '../utils/communityPatternPublication';
+import { editCommunityPattern, isPatternPublicationUnlocked, publishCommunityPattern } from '../utils/communityPatternPublication';
+import { PatternPublishDialog, type PatternEditingPost } from './PatternPublishDialog';
+import type { CommunityPublicationMetadata } from '../utils/communityPatternPublication';
 
 interface UserPatternsModalProps {
   isOpen: boolean;
@@ -191,6 +193,9 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
   const [publishTagDraft, setPublishTagDraft] = useState('');
   const [publishError, setPublishError] = useState<string | null>(null);
   const [publicationTarget, setPublicationTarget] = useState<ExportedPatternRecord | null>(null);
+  const [editingPost, setEditingPost] = useState<PatternEditingPost | null>(null);
+  const [editingBusy, setEditingBusy] = useState(false);
+  const [editingError, setEditingError] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<{ record: ExportedPatternRecord; scope: 'local' | 'cloud' } | null>(null);
   const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
   const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
@@ -353,6 +358,60 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
       setMessage(error instanceof Error ? error.message : (isEn ? 'Rename failed.' : '重命名失败。'));
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const openEditDialog = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!currentUser) return;
+    const publication = record.communityPost;
+    if (!publication) return;
+    setEditingError(null);
+    let description = publication.description ?? '';
+    let tags = publication.tags ?? [];
+    // 旧记录缺本地快照：从社区详情补齐（作者本人可读自己的私密帖）。
+    if (publication.description === undefined || publication.tags === undefined) {
+      try {
+        const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(publication.id)}`, { credentials: 'include' });
+        if (detail.ok) {
+          const body = await detail.json() as { data?: { post?: { description?: string; tags?: string[] } } };
+          const post = body.data?.post;
+          if (post) { description = post.description ?? ''; tags = Array.isArray(post.tags) ? post.tags : []; }
+        }
+      } catch { /* 拉取失败就用空值，用户可以现场补写 */ }
+    }
+    setEditingPost({
+      id: publication.id,
+      title: record.title,
+      description,
+      visibility: publication.visibility,
+      tags,
+    });
+  };
+
+  const handleEditSubmit = async (metadata: CommunityPublicationMetadata): Promise<void> => {
+    if (!editingPost || !currentUser || editingBusy) return;
+    setEditingBusy(true);
+    setEditingError(null);
+    try {
+      const result = await editCommunityPattern({ postId: editingPost.id, metadata });
+      if (result.ok === false) { setEditingError(result.error); return; }
+      setRecords((current) => current.map((item) => item.communityPost?.id === editingPost.id ? {
+        ...item,
+        title: metadata.title,
+        communityPost: {
+          ...item.communityPost,
+          visibility: metadata.visibility,
+          description: metadata.description,
+          tags: metadata.tags,
+        },
+      } : item));
+      setEditingPost(null);
+      setMessage(isEn ? 'Changes saved. The community page reflects them immediately.' : '修改已保存，社区页面立即生效。');
+      void loadPatterns();
+    } catch (error) {
+      setEditingError(error instanceof Error ? error.message : (isEn ? 'Save failed.' : '保存失败。'));
+    } finally {
+      setEditingBusy(false);
     }
   };
 
@@ -649,6 +708,14 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                         </button>
                       )}
                       {isCommunityPublished(record) && record.communityPost && (
+                        <>
+                        <button
+                          onClick={() => void openEditDialog(record)}
+                          className="inline-flex items-center justify-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/20"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          {isEn ? 'Edit listing' : '编辑作品信息'}
+                        </button>
                         <button
                           onClick={() => setPublicationTarget(record)}
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-2 text-xs font-bold text-amber-200 hover:bg-amber-500/20"
@@ -656,6 +723,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                           <EyeOff className="h-3.5 w-3.5" />
                           {isEn ? 'Publication settings' : '发布管理'}
                         </button>
+                        </>
                       )}
                       {isCommunityPublished(record) && (
                         <button
@@ -827,6 +895,14 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
           if (pendingDelete.scope === 'local') void handleDeleteLocal(pendingDelete.record);
           else void handleDeleteCloudAndLocal(pendingDelete.record);
         }}
+      />
+      <PatternPublishDialog
+        record={null}
+        editingPost={editingPost}
+        busy={editingBusy}
+        error={editingError}
+        onClose={() => { if (!editingBusy) { setEditingPost(null); setEditingError(null); } }}
+        onSubmit={(metadata) => { void handleEditSubmit(metadata); }}
       />
       <PatternPublicationDialog
         record={publicationTarget}

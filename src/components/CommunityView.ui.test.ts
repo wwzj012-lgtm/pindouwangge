@@ -48,8 +48,14 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     feed.posts.push(post('4', tags));
     let tree = render();
     for (const tag of [...tags, '人物', '游戏', '花卉']) expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${tag}`)).toBe(true);
+    // 预设运营分类常显（即使没有作品），真实标签按出现追加；每个标签带作品计数。
+    for (const preset of ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo']) {
+      expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${preset}`)).toBe(true);
+    }
+    expect(text(tree)).toContain('#人物(1)');
+    expect(text(tree)).toContain('#像素拼豆(0)');
     expect(text(tree)).not.toContain('#社区作品');
-    button(tree, '#人物').props.onClick(); tree = render();
+    button(tree, '#人物(1)').props.onClick(); tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
     const search = nodes(tree).find(node => node.type === 'input')!;
     search.props.onChange({ target: { value: '不存在' } }); tree = render();

@@ -245,9 +245,11 @@ export async function runLibraryChecks(width: number) {
   await reset(); probe.failure = 'mark'; await click('发布', profile()); await click('确认发布', publishDialog()!);
   await waitFor(() => profile().textContent?.includes('已发布，图库本地状态更新失败'), 'post-confirmed local mark warning');
   check(document.querySelectorAll('.profile-pattern-card').length === 1 && !publishDialog(), 'server-confirmed public post survives failed local mark');
-  probe.failure = ''; await click('编辑', profile());
-  await waitFor(() => !profile(), 'continue editing closes profile after actual App restore');
-  check(count('read') > 0, 'continue editing reads full stored project');
+  probe.failure = ''; await click('编辑作品', profile());
+  await waitFor(() => Boolean(publishDialog()?.textContent?.includes('编辑已发布作品')), 'edit listing dialog reuses the publish window prefilled');
+  check(publishDialog()?.textContent?.includes('修改保存后社区页面立即生效。') ?? false, 'edit dialog shows edit-mode hint');
+  await click('关闭发布窗口', publishDialog()!);
+  await waitFor(() => !publishDialog(), 'edit listing dialog closes without leaving the profile');
   await open();
 
   if (width < 768) {

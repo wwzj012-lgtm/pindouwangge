@@ -4,7 +4,6 @@ import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
 import { loadCommunityPattern } from '../utils/communityPattern';
-import { COMMUNITY_TAG_OPTIONS } from '../utils/communityPatternPublication';
 import { renderCommunityPattern } from '../utils/communityPatternSnapshot';
 import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
@@ -78,7 +77,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const editLimit = canvasLimitForMembership(membership);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
-  const [specFilter, setSpecFilter] = useState<'all' | 'small' | 'medium' | 'large'>('all');
+  const [specFilter, setSpecFilter] = useState<'all' | 'le500' | 'le1000' | 'le2000' | 'le3000' | 'le5000' | 'le8000' | 'gt8000'>('all');
   // 筛选面板：标签很多时默认收起为单行横滑，点「展开」查看全部并调规格。
   const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -166,12 +165,10 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     for (const pattern of patternsState) {
       for (const tag of communityPostTags(pattern)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     }
-    const ordered: { tag: string; count: number }[] = [];
-    for (const tag of COMMUNITY_TAG_OPTIONS) ordered.push({ tag, count: counts.get(tag) ?? 0 });
-    for (const [tag, count] of counts) {
-      if (!COMMUNITY_TAG_OPTIONS.includes(tag)) ordered.push({ tag, count });
-    }
-    return ordered;
+    // 按作品数量由大到小；没有作品的标签不出现。
+    return [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
   }, [patternsState]);
   useEffect(() => {
     if (!isLoading && !feedError && activeCategory !== null && !availableTags.includes(activeCategory)) setActiveCategory(null);
@@ -182,7 +179,14 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     const specMatch = (pattern: CommunityPattern) => {
       if (specFilter === 'all') return true;
       const beads = pattern.beadCount;
-      return specFilter === 'small' ? beads <= 2000 : specFilter === 'medium' ? beads > 2000 && beads <= 6000 : beads > 6000;
+      if (beads === undefined) return false;
+      if (specFilter === 'le500') return beads <= 500;
+      if (specFilter === 'le1000') return beads > 500 && beads <= 1000;
+      if (specFilter === 'le2000') return beads > 1000 && beads <= 2000;
+      if (specFilter === 'le3000') return beads > 2000 && beads <= 3000;
+      if (specFilter === 'le5000') return beads > 3000 && beads <= 5000;
+      if (specFilter === 'le8000') return beads > 5000 && beads <= 8000;
+      return beads > 8000;
     };
     const visible = patternsState.filter(pattern => (activeCategory === null || communityPostTags(pattern).includes(activeCategory)) && specMatch(pattern) && (!query
       || pattern.title.toLocaleLowerCase().includes(query)
@@ -408,6 +412,21 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             >
               最多收藏
             </button>
+            <span className="mx-1 h-4 w-px bg-purple-200" aria-hidden="true" />
+            <span className="px-1 font-bold text-purple-900">规格:</span>
+            {([['all', '全部'], ['le500', '≤500'], ['le1000', '≤1k'], ['le2000', '≤2k'], ['le3000', '≤3k'], ['le5000', '≤5k'], ['le8000', '≤8k'], ['gt8000', '>8k']] as const).map(([value, label]) => (
+              <button
+                type="button"
+                key={`spec:${value}`}
+                aria-pressed={specFilter === value}
+                onClick={() => setSpecFilter(value)}
+                className={`min-h-11 sm:min-h-9 px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <button
             type="button"
@@ -418,26 +437,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             }`}
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            {filtersExpanded ? '收起筛选' : `展开筛选${specFilter !== 'all' ? ' · 已选规格' : ''}`}
+            {filtersExpanded ? '收起标签' : '展开标签'}
           </button>
-          {filtersExpanded && (
-          <div role="group" aria-label="按作品规格筛选" className="flex w-full flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
-            <span className="px-2 font-bold text-purple-900">规格:</span>
-            {([['all', '全部'], ['small', '小型 ≤2000 豆'], ['medium', '中型 2001-6000'], ['large', '大型 >6000 豆']] as const).map(([value, label]) => (
-              <button
-                type="button"
-                key={value}
-                aria-pressed={specFilter === value}
-                onClick={() => setSpecFilter(value)}
-                className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          )}
           <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
             aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
             title={isLoading ? '正在刷新社区' : '刷新社区'}

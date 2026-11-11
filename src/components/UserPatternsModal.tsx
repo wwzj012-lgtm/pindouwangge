@@ -714,7 +714,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
                           className="inline-flex items-center justify-center gap-1 rounded-md border border-sky-500/40 bg-sky-500/10 px-2 py-2 text-xs font-bold text-sky-200 hover:bg-sky-500/20"
                         >
                           <Pencil className="h-3.5 w-3.5" />
-                          {isEn ? 'Edit listing' : '编辑作品信息'}
+                          {isEn ? 'Edit listing' : '编辑作品'}
                         </button>
                         <button
                           onClick={() => setPublicationTarget(record)}

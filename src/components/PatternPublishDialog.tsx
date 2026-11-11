@@ -75,6 +75,7 @@ export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, e
   }, [busy, onClose, record]);
 
   if (!record && !isEditing) return null;
+  const displayTitle = isEditing ? editingPost.title : record.title;
   const message = localError ?? error;
   const addTag = (value: string): void => {
     const tag = value.trim();
@@ -95,7 +96,7 @@ export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, e
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-900/45 p-3 backdrop-blur-sm" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target && !busy) onClose(); }}>
       <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="profile-publish-title" className="max-h-[calc(100vh-1.5rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-purple-200 bg-white p-4 shadow-2xl sm:p-5">
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0"><h3 id="profile-publish-title" className="text-base font-black text-slate-900">{isEditing ? '编辑已发布作品' : '发布到豆社'}</h3><p className="mt-1 truncate text-xs text-slate-500">{record.title}</p><p className="mt-1 text-[11px] font-medium text-emerald-700">云端同步与发布均不收费。</p></div>
+          <div className="min-w-0"><h3 id="profile-publish-title" className="text-base font-black text-slate-900">{isEditing ? '编辑已发布作品' : '发布到豆社'}</h3><p className="mt-1 truncate text-xs text-slate-500">{isEditing ? editingPost.title : record.title}</p><p className="mt-1 text-[11px] font-medium text-emerald-700">{isEditing ? '修改保存后社区页面立即生效。' : '云端同步与发布均不收费。'}</p></div>
           <button type="button" onClick={onClose} disabled={busy} aria-label="关闭发布窗口" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-50"><X className="h-5 w-5" /></button>
         </div>
         <label className="mt-5 block text-xs font-bold text-slate-700">作品名称<input ref={titleRef} value={title} maxLength={60} disabled={busy} onChange={(event) => { setTitle(event.target.value); setLocalError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') submit(); }} className="mt-2 min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition-colors focus:border-purple-500 focus:ring-2 focus:ring-purple-200 disabled:opacity-60" aria-describedby="profile-publish-name-help" /></label>

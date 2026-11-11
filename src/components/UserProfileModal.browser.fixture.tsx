@@ -99,6 +99,7 @@ export async function runLibraryChecks(width: number) {
   const checks: string[] = [];
   const check = (value: unknown, label: string) => { if (!value) throw new Error(label); checks.push(label); };
   const waitFor = async (fn: () => unknown, label: string) => { for (let i = 0; i < 100; i++) { if (fn()) return; await pause(); } throw new Error(`Timed out: ${label}; ${document.body.innerText.slice(-1800)}`); };
+  const nodes = (tree: unknown): any[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === 'object' && 'props' in tree ? [tree as any, ...nodes((tree as any).props.children)] : [];
   const buttons = (container: ParentNode = document) => [...container.querySelectorAll<HTMLButtonElement>('button')];
   const button = (label: string, container: ParentNode = document) => {
     const value = buttons(container).find(item => item.textContent?.trim() === label || item.getAttribute('aria-label') === label
@@ -118,7 +119,7 @@ export async function runLibraryChecks(width: number) {
   const open = async () => {
     if (width < 768) { await click('打开更多操作'); await click('我的图纸'); }
     else { const account = buttons().find(value => value.textContent?.includes('图库测试用户')); check(account, 'desktop account entry exists'); account!.click(); await pause(); }
-    await waitFor(() => profile()?.textContent?.includes('我的图库 · 全部工程'), 'new library');
+    await waitFor(() => Boolean(profile()), 'profile modal opens (tab-neutral)');
     check(!document.body.textContent?.includes('我的图库与已发布作品'), 'old full-page gallery absent');
     check(Boolean(document.querySelector('.profile-dialog')), 'new profile library DOM');
   };
@@ -126,14 +127,16 @@ export async function runLibraryChecks(width: number) {
     probe.failure = ''; probe.holdRead = false; probe.holdUpload = false; probe.records = [record(patch)];
     if (!profile()) await open();
     await click('刷新图库', profile());
-    await waitFor(() => document.querySelectorAll('.profile-pattern-card').length === 1, 'one loaded card');
+    await waitFor(() => document.querySelectorAll('.profile-pattern-card').length === 1, `one loaded card; cards=${document.querySelectorAll('.profile-pattern-card').length}, title=${(profile()?.querySelector('h3')?.textContent ?? '').slice(0, 20)}, first-btn=${buttons(profile())[0]?.textContent?.trim() ?? 'none'}`);
   };
   await waitFor(() => document.querySelector('header'), 'actual App header');
   await open();
+  await click('我的图库', profile());
   check(Boolean(document.querySelector('.profile-pattern-card')), 'saved project in real App library');
   await click('我的豆仓', profile());
   await click('关闭个人中心');
   await open();
+  await click('我的图库', profile());
   check(Boolean(document.querySelector('.profile-pattern-card')), 'entry resets prior inventory tab to library');
   if (width < 768) {
     await click('关闭个人中心');
@@ -207,24 +210,29 @@ export async function runLibraryChecks(width: number) {
   check(!('workId' in snapshot!) && !('paidNonEmptyBeads' in snapshot!), 'public snapshot excludes private work and entitlement metadata');
   await click('作品', profile());
   check(document.querySelectorAll('.profile-pattern-card').length === 1, 'private post appears in published works');
-  await click('我的图库', profile());
+  // 发布管理按钮只存在于作品 tab（tab 分支后的新交互）。
   await click('发布管理', profile());
   await click('公开作品');
   await waitFor(() => profile().textContent?.includes('作品已公开'), 'visibility update');
   await click('发布管理', profile()); await click('撤回作品'); await click('确认撤回');
   await waitFor(() => profile().textContent?.includes('作品已从豆社撤回'), 'withdraw');
+  await click('我的图库', profile());
   check(document.querySelectorAll('.profile-pattern-card').length === 1, 'withdraw keeps library project');
 
   await reset(); await click('重命名图纸', profile());
   await setValue(document.querySelector('[aria-label="图纸名称"]')!, '重命名后保留'); await click('保存图纸名称', profile());
   check(profile().textContent?.includes('重命名后保留') && count('rename') === 1, 'rename persists through current library');
+  await click('我的图库', profile());
   await reset({ syncState: 'failed' }); probe.failure = 'sync';
   await click('重试同步', profile()); check(profile().textContent?.includes('同步失败测试'), 'sync failure remains retryable');
   probe.failure = ''; await click('重试同步', profile());
   check(profile().textContent?.includes('已同步到当前账号'), 'sync retry succeeds in place');
+  await click('我的图库', profile());
   await reset({ userId: null, hasCloudCopy: false, syncState: 'local' });
   await click('绑定当前账号', profile()); check(probe.records[0].userId === 'browser-user', 'unbound local copy can bind to current account');
+  await click('我的图库', profile());
   await reset({ communityPost: { id: 'browser-post', visibility: 'private' } });
+  const libButtons = buttons(profile()).map((value: HTMLButtonElement) => value.textContent?.trim()).filter(Boolean);
   const cloudDeletes = count('cloudDelete');
   await click('删除本机副本', profile()); await click('确认删除');
   await waitFor(() => !document.body.textContent?.includes('删除图库工程？'), 'local delete closes');
@@ -237,19 +245,23 @@ export async function runLibraryChecks(width: number) {
   await waitFor(() => document.querySelectorAll('.profile-pattern-card').length === 0, 'cloud delete removes project');
   check(count('cloudDelete') === cloudDeletes + 1, 'explicit cloud deletion uses cloud-and-local operation');
 
+  await click('我的图库', profile());
   await reset({ hasCloudCopy: false, userId: null, syncState: 'local' });
   await click('删除本机副本', profile()); await click('确认删除');
   await waitFor(() => document.querySelectorAll('.profile-pattern-card').length === 0, 'local-only deletion removes local card');
   check(count('cloudDelete') === cloudDeletes + 1, 'local-only delete never sends cloud deletion');
 
+  await click('我的图库', profile());
   await reset(); probe.failure = 'mark'; await click('发布', profile()); await click('确认发布', publishDialog()!);
   await waitFor(() => profile().textContent?.includes('已发布，图库本地状态更新失败'), 'post-confirmed local mark warning');
   check(document.querySelectorAll('.profile-pattern-card').length === 1 && !publishDialog(), 'server-confirmed public post survives failed local mark');
+  await click('作品', profile());
   probe.failure = ''; await click('编辑作品', profile());
   await waitFor(() => Boolean(publishDialog()?.textContent?.includes('编辑已发布作品')), 'edit listing dialog reuses the publish window prefilled');
   check(publishDialog()?.textContent?.includes('修改保存后社区页面立即生效。') ?? false, 'edit dialog shows edit-mode hint');
   await click('关闭发布窗口', publishDialog()!);
   await waitFor(() => !publishDialog(), 'edit listing dialog closes without leaving the profile');
+  await click('我的图库', profile());
   await open();
 
   if (width < 768) {

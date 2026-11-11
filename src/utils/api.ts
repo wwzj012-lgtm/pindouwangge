@@ -26,7 +26,7 @@ export interface ApiRequestOptions {
   idempotencyKey?: string;
 }
 
-type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
+type ApiMethod = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
 
 export const DEFAULT_API_TIMEOUT_MS = 8_000;
 export const AUTH_API_TIMEOUT_MS = 15_000;
@@ -421,6 +421,10 @@ export function apiPost<T>(path: string, body?: unknown, options?: ApiRequestOpt
 
 export function apiPut<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
   return apiRequest<T>('PUT', path, body, undefined, options);
+}
+
+export function apiPatch<T>(path: string, body?: unknown, options?: ApiRequestOptions): Promise<ApiResult<T>> {
+  return apiRequest<T>('PATCH', path, body, undefined, options);
 }
 
 export function apiDelete<T>(path: string, params?: Record<string, string>, options?: ApiRequestOptions): Promise<ApiResult<T>> {

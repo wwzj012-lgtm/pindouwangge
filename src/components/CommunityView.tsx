@@ -355,7 +355,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
           {/* Categories — a single swipeable row on phones so a long tag list
               never pushes the first artwork below the fold. */}
-          <div role="group" aria-label="按作品标签筛选" className={`-mx-4 flex w-[calc(100%+2rem)] items-center gap-2 scrollbar-none px-4 sm:mx-0 sm:w-full sm:px-0 ${filtersExpanded || tagFilters.length <= 8 ? 'flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible' : 'flex-nowrap overflow-x-auto'}`}>
+          <div role="group" aria-label="按作品标签筛选" className={`-mx-4 flex w-[calc(100%+2rem)] items-center gap-2 scrollbar-none px-4 sm:mx-0 sm:w-full sm:px-0 ${filtersExpanded ? 'flex-wrap' : 'flex-nowrap overflow-x-auto'}`}>
             {[null, ...tagFilters].map(entry => {
               const cat = entry === null ? null : entry.tag;
               const count = entry === null ? patternsState.length : (entry as { tag: string; count: number }).count;
@@ -428,7 +428,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               </button>
             ))}
           </div>
-          <button
+          {tagFilters.length > 6 && <button
             type="button"
             aria-expanded={filtersExpanded}
             onClick={() => setFiltersExpanded(value => !value)}
@@ -438,7 +438,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           >
             <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
             {filtersExpanded ? '收起标签' : '展开标签'}
-          </button>
+          </button>}
           <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
             aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
             title={isLoading ? '正在刷新社区' : '刷新社区'}

@@ -5,7 +5,7 @@ import {
   type ExportedPatternRecord,
 } from './patternHistory';
 import { renderCommunityPattern } from './communityPatternSnapshot';
-import { publishCommunityPost, uploadCommunityAsset, type CommunityPostVisibility } from './communityApi';
+import { editCommunityPost, publishCommunityPost, uploadCommunityAsset, type CommunityPostVisibility } from './communityApi';
 
 export const COMMUNITY_TAG_OPTIONS = ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo'];
 export const COMMUNITY_MAX_TAGS = 5;
@@ -143,7 +143,7 @@ export async function publishCommunityPattern(params: {
 }
 
 
-/** 作者编辑已发布作品：只改标题/简介/标签/可见性，图纸本体不动。 */
+/** 作者编辑已发布作品：只改标题/简介/标签/可见性，图纸本体不动。走标准认证封装。 */
 export async function editCommunityPattern(params: {
   postId: string;
   metadata: CommunityPublicationMetadata;
@@ -151,20 +151,9 @@ export async function editCommunityPattern(params: {
   const { postId } = params;
   const validated = validateCommunityPublicationMetadata(params.metadata);
   if (validated.ok === false) return { ok: false, error: validated.error };
-  const response = await fetch(`/api/community/posts?id=${encodeURIComponent(postId)}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
-    body: JSON.stringify({
-      title: validated.metadata.title,
-      description: validated.metadata.description,
-      visibility: validated.metadata.visibility,
-      tags: validated.metadata.tags,
-    }),
-  });
-  if (!response.ok) {
-    const message = await response.json().then((body) => (body as { message?: string }).message).catch(() => null);
-    return { ok: false, error: message ?? `编辑失败（${response.status}）` };
+  const result = await editCommunityPost(postId, validated.metadata);
+  if (result.ok === false) {
+    return { ok: false, error: result.error ?? `编辑失败（${result.status}）` };
   }
   return { ok: true, fields: ['title', 'description', 'visibility', 'tags'] };
 }

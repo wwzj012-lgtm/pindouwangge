@@ -1,5 +1,5 @@
 import type { ApiResult } from './api';
-import { apiDelete, apiGet, apiPost, apiPostBlob, apiPublicUrl, apiPut, captureApiSessionGuard } from './api';
+import { apiDelete, apiGet, apiPatch, apiPost, apiPostBlob, apiPublicUrl, apiPut, captureApiSessionGuard } from './api';
 import { invalidateCommunityFeed } from './communityFeedEvents';
 
 export interface CommunityPost {
@@ -213,6 +213,20 @@ export async function setCommunityPostVisibility(
     visibility,
   });
   if (result.ok && result.data?.id === postId && result.data.visibility === visibility && isSessionCurrent()) {
+    invalidateCommunityFeed();
+  }
+  return result;
+}
+
+export async function editCommunityPost(postId: string, metadata: {
+  title: string; description: string; visibility: CommunityPostVisibility; tags: string[];
+}): Promise<ApiResult<CommunityPublicationMutationResult>> {
+  const isSessionCurrent = captureApiSessionGuard();
+  const result = await apiPatch<CommunityPublicationMutationResult>('/api/community/posts', {
+    id: postId,
+    ...metadata,
+  });
+  if (result.ok && isSessionCurrent()) {
     invalidateCommunityFeed();
   }
   return result;

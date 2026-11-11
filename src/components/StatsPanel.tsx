@@ -371,8 +371,9 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
         </div>
       )}
 
-      {/* Color Table List */}
-      <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
+      {/* Color Table List：min-h-0 是关键——flex 列里没有它时 min-height:auto
+          让列表被内容撑高、溢出被父级 overflow-hidden 裁掉，最后一条色卡永远不可见。 */}
+      <div className="min-h-0 flex-1 overflow-y-auto space-y-1.5 pr-1 pb-1">
         {filteredStats.map((s, index) => {
           const isHighlighted = activeHighlightIds.includes(s.color.id);
           const isCompleted = completedColorIds.includes(s.color.id);

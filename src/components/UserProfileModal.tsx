@@ -359,6 +359,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     setEditingError(null);
     setEditingPost({
       id: record.communityPost.id,
+      patternId: record.id,
       title,
       description,
       visibility: record.communityPost.visibility,
@@ -373,7 +374,19 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
     try {
       const result = await editCommunityPattern({ postId: editingPost.id, metadata });
       if (result.ok === false) { setEditingError(result.error); return; }
-      setSavedPatterns((current) => current.map((item) => item.communityPost?.id === editingPost.id ? {
+      // 名称统一：编辑弹窗改的标题同时落到图库图纸记录（本地 + 云端 user-patterns），
+      // 否则社区名变了、我的图库/作品页卡片还停留在旧图纸名。失败不回滚豆社修改，仅提示。
+      let renameWarning: string | null = null;
+      const record = savedPatterns.find((item) => item.communityPost?.id === editingPost.id
+        || item.id === editingPost.patternId);
+      if (record && record.title !== metadata.title) {
+        try {
+          await renameExportedPattern(record, currentUserRef.current?.uid ?? null, metadata.title);
+        } catch (error) {
+          renameWarning = error instanceof Error ? error.message : '图库改名失败';
+        }
+      }
+      setSavedPatterns((current) => current.map((item) => item.communityPost?.id === editingPost.id || item.id === editingPost.patternId ? {
         ...item,
         title: metadata.title,
         communityPost: {
@@ -384,6 +397,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
         },
       } : item));
       setEditingPost(null);
+      if (renameWarning) setActionMessage(`豆社作品已更新，但图库图纸改名未成功：${renameWarning}。可稍后在图库手动重命名。`);
       void loadSavedPatterns();
     } catch (error) {
       setEditingError(error instanceof Error ? error.message : '保存失败。');
@@ -426,6 +440,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
       if (!isCurrentOperation(operation.epoch, operation.userId)) return;
       setSavedPatterns((items) => items.map((item) => item.id === record.id ? { ...item, title: updated.title, updatedAt: updated.updatedAt, syncState: updated.syncState } : item));
       cancelRename();
+      // 名称统一（反向）：已发布作品的图库改名同步更新豆社标题。
+      // 先拉详情取当前简介/标签，避免本地快照缺失时把已有内容清空。
+      if (record.communityPost) {
+        try {
+          const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(record.communityPost.id)}`, { credentials: 'include' });
+          if (!detail.ok) throw new Error('作品详情拉取失败');
+          const body = await detail.json() as { data?: { post?: { description?: string; visibility?: 'public' | 'private'; tags?: string[] } } };
+          const post = body.data?.post;
+          const result = await editCommunityPattern({ postId: record.communityPost.id, metadata: {
+            title,
+            description: post?.description ?? '',
+            visibility: post?.visibility ?? record.communityPost.visibility,
+            tags: Array.isArray(post?.tags) ? post!.tags! : [],
+          } });
+          if (result.ok === false) throw new Error(result.error);
+        } catch (error) {
+          if (isCurrentOperation(operation.epoch, operation.userId)) {
+            setActionMessage(`图库已改名，但同步豆社标题失败：${error instanceof Error ? error.message : '请重试'}。`);
+          }
+        }
+      }
     } catch (error) {
       if (isCurrentOperation(operation.epoch, operation.userId)) setActionMessage(error instanceof Error ? error.message : '重命名失败，请重试。');
     } finally { finishAction(operation); }
@@ -857,7 +892,12 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                     const canRetrySync = (record.syncState === 'failed' || record.syncState === 'pending') && record.userId === currentUser?.uid;
                     return (
                       <article key={record.id} className="profile-pattern-card group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all hover:border-purple-500/80 hover:shadow-xl hover:shadow-purple-950/20">
-                        <div className="cursor-pointer relative transition-opacity group-hover:opacity-95" onClick={() => setSelectedPatternForAction(record)}>
+                        <div className="cursor-pointer relative transition-opacity group-hover:opacity-95" onClick={() => {
+                          // 作品页：点图直达“编辑已发布作品”（与编辑作品按钮同口径）；
+                          // 图库页：维持原有操作弹窗（编辑图纸/删除/发布管理）。
+                          if (activeTab === 'works' && record.communityPost) void openEditListingDialog(record);
+                          else setSelectedPatternForAction(record);
+                        }}>
                           <PatternCoverThumbnail record={record} userId={currentUser?.uid || null} />
                           <div className="absolute top-2 left-2 rounded-lg border border-slate-200 bg-white/85 px-2 py-0.5 text-[10px] font-bold text-purple-600 backdrop-blur-md">{record.width}×{record.height} 粒</div>
                           <div className="absolute top-2 right-2 rounded-lg border border-slate-200 bg-white/85 px-2 py-0.5 text-[10px] font-extrabold text-amber-700 backdrop-blur-md">{record.totalBeads} 粒</div>
@@ -871,7 +911,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                                 <button type="button" disabled={isBusy} onClick={cancelRename} aria-label="取消重命名" className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-slate-100 disabled:opacity-50"><X className="h-4 w-4" /></button>
                               </div>
                             ) : (
-                              <div className="flex items-center gap-1"><h4 onClick={() => setSelectedPatternForAction(record)} className="min-w-0 flex-1 cursor-pointer truncate text-xs font-extrabold text-slate-900 hover:text-purple-600" title={record.title}>{record.title}</h4><button type="button" disabled={isBusy} onClick={() => startRename(record)} aria-label="重命名图纸" className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button></div>
+                              <div className="flex items-center gap-1"><h4 onClick={() => { if (activeTab === 'works' && record.communityPost) void openEditListingDialog(record); else setSelectedPatternForAction(record); }} className="min-w-0 flex-1 cursor-pointer truncate text-xs font-extrabold text-slate-900 hover:text-purple-600" title={record.title}>{record.title}</h4><button type="button" disabled={isBusy} onClick={() => startRename(record)} aria-label="重命名图纸" className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 hover:bg-purple-50 hover:text-purple-700 disabled:opacity-50"><Pencil className="h-3.5 w-3.5" /></button></div>
                             )}
                             {/* 时间 / 发布状态 / 同步状态压成一行。原来这三条各占一行，
                                 手机两列卡片里光元信息就吃掉 70px，卡片比封面还高。 */}

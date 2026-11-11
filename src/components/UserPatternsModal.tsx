@@ -354,6 +354,26 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
         syncState: updated.syncState,
       } : item));
       cancelRename();
+      // 名称统一（反向）：已发布作品的图库改名同步豆社标题；先拉详情防清空已有简介/标签。
+      if (record.communityPost) {
+        try {
+          const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(record.communityPost.id)}`, { credentials: 'include' });
+          if (!detail.ok) throw new Error(isEn ? 'Failed to load post details.' : '作品详情拉取失败');
+          const body = await detail.json() as { data?: { post?: { description?: string; visibility?: 'public' | 'private'; tags?: string[] } } };
+          const post = body.data?.post;
+          const sync = await editCommunityPattern({ postId: record.communityPost.id, metadata: {
+            title,
+            description: post?.description ?? '',
+            visibility: post?.visibility ?? record.communityPost.visibility,
+            tags: Array.isArray(post?.tags) ? post!.tags! : [],
+          } });
+          if (sync.ok === false) throw new Error(sync.error);
+        } catch (error) {
+          setMessage(isEn
+            ? `Renamed locally, but syncing the community title failed: ${error instanceof Error ? error.message : 'retry'}.`
+            : `图库已改名，但同步豆社标题失败：${error instanceof Error ? error.message : '请重试'}。`);
+        }
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : (isEn ? 'Rename failed.' : '重命名失败。'));
     } finally {
@@ -385,6 +405,7 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     } catch { /* 拉取失败回落本地快照，用户可现场修改 */ }
     setEditingPost({
       id: publication.id,
+      patternId: record.id,
       title,
       description,
       visibility: publication.visibility,
@@ -399,7 +420,17 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     try {
       const result = await editCommunityPattern({ postId: editingPost.id, metadata });
       if (result.ok === false) { setEditingError(result.error); return; }
-      setRecords((current) => current.map((item) => item.communityPost?.id === editingPost.id ? {
+      // 名称统一：编辑标题同步图库图纸记录（与 UserProfileModal 同口径）。失败不回滚豆社修改。
+      let renameWarning: string | null = null;
+      const record = records.find((item) => item.communityPost?.id === editingPost.id || item.id === editingPost.patternId);
+      if (record && record.title !== metadata.title) {
+        try {
+          await renameExportedPattern(record, currentUser.uid, metadata.title);
+        } catch (error) {
+          renameWarning = error instanceof Error ? error.message : '图库改名失败';
+        }
+      }
+      setRecords((current) => current.map((item) => item.communityPost?.id === editingPost.id || item.id === editingPost.patternId ? {
         ...item,
         title: metadata.title,
         communityPost: {
@@ -410,7 +441,9 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
         },
       } : item));
       setEditingPost(null);
-      setMessage(isEn ? 'Changes saved. The community page reflects them immediately.' : '修改已保存，社区页面立即生效。');
+      setMessage(renameWarning
+        ? (isEn ? `Saved, but renaming the library pattern failed: ${renameWarning}.` : `豆社作品已更新，但图库图纸改名未成功：${renameWarning}。`)
+        : (isEn ? 'Changes saved. The community page reflects them immediately.' : '修改已保存，社区页面立即生效。'));
       void loadPatterns();
     } catch (error) {
       setEditingError(error instanceof Error ? error.message : (isEn ? 'Save failed.' : '保存失败。'));

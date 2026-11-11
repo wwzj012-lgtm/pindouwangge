@@ -944,7 +944,18 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // only once the pattern itself has been completed, paid up to date, or is a
   // server-marked legacy pattern.
   const isFreehandPattern = !isImageDerivedPattern && completionStatus !== 'COMPLETED';
-  const isPatternUnlocked = isFreehandPattern || isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
+  // 解锁态按图纸闩定：首笔增减豆子会触发重新核价，服务端 coverage 刷新可能让
+  // isWithinServerPaidCoverage 翻转，进而瞬间开关坐标标尺/符号图层（coordOffset
+  // 28px 跳变）导致画布抖动。计费判定（needsCompletionSupplement/导出权限）保持
+  // 实时；这里只把"信息展示层"的解锁态稳定住——会话内解锁过就不再闪断。
+  const rawPatternUnlocked = isFreehandPattern || isWithinServerPaidCoverage(currentCoverage, nonEmptyBeads, currentSavingTarget);
+  const unlockDisplayLatchRef = useRef({ workKey: '', unlocked: false });
+  if (unlockDisplayLatchRef.current.workKey !== stableWorkKey) {
+    unlockDisplayLatchRef.current = { workKey: stableWorkKey, unlocked: rawPatternUnlocked };
+  } else if (rawPatternUnlocked) {
+    unlockDisplayLatchRef.current.unlocked = true;
+  }
+  const isPatternUnlocked = unlockDisplayLatchRef.current.unlocked;
   const displayedCreditBalance = getCreditBalance(creditSummary);
   const quotedCompletionPoints = activeCompletionQuote
     ? getCompletionChargePoints(activeCompletionQuote.quote)

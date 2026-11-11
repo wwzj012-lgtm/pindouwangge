@@ -339,22 +339,27 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
   const openEditListingDialog = async (record: ExportedPatternRecord): Promise<void> => {
     if (!record.communityPost) return;
+    // 预填以社区详情为准：本地 record.title 是 works 表的作品名，而编辑改的是 community_posts.title，
+    // 两个数据源会互相漂移；详情响应的 post.title 才是当前社区名。拉取失败回落本地快照。
+    let title = record.title;
     let description = record.communityPost.description ?? '';
     let tags = record.communityPost.tags ?? [];
-    if (record.communityPost.description === undefined || record.communityPost.tags === undefined) {
-      try {
-        const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(record.communityPost.id)}`, { credentials: 'include' });
-        if (detail.ok) {
-          const body = await detail.json() as { data?: { post?: { description?: string; tags?: string[] } } };
-          const post = body.data?.post;
-          if (post) { description = post.description ?? ''; tags = Array.isArray(post.tags) ? post.tags : []; }
+    try {
+      const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(record.communityPost.id)}`, { credentials: 'include' });
+      if (detail.ok) {
+        const body = await detail.json() as { data?: { post?: { title?: string; description?: string; tags?: string[] } } };
+        const post = body.data?.post;
+        if (post) {
+          if (typeof post.title === 'string' && post.title.trim().length > 0) title = post.title;
+          description = post.description ?? description;
+          tags = Array.isArray(post.tags) ? post.tags : tags;
         }
-      } catch { /* 拉取失败就用空值，用户可以现场补写 */ }
-    }
+      }
+    } catch { /* 拉取失败回落本地快照，用户可现场修改 */ }
     setEditingError(null);
     setEditingPost({
       id: record.communityPost.id,
-      title: record.title,
+      title,
       description,
       visibility: record.communityPost.visibility,
       tags,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Heart, Bookmark, Crown , SlidersHorizontal} from 'lucide-react';
+import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Heart, Bookmark, Crown, Tag, ChevronDown } from 'lucide-react';
 import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
@@ -25,6 +25,10 @@ interface CommunityViewProps {
 }
 
 type SortMode = 'hot' | 'new' | 'favorites';
+
+// "未分类"筛选的哨兵值：以 \u0000 开头，不可能与真实标签名冲突（后端标签最长 24 且不允许控制字符）。
+const UNCATEGORIZED_FILTER = '\u0000uncategorized';
+const UNCATEGORIZED_LABEL = '未分类';
 
 const GUEST_COMMUNITY_MESSAGE = '游客账号仅可浏览社区。请登录或注册后再使用喜欢、收藏和发布功能。';
 
@@ -78,8 +82,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
   const [specFilter, setSpecFilter] = useState<'all' | 'le500' | 'le1000' | 'le2000' | 'le3000' | 'le5000' | 'le8000' | 'gt8000'>('all');
-  // 筛选面板：标签很多时默认收起为单行横滑，点「展开」查看全部并调规格。
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // 标签筛选抽屉：默认收起为紧凑入口，展开后是带全部标签 chips（含计数与"未分类"）的面板。
+  const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
   const [selectedProject, setSelectedProject] = useState<StoredPatternProject | null>(null);
@@ -170,12 +174,27 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       .map(([tag, count]) => ({ tag, count }))
       .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
   }, [patternsState]);
+  // "未分类"桶：当前列表里没有任何标签的作品数量。
+  const uncategorizedCount = useMemo(
+    () => patternsState.filter((pattern) => communityPostTags(pattern).length === 0).length,
+    [patternsState],
+  );
   useEffect(() => {
-    if (!isLoading && !feedError && activeCategory !== null && !availableTags.includes(activeCategory)) setActiveCategory(null);
-  }, [availableTags, activeCategory, isLoading, feedError]);
+    if (!isLoading && !feedError && activeCategory !== null) {
+      const stale = activeCategory === UNCATEGORIZED_FILTER
+        ? uncategorizedCount === 0
+        : !availableTags.includes(activeCategory);
+      if (stale) setActiveCategory(null);
+    }
+  }, [availableTags, activeCategory, uncategorizedCount, isLoading, feedError]);
 
   const filteredPatterns = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
+    const tagMatch = (pattern: CommunityPost) => {
+      if (activeCategory === null) return true;
+      if (activeCategory === UNCATEGORIZED_FILTER) return communityPostTags(pattern).length === 0;
+      return communityPostTags(pattern).includes(activeCategory);
+    };
     const specMatch = (pattern: CommunityPattern) => {
       if (specFilter === 'all') return true;
       const beads = pattern.beadCount;
@@ -188,7 +207,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       if (specFilter === 'le8000') return beads > 5000 && beads <= 8000;
       return beads > 8000;
     };
-    const visible = patternsState.filter(pattern => (activeCategory === null || communityPostTags(pattern).includes(activeCategory)) && specMatch(pattern) && (!query
+    const visible = patternsState.filter(pattern => tagMatch(pattern) && specMatch(pattern) && (!query
       || pattern.title.toLocaleLowerCase().includes(query)
       || pattern.author.displayName.toLocaleLowerCase().includes(query)
       || communityPostTags(pattern).some(tag => tag.toLocaleLowerCase().includes(query))));
@@ -353,29 +372,90 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
         {/* Category Tabs & Sorting bar */}
         <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
-          {/* Categories — a single swipeable row on phones so a long tag list
-              never pushes the first artwork below the fold. */}
-          <div role="group" aria-label="按作品标签筛选" className={`-mx-4 flex w-[calc(100%+2rem)] items-center gap-2 scrollbar-none px-4 sm:mx-0 sm:w-full sm:px-0 ${filtersExpanded ? 'flex-wrap' : 'flex-nowrap overflow-x-auto'}`}>
-            {[null, ...tagFilters].map(entry => {
-              const cat = entry === null ? null : entry.tag;
-              const count = entry === null ? patternsState.length : (entry as { tag: string; count: number }).count;
-              return (
+          {/* Tag filter drawer — 收起时是一个带选中摘要的紧凑入口，展开后是含全部标签
+              chips（带作品计数）与"未分类"桶的面板；grid-rows 过渡保证平滑展开收起。
+              面板内容始终渲染（仅视觉隐藏），标签状态不会因开合而丢失。 */}
+          <div className="w-full">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                key={cat === null ? 'all' : `tag:${cat}`}
-                aria-pressed={activeCategory === cat}
-                aria-label={cat === null ? '全部作品' : `筛选标签：${cat}`}
-                onClick={() => setActiveCategory(cat)}
-                className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] shrink-0 items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
-                  activeCategory === cat
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
+                aria-expanded={tagDrawerOpen}
+                aria-controls="community-tag-drawer"
+                onClick={() => setTagDrawerOpen(value => !value)}
+                className={`inline-flex min-h-11 sm:min-h-9 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-all duration-200 ${
+                  tagDrawerOpen
+                    ? 'border-purple-400 bg-purple-100 text-purple-900 shadow-sm'
+                    : activeCategory !== null
+                      ? 'border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100'
+                      : 'border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-50'
                 }`}
               >
-                {cat === null ? '全部' : `#${cat}`}
-                {cat !== null ? <span className="ml-1 opacity-70">({count})</span> : null}
+                <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>标签筛选</span>
+                {activeCategory !== null && (
+                  <span className="inline-flex max-w-[10rem] items-center rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                    <span className="truncate">{activeCategory === UNCATEGORIZED_FILTER ? UNCATEGORIZED_LABEL : `#${activeCategory}`}</span>
+                  </span>
+                )}
+                <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-purple-200/70 text-purple-800 transition-transform duration-300 motion-reduce:transition-none ${tagDrawerOpen ? 'rotate-180' : ''}`}>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </span>
               </button>
-            );})}
+              <span className="hidden truncate text-xs font-bold text-purple-600 sm:inline" aria-hidden="true">
+                共 {tagFilters.length} 类标签 · {patternsState.length} 件作品
+              </span>
+            </div>
+            <div
+              id="community-tag-drawer"
+              aria-hidden={!tagDrawerOpen}
+              className={`grid transition-all duration-300 ease-in-out motion-reduce:transition-none ${
+                tagDrawerOpen ? 'visible mt-2.5 grid-rows-[1fr] opacity-100' : 'invisible grid-rows-[0fr] opacity-0'
+              }`}
+            >
+              <div className="min-h-0 overflow-hidden">
+                <div className="rounded-2xl border border-purple-200 bg-white/85 p-3 shadow-sm backdrop-blur-sm">
+                  <div className="flex items-center justify-between gap-3 pb-2">
+                    <span className="sm:hidden text-[11px] font-bold text-purple-500">共 {tagFilters.length} 类标签 · {patternsState.length} 件作品</span>
+                    <span className="hidden sm:inline text-[11px] font-bold text-purple-500">按标签筛选，可与搜索、规格叠加使用</span>
+                    {activeCategory !== null && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveCategory(null)}
+                        className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100"
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                        清空标签筛选
+                      </button>
+                    )}
+                  </div>
+                  <div role="group" aria-label="按作品标签筛选" className="flex flex-wrap items-center gap-2">
+                    {[
+                      { key: 'all', value: null as string | null, label: '全部', count: null as number | null, ariaLabel: '全部作品' },
+                      ...tagFilters.map(({ tag, count }) => ({
+                        key: `tag:${tag}`, value: tag as string | null, label: `#${tag}`, count: count as number | null, ariaLabel: `筛选标签：${tag}`,
+                      })),
+                      { key: 'uncategorized', value: UNCATEGORIZED_FILTER, label: UNCATEGORIZED_LABEL, count: uncategorizedCount as number | null, ariaLabel: `筛选标签：${UNCATEGORIZED_LABEL}` },
+                    ].map(entry => (
+                      <button
+                        type="button"
+                        key={entry.key}
+                        aria-pressed={activeCategory === entry.value}
+                        aria-label={entry.ariaLabel}
+                        onClick={() => setActiveCategory(entry.value)}
+                        className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                          activeCategory === entry.value
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
+                        }`}
+                      >
+                        {entry.label}
+                        {entry.count !== null ? <span className="ml-1 opacity-70">({entry.count})</span> : null}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Sort selection */}
@@ -428,17 +508,6 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               </button>
             ))}
           </div>
-          {tagFilters.length > 6 && <button
-            type="button"
-            aria-expanded={filtersExpanded}
-            onClick={() => setFiltersExpanded(value => !value)}
-            className={`inline-flex min-h-11 sm:min-h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
-              filtersExpanded ? 'border-purple-400 bg-purple-100 text-purple-900' : 'border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-50'
-            }`}
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-            {filtersExpanded ? '收起标签' : '展开标签'}
-          </button>}
           <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
             aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
             title={isLoading ? '正在刷新社区' : '刷新社区'}

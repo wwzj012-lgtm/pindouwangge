@@ -366,22 +366,26 @@ export const UserPatternsModal: React.FC<UserPatternsModalProps> = ({
     const publication = record.communityPost;
     if (!publication) return;
     setEditingError(null);
+    // 预填以社区详情为准：本地 record.title 是 works 表的作品名，编辑改的是 community_posts.title，
+    // 详情响应的 post.title 才是当前社区名；拉取失败回落本地快照。
+    let title = record.title;
     let description = publication.description ?? '';
     let tags = publication.tags ?? [];
-    // 旧记录缺本地快照：从社区详情补齐（作者本人可读自己的私密帖）。
-    if (publication.description === undefined || publication.tags === undefined) {
-      try {
-        const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(publication.id)}`, { credentials: 'include' });
-        if (detail.ok) {
-          const body = await detail.json() as { data?: { post?: { description?: string; tags?: string[] } } };
-          const post = body.data?.post;
-          if (post) { description = post.description ?? ''; tags = Array.isArray(post.tags) ? post.tags : []; }
+    try {
+      const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(publication.id)}`, { credentials: 'include' });
+      if (detail.ok) {
+        const body = await detail.json() as { data?: { post?: { title?: string; description?: string; tags?: string[] } } };
+        const post = body.data?.post;
+        if (post) {
+          if (typeof post.title === 'string' && post.title.trim().length > 0) title = post.title;
+          description = post.description ?? description;
+          tags = Array.isArray(post.tags) ? post.tags : tags;
         }
-      } catch { /* 拉取失败就用空值，用户可以现场补写 */ }
-    }
+      }
+    } catch { /* 拉取失败回落本地快照，用户可现场修改 */ }
     setEditingPost({
       id: publication.id,
-      title: record.title,
+      title,
       description,
       visibility: publication.visibility,
       tags,

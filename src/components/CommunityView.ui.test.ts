@@ -64,6 +64,27 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(cards(tree)).toHaveLength(4);
   });
 
+  it('offers an uncategorized bucket and a collapsible tag filter drawer', () => {
+    feed.posts = [post('1', ['人物']), post('2'), post('3', [])];
+    let tree = render();
+    // 抽屉默认收起，入口按钮切换 aria-expanded；面板内容（chips）始终在 DOM 中。
+    const trigger = button(tree, '标签筛选');
+    expect(trigger.props['aria-expanded']).toBe(false);
+    trigger.props.onClick(); tree = render();
+    expect(nodes(tree).find(node => node.props['aria-controls'] === 'community-tag-drawer')!.props['aria-expanded']).toBe(true);
+    // "未分类"桶带作品计数，选中后只显示没有任何标签的作品。
+    const uncategorized = button(tree, '未分类(2)');
+    expect(uncategorized.props['aria-label']).toBe('筛选标签：未分类');
+    uncategorized.props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2', '3']);
+    // 未分类与真实标签互斥（同一个 activeCategory 机制，可与搜索/规格叠加）。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    // 面板内支持一键清空标签筛选。
+    button(tree, '清空标签筛选').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+  });
+
   it('refreshes through the shared hook and keeps existing cards during refresh failures', () => {
     button(render(), '刷新社区').props.onClick();
     expect(feed.refresh).toHaveBeenCalledTimes(1);

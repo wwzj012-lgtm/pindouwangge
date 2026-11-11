@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { BeadColor, BeadShape, ToolType, SymmetryMode, CanvasBackdrop, ConvertSettings } from '../../types';
 import { SettingsPanel } from '../SettingsPanel';
+import type { WidthExpandSide } from '../../utils/gridEditing';
 import { StatsPanel } from '../StatsPanel';
 import { GridCanvas } from '../GridCanvas';
 import type { BoardNavApi, BoardNavState } from '../GridCanvas';
@@ -33,6 +34,8 @@ export interface MobileWorkspaceProps {
   backgroundCleanup?: BackgroundCleanupController;
   editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
+  widthExpandSide?: WidthExpandSide;
+  onWidthExpandSideChange?: (side: WidthExpandSide) => void;
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
   settings: ConvertSettings;
@@ -115,6 +118,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
   backgroundCleanup,
   editorActions,
   completionSummary,
+  widthExpandSide,
+  onWidthExpandSideChange,
   grid,
   paletteMap,
   settings,
@@ -331,6 +336,8 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
             <SettingsPanel
               settings={settings}
               setSettings={setSettings}
+              widthExpandSide={widthExpandSide}
+              onWidthExpandSideChange={onWidthExpandSideChange}
               conversionDiagnostics={conversionDiagnostics}
               variant="sheet"
               onReconvert={applyConversionSettings}

@@ -9,11 +9,14 @@ import { GridCanvas } from '../GridCanvas';
 import type { WorkspaceEditingActions } from '../SymmetryAxisControls';
 import type { ConversionDiagnostics } from '../../utils/imagePipeline';
 import { Sparkles } from 'lucide-react';
+import type { WidthExpandSide } from '../../utils/gridEditing';
 
 export interface DesktopWorkspaceProps {
   backgroundCleanup?: BackgroundCleanupController;
   editorActions?: WorkspaceEditingActions;
   completionSummary?: React.ReactNode;
+  widthExpandSide?: WidthExpandSide;
+  onWidthExpandSideChange?: (side: WidthExpandSide) => void;
   // Canvas & Grid State
   grid: (string | null)[][];
   paletteMap: Map<string, BeadColor>;
@@ -91,6 +94,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
   backgroundCleanup,
   editorActions,
   completionSummary,
+  widthExpandSide,
+  onWidthExpandSideChange,
   grid,
   paletteMap,
   settings,
@@ -208,6 +213,8 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
           <SettingsPanel
             settings={settings}
             setSettings={setSettings}
+            widthExpandSide={widthExpandSide}
+            onWidthExpandSideChange={onWidthExpandSideChange}
             conversionDiagnostics={conversionDiagnostics}
             onReconvert={handleReconvert}
             hasImage={sourceImage !== null}

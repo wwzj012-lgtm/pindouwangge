@@ -33,6 +33,34 @@ export function flipGrid(grid: Grid, direction: 'horizontal' | 'vertical'): Grid
   return direction === 'horizontal' ? grid.map(row => [...row].reverse()) : [...grid].reverse().map(row => [...row]);
 }
 
+export type WidthExpandSide = 'left' | 'right';
+
+/**
+ * 把网格对齐到目标尺寸（列数 width / 行数 height）。
+ * 画板尺寸（settings.width/height）与 grid 数据必须同步：否则新列"看得见"
+ * 但数据不存在，画进去的豆散落地撑长被碰到的行（行长度参差），保存时
+ * codec 校验直接报 "grid row N does not match project width"。
+ *
+ * side 决定宽度变化时内容锚定在哪一侧：'left' 表示行首补列/裁列
+ * （用户要"左边加一列"时配合翻转流程，或直接左扩），'right' 为默认行尾。
+ * 行尾补 null 而不是 undefined（防稀疏数组写洞），保证 codec 可编码。
+ */
+export function alignGridToSize(grid: Grid, width: number, height: number, side: WidthExpandSide = 'right'): Grid {
+  const result: Grid = [];
+  for (let y = 0; y < height; y += 1) {
+    const row = Array.isArray(grid[y]) ? grid[y] : [];
+    const columnShift = width - row.length;
+    const aligned: (string | null)[] = new Array(width);
+    for (let x = 0; x < width; x += 1) {
+      const sourceX = side === 'left' ? x - columnShift : x;
+      const value = sourceX >= 0 && sourceX < row.length ? row[sourceX] : null;
+      aligned[x] = value ?? null;
+    }
+    result.push(aligned);
+  }
+  return result;
+}
+
 /** Four-neighbor, same-color bucket clear; disconnected and diagonal beads survive. */
 export function clearConnectedColorRegion(grid: Grid, x: number, y: number): Grid {
   if (!Number.isInteger(x) || !Number.isInteger(y) || !grid[y]?.[x]) return grid;

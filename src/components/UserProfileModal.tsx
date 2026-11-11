@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Compass,
   ShieldCheck,
+  EyeOff,
 } from 'lucide-react';
 import './UserProfileModal.css';
 import { useAuth } from '../context/AuthContext';
@@ -883,6 +884,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                               改成 2×2 等宽格，桌面回到一行排开。 */}
                           <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200/80 pt-2 text-[11px] font-bold sm:flex sm:flex-wrap">
                             {activeTab === 'library' && <button disabled={isBusy} onClick={() => void handleEditPattern(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-purple-200 bg-purple-50 px-2 text-purple-800 transition-colors hover:bg-purple-600 hover:text-white disabled:opacity-50"><Pencil className="h-3 w-3" />编辑</button>}
+                            {activeTab === 'library' && isPublished && record.communityPost && <button disabled={isBusy} onClick={() => setPublicationTarget(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-amber-200 bg-amber-50 px-2 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"><EyeOff className="h-3 w-3" />撤回</button>}
                             {activeTab === 'library' && !isPublished && <button disabled={isBusy} onClick={() => openPublishDialog(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-emerald-200 bg-emerald-50 px-2 text-emerald-800 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"><Sparkles className="h-3 w-3" />发布</button>}
                             {activeTab === 'works' && isPublished && record.communityPost && <button disabled={isBusy} onClick={() => void openEditListingDialog(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-sky-200 bg-sky-50 px-2 text-sky-800 transition-colors hover:bg-sky-100 disabled:opacity-50"><Pencil className="h-3 w-3" />编辑作品</button>}
                             {activeTab === 'works' && isPublished && record.communityPost && <button disabled={isBusy} onClick={() => setPublicationTarget(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-amber-200 bg-amber-50 px-2 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"><SlidersHorizontal className="h-3 w-3" />发布管理</button>}

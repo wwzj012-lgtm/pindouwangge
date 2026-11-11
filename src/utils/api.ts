@@ -330,12 +330,12 @@ async function apiRequestOnce<T>(
       if (adminSession) headers.set('X-Admin-Session', adminSession);
     }
     if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
-    if (method === 'POST' || method === 'PUT') headers.set('Content-Type', 'application/json');
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH') headers.set('Content-Type', 'application/json');
 
     const response = await fetch(url, {
       method,
       headers,
-      body: method === 'POST' || method === 'PUT' ? JSON.stringify(body ?? {}) : undefined,
+      body: method === 'POST' || method === 'PUT' || method === 'PATCH' ? JSON.stringify(body ?? {}) : undefined,
       signal: controller.signal,
     });
     handleAuthenticationFailure(response.status, credentials, path);

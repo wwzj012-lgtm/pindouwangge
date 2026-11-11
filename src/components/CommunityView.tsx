@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Heart, Bookmark, Crown } from 'lucide-react';
+import { X, Search, Sparkles, Eye, Compass, Filter, ArrowRight, Zap, Loader2, RefreshCw, Heart, Bookmark, Crown , SlidersHorizontal} from 'lucide-react';
 import type { CommunityPattern } from '../data/communityData';
 import { useAuth } from '../context/AuthContext';
 import { getApiToken } from '../utils/api';
@@ -79,6 +79,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
   const [specFilter, setSpecFilter] = useState<'all' | 'small' | 'medium' | 'large'>('all');
+  // 筛选面板：标签很多时默认收起为单行横滑，点「展开」查看全部并调规格。
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
   const [selectedProject, setSelectedProject] = useState<StoredPatternProject | null>(null);
@@ -349,7 +351,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
           {/* Categories — a single swipeable row on phones so a long tag list
               never pushes the first artwork below the fold. */}
-          <div role="group" aria-label="按作品标签筛选" className="-mx-4 flex w-[calc(100%+2rem)] flex-nowrap items-center gap-2 overflow-x-auto scrollbar-none px-4 sm:mx-0 sm:w-full sm:flex-wrap sm:overflow-visible sm:px-0">
+          <div role="group" aria-label="按作品标签筛选" className={`-mx-4 flex w-[calc(100%+2rem)] items-center gap-2 scrollbar-none px-4 sm:mx-0 sm:w-full sm:px-0 ${filtersExpanded || tagFilters.length <= 8 ? 'flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-visible' : 'flex-nowrap overflow-x-auto'}`}>
             {[null, ...tagFilters].map(entry => {
               const cat = entry === null ? null : entry.tag;
               const count = entry === null ? patternsState.length : (entry as { tag: string; count: number }).count;
@@ -407,7 +409,19 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               最多收藏
             </button>
           </div>
-          <div role="group" aria-label="按作品规格筛选" className="flex flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
+          <button
+            type="button"
+            aria-expanded={filtersExpanded}
+            onClick={() => setFiltersExpanded(value => !value)}
+            className={`inline-flex min-h-11 sm:min-h-9 shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-colors cursor-pointer ${
+              filtersExpanded ? 'border-purple-400 bg-purple-100 text-purple-900' : 'border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-50'
+            }`}
+          >
+            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            {filtersExpanded ? '收起筛选' : `展开筛选${specFilter !== 'all' ? ' · 已选规格' : ''}`}
+          </button>
+          {filtersExpanded && (
+          <div role="group" aria-label="按作品规格筛选" className="flex w-full flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
             <span className="px-2 font-bold text-purple-900">规格:</span>
             {([['all', '全部'], ['small', '小型 ≤2000 豆'], ['medium', '中型 2001-6000'], ['large', '大型 >6000 豆']] as const).map(([value, label]) => (
               <button
@@ -423,6 +437,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               </button>
             ))}
           </div>
+          )}
           <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
             aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
             title={isLoading ? '正在刷新社区' : '刷新社区'}

@@ -61,8 +61,8 @@ import {
 import { BeadInventoryPanel } from './BeadInventoryPanel';
 import { PatternConfirmDialog } from './PatternConfirmDialog';
 import { PatternPublicationDialog } from './PatternPublicationDialog';
-import { PatternPublishDialog } from './PatternPublishDialog';
-import { isPatternPublicationUnlocked, publishCommunityPattern, type CommunityPublicationMetadata } from '../utils/communityPatternPublication';
+import { PatternPublishDialog, type PatternEditingPost } from './PatternPublishDialog';
+import { editCommunityPattern, isPatternPublicationUnlocked, publishCommunityPattern, type CommunityPublicationMetadata } from '../utils/communityPatternPublication';
 
 export function splitProfilePatternSections(records: readonly ExportedPatternRecord[], currentUserId: string | null): {
   libraryRecords: ExportedPatternRecord[];
@@ -216,6 +216,9 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const [pendingDeletePattern, setPendingDeletePattern] = useState<{ record: ExportedPatternRecord; scope: 'local' | 'cloud' } | null>(null);
   const [deleteDialogError, setDeleteDialogError] = useState<string | null>(null);
   const [publicationTarget, setPublicationTarget] = useState<ExportedPatternRecord | null>(null);
+  const [editingPost, setEditingPost] = useState<PatternEditingPost | null>(null);
+  const [editingBusy, setEditingBusy] = useState(false);
+  const [editingError, setEditingError] = useState<string | null>(null);
   const [publicationDialogError, setPublicationDialogError] = useState<string | null>(null);
   const [publishTarget, setPublishTarget] = useState<ExportedPatternRecord | null>(null);
   const [publishError, setPublishError] = useState<string | null>(null);
@@ -331,6 +334,56 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
   const finishAction = (operation: { token: symbol; epoch: number; userId: string | null }): void => {
     if (actionLockRef.current === operation.token) actionLockRef.current = null;
     if (isCurrentOperation(operation.epoch, operation.userId)) setActionBusyId(null);
+  };
+
+  const openEditListingDialog = async (record: ExportedPatternRecord): Promise<void> => {
+    if (!record.communityPost) return;
+    let description = record.communityPost.description ?? '';
+    let tags = record.communityPost.tags ?? [];
+    if (record.communityPost.description === undefined || record.communityPost.tags === undefined) {
+      try {
+        const detail = await fetch(`/api/community/posts/detail?id=${encodeURIComponent(record.communityPost.id)}`, { credentials: 'include' });
+        if (detail.ok) {
+          const body = await detail.json() as { data?: { post?: { description?: string; tags?: string[] } } };
+          const post = body.data?.post;
+          if (post) { description = post.description ?? ''; tags = Array.isArray(post.tags) ? post.tags : []; }
+        }
+      } catch { /* 拉取失败就用空值，用户可以现场补写 */ }
+    }
+    setEditingError(null);
+    setEditingPost({
+      id: record.communityPost.id,
+      title: record.title,
+      description,
+      visibility: record.communityPost.visibility,
+      tags,
+    });
+  };
+
+  const handleEditListingSubmit = async (metadata: CommunityPublicationMetadata): Promise<void> => {
+    if (!editingPost || editingBusy) return;
+    setEditingBusy(true);
+    setEditingError(null);
+    try {
+      const result = await editCommunityPattern({ postId: editingPost.id, metadata });
+      if (result.ok === false) { setEditingError(result.error); return; }
+      setSavedPatterns((current) => current.map((item) => item.communityPost?.id === editingPost.id ? {
+        ...item,
+        title: metadata.title,
+        communityPost: {
+          ...item.communityPost,
+          visibility: metadata.visibility,
+          description: metadata.description,
+          tags: metadata.tags,
+        },
+      } : item));
+      setEditingPost(null);
+      void loadSavedPatterns();
+    } catch (error) {
+      setEditingError(error instanceof Error ? error.message : '保存失败。');
+    } finally {
+      setEditingBusy(false);
+    }
   };
 
   const handleEditPattern = async (record: ExportedPatternRecord): Promise<void> => {
@@ -831,6 +884,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                           <div className="grid grid-cols-2 gap-1.5 border-t border-slate-200/80 pt-2 text-[11px] font-bold sm:flex sm:flex-wrap">
                             <button disabled={isBusy} onClick={() => void handleEditPattern(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-purple-200 bg-purple-50 px-2 text-purple-800 transition-colors hover:bg-purple-600 hover:text-white disabled:opacity-50"><Pencil className="h-3 w-3" />编辑</button>
                             {!isPublished && <button disabled={isBusy} onClick={() => openPublishDialog(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-emerald-200 bg-emerald-50 px-2 text-emerald-800 transition-colors hover:bg-emerald-600 hover:text-white disabled:opacity-50"><Sparkles className="h-3 w-3" />发布</button>}
+                            {isPublished && record.communityPost && <button disabled={isBusy} onClick={() => void openEditListingDialog(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-sky-200 bg-sky-50 px-2 text-sky-800 transition-colors hover:bg-sky-100 disabled:opacity-50"><Pencil className="h-3 w-3" />编辑作品信息</button>}
                             {isPublished && record.communityPost && <button disabled={isBusy} onClick={() => setPublicationTarget(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-amber-200 bg-amber-50 px-2 text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50"><SlidersHorizontal className="h-3 w-3" />发布管理</button>}
                             {isPublished && !record.communityPost && onOpenCommunity && <button disabled={isBusy} onClick={onOpenCommunity} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-emerald-200 bg-emerald-50 px-2 text-emerald-800 transition-colors hover:bg-emerald-100 disabled:opacity-50"><Compass className="h-3 w-3" />进入社区</button>}
                             {canBindToCurrentAccount && <button disabled={isBusy} onClick={() => void handleSyncToCurrentAccount(record)} className="inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl border sm:w-auto sm:flex-1 border-sky-200 bg-sky-50 px-2 text-sky-800 transition-colors hover:bg-sky-100 disabled:opacity-50"><Cloud className="h-3 w-3" />绑定当前账号</button>}
@@ -919,10 +973,11 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
       <PatternPublishDialog
         record={publishTarget}
-        busy={Boolean(publishTarget && actionBusyId === publishTarget.id)}
-        error={publishError}
-        onClose={() => { if (!actionBusyId) { setPublishTarget(null); setPublishError(null); } }}
-        onSubmit={(metadata) => { void handlePublish(metadata); }}
+        editingPost={editingPost}
+        busy={editingPost ? editingBusy : Boolean(publishTarget && actionBusyId === publishTarget.id)}
+        error={editingPost ? editingError : publishError}
+        onClose={() => { if (editingPost) { if (!editingBusy) { setEditingPost(null); setEditingError(null); } return; } if (!actionBusyId) { setPublishTarget(null); setPublishError(null); } }}
+        onSubmit={(metadata) => { if (editingPost) { void handleEditListingSubmit(metadata); return; } void handlePublish(metadata); }}
       />
       <PatternConfirmDialog
         isOpen={Boolean(pendingDeletePattern)}

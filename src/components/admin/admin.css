@@ -553,3 +553,53 @@
 
 /* 36 位 UID 是内部标识，不是运营的检索入口：退到第三层，只留前 12 位，完整值在 title 里。 */
 .admin-root .admin-uid { font-size:11px; color:var(--admin-muted); letter-spacing:0; }
+
+/* ================= 批次 5：IA 重排 + 视觉规范共享件 ================= */
+/* 侧边栏 5 组层级强化：分组间用暗分隔线 + 分组标题小节样式。 */
+.admin-root .admin-nav-group { padding:6px 0 10px; border-bottom:1px solid rgb(148 163 184 / .14); }
+.admin-root .admin-nav-group:last-child { border-bottom:0; }
+.admin-root .admin-nav-group h2 { padding:4px 12px 6px; border-left:2px solid rgb(99 102 241 / .55); margin-left:10px; }
+/* 共享表格：表头吸顶 + 数字列右对齐（tabular-nums 由 .admin-stage-table 全局提供）。 */
+.admin-root .admin-data-table thead th { position:sticky; top:0; z-index:1; }
+.admin-root .admin-data-table .admin-col--right { text-align:right; }
+.admin-root .admin-data-table .admin-col--center { text-align:center; }
+.admin-root .admin-data-table .admin-col--numeric { font-variant-numeric:tabular-nums; }
+.admin-root .admin-data-table .admin-col--select { width:36px; text-align:center; }
+.admin-root .admin-data-table .admin-col--select input { width:16px; height:16px; accent-color:var(--admin-primary); }
+/* 操作列固定右侧：横向滚动时操作始终可见。 */
+.admin-root .admin-data-table .admin-col--sticky-right { position:sticky; right:0; z-index:2; background:var(--admin-surface); box-shadow:-10px 0 14px -12px rgb(15 23 42 / .4); }
+.admin-root .admin-data-table thead .admin-col--sticky-right { background:var(--admin-subtle); z-index:3; }
+.admin-root .admin-data-table tbody tr:hover .admin-col--sticky-right { background:var(--admin-primary-soft); }
+/* 第五种徽章语义色：info（处理中 / 计划中）。 */
+.admin-root .admin-badge--info { color:#1d4ed8; background:#eff6ff; }
+@media (prefers-color-scheme:dark) { .admin-root .admin-badge--info { color:#93c5fd; background:#1e3a5f; } }
+/* 共享筛选栏：右主操作靠右；结果计数行弱化。 */
+.admin-root .admin-filterbar-actions { display:flex; flex-wrap:wrap; align-items:end; gap:8px; justify-self:end; }
+.admin-root .admin-filterbar-result { margin:0 0 12px; color:var(--admin-muted); font-size:12px; }
+/* 加载骨架：表格形状的 shimmer 占位。 */
+.admin-root .admin-skeleton { display:grid; gap:10px; padding:16px 4px; }
+.admin-root .admin-skeleton-row { display:flex; gap:12px; }
+.admin-root .admin-skeleton-bar { height:16px; border-radius:6px; background:linear-gradient(90deg, var(--admin-subtle) 25%, var(--admin-border) 50%, var(--admin-subtle) 75%); background-size:200% 100%; animation:admin-skeleton-wave 1.4s ease-in-out infinite; }
+@keyframes admin-skeleton-wave { from { background-position:200% 0; } to { background-position:-200% 0; } }
+@media (prefers-reduced-motion:reduce) { .admin-root .admin-skeleton-bar { animation:none; } }
+.admin-root .admin-hidden-text { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+/* 系统设置变更历史：红绿行 diff。 */
+.admin-root .admin-settings-diff-picker { display:grid; gap:6px; max-width:420px; margin-bottom:14px; color:var(--admin-muted); font-size:12px; }
+.admin-root .admin-settings-diff-picker select { min-height:44px; padding:8px 12px; border:1px solid var(--admin-border); border-radius:8px; color:var(--admin-ink); background:var(--admin-surface); font:inherit; }
+.admin-root .admin-settings-diff { border:1px solid var(--admin-border); border-radius:10px; background:var(--admin-surface); margin-bottom:14px; overflow:hidden; }
+.admin-root .admin-settings-diff-meta { display:flex; flex-wrap:wrap; gap:6px 16px; margin:0; padding:10px 14px; border-bottom:1px solid var(--admin-border); background:var(--admin-subtle); color:var(--admin-muted); font-size:12px; }
+.admin-root .admin-settings-diff-note { color:var(--admin-ink); }
+.admin-root .admin-settings-diff-body { padding:8px 0; overflow-x:auto; }
+.admin-root .admin-diff-row { display:flex; gap:8px; padding:1px 14px; font:12px/1.7 ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+.admin-root .admin-diff-row > span { flex-shrink:0; width:12px; user-select:none; }
+.admin-root .admin-diff-row--removed { background:var(--admin-danger-soft); color:var(--admin-danger); }
+.admin-root .admin-diff-row--added { background:var(--admin-success-soft); color:var(--admin-success); }
+.admin-root .admin-diff-row--same { color:var(--admin-muted); }
+/* 标签字典：展示名行内编辑。 */
+.admin-root .admin-tag-name-editor { display:flex; align-items:center; gap:8px; min-width:0; }
+.admin-root .admin-tag-name-editor input { flex:1; min-width:0; min-height:36px; padding:6px 10px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-surface); color:var(--admin-ink); font:inherit; font-size:13px; }
+.admin-root .admin-tag-name-editor input:focus-visible { outline:2px solid var(--admin-primary); outline-offset:2px; }
+.admin-root .admin-tag-name-editor .admin-button { min-height:36px; }
+.admin-root .admin-tag-key { font-size:13px; }
+/* 运行日志合并板块的 tab 行。 */
+.admin-root .admin-runlogs-section .admin-module-tabs { margin-bottom:16px; }

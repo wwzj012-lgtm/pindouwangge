@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminRequest } from './adminRequest';
 import { AdminButton } from './AdminPrimitives';
+import { AdminStatusBadge } from './shared/StatusBadge';
+import { EmptyState } from './shared/EmptyState';
+import { LoadingSkeleton } from './shared/LoadingSkeleton';
 import './AdminWelfare.css';
 
 export interface WelfareRule {
@@ -221,14 +224,14 @@ export function AdminWelfare({ request, canAdjust }: { request: AdminRequest; ca
 
     <div className="admin-welfare-card">
       <h3>规则列表{rules ? <span className="admin-welfare-count">{rules.length} 条</span> : null}</h3>
-      {loading && !rules ? <p>读取中…</p>
-        : rules && rules.length === 0 ? <p className="admin-welfare-empty">还没有福利规则。用上面的表单创建第一条，新注册用户即可自动获得积分。</p>
+      {loading && !rules ? <LoadingSkeleton rows={4} columns={1} ariaLabel="正在读取福利规则…" />
+        : rules && rules.length === 0 ? <EmptyState title="还没有福利规则" description="用上面的表单创建第一条，新注册用户即可自动获得积分。" scope="welfare-rules" />
         : rules ? <ul className="admin-welfare-rules">{rules.map((rule) => <li key={rule.id}
             className={`admin-welfare-rule${rule.enabled ? '' : ' admin-welfare-rule-off'}`}>
           <div className="admin-welfare-rule-main">
             <div className="admin-welfare-rule-title">
               <strong>{rule.name}</strong>
-              <span className={`admin-welfare-badge${rule.enabled ? '' : ' off'}`}>{rule.enabled ? '启用中' : '已停用'}</span>
+              <AdminStatusBadge status={rule.enabled ? 'enabled' : 'disabled'} label={rule.enabled ? '启用中' : '已停用'} />
             </div>
             <div className="admin-welfare-rule-meta">
               <span>{rule.triggerType === 'manual' ? '手动全员发放' : '新注册触发'}</span><span>赠 {rule.amountUnits / UNITS_PER_POINT} 积分</span>

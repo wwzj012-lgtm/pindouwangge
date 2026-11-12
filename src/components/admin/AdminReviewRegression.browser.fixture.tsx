@@ -51,6 +51,9 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
     }
     if (endpoint === '/api/admin/code-redemptions') return response(paged(page > Math.max(1, Math.ceil(recordsTotal / 20)) ? [] : [{ id: 'redemption-1', code: 'REVIEW-ONLY-CODE', userUid: '复核兑换用户', days: 30, memberType: 1, redeemedAt: now }], recordsTotal, (page - 1) * 20));
     if (endpoint === '/api/admin/logs') return response(paged(page > Math.max(1, Math.ceil(logsTotal / 20)) ? [] : [{ id: 'log-1', type: url.searchParams.get('type') || 'admin', operatorUid: url.searchParams.get('operatorUid') || '复核操作者', level: url.searchParams.get('level') || 'review', timestamp: now }], logsTotal, (page - 1) * 20));
+    // 批次 5：logs 板块并入 runLogs；run-logs 两源分流端点在此返回空页即可
+    // （分页/筛选回归检查全部走「历史日志」tab 的 /api/admin/logs）。
+    if (endpoint === '/api/admin/run-logs') return response({ type: url.searchParams.get('type') || 'activity', items: [], total: 0, limit: 30, offset: 0 });
     throw new Error('Unexpected endpoint: ' + endpoint);
   };
   const deny = () => { throw new Error('External network forbidden'); };
@@ -133,7 +136,7 @@ export async function runAdminReviewRegressionChecks(scenario: 'config' | 'uncer
       await click('下一页', sectionFor('兑换使用记录')); recordsTotal = 1; await click('刷新兑换数据');
       assert(new URL(lastRead('/api/admin/code-redemptions?').path, location.href).searchParams.get('page') === '1', 'P2-3: redemption records reread last valid page too');
       assert(new URL(lastRead('/api/admin/code-redemptions?').path, location.href).searchParams.get('code') === '筛选标识', 'P2-3: redemption clamp preserves its code filter');
-      await mount('logs'); await change(document.querySelector('[data-log-operator]')!, 'review-user'); await change(document.querySelector('[data-log-level]')!, 'review-action'); await click('查询');
+      await mount('logs'); await click('历史日志'); await change(document.querySelector('[data-log-operator]')!, 'review-user'); await change(document.querySelector('[data-log-level]')!, 'review-action'); await click('查询');
       await click('下一页'); logsTotal = 1; await click('刷新日志');
       const logQuery = new URL(lastRead('/api/admin/logs?').path, location.href).searchParams;
       assert(logQuery.get('page') === '1' && logQuery.get('operatorUid') === 'review-user' && logQuery.get('level') === 'review-action', 'P2-3: shrinking logs reread last page with original type/operator/action filters');

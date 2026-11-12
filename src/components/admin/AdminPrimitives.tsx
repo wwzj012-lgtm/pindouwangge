@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { CircleAlert, Inbox, Loader2, X } from 'lucide-react';
 import { adminErrorText } from './adminPresentation';
 
-type Tone = 'neutral' | 'success' | 'warning' | 'danger';
+type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 interface ButtonProps {
   children?: ReactNode;
   className?: string;

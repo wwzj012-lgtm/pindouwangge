@@ -6,6 +6,11 @@ import {
   communityModerationPath,
   communityQueryString,
   communityStatusLabel,
+  communityTabLabel,
+  reportsPath,
+  resolveReportBody,
+  reviewBody,
+  reviewQueuePath,
 } from './AdminCommunityPosts';
 
 describe('AdminCommunityPosts request contract', () => {
@@ -37,5 +42,21 @@ describe('AdminCommunityPosts request contract', () => {
     expect((['all', 'public', 'private', 'blocked', 'withdrawn'] as const).map(communityStatusLabel)).toEqual([
       '全部状态', '公开可见', '私有未撤回', '已下架', '已撤回',
     ]);
+  });
+
+  it('targets the batch-2 review-queue and reports endpoints with paged status filters', () => {
+    expect(communityTabLabel('posts')).toBe('帖子列表');
+    expect(communityTabLabel('queue')).toBe('审核队列');
+    expect(communityTabLabel('reports')).toBe('举报');
+    expect(reviewQueuePath('pending', 0)).toBe('/api/admin/community/review-queue?status=pending&limit=20&offset=0');
+    expect(reviewQueuePath('all', 2)).toBe('/api/admin/community/review-queue?status=all&limit=20&offset=40');
+    expect(reportsPath('open', 1)).toBe('/api/admin/reports?status=open&limit=20&offset=20');
+  });
+
+  it('omits empty notes from review and report resolution bodies instead of sending blank strings', () => {
+    expect(reviewBody('post_123', 'approve')).toEqual({ postId: 'post_123', decision: 'approve' });
+    expect(reviewBody('post_123', 'reject', '  确认违规  ')).toEqual({ postId: 'post_123', decision: 'reject', note: '确认违规' });
+    expect(resolveReportBody('report_9', 'delete_post')).toEqual({ reportId: 'report_9', resolution: 'delete_post' });
+    expect(resolveReportBody('report_9', 'ban_user', ' 多次违规 ')).toEqual({ reportId: 'report_9', resolution: 'ban_user', note: '多次违规' });
   });
 });

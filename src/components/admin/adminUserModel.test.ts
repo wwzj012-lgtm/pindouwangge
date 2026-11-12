@@ -4,8 +4,17 @@ import { userOverview, LatestRequest, SYSTEM_ROLE_MINIMUMS, emptyUserQuery, memb
 const now = 1_800_000_000_000;
 const vip: AdminUser = { uid: 'test', email: 'test@example.invalid', role: 'user', member_type: 1, member_expire: now + 90 * 86_400_000 };
 describe('committed user query and request order', () => {
-  it('starts on first page without speculative filters', () => { expect(emptyUserQuery()).toEqual({ search: '', status: 'all', tag: '', page: 1 }); });
-  it('serializes only existing server query fields', () => { const p = new URLSearchParams(userQueryString({ search: '  昵称  ', status: 'banned', tag: 'priority', page: 2 })); expect([...p.keys()].sort()).toEqual(['limit','page','search','status','tag']); expect(p.get('search')).toBe('昵称'); expect(p.get('limit')).toBe('20'); expect(p.get('page')).toBe('2'); });
+  it('starts on first page without speculative filters', () => {
+    // 批次 3：新增筛选字段缺省即"全部"，排序缺省为注册时间降序。
+    expect(emptyUserQuery()).toEqual({ search: '', status: 'all', tag: '', page: 1, role: '', vip: '', memberType: '', registeredFrom: '', registeredTo: '', sortBy: 'registered_at', sortDir: 'desc' });
+  });
+  it('serializes only existing server query fields', () => {
+    // 批次 3：排序字段始终随请求下发（服务端白名单校验），未设置的筛选不出现。
+    const p = new URLSearchParams(userQueryString({ search: '  昵称  ', status: 'banned', tag: 'priority', page: 2 }));
+    expect([...p.keys()].sort()).toEqual(['limit','page','search','sortBy','sortDir','status','tag']);
+    expect(p.get('search')).toBe('昵称'); expect(p.get('limit')).toBe('20'); expect(p.get('page')).toBe('2');
+    expect(p.get('sortBy')).toBe('registered_at'); expect(p.get('sortDir')).toBe('desc');
+  });
   it('clamps a negative page and preserves default status', () => { const p = new URLSearchParams(userQueryString({ ...emptyUserQuery(), page: -1 })); expect(p.get('page')).toBe('1'); expect(p.get('status')).toBe('all'); });
   it('rejects a late earlier request', () => { const epoch = new LatestRequest(); const slow = epoch.next(), fast = epoch.next(); expect(epoch.current(fast)).toBe(true); expect(epoch.current(slow)).toBe(false); });
   it('invalidates response updates after unmount', () => { const epoch = new LatestRequest(); const id = epoch.next(); epoch.invalidate(); expect(epoch.current(id)).toBe(false); });

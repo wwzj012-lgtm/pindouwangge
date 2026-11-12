@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AdminButton, AdminConfirmDialog } from './AdminPrimitives';
+import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
 import {
   CREDIT_PAGE_SIZE, CREDIT_TYPES, creditLedgerQuery, formatCreditUnits, matchesCreditAdjustment,
   parseCreditPoints, readCreditRecovery, saveCreditRecovery, validCreditAccount,
@@ -144,6 +145,42 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
     setQ(qDraft.trim()); setType(typeDraft); setFrom(fromDraft); setTo(toDraft); setAccountPage(0); setLedgerPage(0); setRevision(v=>v+1);
   };
   const blocked = !canAdjust || !!recovery || !!storageError || busy;
+  // 批次 5：共享表格列定义（机械替换，行为不变；.admin-credits-table 响应式布局经
+  // wrapperClassName 保留，data-label 单元格属性经 cellAttrs 透传）。
+  const accountColumns: Array<AdminDataTableColumn<CreditAccount>> = [
+    {
+      key: 'uid',
+      label: '用户',
+      render: a => <><strong>{name(a)}</strong><small>{a.email}</small><small>{a.uid}</small></>,
+    },
+    { key: 'availableUnits', label: '可用积分', numeric: true, render: a => formatCreditUnits(a.availableUnits), cellAttrs: () => ({ 'data-label': '可用' }) },
+    { key: 'heldUnits', label: '冻结积分', numeric: true, render: a => formatCreditUnits(a.heldUnits), cellAttrs: () => ({ 'data-label': '冻结' }) },
+    {
+      key: 'actions',
+      label: '操作',
+      sticky: 'right',
+      render: a => <AdminButton data-credit-user={a.uid} onClick={() => { setAccount(null); setUid(a.uid); setLedgerPage(0); setAmount(''); setReason(''); setWriteError(''); setSuccess(null); if (uid === a.uid) void readAccount(a.uid); }}>查看</AdminButton>,
+    },
+  ];
+  const ledgerColumns: Array<AdminDataTableColumn<CreditLedgerOperation>> = [
+    {
+      key: 'uid',
+      label: '用户',
+      render: row => <><strong>{name(row)}</strong><small>{row.email}</small><small>{row.uid}</small></>,
+    },
+    {
+      key: 'purpose',
+      label: '用途',
+      render: row => <>{row.purpose}<small>{CREDIT_TYPES[row.type as CreditType] || '积分变动'} · {row.operationId}</small></>,
+    },
+    { key: 'createdAt', label: '时间', render: row => dateText(row.createdAt) },
+    {
+      key: 'amount',
+      label: '数额（积分）',
+      numeric: true,
+      render: row => <>{row.type === 'consumption' ? '-' + formatCreditUnits(row.consumedUnits) : formatCreditUnits(row.deltaAvailableUnits)}{row.deltaHeldUnits !== 0 && <small>冻结变动 {formatCreditUnits(row.deltaHeldUnits)}</small>}</>,
+    },
+  ];
   return <section className="admin-credits" aria-label="积分管理">
     <header><h2>积分管理</h2><p>查看用户可用与冻结积分，核查最近消费，并留下完整的调整记录。</p></header>
     <form className="admin-credits-filters" onSubmit={filters} aria-label="积分筛选">
@@ -165,10 +202,8 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
     <div className="admin-credits-columns">
       <section className="admin-credits-card" aria-label="用户积分账户"><h3>用户积分账户</h3>
         {accountLoading && <p role="status">正在读取账户…</p>}{accountError && <p role="alert">{accountError} <AdminButton onClick={()=>setRevision(v=>v+1)}>重试</AdminButton></p>}
-        {accounts && <><div className="admin-credits-table"><table><thead><tr><th>用户</th><th>可用积分</th><th>冻结积分</th><th>操作</th></tr></thead><tbody>
-          {accounts.items.map(a=><tr key={a.uid}><td><strong>{name(a)}</strong><small>{a.email}</small><small>{a.uid}</small></td><td data-label="可用">{formatCreditUnits(a.availableUnits)}</td><td data-label="冻结">{formatCreditUnits(a.heldUnits)}</td>
-            <td><AdminButton data-credit-user={a.uid} onClick={()=>{setAccount(null);setUid(a.uid);setLedgerPage(0);setAmount('');setReason('');setWriteError('');setSuccess(null); if (uid===a.uid) void readAccount(a.uid);}}>查看</AdminButton></td></tr>)}
-        </tbody></table></div>{accounts.items.length===0 && <p>未找到符合条件的用户。</p>}
+        {accounts && <><AdminDataTable wrapperClassName="admin-credits-table" columns={accountColumns} rows={accounts.items} rowKey={a => a.uid} ariaLabel="用户积分账户" />
+        {accounts.items.length===0 && <p>未找到符合条件的用户。</p>}
         <CreditPagination page={accountPage} total={accounts.total} loading={accountLoading} onChange={setAccountPage} label="账户" /></>}
       </section>
       <section className="admin-credits-card" aria-label="积分调整" data-empty={!uid || undefined}><h3>积分调整</h3>
@@ -194,11 +229,8 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
       <p>{uid?`当前用户：${uid}`:'全部用户'} · 消费按一次操作汇总，冻结、解冻、过期与管理员调整不计入消费。</p></div>
       {uid && <AdminButton onClick={()=>{setUid('');setAccount(null);setLedgerPage(0);}}>查看全部用户记录</AdminButton>}</div>
       {ledgerLoading && <p role="status">正在读取积分记录…</p>}{ledgerError && <p role="alert">{ledgerError} <AdminButton onClick={()=>setRevision(v=>v+1)}>重试</AdminButton></p>}
-      {ledger && <><div className="admin-credits-table"><table><thead><tr><th>用户</th><th>用途</th><th>时间</th><th>数额（积分）</th></tr></thead><tbody>
-        {ledger.items.map(row=><tr key={`${row.uid}:${row.operationId}:${row.entryKind}:${row.referenceId}`}><td><strong>{name(row)}</strong><small>{row.email}</small><small>{row.uid}</small></td>
-          <td>{row.purpose}<small>{CREDIT_TYPES[row.type as CreditType]||'积分变动'} · {row.operationId}</small></td><td>{dateText(row.createdAt)}</td>
-          <td>{row.type==='consumption'?'-'+formatCreditUnits(row.consumedUnits):formatCreditUnits(row.deltaAvailableUnits)}{row.deltaHeldUnits!==0&&<small>冻结变动 {formatCreditUnits(row.deltaHeldUnits)}</small>}</td></tr>)}
-      </tbody></table></div>{ledger.items.length===0 && <p>暂无符合条件的积分记录。</p>}
+      {ledger && <><AdminDataTable wrapperClassName="admin-credits-table" columns={ledgerColumns} rows={ledger.items} rowKey={row => `${row.uid}:${row.operationId}:${row.entryKind}:${row.referenceId}`} ariaLabel="积分记录" />
+      {ledger.items.length===0 && <p>暂无符合条件的积分记录。</p>}
       <CreditPagination page={ledgerPage} total={ledger.total} loading={ledgerLoading} onChange={setLedgerPage} label="记录" /></>}
     </section>
     <AdminConfirmDialog open={!!confirm} title={confirm?.retry?'确认原样重试积分调整':'确认积分调整'}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Gift, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, Coins, Crown, FileClock, Gift, KeyRound, LayoutDashboard, LogOut, Megaphone, Menu, Palette, RefreshCw, ScrollText, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, Tags, Users, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { clearAdminSession, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
@@ -11,9 +11,15 @@ import { AdminWelfare } from './AdminWelfare';
 import { AdminPaletteResources, type AdminAssetPreviewRequest } from './AdminPaletteResources';
 import { AdminCommunityPosts } from './AdminCommunityPosts';
 import { AdminBannedWords } from './AdminBannedWords';
+import { AdminCommunityTagDictionary } from './AdminCommunityTagDictionary';
+import { OperationLogViewer } from './OperationLogViewer';
+import { RunLogsSection } from './RunLogsSection';
+import { FeatureFlagsPanel } from './FeatureFlagsPanel';
+import { SettingsDiffView } from './SettingsDiffView';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
+import { parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations, trendBarHeights, type DashboardSection } from './adminDashboardModel';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -28,8 +34,19 @@ export function parseAdminCapabilities(value: unknown, operatorUid: string): Adm
   if (CAPABILITY_KEYS.some(key => typeof candidate.capabilities![key] !== 'boolean')) return null;
   return { operatorUid, capabilities: Object.fromEntries(CAPABILITY_KEYS.map(key => [key, candidate.capabilities![key]])) as Record<CapabilityKey, boolean> };
 }
-type SectionId = 'dashboard' | 'users' | 'roles' | 'logs' | 'codes' | 'credits' | 'welfare' | 'announcements' | 'config' | 'brands' | 'resources' | 'community' | 'bannedwords';
-type GroupId = 'overview' | 'operations' | 'content' | 'system';
+
+/**
+ * 批次 5：IA 重排终态 —— 5 组 15 项（菜单总数 ≤16）。
+ * - 总览[dashboard]
+ * - 用户与经营[users → credits → codes → welfare]（按业务链排，福利规则末位）
+ * - 内容治理[community → tagDictionary → bannedwords]
+ * - 资源与色彩[brands → resources]
+ * - 监控与系统[operationLogs → runLogs → announcements → config → roles]
+ * 旧 logs / sessions / cronRuns 三个 SectionId 并入 runLogs 板块内 tab；
+ * bookmarks 由 LEGACY_SECTION_MAP 兼容映射，不再 404。
+ */
+type SectionId = 'dashboard' | 'users' | 'credits' | 'codes' | 'welfare' | 'community' | 'tagDictionary' | 'bannedwords' | 'brands' | 'resources' | 'operationLogs' | 'runLogs' | 'announcements' | 'config' | 'roles';
+type GroupId = 'overview' | 'business' | 'content' | 'assets' | 'system';
 interface MenuItem { id: SectionId; label: string; group: GroupId; icon: LucideIcon; }
 interface TrendPoint { date: string; count: number; }
 interface DashboardData {
@@ -37,58 +54,106 @@ interface DashboardData {
   trends: { days7: { users: TrendPoint[]; works: TrendPoint[]; communityPosts: TrendPoint[]; successfulActions: TrendPoint[]; errors: TrendPoint[] } };
   telemetry: { successfulActions24h: number; durationSamples24h: number; averageDurationMs: number; maximumDurationMs: number; errors24h: number; errorCodes: { code: string; count: number }[] };
   warnings?: string[];
+  /** 批次 3：结构化分段可用性、待办与今日指标。 */
+  sections?: Record<string, DashboardSection>;
+  todo?: ReturnType<typeof parseDashboardTodo>;
+  metrics?: ReturnType<typeof parseDashboardMetrics>;
 }
-const GROUPS: { id: GroupId; label: string }[] = [{ id: 'overview', label: '工作台' }, { id: 'operations', label: '用户与经营' }, { id: 'content', label: '内容与色彩' }, { id: 'system', label: '系统管理' }];
-const MENU_ITEMS: MenuItem[] = [
+const GROUPS: { id: GroupId; label: string }[] = [
+  { id: 'overview', label: '总览' },
+  { id: 'business', label: '用户与经营' },
+  { id: 'content', label: '内容治理' },
+  { id: 'assets', label: '资源与色彩' },
+  { id: 'system', label: '监控与系统' },
+];
+export const ADMIN_MENU_ITEMS: MenuItem[] = [
   { id: 'dashboard', label: '数据仪表盘', group: 'overview', icon: LayoutDashboard },
-  { id: 'users', label: '用户管理', group: 'operations', icon: Users },
-  { id: 'credits', label: '积分管理', group: 'operations', icon: Coins },
-  { id: 'welfare', label: '福利规则', group: 'operations', icon: Gift },
-  { id: 'codes', label: '兑换码管理', group: 'operations', icon: KeyRound },
+  { id: 'users', label: '用户管理', group: 'business', icon: Users },
+  { id: 'credits', label: '积分管理', group: 'business', icon: Coins },
+  { id: 'codes', label: '兑换码管理', group: 'business', icon: KeyRound },
+  { id: 'welfare', label: '福利规则', group: 'business', icon: Gift },
   { id: 'community', label: '社区内容', group: 'content', icon: Activity },
+  { id: 'tagDictionary', label: '标签字典', group: 'content', icon: Tags },
   { id: 'bannedwords', label: '违禁词库', group: 'content', icon: ShieldAlert },
-  { id: 'announcements', label: '公告系统', group: 'content', icon: Megaphone },
-  { id: 'brands', label: '品牌与颜色', group: 'content', icon: Palette },
-  { id: 'resources', label: '真实资源文件', group: 'content', icon: Archive },
-  { id: 'logs', label: '系统日志', group: 'system', icon: ClipboardList },
+  { id: 'brands', label: '品牌与颜色', group: 'assets', icon: Palette },
+  { id: 'resources', label: '真实资源文件', group: 'assets', icon: Archive },
+  { id: 'operationLogs', label: '操作审计', group: 'system', icon: ScrollText },
+  { id: 'runLogs', label: '运行日志', group: 'system', icon: FileClock },
+  { id: 'announcements', label: '公告系统', group: 'system', icon: Megaphone },
   { id: 'config', label: '功能配置', group: 'system', icon: Settings2 },
   { id: 'roles', label: '角色与权限', group: 'system', icon: ShieldCheck },
 ];
+const MENU_ITEMS = ADMIN_MENU_ITEMS;
+
+/** 需要 effective capability 才显示的菜单项（能力未知时全部可见，不猜）。 */
+const CAPABILITY_SECTIONS: Partial<Record<SectionId, CapabilityKey>> = {
+  credits: 'credits.read',
+  welfare: 'credits.read',
+  brands: 'colors.read',
+};
+export function visibleMenuSections(capabilities: AdminCapabilities | null): SectionId[] {
+  if (!capabilities) return MENU_ITEMS.map(item => item.id);
+  return MENU_ITEMS
+    .filter(item => {
+      const required = CAPABILITY_SECTIONS[item.id];
+      return !required || capabilities.capabilities[required];
+    })
+    .map(item => item.id);
+}
+
 const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   dashboard: '查看用户增长、内容数据与服务运行情况；不可用项标记为 —。',
   users: '查找用户，管理账号、会员与访问权限。',
   credits: '查看真实积分余额与消费流水，核对账户快照和原因后调整积分。',
-  welfare: '配置新注册自动赠送等福利规则，查看每条规则的发放统计。',
-  roles: '管理角色与权限，授权结果以服务端为准。',
-  logs: '按条件检索操作记录与运行日志。',
   codes: '生成、查询与管理兑换码，操作前核对范围。',
-  announcements: '管理公告草稿、发布状态与展示范围。',
-  config: '查看功能配置，核对差异后提交变更。',
+  welfare: '配置新注册自动赠送等福利规则，查看每条规则的发放统计。',
+  community: '查看帖子与图纸证据，填写原因后进行审核；审核队列与举报在板块内 tab。',
+  tagDictionary: '管理标签展示名与启停状态；隐藏即时生效，存量帖子上的标签保留。',
+  bannedwords: '管理发布拦截违禁词；只拦新增与编辑，修改后最多 5 分钟生效。',
   brands: '先选择品牌，再管理该品牌的子颜色。已有图纸保留颜色快照。',
   resources: '查看实际存储对象与预览，资源删除保持禁用。',
-  community: '查看帖子与图纸证据，填写原因后进行审核。',
-  bannedwords: '管理发布拦截违禁词；只拦新增与编辑，修改后最多 5 分钟生效。',
+  operationLogs: '结构化管理写操作审计；展开行查看改动前后字段级对比。',
+  runLogs: '运行日志 / 定时任务 / 管理会话合并板块；旧系统日志按数据源分流检索。',
+  announcements: '管理公告草稿、发布状态与展示范围。',
+  config: '查看功能配置，核对差异后提交变更；支持设置变更历史 diff。',
+  roles: '管理角色与权限，授权结果以服务端为准。',
 };
 const formatter = new Intl.NumberFormat('zh-CN');
 export function formatAdminMetric(value: unknown): string { return typeof value === 'number' && Number.isFinite(value) ? formatter.format(value) : '—'; }
 export function sumAdminMetrics(a: unknown, b: unknown): number | undefined { return typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b) ? a + b : undefined; }
-export function resolveAdminSection(value: string | null): SectionId { if (value === 'colors-assets') return 'brands'; return MENU_ITEMS.some(item => item.id === value) ? value as SectionId : 'dashboard'; }
+/** 批次 5：旧 SectionId 兼容映射（书签不 404）。 */
+export const LEGACY_SECTION_MAP: Record<string, SectionId> = {
+  logs: 'runLogs',
+  sessions: 'runLogs',
+  cronRuns: 'runLogs',
+  'colors-assets': 'brands',
+};
+export function resolveAdminSection(value: string | null): SectionId {
+  if (value && LEGACY_SECTION_MAP[value]) return LEGACY_SECTION_MAP[value];
+  return MENU_ITEMS.some(item => item.id === value) ? value as SectionId : 'dashboard';
+}
 export function adminAccessFailure(status: number, signedIn: boolean): AccessState { return status === 403 ? 'forbidden' : status === 401 ? signedIn ? 'session-required' : 'signed-out' : 'unavailable'; }
 const currentMenu = (id: SectionId) => MENU_ITEMS.find(item => item.id === id)!;
 function normalizeLegacySectionUrl() {
   const url = new URL(window.location.href);
-  if (url.searchParams.get('section') !== 'colors-assets') return;
-  url.searchParams.set('section', 'brands');
+  const raw = url.searchParams.get('section');
+  const mapped = raw ? LEGACY_SECTION_MAP[raw] : undefined;
+  if (!mapped) return;
+  url.searchParams.set('section', mapped);
   window.history.replaceState(window.history.state, '', url);
 }
 
-function Sidebar({ active, navigate, returnToApp }: { active: SectionId; navigate: (id: SectionId) => void; returnToApp: () => void }) {
+function Sidebar({ active, navigate, returnToApp, visibleSections }: { active: SectionId; navigate: (id: SectionId) => void; returnToApp: () => void; visibleSections: ReadonlySet<SectionId> }) {
   return <>
     <div className="admin-brand"><span className="admin-brand-mark"><ShieldEllipsis aria-hidden="true" /></span><div><strong>拼豆管理工作台</strong><small>运营与平台管理</small></div></div>
-    <nav className="admin-navigation" aria-label="后台菜单">{GROUPS.map(group => <section className="admin-nav-group" key={group.id}>
-      <h2>{group.label}</h2>{MENU_ITEMS.filter(item => item.group === group.id).map(item => { const Icon = item.icon;
-        return <button type="button" className="admin-nav-item" key={item.id} data-admin-section={item.id} aria-current={active === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon aria-hidden="true" /><span>{item.label}</span></button>;
-      })}</section>)}</nav>
+    <nav className="admin-navigation" aria-label="后台菜单">{GROUPS.map(group => {
+      const items = MENU_ITEMS.filter(item => item.group === group.id && visibleSections.has(item.id));
+      if (items.length === 0) return null;
+      return <section className="admin-nav-group" key={group.id}>
+        <h2>{group.label}</h2>{items.map(item => { const Icon = item.icon;
+          return <button type="button" className="admin-nav-item" key={item.id} data-admin-section={item.id} aria-current={active === item.id ? 'page' : undefined} onClick={() => navigate(item.id)}><Icon aria-hidden="true" /><span>{item.label}</span></button>;
+        })}</section>;
+    })}</nav>
     <div className="admin-sidebar-footer"><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton></div>
   </>;
 }
@@ -145,7 +210,58 @@ function TrendChart({ label, points }: { label: string; points?: TrendPoint[] })
     </> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
   </article>;
 }
-function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void; navigate: (id: SectionId) => void }) {
+/** 批次 3：待办卡。数字来自服务端 todo 分段；缺失时不渲染（不伪造 0）。 */
+function TodoCards({ todo, navigate }: { todo: DashboardData['todo']; navigate: (id: SectionId, query?: Record<string, string>) => void }) {
+  if (!todo) return null;
+  const cards: { key: string; label: string; value: number; detail: string; tone: 'danger' | 'warning' | 'neutral'; target: SectionId; query: Record<string, string> }[] = [
+    { key: 'pendingReviews', label: '待审核帖子', value: todo.pendingReviews, detail: '命中违禁词或被举报后进入人工审核', tone: todo.pendingReviews > 0 ? 'warning' : 'neutral', target: 'community', query: todoDrillQuery('reviews') },
+    { key: 'pendingReports', label: '待处理举报', value: todo.pendingReports, detail: 'open 状态的内容举报', tone: todo.pendingReports > 0 ? 'danger' : 'neutral', target: 'community', query: todoDrillQuery('reports') },
+    { key: 'codes', label: '兑换码库存', value: todo.availableCodes ?? 0, detail: todo.lowStockCodes ? `低于阈值 ${todo.lowStockThreshold ?? '—'}，建议补充` : `阈值 ${todo.lowStockThreshold ?? '—'} 内，库存正常`, tone: todo.lowStockCodes ? 'danger' : 'neutral', target: 'codes', query: todoDrillQuery('codes') },
+  ];
+  return <section className="admin-dashboard-section" aria-labelledby="admin-todo-title" data-dashboard-todo>
+    <AdminToolbar><h2 id="admin-todo-title">待办事项</h2><p>点击卡片下钻到对应板块（带预置筛选）。</p></AdminToolbar>
+    <div className="admin-metrics">
+      {cards.map((card) => <button type="button" key={card.key} className="admin-metric" data-todo-card={card.key}
+        aria-label={card.label + ' ' + card.value + '，去处理'}
+        onClick={() => navigate(card.target, card.query)}>
+        <div className="admin-metric-head"><span>{card.label}</span><AdminBadge tone={card.tone}>{card.tone === 'neutral' ? '正常' : '待处理'}</AdminBadge></div>
+        <p className="admin-metric-value" data-todo-value={card.key}>{formatAdminMetric(card.value)}</p>
+        <p>{card.detail}</p>
+        <ArrowUpRight className="admin-metric-open" aria-hidden="true" />
+      </button>)}
+    </div>
+  </section>;
+}
+
+/** 批次 3：今日指标 + 7 天注册趋势 mini bar。 */
+function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
+  if (!metrics) return null;
+  const registered = todayRegistrations(metrics);
+  const heights = trendBarHeights(metrics.registerTrend7d);
+  const cards: { key: string; label: string; value: number | null; icon: LucideIcon }[] = [
+    { key: 'works', label: '今日新作品', value: metrics.todayNewWorks, icon: Archive },
+    { key: 'posts', label: '今日新帖子', value: metrics.todayNewPosts, icon: Activity },
+    { key: 'reports', label: '今日新举报', value: metrics.todayNewReports, icon: ShieldAlert },
+    { key: 'registrations', label: '今日新注册', value: registered, icon: Users },
+  ];
+  return <section className="admin-dashboard-section" aria-labelledby="admin-metrics-title" data-dashboard-metrics>
+    <AdminToolbar><h2 id="admin-metrics-title">今日概览</h2><p>统计自今日 0 点起（UTC）；7 天注册趋势横轴为最近 7 天。</p></AdminToolbar>
+    <div className="admin-metrics">
+      {cards.map((card) => <article className="admin-metric" key={card.key} data-metric-card={card.key}>
+        <div className="admin-metric-head"><span>{card.label}</span><card.icon aria-hidden="true" /></div>
+        <p className="admin-metric-value" data-metric-value={card.key}>{formatAdminMetric(card.value)}</p>
+      </article>)}
+    </div>
+    {metrics.registerTrend7d.length > 0 && <div className="admin-register-trend" data-register-trend>
+      {metrics.registerTrend7d.map((point, index) => <div key={point.date} className="admin-register-bar" title={point.date + '：' + point.count}>
+        <i style={{ height: heights[index] + '%' }} aria-hidden="true" />
+        <small>{point.date.slice(5)}</small>
+      </div>)}
+    </div>}
+  </section>;
+}
+
+function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void; navigate: (id: SectionId, query?: Record<string, string>) => void }) {
   if (loading && !data) return <AdminLoading label="正在加载服务端统计…" />;
   if (error) return <AdminErrorState title="统计暂不可用" message={error} retry={retry} busy={loading} />;
   if (!data) return <AdminEmptyState title="尚无统计结果" description="未知值不会显示为零。" action={<AdminButton onClick={retry}>刷新统计</AdminButton>} />;
@@ -165,6 +281,8 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
   return <section aria-label="运营概览" aria-busy={loading}>
     <AdminToolbar><h2>运营概览</h2></AdminToolbar>
     {loading && <p role="status" className="admin-muted">正在更新统计，当前结果暂时保留…</p>}
+    <TodoCards todo={data.todo} navigate={navigate} />
+    <MetricsPanel metrics={data.metrics} />
     <div className="admin-metrics"><MetricCard label="注册用户" value={overview?.totalUsers} detail={'近30天新增 ' + formatAdminMetric(overview?.newUsers30Days)} icon={Users} onOpen={() => navigate('users')} /><MetricCard label="活跃会员" value={overview?.activeVipUsers} detail="当前有效 VIP / Pro" icon={Crown} onOpen={() => navigate('users')} /><MetricCard label="图纸与社区作品" value={sumAdminMetrics(overview?.works, overview?.communityPosts)} detail={'图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts)} icon={Archive} onOpen={() => navigate('community')} /><MetricCard label="累计兑换" value={overview?.redeemedCodes} detail={'近24小时错误 ' + formatAdminMetric(overview?.recentErrors)} icon={KeyRound} onOpen={() => navigate('codes')} /></div>
     <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2><p>仅统计已采集的状态变更和服务端错误，不代表所有请求。</p></AdminToolbar>
       <div className="admin-ops">
@@ -194,7 +312,7 @@ function pruneEditorCache(cache: Map<Control, string>) {
     if (!control.isConnected || !isEditorControl(control)) cache.delete(control);
   }
 }
-type PendingAction = { kind: 'refresh' } | { kind: 'navigate'; section: SectionId; fromHistory?: boolean };
+type PendingAction = { kind: 'refresh' } | { kind: 'navigate'; section: SectionId; fromHistory?: boolean; query?: Record<string, string> };
 
 export function AdminConsole() {
   const { currentUser } = useAuth();
@@ -340,15 +458,25 @@ function AdminConsoleSession(_props: { key?: string }) {
     finally { setChecking(false); }
   };
   const performAction = (action: PendingAction) => {
-    if (action.kind === 'refresh') { if (activeSection === 'dashboard') void loadDashboard(); else { if (activeSection === 'brands' || activeSection === 'credits') void loadCapabilities(); setRefreshRevision(value => value + 1); } }
-    else { edits.current.clear(); setActiveSection(action.section); if (!action.fromHistory) { const url = new URL(window.location.href); url.searchParams.set('section', action.section); window.history.pushState({}, '', url); } }
+    if (action.kind === 'refresh') { if (activeSection === 'dashboard') void loadDashboard(); else { if (activeSection === 'brands' || activeSection === 'credits' || activeSection === 'welfare') void loadCapabilities(); setRefreshRevision(value => value + 1); } }
+    else {
+      edits.current.clear(); setActiveSection(action.section);
+      if (!action.fromHistory) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('section', action.section);
+        // 批次 3：待办卡下钻的预置筛选参数；先清掉旧的再写入新的。
+        url.searchParams.delete('preset');
+        for (const [key, value] of Object.entries(action.query ?? {})) url.searchParams.set(key, value);
+        window.history.pushState({}, '', url);
+      }
+    }
   };
   const queueAction = (action: PendingAction) => {
     setMobileNavigation(false);
     const dirty = hasDirtyEdits();
     if (dirty) setPendingAction(action); else performAction(action);
   };
-  const navigate = (id: SectionId) => { if (id === activeSection) { setMobileNavigation(false); return; } queueAction({ kind: 'navigate', section: id }); };
+  const navigate = (id: SectionId, query?: Record<string, string>) => { if (id === activeSection && !query) { setMobileNavigation(false); return; } queueAction({ kind: 'navigate', section: id, query }); };
   const returnToApp = () => window.location.assign('/');
   const logout = async () => {
     setLoggingOut(true); setLogoutError('');
@@ -358,6 +486,8 @@ function AdminConsoleSession(_props: { key?: string }) {
       generation.current++; clearAdminSession(); setDashboard(null); setLogoutOpen(false); setAccess(signedIn ? 'session-required' : 'signed-out'); setAccessError('');
     } finally { setLoggingOut(false); }
   };
+  // Hook order must stay unconditional: this memo sits above the early gate return.
+  const visibleSections = useMemo(() => new Set(visibleMenuSections(capabilities)), [capabilities]);
 
   if (access !== 'ready') {
     // 四种进不来的原因要分开说：没登录却被告知"会话已过期"是最容易让人卡住的一种。
@@ -400,8 +530,11 @@ function AdminConsoleSession(_props: { key?: string }) {
 
   const busy = dashboardLoading || modulePending > 0;
   const module = activeSection === 'users' || activeSection === 'roles' ? <AdminUsersRoles mode={activeSection} request={moduleRequest} />
-    : activeSection === 'logs' || activeSection === 'codes' ? <AdminLogsCodes mode={activeSection} request={moduleRequest} />
-    : activeSection === 'announcements' || activeSection === 'config' ? <AdminAnnouncementsConfig mode={activeSection} request={moduleRequest} />
+    : activeSection === 'codes' ? <AdminLogsCodes mode="codes" request={moduleRequest} />
+    : activeSection === 'announcements' ? <AdminAnnouncementsConfig mode="announcements" request={moduleRequest} />
+    : activeSection === 'config' ? <div className="admin-final-modules"><AdminAnnouncementsConfig mode="config" request={moduleRequest} /><FeatureFlagsPanel request={moduleRequest} /><SettingsDiffView request={moduleRequest} /></div>
+    : activeSection === 'operationLogs' ? <OperationLogViewer request={moduleRequest} />
+    : activeSection === 'runLogs' ? <RunLogsSection request={moduleRequest} operatorUid={capabilities?.operatorUid ?? userUid ?? ''} />
     : activeSection === 'credits' ? capabilityError ? <AdminErrorState title="权限尚未确认" message={capabilityError} retry={() => void loadCapabilities()} busy={capabilityLoading} />
       : !capabilities ? <AdminLoading label="正在确认积分管理权限…" />
       : capabilities.capabilities['credits.read'] ? <AdminCredits request={moduleRequest} canRead={capabilities.capabilities['credits.read']} canAdjust={capabilities.capabilities['credits.adjust']} operatorUid={capabilities.operatorUid} />
@@ -416,10 +549,11 @@ function AdminConsoleSession(_props: { key?: string }) {
       : <AdminErrorState title="无品牌读取权限" message="当前操作者缺少 colors.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
     : activeSection === 'resources' ? <AdminPaletteResources request={moduleRequest} previewRequest={assetPreviewRequest} readOnly />
     : activeSection === 'community' ? <AdminCommunityPosts request={moduleRequest} previewRequest={previewRequest} />
+    : activeSection === 'tagDictionary' ? <AdminCommunityTagDictionary request={moduleRequest} />
     : activeSection === 'bannedwords' ? <AdminBannedWords request={moduleRequest} /> : null;
   return <div className="admin-root">
     <a className="admin-skip-link" href="#admin-main">跳到主要内容</a>
-    <aside className="admin-sidebar"><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></aside>
+    <aside className="admin-sidebar"><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} visibleSections={visibleSections} /></aside>
     <div className="admin-layout"><header className="admin-header"><div className="admin-header-title">
       <AdminButton className="admin-mobile-menu" iconOnly variant="ghost" aria-label="打开菜单" aria-expanded={mobileNavigation} onClick={() => setMobileNavigation(true)}><Menu aria-hidden="true" /></AdminButton>
       <div><nav className="admin-breadcrumb" aria-label="面包屑"><span>管理工作台</span><ChevronRight aria-hidden="true" /><span>{GROUPS.find(group => group.id === section.group)?.label}</span></nav><h1>{section.label}</h1></div>
@@ -435,7 +569,7 @@ function AdminConsoleSession(_props: { key?: string }) {
         {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} navigate={navigate} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
       </main>
     </div>
-    <AdminDrawer open={mobileNavigation} title="后台菜单" side="left" className="admin-navigation-drawer" onClose={() => setMobileNavigation(false)}><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></AdminDrawer>
+    <AdminDrawer open={mobileNavigation} title="后台菜单" side="left" className="admin-navigation-drawer" onClose={() => setMobileNavigation(false)}><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} visibleSections={visibleSections} /></AdminDrawer>
     <AdminConfirmDialog open={Boolean(pendingAction)} title="存在未保存编辑" description="取消会保留当前输入。确认后将继续刷新或切换页面。" subject={section.label} impact="尚未保存的编辑可能丢失，请先核对。" confirmLabel="放弃编辑并继续" onClose={() => { if (pendingAction?.kind === 'navigate' && pendingAction.fromHistory) { const url = new URL(window.location.href); url.searchParams.set('section', activeSection); window.history.replaceState({}, '', url); } setPendingAction(null); }} onConfirm={() => { const action = pendingAction; setPendingAction(null); edits.current.clear(); if (action) performAction(action); }} />
     <AdminConfirmDialog open={logoutOpen} title="退出后台会话" description="确认后将请求撤销当前后台会话。" subject={currentUser?.displayName || currentUser?.email || '当前管理员'} impact="退出后台管理，保留前台登录；未保存编辑可能丢失。" confirmLabel="退出后台会话" pending={loggingOut} onClose={() => setLogoutOpen(false)} onConfirm={() => void logout()}>{logoutError && <AdminErrorState message={logoutError} />}</AdminConfirmDialog>
   </div>;

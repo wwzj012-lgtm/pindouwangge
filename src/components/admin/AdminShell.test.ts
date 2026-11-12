@@ -22,8 +22,13 @@ describe('admin shell state boundaries', () => {
     expect(sumAdminMetrics(undefined, 1)).toBeUndefined(); expect(sumAdminMetrics(1, NaN)).toBeUndefined();
   });
   it('accepts all existing module identifiers', () => {
-    for (const section of ['dashboard', 'users', 'roles', 'logs', 'codes', 'credits', 'announcements', 'config', 'brands', 'resources', 'community', 'bannedwords']) expect(resolveAdminSection(section)).toBe(section);
+    for (const section of ['dashboard', 'users', 'roles', 'codes', 'credits', 'welfare', 'announcements', 'config', 'brands', 'resources', 'community', 'bannedwords', 'operationLogs', 'runLogs', 'tagDictionary']) expect(resolveAdminSection(section)).toBe(section);
     expect(resolveAdminSection('colors-assets')).toBe('brands');
+  });
+  it('maps legacy bookmarks onto the merged monitoring section instead of 404', () => {
+    expect(resolveAdminSection('logs')).toBe('runLogs');
+    expect(resolveAdminSection('sessions')).toBe('runLogs');
+    expect(resolveAdminSection('cronRuns')).toBe('runLogs');
   });
   it('rejects unknown module identifiers rather than treating them as authorized routes', () => {
     expect(resolveAdminSection(null)).toBe('dashboard'); expect(resolveAdminSection('../users')).toBe('dashboard'); expect(resolveAdminSection('invented')).toBe('dashboard');

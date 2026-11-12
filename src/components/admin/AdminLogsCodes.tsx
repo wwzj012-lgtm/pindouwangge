@@ -1,9 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, ClipboardCopy, Copy, KeyRound, Trash2, Undo2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ClipboardCopy, Copy, Download, KeyRound, Trash2, Undo2 } from 'lucide-react';
 import { maskCardCode } from '../../utils/vipCodeUtils';
 import type { AdminRequest } from './adminRequest';
 import { adminLabel, adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
+import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { defaultTriggerDownload } from './CsvExportButton';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
 import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
 
@@ -17,6 +19,16 @@ interface CodeStats { total: number; redeemed: number; available: number; delete
 interface CodePage { items: VipCode[]; total: number; page: number; limit: number; stats?: CodeStats; }
 const number = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? new Intl.NumberFormat('zh-CN').format(value) : '—';
 const codeType = (code: VipCode) => code.member_type === 2 ? '商家 Pro' : '普通 VIP';
+
+/** 批次 5：本批生成结果导出明文 CSV。行数=生成数；带 BOM 便于 Excel 打开。 */
+export function generatedCodesCsv(codes: string[]): string {
+  const escape = (code: string) => /[",\r\n]/.test(code) ? '"' + code.replace(/"/g, '""') + '"' : code;
+  return '\uFEFF' + codes.map(escape).join('\r\n');
+}
+export function generatedCodesFilename(count: number, now = new Date()): string {
+  const stamp = now.toISOString().slice(0, 10);
+  return `generated-codes-${stamp}-${count}.csv`;
+}
 
 function Pager({ page, total, loading, change }: { page: number; total: number; loading: boolean; change: (page: number) => void }) {
   return <div className="admin-pagination"><span>共 {number(total)} 条 · 第 {page} / {Math.max(1, Math.ceil(total / 20))} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || page <= 1} onClick={() => change(page - 1)}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || page >= Math.ceil(total / 20)} onClick={() => change(page + 1)}><ChevronRight aria-hidden="true" /></AdminButton></div></div>;
@@ -55,6 +67,28 @@ function LogsPanel({ request }: { request: AdminRequest }) {
   useEffect(() => { void load(); return () => epoch.current.invalidate(); }, [load]);
   const apply = () => { const dates = logDates(draft.from, draft.to); setValidation(dates.error); if (!dates.error) setQuery({ ...draft, page: 1 }); };
   const changeKind = (kind: LogKind) => { setDraft(value => ({ ...value, kind })); setQuery(value => ({ ...value, kind, page: 1 })); setSelected(null); };
+  // 批次 5：共享表格列定义（机械替换，行为不变）。
+  const logColumns: Array<AdminDataTableColumn<LogEntry>> = [
+    { key: 'timestamp', label: '时间', render: item => dateText(item.timestamp) },
+    {
+      key: 'operator',
+      label: '操作者 / 对象',
+      render: item => <><span className="admin-mono">{item.operatorEmail ?? item.operatorUid ?? '未提供'}</span><small>{item.entityType}{item.entityId ? ' · ' + item.entityId : ''}</small></>,
+    },
+    { key: 'level', label: '动作 / 级别', render: item => item.level ?? '未提供' },
+    {
+      key: 'outcome',
+      label: '结果状态',
+      render: item => <AdminBadge tone={logOutcome(item.type, item.metadata, item.resolvedAt).includes('成功') ? 'success' : logOutcome(item.type, item.metadata, item.resolvedAt).includes('失败') ? 'danger' : item.type === 'error' ? 'warning' : 'neutral'}>{logOutcome(item.type, item.metadata, item.resolvedAt).replace('已记录 · ', '')}</AdminBadge>,
+    },
+    { key: 'duration', label: '采集耗时', render: item => logDuration(item.metadata) },
+    {
+      key: 'actions',
+      label: '操作',
+      sticky: 'right',
+      render: item => <AdminButton data-log-detail={item.id} onClick={() => setSelected(item)}>详情</AdminButton>,
+    },
+  ];
   return <section>
     <AdminToolbar actions={<AdminButton busy={loading} onClick={() => void load()}>刷新日志</AdminButton>}><h2>可追溯操作记录</h2><p>分类、结果状态与已采集耗时分开展示；未采集耗时为 —。</p></AdminToolbar>
     <div className="admin-module-tabs" role="group" aria-label="日志类别">{(['admin','user','error'] as LogKind[]).map(kind => <AdminButton key={kind} data-log-kind={kind} variant={query.kind === kind ? 'primary' : 'secondary'} aria-pressed={query.kind === kind} onClick={() => changeKind(kind)}>{kind === 'admin' ? '管理员操作' : kind === 'user' ? '用户行为' : '错误事件'}</AdminButton>)}</div>
@@ -70,7 +104,7 @@ function LogsPanel({ request }: { request: AdminRequest }) {
     <div className="admin-stage-panel" aria-busy={loading}>
       {loading && snapshot && <p role="status" className="admin-result-caption">正在查询，暂时保留已有记录…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取日志…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
-        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="日志列表"><thead><tr><th>时间</th><th>操作者 / 对象</th><th>动作 / 级别</th><th>结果状态</th><th>采集耗时</th><th>操作</th></tr></thead><tbody>{snapshot.items.map(item => <tr key={item.id}><td>{dateText(item.timestamp)}</td><td><span className="admin-mono">{item.operatorEmail ?? item.operatorUid ?? '未提供'}</span><small>{item.entityType}{item.entityId ? ' · ' + item.entityId : ''}</small></td><td>{item.level ?? '未提供'}</td><td><AdminBadge tone={logOutcome(item.type, item.metadata, item.resolvedAt).includes('成功') ? 'success' : logOutcome(item.type, item.metadata, item.resolvedAt).includes('失败') ? 'danger' : item.type === 'error' ? 'warning' : 'neutral'}>{logOutcome(item.type, item.metadata, item.resolvedAt).replace('已记录 · ', '')}</AdminBadge></td><td>{logDuration(item.metadata)}</td><td><AdminButton data-log-detail={item.id} onClick={() => setSelected(item)}>详情</AdminButton></td></tr>)}</tbody></table></div>
+        <AdminDataTable columns={logColumns} rows={snapshot.items} rowKey={item => item.id} ariaLabel="日志列表" minWidth={760} />
         <Pager page={snapshot.page} total={snapshot.total} loading={loading || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
       </> : <AdminEmptyState title="没有匹配日志" description="调整查询条件或重置后重试。" />}
     </div>
@@ -181,6 +215,37 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
       <AdminButton data-code-delete={code.id} iconOnly variant="danger-quiet" aria-label={code.deletePendingAt ? '撤销删除申请' : '申请删除'} disabled={busy} onClick={() => reviewRow(code, code.deletePendingAt ? 'restore' : 'delete')}>{code.deletePendingAt ? <Undo2 aria-hidden="true" /> : <Trash2 aria-hidden="true" />}</AdminButton>
     </div>{feedback?.error && <p className="admin-field-error" role="alert" data-code-feedback={code.id}>{feedback.error}</p>}{feedback?.success && <p className="admin-code-feedback" role="status" data-code-feedback={code.id}>{feedback.success}</p>}{feedback?.warning && <p className="admin-code-feedback admin-code-feedback--pending" role="status" data-code-feedback={code.id}>{feedback.warning}</p>}</div>;
   };
+  // 批次 5：共享表格列定义（机械替换，行为不变）。
+  const codeColumns: Array<AdminDataTableColumn<VipCode>> = [
+    {
+      key: 'code',
+      label: '兑换码 / 渠道',
+      render: code => <><span className="admin-mono admin-code-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></>,
+    },
+    { key: 'term', label: '权益', render: code => <span className="admin-code-term">{codeType(code)} · {code.days}天</span> },
+    {
+      key: 'used',
+      label: '兑换状态',
+      render: code => <><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</>,
+    },
+    {
+      key: 'marks',
+      label: '发售 / 删除标记',
+      render: code => <span className="admin-code-sale-cell"><AdminBadge tone={code.copied ? 'warning' : 'neutral'}>{codeSaleLabel(code.copied)}</AdminBadge>{code.copied && <small className="admin-code-sale-note">仅表示发售标记，不代表真实付款</small>}{code.deletePendingAt && <AdminBadge tone="danger">删除等待至 {dateText(code.deletePendingAt).split(' ')[0]}</AdminBadge>}</span>,
+    },
+    {
+      key: 'actions',
+      label: '明确操作',
+      sticky: 'right',
+      render: code => operations(code),
+    },
+  ];
+  const redemptionColumns: Array<AdminDataTableColumn<Redemption>> = [
+    { key: 'code', label: '卡密', render: item => <span className="admin-mono">{maskCardCode(item.code)}</span> },
+    { key: 'userUid', label: '用户UID', render: item => item.userUid ?? '未提供' },
+    { key: 'memberType', label: '权益', render: item => `${item.memberType === 2 ? '商家Pro' : '普通VIP'} · ${item.days}天` },
+    { key: 'redeemedAt', label: '兑换时间', render: item => dateText(item.redeemedAt) },
+  ];
   const anyWrite = lockView.batch || lockView.rows.size > 0;
   return <section>
     <AdminToolbar actions={<AdminButton busy={loading} disabled={anyWrite} onClick={refresh}>刷新兑换数据</AdminButton>}><h2>兑换码发行与管理</h2><p>复制和发售标记是两件事；同一张码同一时间只处理一项，不同码可以同时处理。</p></AdminToolbar>
@@ -204,14 +269,15 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     </div>
     <section className="admin-stage-panel" aria-busy={loading}><h2 className="admin-detail-title">兑换码列表</h2>{loading && snapshot && <p role="status" className="admin-result-caption">正在读取，旧列表保留…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
-        <div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换码列表"><thead><tr><th>兑换码 / 渠道</th><th>权益</th><th>兑换状态</th><th>发售 / 删除标记</th><th>明确操作</th></tr></thead><tbody>{snapshot.items.map(code => <tr key={code.id} className={codeSaleRowClassName(code.copied)} data-code-row={code.id}><td><span className="admin-mono admin-code-mono">{maskCardCode(code.code)}</span><small>{code.channel ?? '渠道未提供'}</small></td><td className="admin-code-term">{codeType(code)} · {code.days}天</td><td><AdminBadge tone={code.used ? 'neutral' : 'success'}>{code.used ? '已兑换' : '未兑换'}</AdminBadge>{code.usedBy && <small>{code.usedBy}</small>}</td><td className="admin-code-sale-cell"><AdminBadge tone={code.copied ? 'warning' : 'neutral'}>{codeSaleLabel(code.copied)}</AdminBadge>{code.copied && <small className="admin-code-sale-note">仅表示发售标记，不代表真实付款</small>}{code.deletePendingAt && <AdminBadge tone="danger">删除等待至 {dateText(code.deletePendingAt).split(' ')[0]}</AdminBadge>}</td><td>{operations(code)}</td></tr>)}</tbody></table></div>
+        <AdminDataTable columns={codeColumns} rows={snapshot.items} rowKey={code => code.id} ariaLabel="兑换码列表" minWidth={850}
+          rowAttrs={code => ({ className: codeSaleRowClassName(code.copied), 'data-code-row': code.id })} />
         <Pager page={snapshot.page ?? query.page} total={snapshot.total} loading={loading || anyWrite || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
       </> : <AdminEmptyState title="没有匹配兑换码" description="调整已提交筛选或重置后重试。" />}
     </section>
     <section className="admin-stage-panel" aria-busy={recordsLoading}><AdminToolbar><h2>兑换使用记录</h2><p>按当前卡密搜索条件分页；其它发行筛选不冒充兑换记录筛选。</p></AdminToolbar>
       {recordsError && <AdminErrorState message={recordsError} retry={() => void loadRedemptions()} busy={recordsLoading} />}
       <p className="admin-result-caption">服务端累计兑换 {number(records?.stats?.total)} · VIP {number(records?.stats?.vip)} · Pro {number(records?.stats?.pro)}</p>
-      {!records ? recordsLoading ? <AdminLoading label="正在读取兑换记录…" /> : <AdminEmptyState title="尚无成功读取结果" /> : records.items.length ? <><div className="admin-table-scroll"><table className="admin-stage-table" aria-label="兑换使用记录"><thead><tr><th>卡密</th><th>用户UID</th><th>权益</th><th>兑换时间</th></tr></thead><tbody>{records.items.map(item => <tr key={item.id}><td className="admin-mono">{maskCardCode(item.code)}</td><td>{item.userUid ?? '未提供'}</td><td>{item.memberType === 2 ? '商家Pro' : '普通VIP'} · {item.days}天</td><td>{dateText(item.redeemedAt)}</td></tr>)}</tbody></table></div><Pager page={records.page} total={records.total} loading={recordsLoading || Boolean(recordsError)} change={setRedemptionPage} /></> : <AdminEmptyState title="暂无匹配兑换记录" />}
+      {!records ? recordsLoading ? <AdminLoading label="正在读取兑换记录…" /> : <AdminEmptyState title="尚无成功读取结果" /> : records.items.length ? <><AdminDataTable columns={redemptionColumns} rows={records.items} rowKey={item => item.id} ariaLabel="兑换使用记录" minWidth={640} /><Pager page={records.page} total={records.total} loading={recordsLoading || Boolean(recordsError)} change={setRedemptionPage} /></> : <AdminEmptyState title="暂无匹配兑换记录" />}
     </section>
     <AdminConfirmDialog open={Boolean(review)} title={review?.kind === 'generation' ? '确认生成这一批兑换码' : review?.label ?? '确认操作'} description="参数在打开确认时冻结，请核对范围后提交。"
       subject={review?.kind === 'generation' ? '新发行批次 · ' + number(review.value.quantity) + ' 张兑换码' : review ? maskCardCode(review.code.code) + ' · 记录 ID：' + review.code.id + ' · 本次仅 1 条' : undefined}
@@ -228,7 +294,14 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     </AdminConfirmDialog>
     <AdminDrawer open={Boolean(result)} title="本批生成结果" description={result ? '服务端确认数量：' + number(result.confirmed) + '；本次提交明文 ' + result.codes.length + '条。' : undefined} onClose={() => { if (copiedAll) setResult(null); else setCloseResult(true); }} className="admin-code-result-drawer">
       <p>明文只在本次结果窗口展示。复制仅剪贴板操作，不自动标记发售。</p><pre className="admin-log-payload" data-generation-result>{result?.codes.join('\n')}</pre>
-      <AdminButton data-result-copy onClick={() => { void navigator.clipboard.writeText(result?.codes.join('\n') ?? '').then(() => { setCopiedAll(true); setCopyAllError(''); }, () => { setCopyAllError('复制失败；明文结果仍保留，请重试。'); }); }}><ClipboardCopy aria-hidden="true" />复制本批全部</AdminButton>
+      <div className="admin-toolbar-actions">
+        <AdminButton data-result-copy onClick={() => { void navigator.clipboard.writeText(result?.codes.join('\n') ?? '').then(() => { setCopiedAll(true); setCopyAllError(''); }, () => { setCopyAllError('复制失败；明文结果仍保留，请重试。'); }); }}><ClipboardCopy aria-hidden="true" />复制本批全部</AdminButton>
+        {/* 批次 5：一键下载本批明文 CSV（行数=生成数；本地 blob，不经服务端）。 */}
+        <AdminButton data-result-download disabled={!result || result.codes.length === 0}
+          onClick={() => { if (!result) return; defaultTriggerDownload(new Blob([generatedCodesCsv(result.codes)], { type: 'text/csv;charset=utf-8' }), generatedCodesFilename(result.codes.length)); }}>
+          <Download aria-hidden="true" />下载明文 CSV
+        </AdminButton>
+      </div>
       {copiedAll && <p role="status" className="admin-code-feedback">本批已复制，未修改发售标记。</p>}{copyAllError && <AdminErrorState message={copyAllError} />}
     </AdminDrawer>
     <AdminConfirmDialog open={closeResult} title="关闭尚未复制的结果？" description="不会自动导出或发售；关闭后只能通过现有列表逐条复制。取消可保留本批明文。" confirmLabel="关闭结果" onClose={() => setCloseResult(false)} onConfirm={() => { setCloseResult(false); setResult(null); }} />

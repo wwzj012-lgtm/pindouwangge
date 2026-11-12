@@ -2,10 +2,18 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Ban, ChevronLeft, ChevronRight, KeyRound, Plus, ShieldCheck, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPasswordReset } from './AdminPasswordReset';
+import { BatchActionBar } from './BatchActionBar';
+import { CsvExportButton } from './CsvExportButton';
 import type { AdminRequest } from './adminRequest';
 import { adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
-import { LatestRequest, userOverview, dateText, emptyUserQuery, memberLabel, membershipDraft, membershipPresentation, membershipProposal, requestError, returnedExpiry, userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery, type UserStatus } from './adminUserModel';
+import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import {
+  LatestRequest, buildUserBatchBody, userOverview, dateText, emptyUserQuery, memberLabel, membershipDraft,
+  membershipPresentation, membershipProposal, parseBatchOutcome, requestError, returnedExpiry, toggleUserSort,
+  userLabel, userQueryString, type AdminTag, type AdminUser, type MembershipDraft, type UserDetail, type UserQuery,
+  type UserSortBy, type UserStatus,
+} from './adminUserModel';
 
 const statusLabel = (status?: string) => status === 'banned' ? '已封禁' : status === 'suspended' ? '已暂停' : status === 'active' ? '正常' : '未提供';
 function StatusBadge({ status }: { status?: string }) { return <AdminBadge tone={status === 'banned' ? 'danger' : status === 'suspended' ? 'warning' : status === 'active' ? 'success' : 'neutral'}>{statusLabel(status)}</AdminBadge>; }
@@ -26,6 +34,8 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
   const [tags, setTags] = useState<AdminTag[]>([]), [tagError, setTagError] = useState('');
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [details, setDetails] = useState<Record<string, UserDetail>>({});
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [batchBusy, setBatchBusy] = useState(false);
   const epoch = useRef(new LatestRequest()), tagEpoch = useRef(new LatestRequest());
   const trigger = useRef<HTMLElement | null>(null);
   const load = useCallback(async () => {
@@ -47,7 +57,31 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
   useEffect(() => { void load(); return () => epoch.current.invalidate(); }, [load]);
   useEffect(() => { void loadTags(); return () => tagEpoch.current.invalidate(); }, [loadTags]);
   const apply = () => setQuery({ ...draft, search: draft.search.trim(), page: 1 });
-  const reset = () => { setDraft(emptyUserQuery()); setQuery(emptyUserQuery()); };
+  const reset = () => { setDraft(emptyUserQuery()); setQuery(emptyUserQuery()); setChecked(new Set()); };
+  const toggleSort = (column: UserSortBy) => { setChecked(new Set()); setQuery(current => ({ ...current, ...toggleUserSort(current, column), page: 1 })); };
+  const toggleChecked = (uid: string) => setChecked(current => {
+    const next = new Set(current);
+    if (next.has(uid)) next.delete(uid); else next.add(uid);
+    return next;
+  });
+  const toggleAllChecked = () => setChecked(current => {
+    if (snapshot && current.size >= snapshot.items.length) return new Set();
+    return new Set((snapshot?.items ?? []).map(user => user.uid));
+  });
+  /** 批量执行：服务端逐条处理，结果展示在 BatchActionBar 弹窗里。 */
+  const runBatch = async (actionKey: string, params: { reason: string }) => {
+    const op = actionKey === 'ban' ? 'ban' as const : actionKey === 'unban' ? 'unban' as const : null;
+    if (!op) return { outcome: null, error: '未知的批量动作' };
+    const body = buildUserBatchBody(op, Array.from(checked), op === 'ban' ? { reason: params.reason } : undefined);
+    setBatchBusy(true);
+    try {
+      const result = await request('/api/admin/batch', { method: 'POST', body: JSON.stringify(body) });
+      const outcome = result.ok ? parseBatchOutcome(result.data) : null;
+      if (!outcome) return { outcome: null, error: result.error ?? '批量结果无法解析，请稍后核对审计日志。' };
+      await load();
+      return { outcome };
+    } finally { setBatchBusy(false); }
+  };
   const open = (user: AdminUser) => { trigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setSelected(user); };
   const resetEntry = (user: AdminUser, disabled = false) => <AdminButton data-user-reset-password={user.uid} disabled={disabled || user.uid === currentUser?.uid} title={user.uid === currentUser?.uid ? '不能重置当前管理员自己的密码' : '重置该用户登录密码'} onClick={() => setResetUser(user)}><KeyRound aria-hidden="true" />重置密码</AdminButton>;
   const close = () => { setSelected(null); requestAnimationFrame(() => { if (trigger.current?.isConnected) trigger.current.focus({ preventScroll: true }); }); };
@@ -58,30 +92,85 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
   const eligibility = (user: AdminUser) => { const view = membershipPresentation(user);
     const expiry = view.expiry === '空到期值' ? '无到期限制' : view.expiry;
     return <><span className="admin-eligibility">{view.effective}</span><small title={'接口付费字段 ' + view.paid + ' · 原到期值 ' + view.expiry}>{expiry}</small>{view.caveat && <small>{view.caveat}</small>}</>; };
+  // 批次 5：共享表格列定义（机械替换，行为不变；手机卡片布局保留）。
+  const userColumns: Array<AdminDataTableColumn<AdminUser>> = [
+    {
+      key: 'label',
+      label: '用户 / 账号',
+      render: user => <><strong>{userLabel(user)}</strong><small>{user.email}</small><small className="admin-mono admin-uid" title={user.uid}>{user.uid.length > 13 ? user.uid.slice(0, 12) + '…' : user.uid}</small></>,
+    },
+    {
+      key: 'status',
+      label: '账号状态',
+      render: user => <><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small>限制至 {dateText(user.moderation.expiresAt)}</small>}</>,
+    },
+    { key: 'membership', label: '会员权益', render: user => eligibility(user) },
+    { key: 'tags', label: '标签', render: user => <span className="admin-tag-summary">{tagText(user)}</span> },
+    {
+      key: 'createdAt',
+      label: '注册时间',
+      sortable: true,
+      sortDirection: snapshot?.query.sortBy === 'registered_at' ? snapshot.query.sortDir : null,
+      render: user => <span title={user.createdAt == null ? '接口未返回注册时间' : undefined}>{dateText(user.createdAt)}</span>,
+      header: <button type="button" data-sort-registered className="admin-sort-header" onClick={() => toggleSort('registered_at')}>注册时间{snapshot?.query.sortBy === 'registered_at' ? (snapshot.query.sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</button>,    },
+    {
+      key: 'lastActiveAt',
+      label: '最近活动',
+      render: user => <span title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>{dateText(user.lastActiveAt)}</span>,
+    },
+    {
+      key: 'actions',
+      label: '操作',
+      sticky: 'right',
+      render: user => <div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div>,
+    },
+  ];
   return <section className="admin-users-page">
-    <AdminToolbar actions={<AdminButton onClick={() => void load()} busy={loading}>刷新列表</AdminButton>}><h2>用户与会员</h2><p>账号限制与会员资格分开展示；查询仅在提交后生效。</p></AdminToolbar>
+    <AdminToolbar actions={<><CsvExportButton type="users" label="导出用户 CSV" disabled={loading || batchBusy} /><AdminButton onClick={() => void load()} busy={loading}>刷新列表</AdminButton></>}><h2>用户与会员</h2><p>账号限制与会员资格分开展示；查询仅在提交后生效。</p></AdminToolbar>
     <div className="admin-stage-panel admin-user-filters" role="search" aria-label="用户查询">
       <label>搜索用户<input value={draft.search} maxLength={120} onChange={event => setDraft(current => ({ ...current, search: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); if (!loading) apply(); } }} placeholder="昵称、邮箱或 UID" /></label>
       <label>账号状态<select aria-label="账号状态筛选" value={draft.status} onChange={event => setDraft(current => ({ ...current, status: event.target.value as UserStatus }))}><option value="all">所有状态</option><option value="active">正常</option><option value="suspended">暂停</option><option value="banned">封禁</option></select></label>
       <label>用户标签<select aria-label="用户标签筛选" value={draft.tag} onChange={event => setDraft(current => ({ ...current, tag: event.target.value }))}><option value="">所有标签</option>{tags.map(tag => <option key={tag.id} value={tag.key}>{tag.displayName}</option>)}</select></label>
+      <label>角色<select data-filter-role aria-label="角色筛选" value={draft.role} onChange={event => setDraft(current => ({ ...current, role: event.target.value as UserQuery['role'] }))}><option value="">所有角色</option><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
+      <label>会员字段<select data-filter-vip aria-label="VIP 字段筛选" value={draft.vip} onChange={event => setDraft(current => ({ ...current, vip: event.target.value as UserQuery['vip'] }))}><option value="">全部（is_vip）</option><option value="true">is_vip 开</option><option value="false">is_vip 关</option></select></label>
+      <label>付费级别<select data-filter-member-type aria-label="付费级别筛选" value={draft.memberType} onChange={event => setDraft(current => ({ ...current, memberType: event.target.value as UserQuery['memberType'] }))}><option value="">所有级别</option><option value="0">免费</option><option value="1">VIP</option><option value="2">商家 Pro</option></select></label>
+      <label>注册起<input data-filter-registered-from type="date" aria-label="注册开始日期" value={draft.registeredFrom} onChange={event => setDraft(current => ({ ...current, registeredFrom: event.target.value }))} /></label>
+      <label>注册止<input data-filter-registered-to type="date" aria-label="注册结束日期" value={draft.registeredTo} onChange={event => setDraft(current => ({ ...current, registeredTo: event.target.value }))} /></label>
+      <label>排序字段<select data-filter-sort-by aria-label="排序字段" value={draft.sortBy} onChange={event => setDraft(current => ({ ...current, sortBy: event.target.value as UserSortBy }))}><option value="registered_at">注册时间</option><option value="credit_balance">可用积分</option></select></label>
+      <label>排序方向<select data-filter-sort-dir aria-label="排序方向" value={draft.sortDir} onChange={event => setDraft(current => ({ ...current, sortDir: event.target.value as UserQuery['sortDir'] }))}><option value="desc">降序</option><option value="asc">升序</option></select></label>
       <div className="admin-filter-actions"><AdminButton data-users-query disabled={loading} variant="primary" onClick={apply}>查询</AdminButton><AdminButton data-users-reset disabled={loading} onClick={reset}>重置</AdminButton></div>
     </div>
+    <BatchActionBar
+      selectedCount={checked.size}
+      disabled={batchBusy}
+      actions={[
+        { key: 'ban', label: '封禁', requiresReason: true },
+        { key: 'unban', label: '解封' },
+      ]}
+      onRun={runBatch}
+      onClear={() => setChecked(new Set())}
+    />
     {tagError && <AdminErrorState title="标签目录暂不可用" message={tagError} retry={() => void loadTags()} />}
     {error && <AdminErrorState title="未能更新用户列表" message={error + ' 上次成功列表及查询输入未丢弃。'} retry={() => void load()} busy={loading} />}
     <div className="admin-stage-panel admin-user-results" aria-busy={loading}>
       <p className="admin-result-caption" role="status">{loading ? '正在查询；已有列表暂时保留…' : snapshot ? '已读取 ' + snapshot.total + ' 名匹配用户。' : '尚无成功读取结果。'}{snapshot && error && ' 当前展示上次成功结果：' + (snapshot.query.search || '全部用户') + '，第' + snapshot.query.page + '页。'}</p>
       {!snapshot ? loading ? <AdminLoading label="正在读取用户列表…" /> : <AdminEmptyState title="尚无可显示结果" description="请重试读取；未知总数不会显示为零。" /> : snapshot.items.length === 0 ? <AdminEmptyState title="没有匹配的用户" description="调整查询条件，或重置后重试。" action={<AdminButton onClick={reset}>重置筛选</AdminButton>} /> : <>
-        <div className="admin-users-table-wrap"><table className="admin-stage-table" aria-label="用户列表"><thead><tr><th>用户 / 账号</th><th>账号状态</th><th>会员权益</th><th>标签</th><th>最近活动</th><th>操作</th></tr></thead><tbody>{snapshot.items.map(user => <tr key={user.uid} data-user-row={user.uid}>
-          <td><strong>{userLabel(user)}</strong><small>{user.email}</small><small className="admin-mono admin-uid" title={user.uid}>{user.uid.length > 13 ? user.uid.slice(0, 12) + '…' : user.uid}</small></td>
-          <td><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small>限制至 {dateText(user.moderation.expiresAt)}</small>}</td>
-          <td>{eligibility(user)}</td><td><span className="admin-tag-summary">{tagText(user)}</span></td><td title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>{dateText(user.lastActiveAt)}</td>
-          <td><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></td>
-        </tr>)}</tbody></table></div>
+        <div className="admin-users-table-wrap"><AdminDataTable columns={userColumns} rows={snapshot.items} rowKey={user => user.uid} ariaLabel="用户列表" minWidth={850}
+          selectable
+          selected={checked}
+          selectAllLabel="全选本页"
+          selectAllChecked={snapshot.items.length > 0 && checked.size >= snapshot.items.length}
+          selectAllAttrs={{ 'data-users-select-all': '' }}
+          onToggleAll={() => toggleAllChecked()}
+          rowSelectLabel={user => '勾选 ' + userLabel(user)}
+          rowSelectAttrs={user => ({ 'data-user-check': user.uid })}
+          onToggleRow={user => toggleChecked(user.uid)}
+          rowAttrs={user => ({ 'data-user-row': user.uid })} /></div>
         <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono admin-uid" title={user.uid}>{user.uid.length > 13 ? user.uid.slice(0, 12) + '…' : user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>最近活动：{dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
       </>}
       {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {adminPageCount(snapshot.total, snapshot.limit)} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= adminPageCount(snapshot.total, snapshot.limit)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
     </div>
-    <p className="admin-stage-footnote">列表接口不返回逐用户标签或最近活动时间。标签在详情读取后展示；不额外批量请求或伪造活动记录。</p>
+    <p className="admin-stage-footnote">列表接口不返回逐用户标签或最近活动时间。标签在详情读取后展示；排序仅支持注册时间与可用积分（最近活动无独立列，暂不支持按其排序）。勾选行后可批量封禁/解封；批量操作逐条提交，结果以服务端为准。</p>
     {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} resetEntry={resetEntry} />}
     {resetUser && <AdminPasswordReset key={resetUser.uid} user={resetUser} currentUserUid={currentUser?.uid} request={request} onClose={() => setResetUser(null)} />}
   </section>;
@@ -186,19 +275,28 @@ function UserDetailDrawer({ user, tags, request, onClose, onRead, onChanged, res
 
 export function UserOperationsOverview({ detail }: { detail: UserDetail }) {
   const summary = userOverview(detail), membership = membershipPresentation(detail.user);
+  const ledger = detail.recentCreditLedger ?? [];
   return <section className="admin-detail-section" aria-label="用户详情运营总览"><h2>用户详情运营总览</h2>
     <dl className="admin-detail-facts">
       <div><dt>账号</dt><dd>{detail.user.email}</dd></div><div><dt>UID</dt><dd className="admin-mono">{detail.user.uid}</dd></div>
       <div><dt>可用积分（只读）</dt><dd data-user-credit-balance>{summary.available}</dd></div>
       <div><dt>冻结积分（只读）</dt><dd>{summary.held}</dd></div>
       <div><dt>积分账户更新时间</dt><dd>{dateText(detail.credits?.updatedAt)}</dd></div>
-      <div><dt>图纸数（未删除）</dt><dd>{summary.works}</dd></div><div><dt>公开社区帖数</dt><dd>{summary.posts}</dd></div>
+      <div><dt>图纸数（未删除）</dt><dd data-user-works-count>{Number.isSafeInteger(detail.worksCount) && detail.worksCount! >= 0 ? String(detail.worksCount) : summary.works}</dd></div>
+      <div><dt>公开社区帖数</dt><dd data-user-posts-count>{Number.isSafeInteger(detail.postsCount) && detail.postsCount! >= 0 ? String(detail.postsCount) : summary.posts}</dd></div>
+      <div><dt>最近活跃（登录/发帖/作品取最大）</dt><dd data-user-last-active>{dateText(detail.lastActiveAt)}</dd></div>
       <div><dt>最近内容活动</dt><dd>{summary.activity}</dd></div>
       <div><dt>会员有效权益</dt><dd>{membership.effective}</dd></div><div><dt>付费级别 / 到期</dt><dd>{membership.paid} / {membership.expiry === '空到期值' ? '无到期限制' : membership.expiry}</dd></div>
       <div><dt>账号限制</dt><dd><StatusBadge status={detail.moderation.status} />{detail.moderation.reason && <p>{detail.moderation.reason}</p>}<p>限制到期：{detail.moderation.expiresAt == null ? '无到期时间' : dateText(detail.moderation.expiresAt)}</p></dd></div>
       <div><dt>注册方式 / 当前认证来源</dt><dd>{summary.provider}</dd></div>
       <div><dt>注册时间</dt><dd>{dateText(detail.user.createdAt)}</dd></div><div><dt>资料更新时间</dt><dd>{dateText(detail.user.updatedAt)}</dd></div>
     </dl>
+    <h3>最近管理员积分调整（最多 10 条）</h3>
+    {ledger.length ? <ul className="admin-ledger-list" data-recent-credit-ledger>{ledger.map(item => <li key={item.id}>
+      <span data-ledger-delta={item.deltaUnits > 0 ? 'plus' : 'minus'}>{item.deltaUnits > 0 ? '+' : ''}{item.deltaUnits}</span>
+      <span>{item.reason}</span>
+      <small>{dateText(item.createdAt)} · {item.beforeAvailableUnits} → {item.afterAvailableUnits}</small>
+    </li>)}</ul> : <p className="admin-muted">暂无积分调整记录（或积分账本尚未启用）。</p>}
     <p className="admin-stage-footnote">{detail.activityScope || '活动统计口径未提供。'}；当前认证来源不代表历史注册方式。积分仅展示账户记录，不触发结算或调整。</p>
   </section>;
 }

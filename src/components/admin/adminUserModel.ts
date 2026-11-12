@@ -13,6 +13,17 @@ export interface UserDetail {
   aggregates?: { works?: number | null; publicPosts?: number | null }; workCount?: number;
   credits?: { availableUnits: number; heldUnits: number; unitsPerPoint: number; updatedAt: number } | null;
   recentActivity?: { at: number; source: string } | null; activityScope?: string;
+  /** 批次 3 补全：显式计数、最近活跃时间、最近管理员积分调整。 */
+  worksCount?: number | null;
+  postsCount?: number | null;
+  lastActiveAt?: number | null;
+  recentCreditLedger?: CreditAdjustmentSummary[];
+}
+export interface CreditAdjustmentSummary {
+  id: string; uid: string; operatorUid: string;
+  deltaUnits: number; reason: string;
+  beforeAvailableUnits: number; afterAvailableUnits: number;
+  createdAt: number;
 }
 export function userOverview(detail: UserDetail) {
   const credits = detail.credits;
@@ -27,12 +38,42 @@ export function userOverview(detail: UserDetail) {
     provider: detail.user.authProvider === 'password' ? '邮箱密码' : detail.user.authProvider === 'guest' ? '游客' : detail.user.authProvider === 'firebase' ? 'Firebase' : '未提供',
   };
 }
-export interface UserQuery { search: string; status: UserStatus; tag: string; page: number; }
-export const emptyUserQuery = (): UserQuery => ({ search: '', status: 'all', tag: '', page: 1 });
+export type UserSortBy = 'registered_at' | 'credit_balance';
+export type UserSortDir = 'asc' | 'desc';
+export interface UserQuery {
+  search: string; status: UserStatus; tag: string; page: number;
+  /** 批次 3 新增筛选：role / vip / 会员类型 / 注册时间区间 / 排序；缺省即"全部"。 */
+  role?: '' | 'user' | 'admin';
+  vip?: '' | 'true' | 'false';
+  memberType?: '' | '0' | '1' | '2';
+  registeredFrom?: string;
+  registeredTo?: string;
+  sortBy?: UserSortBy;
+  sortDir?: UserSortDir;
+}
+export const emptyUserQuery = (): UserQuery => ({
+  search: '', status: 'all', tag: '', page: 1,
+  role: '', vip: '', memberType: '', registeredFrom: '', registeredTo: '',
+  sortBy: 'registered_at', sortDir: 'desc',
+});
 export function userQueryString(query: UserQuery): string {
   const params = new URLSearchParams({ page: String(Math.max(1, Math.floor(query.page))), limit: '20', status: query.status });
   if (query.search.trim()) params.set('search', query.search.trim()); if (query.tag) params.set('tag', query.tag);
+  if (query.role) params.set('role', query.role);
+  if (query.vip) params.set('vip', query.vip);
+  if (query.memberType) params.set('memberType', query.memberType);
+  if (query.registeredFrom) params.set('registeredFrom', query.registeredFrom);
+  if (query.registeredTo) params.set('registeredTo', query.registeredTo);
+  params.set('sortBy', query.sortBy ?? 'registered_at');
+  params.set('sortDir', query.sortDir ?? 'desc');
   return params.toString();
+}
+/** 点击排序表头：同列切换方向，新列从升序开始。 */
+export function toggleUserSort(current: UserQuery, column: UserSortBy): { sortBy: UserSortBy; sortDir: UserSortDir } {
+  if ((current.sortBy ?? 'registered_at') === column) {
+    return { sortBy: column, sortDir: (current.sortDir ?? 'desc') === 'asc' ? 'desc' : 'asc' };
+  }
+  return { sortBy: column, sortDir: 'asc' };
 }
 export class LatestRequest {
   private version = 0;
@@ -76,8 +117,58 @@ export function membershipProposal(user: AdminUser, draft: MembershipDraft, now 
   };
 }
 export function requestError(result: { status: number; error?: string }, operation: string): string { return operation + (result.status === 403 ? '被服务端拒绝（403）' : '失败') + '：' + (result.error || '请重试。'); }
-export const SYSTEM_ROLE_MINIMUMS: Record<string, string[]> = { operations: ['dashboard.read'], content_moderator: ['community.read', 'community.moderate'], read_only: ['dashboard.read'] };
-export function permissionDelta(before: Iterable<string>, after: Iterable<string>) {
+export const SYSTEM_ROLE_MINIMUMS: Record<string, string[]> = { operations: ['dashboard.read'], content_moderator: ['community.read', 'community.moderate'], read_only: ['dashboard.read'] };export function permissionDelta(before: Iterable<string>, after: Iterable<string>) {
   const a = new Set(before), b = new Set(after);
   return { added: [...b].filter(code => !a.has(code)).sort(), removed: [...a].filter(code => !b.has(code)).sort() };
+}
+
+// ===== 批次 3：批量操作与 CSV 导出 =====
+
+export type BatchUserOp = 'ban' | 'unban' | 'adjustCredits';
+export type BatchEntity = 'users' | 'posts';
+export interface BatchOutcome {
+  total: number; succeeded: number; failed: { id: string; error: string }[];
+}
+export interface BatchBody {
+  entity: BatchEntity; op: BatchUserOp | 'hide' | 'restore';
+  ids: string[]; params?: { delta?: number; reason?: string };
+}
+
+export const BATCH_ID_LIMIT = 100;
+
+/** 组装批量请求体；ids 空或超 100 抛错（调用前 UI 已按勾选数禁用）。 */
+export function buildUserBatchBody(op: BatchUserOp, ids: string[], params?: { delta?: number; reason?: string }): BatchBody {
+  if (ids.length === 0 || ids.length > BATCH_ID_LIMIT) {
+    throw new Error(`批量操作需选择 1-${BATCH_ID_LIMIT} 个用户`);
+  }
+  return { entity: 'users', op, ids, params };
+}
+
+/** 校验服务端批量结果；缺字段或类型不符返回 null（不伪造成功）。 */
+export function parseBatchOutcome(value: unknown): BatchOutcome | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const total = candidate.total, succeeded = candidate.succeeded;
+  if (typeof total !== 'number' || typeof succeeded !== 'number' || !Array.isArray(candidate.failed)) return null;
+  const failed = (candidate.failed as unknown[]).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const entry = item as Record<string, unknown>;
+    return typeof entry.id === 'string' && typeof entry.error === 'string'
+      ? [{ id: entry.id, error: entry.error }]
+      : [];
+  });
+  return { total, succeeded, failed };
+}
+
+export type CsvExportType = 'users' | 'credit-ledger' | 'redemptions' | 'audit-logs';
+export const CSV_EXPORT_MAX = 10_000;
+
+export function exportCsvPath(type: CsvExportType, limit = CSV_EXPORT_MAX): string {
+  const bounded = Math.max(1, Math.min(CSV_EXPORT_MAX, Math.floor(limit)));
+  return `/api/admin/export?type=${encodeURIComponent(type)}&limit=${bounded}`;
+}
+
+export function exportCsvFilename(type: CsvExportType, date = new Date()): string {
+  const stamp = date.toISOString().slice(0, 10).replaceAll('-', '');
+  return `${type}-${stamp}.csv`;
 }

@@ -35,7 +35,8 @@ describe('public navigation hides assembly entry points without removing other t
         onClearCanvas: vi.fn(),
         setCurrentTab: vi.fn(),
       };
-      for (const component of [Header, MobileHeaderNav]) {
+      // Header 与 MobileHeaderNav 的 props 类型不同，统一按 FC<any> 建 element 以匹配 createElement 重载（运行时不变）。
+      for (const component of [Header, MobileHeaderNav] as React.FC<any>[]) {
         const markup = renderToStaticMarkup(React.createElement(component, props));
         expect(markup).not.toMatch(/立体|3D Fuse Bead|lucide-box/);
         expect(markup).toContain('豆织');

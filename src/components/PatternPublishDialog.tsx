@@ -8,6 +8,7 @@ import {
   validateCommunityPublicationMetadata,
   type CommunityPublicationMetadata,
 } from '../utils/communityPatternPublication';
+import { checkCommunityModeration, type CommunityModerationViolation } from '../utils/communityApi';
 
 /** 编辑模式：预填已发布内容的值；发布模式：空表单。patternId 用于编辑保存后同步图库图纸名。 */
 export interface PatternEditingPost {
@@ -28,6 +29,13 @@ interface PatternPublishDialogProps {
   editingPost?: PatternEditingPost | null;
 }
 
+/** 违禁词预检命中 → 逐词提示（双层校验的前端层；后端发布路径仍强校验兜底）。 */
+export function moderationViolationMessage(violations: readonly CommunityModerationViolation[]): string {
+  const parts = violations.map((violation) =>
+    `${violation.field === 'title' ? '作品名称' : '标签'}包含违禁词“${violation.word}”`);
+  return `内容未通过安全校验：${[...new Set(parts)].join('；')}。请修改后重试。`;
+}
+
 export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, editingPost }: PatternPublishDialogProps): React.ReactElement | null {
   const isEditing = editingPost !== null && editingPost !== undefined;
   const [title, setTitle] = useState('');
@@ -36,6 +44,7 @@ export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, e
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [moderating, setModerating] = useState(false);
   const titleRef = useRef<HTMLInputElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
 
@@ -86,11 +95,25 @@ export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, e
     if (tags.length >= COMMUNITY_MAX_TAGS) { setLocalError(`最多可添加 ${COMMUNITY_MAX_TAGS} 个标签。`); return; }
     setTags((current) => [...current, tag]); setTagDraft(''); setLocalError(null);
   };
-  const submit = (): void => {
-    if (busy) return;
+  const submit = async (): Promise<void> => {
+    if (busy || moderating) return;
     const validation = validateCommunityPublicationMetadata({ title, description, visibility, tags });
     if (validation.ok === false) { setLocalError(validation.error); return; }
-    setLocalError(null); onSubmit(validation.metadata);
+    setModerating(true);
+    try {
+      const result = await checkCommunityModeration({ title: validation.metadata.title, tags: validation.metadata.tags });
+      if (result.ok && result.data && result.data.violations.length > 0) {
+        setLocalError(moderationViolationMessage(result.data.violations));
+        return;
+      }
+      // 预检服务不可用（网络/网关错误）不阻塞发布：后端强校验会兜底拦截。
+    } catch {
+      // ignore: fall through to onSubmit
+    } finally {
+      setModerating(false);
+    }
+    setLocalError(null);
+    onSubmit(validation.metadata);
   };
 
   return (
@@ -120,7 +143,7 @@ export function PatternPublishDialog({ record, busy, error, onClose, onSubmit, e
           )}
           <div className="mt-2 flex gap-2"><input value={tagDraft} maxLength={COMMUNITY_MAX_TAG_LENGTH} disabled={busy || tags.length >= COMMUNITY_MAX_TAGS} onChange={(event) => { setTagDraft(event.target.value); setLocalError(null); }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); addTag(tagDraft); } }} aria-label="自定义标签" placeholder="自定义标签" className="min-h-11 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-xs text-slate-900 outline-none transition-colors focus:border-purple-500 focus:ring-2 focus:ring-purple-200 disabled:opacity-60" /><button type="button" disabled={busy || !tagDraft.trim() || tags.length >= COMMUNITY_MAX_TAGS} onClick={() => addTag(tagDraft)} className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-purple-300 text-purple-700 transition-colors hover:bg-purple-50 disabled:opacity-50" aria-label="添加标签"><Plus className="h-4 w-4" /></button></div></fieldset>
         {message && <div role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-700">{message}</div>}
-        <div className="mt-5 grid grid-cols-2 gap-3"><button type="button" onClick={onClose} disabled={busy} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50">取消</button><button type="button" onClick={submit} disabled={busy} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 text-sm font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-50">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{isEditing ? '保存修改' : '确认发布'}</button></div>
+        <div className="mt-5 grid grid-cols-2 gap-3"><button type="button" onClick={onClose} disabled={busy} className="min-h-11 rounded-xl border border-slate-200 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50">取消</button><button type="button" onClick={() => void submit()} disabled={busy || moderating} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 text-sm font-bold text-white transition-colors hover:bg-purple-700 disabled:opacity-50">{busy || moderating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}{isEditing ? '保存修改' : '确认发布'}</button></div>
       </section>
     </div>
   );

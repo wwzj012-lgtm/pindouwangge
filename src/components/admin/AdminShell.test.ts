@@ -21,8 +21,8 @@ describe('admin shell state boundaries', () => {
     expect(sumAdminMetrics(3, 1)).toBe(4); expect(sumAdminMetrics(0, 0)).toBe(0);
     expect(sumAdminMetrics(undefined, 1)).toBeUndefined(); expect(sumAdminMetrics(1, NaN)).toBeUndefined();
   });
-  it('accepts all nine existing module identifiers', () => {
-    for (const section of ['dashboard', 'users', 'roles', 'logs', 'codes', 'credits', 'announcements', 'config', 'brands', 'resources', 'community']) expect(resolveAdminSection(section)).toBe(section);
+  it('accepts all existing module identifiers', () => {
+    for (const section of ['dashboard', 'users', 'roles', 'logs', 'codes', 'credits', 'announcements', 'config', 'brands', 'resources', 'community', 'bannedwords']) expect(resolveAdminSection(section)).toBe(section);
     expect(resolveAdminSection('colors-assets')).toBe('brands');
   });
   it('rejects unknown module identifiers rather than treating them as authorized routes', () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 与 CommunityView.ui.test.ts 同款 hook mock：useState/useRef 跨渲染持久槽位，
 // useEffect 真执行（依赖变化才跑），保证编辑模式的预填 effect 能写入状态。
 const hooks = vi.hoisted(() => ({ cursor: 0, slots: [] as unknown[], effects: [] as unknown[][] }));
+const communityApi = vi.hoisted(() => ({ checkCommunityModeration: vi.fn() }));
 vi.mock('react', () => ({
   default: {},
   useState: <T,>(initial: T | (() => T)) => {
@@ -28,7 +29,9 @@ vi.mock('react', () => ({
   useCallback: <T,>(fn: T) => fn,
 }));
 
-import { PatternPublishDialog, type PatternEditingPost } from './PatternPublishDialog';
+vi.mock('../utils/communityApi', () => ({ checkCommunityModeration: communityApi.checkCommunityModeration }));
+
+import { PatternPublishDialog, moderationViolationMessage, type PatternEditingPost } from './PatternPublishDialog';
 
 type Node = { type?: unknown; props: Record<string, any> };
 const nodes = (tree: unknown): Node[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === 'object' && 'props' in tree ? [tree as Node, ...nodes((tree as Node).props.children)] : [];
@@ -52,6 +55,7 @@ describe('PatternPublishDialog custom tag chips', () => {
   beforeEach(() => {
     hooks.cursor = 0; hooks.slots = []; hooks.effects = [];
     vi.clearAllMocks();
+    communityApi.checkCommunityModeration.mockResolvedValue({ ok: true, status: 200, data: { violations: [] } });
   });
 
   it('renders custom tags as removable chips instead of swallowing them silently', () => {
@@ -89,5 +93,49 @@ describe('PatternPublishDialog custom tag chips', () => {
     tree = render();
     expect(nodes(tree).some(node => node.props['aria-label'] === '移除标签 自定标签甲')).toBe(false);
     expect(text(tree)).toContain('标签（1/5）');
+  });
+});
+
+describe('PatternPublishDialog moderation pre-check', () => {
+  beforeEach(() => {
+    hooks.cursor = 0; hooks.slots = []; hooks.effects = [];
+    vi.clearAllMocks();
+    communityApi.checkCommunityModeration.mockResolvedValue({ ok: true, status: 200, data: { violations: [] } });
+  });
+
+  const flush = async (): Promise<void> => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+  const confirm = async (tree: unknown): Promise<unknown> => {
+    button(tree, '保存修改').props.onClick();
+    await flush();
+    return render();
+  };
+
+  it('blocks submit and lists every matched word when the pre-check hits banned words', async () => {
+    communityApi.checkCommunityModeration.mockResolvedValue({
+      ok: true, status: 200,
+      data: { violations: [{ field: 'title', word: '坏词' }, { field: 'tag', word: '黑词' }] },
+    });
+    const tree = await confirm(renderPrimed());
+    expect(communityApi.checkCommunityModeration).toHaveBeenCalledWith({ title: editingPost.title, tags: editingPost.tags });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    // role="alert" 错误区逐词提示（字段 + 命中词）。
+    expect(text(tree)).toContain('作品名称包含违禁词“坏词”');
+    expect(text(tree)).toContain('标签包含违禁词“黑词”');
+    expect(moderationViolationMessage([{ field: 'tag', word: '黑词' }])).toContain('标签包含违禁词“黑词”');
+  });
+
+  it('submits normally when the pre-check passes', async () => {
+    const tree = await confirm(renderPrimed());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(props.onSubmit).toHaveBeenCalledWith(expect.objectContaining({ title: editingPost.title, tags: editingPost.tags }));
+    expect(text(tree)).not.toContain('违禁词');
+  });
+
+  it('does not block publish when the moderation service is unavailable (backend still enforces)', async () => {
+    communityApi.checkCommunityModeration.mockResolvedValue({ ok: false, status: 0, error: '无法连接后台服务' });
+    const tree = await confirm(renderPrimed());
+    expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    expect(text(tree)).not.toContain('违禁词');
+    void tree;
   });
 });

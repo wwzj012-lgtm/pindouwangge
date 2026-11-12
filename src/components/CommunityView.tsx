@@ -9,9 +9,12 @@ import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
 import { CommunityPatternWorkspace } from './CommunityPatternWorkspace';
 import { CommunityPostCard, communityPostTags } from './CommunityPostCard';
+import { MobileSelect } from './ui/MobileSelect';
 import { useCommunityFeed } from '../hooks/useCommunityFeed';
 import {
   type CommunityPost,
+  type CommunityTagSummary,
+  fetchCommunityTags,
   getCommunityPost,
   reactToCommunityPost,
 } from '../utils/communityApi';
@@ -25,6 +28,22 @@ interface CommunityViewProps {
 }
 
 type SortMode = 'hot' | 'new' | 'favorites';
+// 规格筛选桶（与后端 specs 快照的 beadCount 区间一一对应）。
+type SpecFilter = 'all' | 'le500' | 'le1000' | 'le2000' | 'le3000' | 'le5000' | 'le8000' | 'gt8000';
+
+// 标签抽屉默认渲染的热度前 N 个 chips；总数超出时显示"更多 (n)"，展开后内部滚动。
+const TAG_CHIP_PREVIEW_COUNT = 14;
+
+const SPEC_FILTER_OPTIONS: { value: SpecFilter; label: string }[] = [
+  { value: 'all', label: '全部' },
+  { value: 'le500', label: '≤500' },
+  { value: 'le1000', label: '≤1k' },
+  { value: 'le2000', label: '≤2k' },
+  { value: 'le3000', label: '≤3k' },
+  { value: 'le5000', label: '≤5k' },
+  { value: 'le8000', label: '≤8k' },
+  { value: 'gt8000', label: '>8k' },
+];
 
 // "未分类"筛选的哨兵值：以 \u0000 开头，不可能与真实标签名冲突（后端标签最长 24 且不允许控制字符）。
 const UNCATEGORIZED_FILTER = '\u0000uncategorized';
@@ -81,9 +100,12 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const editLimit = canvasLimitForMembership(membership);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
-  const [specFilter, setSpecFilter] = useState<'all' | 'le500' | 'le1000' | 'le2000' | 'le3000' | 'le5000' | 'le8000' | 'gt8000'>('all');
+  const [specFilter, setSpecFilter] = useState<SpecFilter>('all');
   // 标签筛选抽屉：默认收起为紧凑入口，展开后是带全部标签 chips（含计数与"未分类"）的面板。
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
+  // 标签字典（服务端 usage_count，已按热度降序返回）；展开态是否显示全部标签。
+  const [communityTags, setCommunityTags] = useState<CommunityTagSummary[]>([]);
+  const [showAllTags, setShowAllTags] = useState(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedPattern, setSelectedPattern] = useState<CommunityPost | null>(null);
   const [selectedProject, setSelectedProject] = useState<StoredPatternProject | null>(null);
@@ -162,19 +184,34 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     return () => { disposed = true; if (previewUrl) URL.revokeObjectURL(previewUrl); };
   }, [ownerOriginal]);
 
-  const availableTags = useMemo(() => [...new Set(patternsState.flatMap(communityPostTags))], [patternsState]);
-  // 预设标签始终展示（运营分类），自定义标签按出现追加；每个标签带作品计数。
-  const tagFilters = useMemo(() => {
-    const counts = new Map<string, number>();
+  // 标签字典来自服务端（GET /api/community/tags）：usage_count 已由发布/编辑/撤回
+  // 与 cron 校准维护，接口按热度降序返回——本地不再统计、不再排序。
+  const refreshTagDictionary = useCallback(async () => {
+    const result = await fetchCommunityTags();
+    if (result.ok && result.data) setCommunityTags(result.data.tags);
+  }, []);
+  useEffect(() => { void refreshTagDictionary(); }, [refreshTagDictionary]);
+
+  // 标签归一化键：与后端字典一致（trim + 小写）。帖子标签按作者原样存储（可能带大写/空格），
+  // 筛选与 staleness 校验都必须先归一化再比对，否则"字母 Logo"这类键永远匹配不到帖子。
+  const availableTagKeys = useMemo(() => {
+    const keys = new Set<string>(communityTags.map(({ tag }) => tag));
     for (const pattern of patternsState) {
-      for (const tag of communityPostTags(pattern)) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      for (const tag of communityPostTags(pattern)) keys.add(tag.trim().toLocaleLowerCase());
     }
-    // 按作品数量由大到小；没有作品的标签不出现。
-    return [...counts.entries()]
-      .map(([tag, count]) => ({ tag, count }))
-      .sort((left, right) => right.count - left.count || left.tag.localeCompare(right.tag));
-  }, [patternsState]);
-  // "未分类"桶：当前列表里没有任何标签的作品数量。
+    return keys;
+  }, [communityTags, patternsState]);
+  // 字典键 → 展示名：chips 与选中区显示字典 name（如键"字母 logo"显示"字母 Logo"）。
+  const tagNameByKey = useMemo(
+    () => new Map(communityTags.map(({ tag, name }) => [tag, name])),
+    [communityTags],
+  );
+  // 抽屉 chips 数据源：服务端字典顺序原样使用；没有作品的标签（计数 0）也保留（运营预设）。
+  const tagFilters = useMemo(
+    () => communityTags.map(({ tag, name, usageCount }) => ({ tag, name, count: usageCount })),
+    [communityTags],
+  );
+  // "未分类"桶：当前列表里没有任何标签的作品数量（基于已加载帖子，与字典无关）。
   const uncategorizedCount = useMemo(
     () => patternsState.filter((pattern) => communityPostTags(pattern).length === 0).length,
     [patternsState],
@@ -183,17 +220,23 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     if (!isLoading && !feedError && activeCategory !== null) {
       const stale = activeCategory === UNCATEGORIZED_FILTER
         ? uncategorizedCount === 0
-        : !availableTags.includes(activeCategory);
+        : !availableTagKeys.has(activeCategory.trim().toLocaleLowerCase());
       if (stale) setActiveCategory(null);
     }
-  }, [availableTags, activeCategory, uncategorizedCount, isLoading, feedError]);
+  }, [availableTagKeys, activeCategory, uncategorizedCount, isLoading, feedError]);
+  // 当前选中标签的展示名（未分类哨兵与字典外键回退为原值）。
+  const selectedTagLabel = activeCategory === null || activeCategory === UNCATEGORIZED_FILTER
+    ? UNCATEGORIZED_LABEL
+    : tagNameByKey.get(activeCategory) ?? activeCategory;
 
   const filteredPatterns = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
     const tagMatch = (pattern: CommunityPost) => {
       if (activeCategory === null) return true;
       if (activeCategory === UNCATEGORIZED_FILTER) return communityPostTags(pattern).length === 0;
-      return communityPostTags(pattern).includes(activeCategory);
+      // 归一化键比对：帖子标签原样带大小写，字典键是小写键（如"字母 Logo" ↔ "字母 logo"）。
+      const selectedKey = activeCategory.trim().toLocaleLowerCase();
+      return communityPostTags(pattern).some((tag) => tag.trim().toLocaleLowerCase() === selectedKey);
     };
     const specMatch = (pattern: CommunityPost) => {
       if (specFilter === 'all') return true;
@@ -395,7 +438,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 <span>标签筛选</span>
                 {activeCategory !== null && (
                   <span className="inline-flex max-w-[10rem] items-center rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                    <span className="truncate">{activeCategory === UNCATEGORIZED_FILTER ? UNCATEGORIZED_LABEL : `#${activeCategory}`}</span>
+                    <span className="truncate">{`#${selectedTagLabel}`}</span>
                   </span>
                 )}
                 <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-purple-200/70 text-purple-800 transition-transform duration-300 motion-reduce:transition-none ${tagDrawerOpen ? 'rotate-180' : ''}`}>
@@ -429,11 +472,29 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                       </button>
                     )}
                   </div>
-                  <div role="group" aria-label="按作品标签筛选" className="flex flex-wrap items-center gap-2">
+                  {/* 选中区：固定在抽屉顶部，不随 chips 区滚动；可单独移除当前选中。 */}
+                  {activeCategory !== null && (
+                    <div className="mb-2 flex items-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5">
+                      <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
+                      <span className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
+                        <span className="min-w-0 truncate">{`#${selectedTagLabel}`}</span>
+                        <button
+                          type="button"
+                          onClick={() => setActiveCategory(null)}
+                          aria-label={`移除已选标签 ${selectedTagLabel}`}
+                          className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
+                        >
+                          <X className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </span>
+                    </div>
+                  )}
+                  <div role="group" aria-label="按作品标签筛选" className="flex max-h-64 flex-wrap items-start gap-2 overflow-y-auto">
                     {[
                       { key: 'all', value: null as string | null, label: '全部', count: null as number | null, ariaLabel: '全部作品' },
-                      ...tagFilters.map(({ tag, count }) => ({
-                        key: `tag:${tag}`, value: tag as string | null, label: `#${tag}`, count: count as number | null, ariaLabel: `筛选标签：${tag}`,
+                      // chips 展示字典 name（原样大小写），筛选值用归一化键 tag。
+                      ...(showAllTags ? tagFilters : tagFilters.slice(0, TAG_CHIP_PREVIEW_COUNT)).map(({ tag, name, count }) => ({
+                        key: `tag:${tag}`, value: tag as string | null, label: `#${name}`, count: count as number | null, ariaLabel: `筛选标签：${name}`,
                       })),
                       { key: 'uncategorized', value: UNCATEGORIZED_FILTER, label: UNCATEGORIZED_LABEL, count: uncategorizedCount as number | null, ariaLabel: `筛选标签：${UNCATEGORIZED_LABEL}` },
                     ].map(entry => (
@@ -443,25 +504,36 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                         aria-pressed={activeCategory === entry.value}
                         aria-label={entry.ariaLabel}
                         onClick={() => setActiveCategory(entry.value)}
-                        className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                        className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
                           activeCategory === entry.value
                             ? 'bg-purple-600 text-white shadow-sm'
                             : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
                         }`}
                       >
-                        {entry.label}
-                        {entry.count !== null ? <span className="ml-1 opacity-70">({entry.count})</span> : null}
+                        <span className="min-w-0 truncate">{entry.label}</span>
+                        {entry.count !== null ? <span className="ml-1 shrink-0 opacity-70">({entry.count})</span> : null}
                       </button>
                     ))}
+                    {tagFilters.length > TAG_CHIP_PREVIEW_COUNT && (
+                      <button
+                        type="button"
+                        aria-expanded={showAllTags}
+                        onClick={() => setShowAllTags(value => !value)}
+                        className="inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full border border-dashed border-purple-300 bg-white/60 px-3.5 py-1.5 text-xs font-bold text-purple-700 transition-colors hover:bg-purple-50"
+                      >
+                        {showAllTags ? '收起' : `更多 (${tagFilters.length - TAG_CHIP_PREVIEW_COUNT})`}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Sort selection */}
-          <div className="flex w-full flex-wrap items-center justify-between gap-3">
-          <div role="group" aria-label="作品排序" className="flex flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
+          {/* Sort selection — 移动端：排序 chips 独占一行，规格走下拉（两行结构，消除孤行断行）；
+              桌面端：排序 + 规格 chips 仍同一行。 */}
+          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+          <div role="group" aria-label="作品排序" className="flex min-w-0 flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
             <span className="text-purple-600 font-medium px-2 flex items-center gap-1">
               <Filter className="w-3 h-3" />
               排序:
@@ -493,29 +565,41 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             >
               最多收藏
             </button>
-            <span className="mx-1 h-4 w-px bg-purple-200" aria-hidden="true" />
-            <span className="px-1 font-bold text-purple-900">规格:</span>
-            {([['all', '全部'], ['le500', '≤500'], ['le1000', '≤1k'], ['le2000', '≤2k'], ['le3000', '≤3k'], ['le5000', '≤5k'], ['le8000', '≤8k'], ['gt8000', '>8k']] as const).map(([value, label]) => (
-              <button
-                type="button"
-                key={`spec:${value}`}
-                aria-pressed={specFilter === value}
-                onClick={() => setSpecFilter(value)}
-                className={`min-h-11 sm:min-h-9 px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+            <span className="mx-1 hidden h-4 w-px bg-purple-200 sm:block" aria-hidden="true" />
+            <span className="hidden px-1 font-bold text-purple-900 sm:inline">规格:</span>
+            <span className="hidden min-w-0 flex-wrap items-center sm:flex">
+              {SPEC_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  type="button"
+                  key={`spec:${value}`}
+                  aria-pressed={specFilter === value}
+                  onClick={() => setSpecFilter(value)}
+                  className={`min-h-11 sm:min-h-9 px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                    specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </span>
           </div>
-          <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); }} disabled={isLoading || isLoadingMore}
-            aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
-            title={isLoading ? '正在刷新社区' : '刷新社区'}
-            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-purple-300 bg-white px-3 py-2 text-sm font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60 sm:px-4">
-            <RefreshCw aria-hidden="true" className={`h-4 w-4 ${isLoading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
-            <span className="hidden sm:inline">{isLoading ? '正在刷新' : '刷新社区'}</span>
-          </button>
+          <div className="flex min-w-0 items-center gap-2 sm:contents">
+            <div className="min-w-0 flex-1 sm:hidden">
+              <MobileSelect
+                value={specFilter}
+                options={SPEC_FILTER_OPTIONS.map(({ value, label }) => ({ value, label }))}
+                onChange={(next) => setSpecFilter(next as SpecFilter)}
+                ariaLabel="按豆子数量筛选规格"
+              />
+            </div>
+            <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); void refreshTagDictionary(); }} disabled={isLoading || isLoadingMore}
+              aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
+              title={isLoading ? '正在刷新社区' : '刷新社区'}
+              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-purple-300 bg-white px-3 py-2 text-sm font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60 sm:px-4">
+              <RefreshCw aria-hidden="true" className={`h-4 w-4 ${isLoading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+              <span className="hidden sm:inline">{isLoading ? '正在刷新' : '刷新社区'}</span>
+            </button>
+          </div>
           </div>
         </div>
 

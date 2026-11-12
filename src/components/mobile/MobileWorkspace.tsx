@@ -89,9 +89,10 @@ export interface MobileWorkspaceProps {
   handleCellClick: (row: number, col: number, overrideColorId?: string) => void;
   beginHistoryTransaction: () => void;
   finishHistoryTransaction: () => void;
-  handleApplyShape: (tool: ToolType, r1: number, c1: number, r2: number, c2: number) => void;
+  // 与 GridCanvas 的 onApplyShape/onReferenceImageUpload 契约一致：形状用点集，参考图用 File。
+  handleApplyShape: (points: { x: number; y: number }[]) => void;
   handleLassoClear: (points: { x: number; y: number }[]) => void;
-  handleReferenceImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  handleReferenceImageUpload: (file: File) => void;
   handleResetCurrentCanvas: () => void;
   handleClearOuterBackground: () => void;
   openColorManagerModal: () => void;

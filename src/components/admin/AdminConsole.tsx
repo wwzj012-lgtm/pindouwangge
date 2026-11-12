@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Gift, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, ClipboardList, Coins, Gift, Crown, KeyRound, LayoutDashboard, LogOut, Menu, Megaphone, Palette, RefreshCw, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, Users, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { clearAdminSession, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
@@ -10,6 +10,7 @@ import { AdminCredits } from './AdminCredits';
 import { AdminWelfare } from './AdminWelfare';
 import { AdminPaletteResources, type AdminAssetPreviewRequest } from './AdminPaletteResources';
 import { AdminCommunityPosts } from './AdminCommunityPosts';
+import { AdminBannedWords } from './AdminBannedWords';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
@@ -27,7 +28,7 @@ export function parseAdminCapabilities(value: unknown, operatorUid: string): Adm
   if (CAPABILITY_KEYS.some(key => typeof candidate.capabilities![key] !== 'boolean')) return null;
   return { operatorUid, capabilities: Object.fromEntries(CAPABILITY_KEYS.map(key => [key, candidate.capabilities![key]])) as Record<CapabilityKey, boolean> };
 }
-type SectionId = 'dashboard' | 'users' | 'roles' | 'logs' | 'codes' | 'credits' | 'welfare' | 'announcements' | 'config' | 'brands' | 'resources' | 'community';
+type SectionId = 'dashboard' | 'users' | 'roles' | 'logs' | 'codes' | 'credits' | 'welfare' | 'announcements' | 'config' | 'brands' | 'resources' | 'community' | 'bannedwords';
 type GroupId = 'overview' | 'operations' | 'content' | 'system';
 interface MenuItem { id: SectionId; label: string; group: GroupId; icon: LucideIcon; }
 interface TrendPoint { date: string; count: number; }
@@ -45,6 +46,7 @@ const MENU_ITEMS: MenuItem[] = [
   { id: 'welfare', label: '福利规则', group: 'operations', icon: Gift },
   { id: 'codes', label: '兑换码管理', group: 'operations', icon: KeyRound },
   { id: 'community', label: '社区内容', group: 'content', icon: Activity },
+  { id: 'bannedwords', label: '违禁词库', group: 'content', icon: ShieldAlert },
   { id: 'announcements', label: '公告系统', group: 'content', icon: Megaphone },
   { id: 'brands', label: '品牌与颜色', group: 'content', icon: Palette },
   { id: 'resources', label: '真实资源文件', group: 'content', icon: Archive },
@@ -65,6 +67,7 @@ const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   brands: '先选择品牌，再管理该品牌的子颜色。已有图纸保留颜色快照。',
   resources: '查看实际存储对象与预览，资源删除保持禁用。',
   community: '查看帖子与图纸证据，填写原因后进行审核。',
+  bannedwords: '管理发布拦截违禁词；只拦新增与编辑，修改后最多 5 分钟生效。',
 };
 const formatter = new Intl.NumberFormat('zh-CN');
 export function formatAdminMetric(value: unknown): string { return typeof value === 'number' && Number.isFinite(value) ? formatter.format(value) : '—'; }
@@ -412,7 +415,8 @@ function AdminConsoleSession(_props: { key?: string }) {
       : capabilities.capabilities['colors.read'] ? <AdminBrandsColors request={moduleRequest} readOnly={!capabilities.capabilities['colors.write']} operatorUid={capabilities.operatorUid} />
       : <AdminErrorState title="无品牌读取权限" message="当前操作者缺少 colors.read 权限，请联系有授权能力的管理员。" retry={() => void loadCapabilities()} busy={capabilityLoading} />
     : activeSection === 'resources' ? <AdminPaletteResources request={moduleRequest} previewRequest={assetPreviewRequest} readOnly />
-    : activeSection === 'community' ? <AdminCommunityPosts request={moduleRequest} previewRequest={previewRequest} /> : null;
+    : activeSection === 'community' ? <AdminCommunityPosts request={moduleRequest} previewRequest={previewRequest} />
+    : activeSection === 'bannedwords' ? <AdminBannedWords request={moduleRequest} /> : null;
   return <div className="admin-root">
     <a className="admin-skip-link" href="#admin-main">跳到主要内容</a>
     <aside className="admin-sidebar"><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} /></aside>

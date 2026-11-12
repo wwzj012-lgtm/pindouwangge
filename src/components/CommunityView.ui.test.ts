@@ -4,7 +4,7 @@ import type { CommunityPost } from '../utils/communityApi';
 
 const hooks = vi.hoisted(() => ({ cursor: 0, slots: [] as unknown[] }));
 const feed = vi.hoisted(() => ({ posts: [] as CommunityPost[], nextCursor: null as string | null, isLoading: false, isLoadingMore: false, error: null as string | null, refresh: vi.fn(), loadMore: vi.fn(), updatePost: vi.fn() }));
-const api = vi.hoisted(() => ({ getCommunityPost: vi.fn(), reactToCommunityPost: vi.fn(), loadCommunityPattern: vi.fn(), getApiToken: vi.fn(() => 'test-token') }));
+const api = vi.hoisted(() => ({ getCommunityPost: vi.fn(), reactToCommunityPost: vi.fn(), fetchCommunityTags: vi.fn(), loadCommunityPattern: vi.fn(), getApiToken: vi.fn(() => 'test-token') }));
 vi.mock('react', async importOriginal => ({ ...await importOriginal<typeof import('react')>(),
   useState: <T,>(initial: T) => {
     const slot = hooks.cursor++;
@@ -17,13 +17,14 @@ vi.mock('react', async importOriginal => ({ ...await importOriginal<typeof impor
 vi.mock('../hooks/useCommunityFeed', () => ({ useCommunityFeed: () => feed }));
 vi.mock('../context/AuthContext', () => ({ useAuth: () => ({ currentUser: { uid: 'test-user' }, userProfile: null, isVip: false, isPro: false }) }));
 vi.mock('../utils/api', () => ({ getApiToken: api.getApiToken }));
-vi.mock('../utils/communityApi', () => ({ getCommunityPost: api.getCommunityPost, reactToCommunityPost: api.reactToCommunityPost }));
+vi.mock('../utils/communityApi', () => ({ getCommunityPost: api.getCommunityPost, reactToCommunityPost: api.reactToCommunityPost, fetchCommunityTags: api.fetchCommunityTags }));
 vi.mock('../utils/communityPattern', () => ({ loadCommunityPattern: api.loadCommunityPattern }));
 vi.mock('../utils/communityPatternSnapshot', () => ({ renderCommunityPattern: vi.fn() }));
 vi.mock('./CommunityPatternWorkspace', () => ({ CommunityPatternWorkspace: () => null }));
 
 import { CommunityView } from './CommunityView';
 import { CommunityPostCard, communityPostTags } from './CommunityPostCard';
+import { MobileSelect } from './ui/MobileSelect';
 
 type Node = { type?: unknown; props: Record<string, any> };
 const nodes = (tree: unknown): Node[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === 'object' && 'props' in tree ? [tree as Node, ...nodes((tree as Node).props.children)] : [];
@@ -41,32 +42,52 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     feed.posts = [post('1', ['人物', '游戏']), post('2', ['花卉']), post('3')];
     feed.nextCursor = null; feed.isLoading = false; feed.isLoadingMore = false; feed.error = null;
     api.getApiToken.mockReturnValue('test-token');
+    // 标签字典来自服务端（GET /api/community/tags），默认给一份与帖子对应的最小字典。
+    api.fetchCommunityTags.mockResolvedValue({ ok: true, data: { tags: [{ tag: '人物', name: '人物', usageCount: 1 }, { tag: '游戏', name: '游戏', usageCount: 1 }, { tag: '花卉', name: '花卉', usageCount: 1 }] } });
   });
 
-  it('renders all actual tags without slicing and combines tag filtering with search', () => {
-    const tags = Array.from({ length: 30 }, (_, i) => `真实标签${i}`);
-    feed.posts.push(post('4', tags));
-    let tree = render();
-    for (const tag of [...tags, '人物', '游戏', '花卉']) expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${tag}`)).toBe(true);
-    // 只显示有作品的标签（0 计数不出现），按作品数量由大到小排列；每个标签带计数。
-    for (const preset of ['像素拼豆', '动物', '风景', '动漫', '原创', '节日', '字母 Logo']) {
-      expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${preset}`)).toBe(false);
-    }
-    expect(text(tree)).toContain('#人物(1)');
-    expect(text(tree)).not.toContain('#像素拼豆');
-    expect(text(tree)).not.toContain('#社区作品');
+  // useEffect 在本测试里被 mock 成 no-op，抽屉字典通过"刷新社区"按钮触发加载。
+  const loadTags = async (tree: unknown): Promise<unknown> => {
+    button(tree, '刷新社区').props.onClick();
+    await flush();
+    return render();
+  };
+
+  it('renders the server dictionary hot-first, previews 14 chips and expands via 更多', async () => {
+    const remoteTags = Array.from({ length: 20 }, (_, i) => ({ tag: `真实标签${i}`, name: `真实标签${i}`, usageCount: 20 - i }));
+    api.fetchCommunityTags.mockResolvedValue({ ok: true, data: { tags: remoteTags } });
+    let tree = await loadTags(render());
+    // 服务端已按 usage_count 降序返回：默认渲染前 14 个，其余收进"更多 (6)"。
+    for (const tag of remoteTags.slice(0, 14)) expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${tag.tag}`)).toBe(true);
+    for (const tag of remoteTags.slice(14)) expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${tag.tag}`)).toBe(false);
+    expect(text(tree)).toContain('更多 (6)');
+    // 本地不再排序：chips 顺序与服务端字典一致（热度降序）。
+    const chipOrder = nodes(tree)
+      .filter(node => typeof node.props['aria-label'] === 'string' && node.props['aria-label'].startsWith('筛选标签：真实标签'))
+      .map(node => Number(String(node.props['aria-label']).replace('筛选标签：真实标签', '')));
+    expect(chipOrder).toEqual([...Array(14).keys()]);
+    // 展开后全部标签可见，且可收起。
+    button(tree, '更多 (6)').props.onClick(); tree = render();
+    for (const tag of remoteTags) expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：${tag.tag}`)).toBe(true);
+    button(tree, '收起').props.onClick(); tree = render();
+    expect(nodes(tree).some(node => node.props['aria-label'] === `筛选标签：真实标签19`)).toBe(false);
+  });
+
+  it('selects a tag from the drawer, pins it in the sticky selected area and removes it there', async () => {
+    let tree = await loadTags(render());
     button(tree, '#人物(1)').props.onClick(); tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
-    const search = nodes(tree).find(node => node.type === 'input')!;
-    search.props.onChange({ target: { value: '不存在' } }); tree = render();
-    expect(cards(tree)).toHaveLength(0);
-    button(tree, '清空筛选').props.onClick(); tree = render();
-    expect(cards(tree)).toHaveLength(4);
+    // 选中区固定在抽屉顶部：带移除按钮，点击后单独移除当前选中。
+    const remove = nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 人物');
+    expect(remove).toBeTruthy();
+    remove!.props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+    expect(nodes(tree).some(node => node.props['aria-label'] === '移除已选标签 人物')).toBe(false);
   });
 
-  it('offers an uncategorized bucket and a collapsible tag filter drawer', () => {
+  it('offers an uncategorized bucket and a collapsible tag filter drawer, combined with search', async () => {
     feed.posts = [post('1', ['人物']), post('2'), post('3', [])];
-    let tree = render();
+    let tree = await loadTags(render());
     // 抽屉默认收起，入口按钮切换 aria-expanded；面板内容（chips）始终在 DOM 中。
     const trigger = button(tree, '标签筛选');
     expect(trigger.props['aria-expanded']).toBe(false);
@@ -80,7 +101,16 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     // 未分类与真实标签互斥（同一个 activeCategory 机制，可与搜索/规格叠加）。
     button(tree, '#人物(1)').props.onClick(); tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
-    // 面板内支持一键清空标签筛选。
+    // 标签筛选可与搜索叠加。
+    const search = nodes(tree).find(node => node.type === 'input')!;
+    search.props.onChange({ target: { value: '不存在' } }); tree = render();
+    expect(cards(tree)).toHaveLength(0);
+    // "清空筛选"清空搜索词与标签筛选。
+    button(tree, '清空筛选').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+    // 面板内支持单独一键清空标签筛选（保留其它筛选状态）。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(1);
     button(tree, '清空标签筛选').props.onClick(); tree = render();
     expect(cards(tree)).toHaveLength(3);
   });
@@ -166,6 +196,46 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(text(detail)).toContain('#人物#游戏');
     button(tree, '载入完整图纸').props.onClick();
     expect(props.onRemixPattern).toHaveBeenCalledWith(expect.objectContaining({ tags: ['人物', '游戏'], project }));
+  });
+
+  it('matches post tags by normalized key and shows the dictionary display name (字母 Logo case)', async () => {
+    // 帖子标签按作者原样带大写存储，字典键是归一化小写键；chips 必须用字典 name 展示。
+    feed.posts = [post('1', ['字母 Logo']), post('2', ['人物'])];
+    api.fetchCommunityTags.mockResolvedValue({
+      ok: true,
+      data: { tags: [{ tag: '字母 logo', name: '字母 Logo', usageCount: 1 }, { tag: '人物', name: '人物', usageCount: 1 }] },
+    });
+    let tree = await loadTags(render());
+    // chips 展示字典展示名而非归一化键。
+    const chip = button(tree, '#字母 Logo(1)');
+    expect(chip.props['aria-label']).toBe('筛选标签：字母 Logo');
+    chip.props.onClick(); tree = render();
+    // 归一化键比对：原样大写存储的帖子标签能命中，选中不会被清空。
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    expect(nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 字母 Logo')).toBeTruthy();
+    // 入口按钮摘要与移除都展示字典名。
+    expect(text(tree)).toContain('#字母 Logo');
+  });
+
+  it('keeps desktop spec chips and swaps the spec filter to a 44px MobileSelect on mobile', () => {
+    let tree = render();
+    // 桌面规格 chips 仍在（specButton 依赖它）；移动端走 MobileSelect 下拉。
+    const specButton = (current: unknown, label: string) => {
+      const node = nodes(current).find(node => node.type === 'button' && text(node).trim() === label && node.props['aria-label'] === undefined);
+      if (!node) throw Error(`Missing spec button: ${label}`);
+      return node;
+    };
+    specButton(tree, '≤500');
+    const select = nodes(tree).find(node => node.type === MobileSelect);
+    expect(select).toBeTruthy();
+    expect(select!.props['ariaLabel']).toBe('按豆子数量筛选规格');
+    expect(select!.props.options.map((option: { value: string }) => option.value))
+      .toEqual(['all', 'le500', 'le1000', 'le2000', 'le3000', 'le5000', 'le8000', 'gt8000']);
+    expect(select!.props.value).toBe('all');
+    select!.props.onChange('le500'); tree = render();
+    expect(nodes(tree).find(node => node.type === MobileSelect)!.props.value).toBe('le500');
+    specButton(tree, '全部').props.onClick(); tree = render();
+    expect(nodes(tree).find(node => node.type === MobileSelect)!.props.value).toBe('all');
   });
 
   it('filters posts by the specs bead count and keeps unknown-spec posts only in 全部', () => {

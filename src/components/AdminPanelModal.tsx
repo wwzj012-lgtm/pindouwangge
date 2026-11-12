@@ -1208,7 +1208,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                                 <Crown className="w-3 h-3 text-rose-400" />
                                 管理员 (全功能)
                               </span>
-                            ) : (user.member_type === 2 || (user.isVip && user.member_type === 2)) ? (
+                            ) : (user.member_type === 2 || (user.isVip && (user.member_type as number) === 2)) ? (
                               <span className="inline-flex items-center gap-1 text-amber-300 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 px-2 py-0.5 rounded text-[10px] font-bold shadow-sm">
                                 <Crown className="w-3 h-3 text-amber-400 fill-amber-400" />
                                 <Store className="w-3 h-3 text-amber-300" />
@@ -1370,7 +1370,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({ isOpen, onClos
                                   <Crown className="w-3.5 h-3.5 text-rose-400" />
                                   管理员
                                 </span>
-                              ) : (user.member_type === 2 || (user.isVip && user.member_type === 2)) ? (
+                              ) : (user.member_type === 2 || (user.isVip && (user.member_type as number) === 2)) ? (
                                 <span className="inline-flex items-center gap-1 text-amber-300 bg-gradient-to-r from-amber-950 to-slate-900 border border-amber-500/50 px-2.5 py-0.5 rounded text-[11px] font-bold shadow-sm">
                                   <Crown className="w-3.5 h-3.5 text-amber-400 fill-amber-400" />
                                   <Store className="w-3.5 h-3.5 text-amber-300" />

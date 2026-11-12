@@ -3,6 +3,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ErrorBoundary } from './ErrorBoundary';
 
+// @types/react 19 要求 Component 构造器显式传入 props；测试直接 new 后立即覆写 props/state，
+// 用类型断言保留零参构造（运行时是同一个构造函数，行为不变）。
+const TestErrorBoundary = ErrorBoundary as unknown as new () => ErrorBoundary;
+
 // Render the actual fallback and exercise its button without a DOM dependency.
 describe('ErrorBoundary', () => {
   it('implements the React boundary contract instead of watching window.error', () => {
@@ -23,7 +27,7 @@ describe('ErrorBoundary', () => {
 
   it('renders a stable friendly message and keeps raw details in console diagnostics', () => {
     const error = new Error('INTERNAL_PROBE: failed query /private/backend.ts:42');
-    const boundary = new ErrorBoundary();
+    const boundary = new TestErrorBoundary();
     boundary.props = { children: null, fallbackTitle: '自定义恢复标题' };
     boundary.state = ErrorBoundary.getDerivedStateFromError(error);
     const html = renderToStaticMarkup(boundary.render());
@@ -44,7 +48,7 @@ describe('ErrorBoundary', () => {
     const reload = vi.fn();
     vi.stubGlobal('window', { location: { reload } });
     const child = createElement('span', null, 'recovered child');
-    const boundary = new ErrorBoundary();
+    const boundary = new TestErrorBoundary();
     boundary.props = { children: child, reloadOnReset };
     boundary.state = ErrorBoundary.getDerivedStateFromError(new Error('PRIVATE_RESET_PROBE'));
     boundary.setState = vi.fn(next => { boundary.state = { ...boundary.state, ...next }; });

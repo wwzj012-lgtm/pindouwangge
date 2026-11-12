@@ -243,3 +243,61 @@ export async function withdrawCommunityPost(postId: string): Promise<ApiResult<C
   }
   return result;
 }
+
+/** 服务端标签字典条目：tag 为归一化键，name 为展示名，usage_count 由后端维护并已按热度降序。 */
+export interface CommunityTagSummary {
+  tag: string;
+  name: string;
+  usageCount: number;
+}
+
+/** 违禁词预检结果：field 指明命中的位置，word 是词库命中原词（不暴露词库其它内容）。 */
+export interface CommunityModerationViolation {
+  field: 'title' | 'tag';
+  word: string;
+}
+
+export interface AdminBannedWord {
+  id: number;
+  word: string;
+  status: 'active' | 'disabled';
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 拉取豆社标签字典（公开接口）。返回即服务端热度排序结果，调用方不得再本地排序。
+ * 拉取失败返回非 ok 结果，由调用方决定是否回退为空标签集。
+ */
+export async function fetchCommunityTags(limit = 100): Promise<ApiResult<{ tags: CommunityTagSummary[] }>> {
+  return apiGet<{ tags: CommunityTagSummary[] }>('/api/community/tags', { limit: String(limit) });
+}
+
+/**
+ * 发布前违禁词预检（登录用户）。这是双层校验的前端层：提交前调用以逐词提示；
+ * 网络失败时返回非 ok，由调用方决定是否放行（后端发布路径仍有强校验兜底）。
+ */
+export function checkCommunityModeration(input: { title?: string; tags?: string[] }): Promise<ApiResult<{ violations: CommunityModerationViolation[] }>> {
+  return apiPost<{ violations: CommunityModerationViolation[] }>('/api/community/moderation/check', {
+    ...(input.title === undefined ? {} : { title: input.title }),
+    ...(input.tags === undefined ? {} : { tags: input.tags }),
+  });
+}
+
+/* ------------------------- 管理端违禁词 CRUD ------------------------- */
+
+export function listBannedWords(): Promise<ApiResult<{ items: AdminBannedWord[] }>> {
+  return apiGet<{ items: AdminBannedWord[] }>('/api/admin/community/banned-words');
+}
+
+export function createBannedWord(word: string): Promise<ApiResult<{ item: AdminBannedWord }>> {
+  return apiPost<{ item: AdminBannedWord }>('/api/admin/community/banned-words', { word });
+}
+
+export function setBannedWordStatus(id: number, status: 'active' | 'disabled'): Promise<ApiResult<{ item: AdminBannedWord | null }>> {
+  return apiPatch<{ item: AdminBannedWord | null }>(`/api/admin/community/banned-words?id=${encodeURIComponent(String(id))}`, { status });
+}
+
+export function deleteBannedWord(id: number): Promise<ApiResult<{ deleted: boolean }>> {
+  return apiDelete<{ deleted: boolean }>('/api/admin/community/banned-words', { id: String(id) });
+}

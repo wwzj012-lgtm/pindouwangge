@@ -123,7 +123,9 @@ export const CompletionSummary: React.FC<CompletionSummaryProps> = ({
               <button type="button" onClick={onCancelQuote} className="min-h-7 rounded-md px-2 text-xs lg:text-[10px] font-bold text-slate-600 hover:bg-white">
                 {isEn ? 'Cancel' : '取消'}
               </button>
-              <button type="button" onClick={onComplete} disabled={completionStatus === 'COMPLETING' || quotedPoints === null || quoteStatus !== 'idle'} className="min-h-7 rounded-md bg-indigo-600 px-2.5 text-xs lg:text-[10px] font-black text-white hover:bg-indigo-700 disabled:opacity-60">
+              {/* completionStatus 声明为 string；此处处于 'AWAITING_CONFIRMATION' 分支内，
+                  TS 收窄后防御性比较被误报，收宽回 string（运行时行为不变）。 */}
+              <button type="button" onClick={onComplete} disabled={(completionStatus as string) === 'COMPLETING' || quotedPoints === null || quoteStatus !== 'idle'} className="min-h-7 rounded-md bg-indigo-600 px-2.5 text-xs lg:text-[10px] font-black text-white hover:bg-indigo-700 disabled:opacity-60">
                 {isEn ? 'Confirm & unlock' : '确认并解锁'}
               </button>
             </div>

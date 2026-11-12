@@ -114,6 +114,34 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(cards(tree)).toHaveLength(3);
   });
 
+  it('flows chips in the same flex-wrap container as the trigger and shows only the button when collapsed', async () => {
+    let tree = await loadTags(render());
+    const drawerNode = (current: unknown) => nodes(current).find(node => node.props.id === 'community-tag-drawer')!;
+    const childButtons = (drawer: Node) => [drawer.props.children]
+      .flat(Infinity)
+      .filter((child): child is Node => Boolean(child) && typeof child === 'object' && (child as Node).type === 'button');
+    // 收起态：容器里只有「标签筛选」按钮可见，chips 全部 display:none（DOM 保留防状态丢失），
+    // 且容器没有内部滚动高度。
+    expect(String(drawerNode(tree).props.className)).not.toContain('max-h-64');
+    const collapsed = childButtons(drawerNode(tree));
+    expect(collapsed[0].props['aria-expanded']).toBe(false);
+    expect(String(collapsed[0].props.className)).not.toContain('hidden');
+    for (const chip of collapsed.slice(1)) expect(String(chip.props.className)).toContain('hidden');
+    // 展开态：按钮与 chips 是同一容器的兄弟节点——按钮是流里第一个元素，chips 紧跟其后
+    // 流动铺满换行（无 flex-1 嵌套子容器），容器 max-h-64 内部滚动。
+    button(tree, '标签筛选').props.onClick(); tree = render();
+    const expandedDrawer = drawerNode(tree);
+    expect(String(expandedDrawer.props.className)).toContain('max-h-64');
+    expect(String(expandedDrawer.props.className)).toContain('overflow-y-auto');
+    const expanded = childButtons(expandedDrawer);
+    expect(expanded[0].props['aria-expanded']).toBe(true);
+    expect(expanded[1].props['aria-label']).toBe('全部作品');
+    for (const chip of expanded.slice(1)) {
+      expect(String(chip.props.className)).toContain('inline-flex');
+      expect(String(chip.props.className)).not.toContain('hidden');
+    }
+  });
+
   it('refreshes through the shared hook and keeps existing cards during refresh failures', () => {
     button(render(), '刷新社区').props.onClick();
     expect(feed.refresh).toHaveBeenCalledTimes(1);

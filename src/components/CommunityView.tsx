@@ -97,7 +97,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const { currentUser, userProfile, isVip, isPro } = useAuth();
   const membership = { isVip, isPro };
   const editLimit = canvasLimitForMembership(membership);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  // 标签多选：归一化键集合（含"未分类"哨兵），过滤语义为并集（命中任一选中键即显示）。
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set<string>());
   // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
   const [specFilter, setSpecFilter] = useState<SpecFilter>('all');
   // 标签筛选抽屉：默认收起为紧凑入口，展开后是带全部标签 chips（含计数与"未分类"）的面板。
@@ -215,27 +216,59 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     () => patternsState.filter((pattern) => communityPostTags(pattern).length === 0).length,
     [patternsState],
   );
+  // stale 校验：字典/帖子归一化键集合比对，逐个剔除失效键（失效的"未分类"也一并移除）。
   useEffect(() => {
-    if (!isLoading && !feedError && activeCategory !== null) {
-      const stale = activeCategory === UNCATEGORIZED_FILTER
-        ? uncategorizedCount === 0
-        : !availableTagKeys.has(activeCategory.trim().toLocaleLowerCase());
-      if (stale) setActiveCategory(null);
-    }
-  }, [availableTagKeys, activeCategory, uncategorizedCount, isLoading, feedError]);
-  // 当前选中标签的展示名（未分类哨兵与字典外键回退为原值）。
-  const selectedTagLabel = activeCategory === null || activeCategory === UNCATEGORIZED_FILTER
-    ? UNCATEGORIZED_LABEL
-    : tagNameByKey.get(activeCategory) ?? activeCategory;
+    if (isLoading || feedError || selectedTags.size === 0) return;
+    setSelectedTags(current => {
+      const next = new Set<string>();
+      for (const key of current) {
+        const stale = key === UNCATEGORIZED_FILTER
+          ? uncategorizedCount === 0
+          : !availableTagKeys.has(key.trim().toLocaleLowerCase());
+        if (!stale) next.add(key);
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [availableTagKeys, selectedTags, uncategorizedCount, isLoading, feedError]);
+  // 已选标签的展示数据：未分类哨兵与字典外键回退为原值展示。
+  const selectedTagEntries = useMemo(() => [...selectedTags].map(key => ({
+    key,
+    label: key === UNCATEGORIZED_FILTER ? UNCATEGORIZED_LABEL : tagNameByKey.get(key) ?? key,
+  })), [selectedTags, tagNameByKey]);
+  // chip 切换：加入/移出选中集合；"全部"（null）一键清空（空集 = 全部高亮）。
+  const toggleTagFilter = useCallback((key: string | null) => {
+    if (key === null) { setSelectedTags(new Set<string>()); return; }
+    setSelectedTags(current => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+  // sticky 区单个移除。
+  const removeTagFilter = useCallback((key: string) => {
+    setSelectedTags(current => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }, []);
 
   const filteredPatterns = useMemo(() => {
     const query = searchQuery.trim().toLocaleLowerCase();
+    // 多选并集（OR）：作品的归一化标签命中任一选中键即显示；"未分类"作为同一并集
+    // 语义的成员（选中未分类 = 命中"无标签"作品）。
     const tagMatch = (pattern: CommunityPost) => {
-      if (activeCategory === null) return true;
-      if (activeCategory === UNCATEGORIZED_FILTER) return communityPostTags(pattern).length === 0;
-      // 归一化键比对：帖子标签原样带大小写，字典键是小写键（如"字母 Logo" ↔ "字母 logo"）。
-      const selectedKey = activeCategory.trim().toLocaleLowerCase();
-      return communityPostTags(pattern).some((tag) => tag.trim().toLocaleLowerCase() === selectedKey);
+      if (selectedTags.size === 0) return true;
+      const postTagKeys = communityPostTags(pattern).map(tag => tag.trim().toLocaleLowerCase());
+      for (const key of selectedTags) {
+        if (key === UNCATEGORIZED_FILTER) {
+          if (postTagKeys.length === 0) return true;
+        } else if (postTagKeys.includes(key.trim().toLocaleLowerCase())) {
+          return true;
+        }
+      }
+      return false;
     };
     const specMatch = (pattern: CommunityPost) => {
       if (specFilter === 'all') return true;
@@ -259,7 +292,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       if (sortBy === 'favorites') return second.favoriteCount - first.favoriteCount || second.publishedAt - first.publishedAt;
       return second.likeCount - first.likeCount || second.publishedAt - first.publishedAt;
     });
-  }, [patternsState, activeCategory, specFilter, searchQuery, sortBy]);
+  }, [patternsState, selectedTags, specFilter, searchQuery, sortBy]);
 
   const requireRegisteredCommunityAccount = useCallback((message: string): boolean => {
     const hasFormalLogin = Boolean(currentUser)
@@ -417,33 +450,37 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
           {/* Tag filter drawer — 单一 flex-wrap 容器（用户示意拍平）：「标签筛选」按钮是流里
               第一个元素，展开后的标签 chips（带作品计数）与"未分类"桶紧跟在按钮后面流动、
-              铺满整行后自然换行；展开时容器 max-h-64 内部滚动。收起时 chips 仅视觉隐藏
+              铺满整行后自然换行；展开时容器 max-h-64 内部滚动。chips 支持多选（并集过滤）。收起时 chips 仅视觉隐藏
               （display:none），节点保留在 DOM 中，标签状态不会因开合而丢失。 */}
           <div
             id="community-tag-drawer"
+            aria-label="标签多选筛选"
             className={`flex w-full flex-wrap items-center gap-2 ${tagDrawerOpen ? 'max-h-64 overflow-y-auto' : ''}`}
           >
-            {/* 已选标签 sticky 选中区：w-full 独占一行固定在 chips 区上方，可单独移除当前选中。
+            {/* 已选标签 sticky 选中区：w-full 独占一行固定在 chips 区上方，多个已选 chip
+                可逐个移除（每个带 ×），另有"清空标签筛选"一键清空全部。
                 收起时仅视觉隐藏（display:none），节点保留在 DOM 中，状态不会因开合丢失。 */}
-            {activeCategory !== null && (
-              <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5`}>
-                <span className="inline-flex min-w-0 items-center gap-2">
+            {selectedTags.size > 0 && (
+              <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5`}>
+                <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
-                  <span className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
-                    <span className="min-w-0 truncate">{`#${selectedTagLabel}`}</span>
-                    <button
-                      type="button"
-                      onClick={() => setActiveCategory(null)}
-                      aria-label={`移除已选标签 ${selectedTagLabel}`}
-                      className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
-                    >
-                      <X className="h-3 w-3" aria-hidden="true" />
-                    </button>
-                  </span>
+                  {selectedTagEntries.map(({ key, label }) => (
+                    <span key={key} className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
+                      <span className="min-w-0 truncate">{`#${label}`}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeTagFilter(key)}
+                        aria-label={`移除已选标签 ${label}`}
+                        className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
+                    </span>
+                  ))}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setActiveCategory(null)}
+                  onClick={() => setSelectedTags(new Set<string>())}
                   className="inline-flex min-h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100"
                 >
                   <X className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -459,16 +496,16 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               className={`inline-flex min-h-11 sm:min-h-9 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-all duration-200 ${
                 tagDrawerOpen
                   ? 'border-purple-400 bg-purple-100 text-purple-900 shadow-sm'
-                  : activeCategory !== null
+                  : selectedTags.size > 0
                     ? 'border-purple-300 bg-purple-50 text-purple-800 hover:bg-purple-100'
                     : 'border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-50'
               }`}
             >
               <Tag className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>标签筛选</span>
-              {activeCategory !== null && (
-                <span className="inline-flex max-w-[10rem] items-center rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
-                  <span className="truncate">{`#${selectedTagLabel}`}</span>
+              {selectedTags.size > 0 && (
+                <span className="inline-flex items-center rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                  {`已选 ${selectedTags.size}`}
                 </span>
               )}
               <span aria-hidden="true" className={`inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-purple-200/70 text-purple-800 transition-transform duration-300 motion-reduce:transition-none ${tagDrawerOpen ? 'rotate-180' : ''}`}>
@@ -484,23 +521,27 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 key: `tag:${tag}`, value: tag as string | null, label: `#${name}`, count: count as number | null, ariaLabel: `筛选标签：${name}`,
               })),
               { key: 'uncategorized', value: UNCATEGORIZED_FILTER, label: UNCATEGORIZED_LABEL, count: uncategorizedCount as number | null, ariaLabel: `筛选标签：${UNCATEGORIZED_LABEL}` },
-            ].map(entry => (
-              <button
-                type="button"
-                key={entry.key}
-                aria-pressed={activeCategory === entry.value}
-                aria-label={entry.ariaLabel}
-                onClick={() => setActiveCategory(entry.value)}
-                className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
-                  activeCategory === entry.value
-                    ? 'bg-purple-600 text-white shadow-sm'
-                    : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
-                }`}
-              >
-                <span className="min-w-0 truncate">{entry.label}</span>
-                {entry.count !== null ? <span className="ml-1 shrink-0 opacity-70">({entry.count})</span> : null}
-              </button>
-            ))}
+            ].map(entry => {
+              const isAll = entry.value === null;
+              const pressed = isAll ? selectedTags.size === 0 : selectedTags.has(entry.value);
+              return (
+                <button
+                  type="button"
+                  key={entry.key}
+                  aria-pressed={pressed}
+                  aria-label={entry.ariaLabel}
+                  onClick={() => toggleTagFilter(entry.value)}
+                  className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                    pressed
+                      ? 'bg-purple-600 text-white shadow-sm'
+                      : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
+                  }`}
+                >
+                  <span className="min-w-0 truncate">{entry.label}</span>
+                  {entry.count !== null ? <span className="ml-1 shrink-0 opacity-70">({entry.count})</span> : null}
+                </button>
+              );
+            })}
             {tagFilters.length > TAG_CHIP_PREVIEW_COUNT && (
               <button
                 type="button"
@@ -624,7 +665,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <h3 className="text-base font-bold text-purple-900">{patternsState.length === 0 ? '社区还没有公开作品' : '未找到相关拼豆灵感图纸'}</h3>
             <p className="text-xs text-purple-600 mt-1">{patternsState.length === 0 ? '从画板创作后，可在我的图库发布完整图纸。' : '您可以尝试其他标签或搜索词。'}</p>
             <button
-              onClick={patternsState.length === 0 ? onNavigateToStudio : () => { setSearchQuery(''); setActiveCategory(null); }}
+              onClick={patternsState.length === 0 ? onNavigateToStudio : () => { setSearchQuery(''); setSelectedTags(new Set<string>()); }}
               className="mt-4 min-h-11 px-5 py-2.5 rounded-xl bg-purple-600 text-white font-bold text-xs shadow-md cursor-pointer"
             >
               {patternsState.length === 0 ? '前往画板创作' : '清空筛选'}

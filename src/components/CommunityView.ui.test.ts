@@ -6,9 +6,9 @@ const hooks = vi.hoisted(() => ({ cursor: 0, slots: [] as unknown[] }));
 const feed = vi.hoisted(() => ({ posts: [] as CommunityPost[], nextCursor: null as string | null, isLoading: false, isLoadingMore: false, error: null as string | null, refresh: vi.fn(), loadMore: vi.fn(), updatePost: vi.fn() }));
 const api = vi.hoisted(() => ({ getCommunityPost: vi.fn(), reactToCommunityPost: vi.fn(), fetchCommunityTags: vi.fn(), loadCommunityPattern: vi.fn(), getApiToken: vi.fn(() => 'test-token') }));
 vi.mock('react', async importOriginal => ({ ...await importOriginal<typeof import('react')>(),
-  useState: <T,>(initial: T) => {
+  useState: <T,>(initial: T | (() => T)) => {
     const slot = hooks.cursor++;
-    if (!(slot in hooks.slots)) hooks.slots[slot] = initial;
+    if (!(slot in hooks.slots)) hooks.slots[slot] = typeof initial === 'function' && initial.length === 0 ? (initial as () => T)() : initial;
     return [hooks.slots[slot], (next: T | ((current: T) => T)) => { hooks.slots[slot] = typeof next === 'function' ? (next as (current: T) => T)(hooks.slots[slot] as T) : next; }];
   },
   useRef: <T,>(initial: T) => { const slot = hooks.cursor++; return (hooks.slots[slot] ??= { current: initial }); },
@@ -84,6 +84,77 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(nodes(tree).some(node => node.props['aria-label'] === '移除已选标签 人物')).toBe(false);
   });
 
+  it('supports multi-select with union (OR) filtering and chip toggling', async () => {
+    let tree = await loadTags(render());
+    button(tree, '标签筛选').props.onClick(); tree = render();
+    // 多选并集：人物 ∪ 游戏 → 只有同时命中任一标签的作品（作品1 两者都有）。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    expect(button(tree, '#人物(1)').props['aria-pressed']).toBe(true);
+    button(tree, '#游戏(1)').props.onClick(); tree = render();
+    expect(button(tree, '#游戏(1)').props['aria-pressed']).toBe(true);
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    // 换成 人物 ∪ 花卉 → 并集覆盖作品1 与作品2。
+    button(tree, '#游戏(1)').props.onClick(); tree = render();
+    button(tree, '#花卉(1)').props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1', '2']);
+    // 再次点击已选 chip = 取消选中（toggle 语义）。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    expect(button(tree, '#人物(1)').props['aria-pressed']).toBe(false);
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2']);
+    // 全部取消后回到完整列表。
+    button(tree, '#花卉(1)').props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+    // "全部" chip 在空集时高亮（aria-pressed）。
+    expect(nodes(tree).find(node => node.props['aria-label'] === '全部作品')!.props['aria-pressed']).toBe(true);
+  });
+
+  it('unions the uncategorized bucket with real tags and clears all via the 全部 chip', async () => {
+    feed.posts = [post('1', ['人物']), post('2'), post('3', [])];
+    let tree = await loadTags(render());
+    button(tree, '标签筛选').props.onClick(); tree = render();
+    // 选中未分类：只显示无标签作品。
+    button(tree, '未分类(2)').props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2', '3']);
+    // 未分类与真实标签同属一个并集语义：人物 ∪ 未分类 = 人物作品 ∪ 无标签作品。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1', '2', '3']);
+    // "全部" chip 清空 selectedTags：aria-pressed 回到 true，徽标消失。
+    const allChip = nodes(tree).find(node => node.props['aria-label'] === '全部作品')!;
+    expect(allChip.props['aria-pressed']).toBe(false);
+    allChip.props.onClick(); tree = render();
+    expect(nodes(tree).find(node => node.props['aria-label'] === '全部作品')!.props['aria-pressed']).toBe(true);
+    expect(nodes(tree).find(node => node.props['aria-label'] === '筛选标签：未分类')!.props['aria-pressed']).toBe(false);
+    expect(cards(tree)).toHaveLength(3);
+    expect(nodes(tree).some(node => node.props['aria-label'] === '移除已选标签 人物')).toBe(false);
+  });
+
+  it('renders multiple removable chips in the sticky selected area and shows a count badge on the trigger', async () => {
+    let tree = await loadTags(render());
+    button(tree, '标签筛选').props.onClick(); tree = render();
+    // 无选中时不渲染 sticky 区，入口按钮无徽标。
+    expect(nodes(tree).some(node => node.props['aria-label'] === '清空标签筛选' || text(node) === '清空标签筛选')).toBe(false);
+    expect(text(tree)).not.toContain('已选');
+    // 选中两个标签：sticky 区渲染两个已选 chip，入口按钮显示 "已选 2"。
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    button(tree, '#花卉(1)').props.onClick(); tree = render();
+    expect(text(nodes(tree).find(node => node.props['aria-controls'] === 'community-tag-drawer')!)).toContain('已选 2');
+    expect(nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 人物')).toBeTruthy();
+    expect(nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 花卉')).toBeTruthy();
+    // 逐个移除：移除人物后只剩花卉作品；移除花卉后 sticky 区整体消失。
+    nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 人物')!.props.onClick(); tree = render();
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2']);
+    expect(nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 花卉')).toBeTruthy();
+    nodes(tree).find(node => node.props['aria-label'] === '移除已选标签 花卉')!.props.onClick(); tree = render();
+    expect(cards(tree)).toHaveLength(3);
+    expect(nodes(tree).some(node => node.props['aria-label'] === '移除已选标签 花卉')).toBe(false);
+    expect(text(tree)).not.toContain('已选 2');
+    // sticky 区容器 flex-wrap 支持多个已选 chip 换行。
+    button(tree, '#人物(1)').props.onClick(); button(tree, '#花卉(1)').props.onClick();
+    tree = render();
+    const sticky = nodes(tree).find(node => String(node.props.className ?? '').includes('rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5'))!;
+    expect(String(sticky.props.className)).toContain('flex-wrap');
+  });
+
   it('offers an uncategorized bucket and a collapsible tag filter drawer, combined with search', async () => {
     feed.posts = [post('1', ['人物']), post('2'), post('3', [])];
     let tree = await loadTags(render());
@@ -97,9 +168,9 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(uncategorized.props['aria-label']).toBe('筛选标签：未分类');
     uncategorized.props.onClick(); tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['2', '3']);
-    // 未分类与真实标签互斥（同一个 activeCategory 机制，可与搜索/规格叠加）。
+    // 未分类与真实标签同属一个并集语义（多选），可与搜索/规格叠加。
     button(tree, '#人物(1)').props.onClick(); tree = render();
-    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1', '2', '3']);
     // 标签筛选可与搜索叠加。
     const search = nodes(tree).find(node => node.type === 'input')!;
     search.props.onChange({ target: { value: '不存在' } }); tree = render();

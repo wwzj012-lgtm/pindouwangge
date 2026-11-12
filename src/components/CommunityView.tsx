@@ -9,7 +9,6 @@ import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
 import { CommunityPatternWorkspace } from './CommunityPatternWorkspace';
 import { CommunityPostCard, communityPostTags } from './CommunityPostCard';
-import { MobileSelect } from './ui/MobileSelect';
 import { useCommunityFeed } from '../hooks/useCommunityFeed';
 import {
   type CommunityPost,
@@ -420,13 +419,15 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               chips（带作品计数）与"未分类"桶的面板；grid-rows 过渡保证平滑展开收起。
               面板内容始终渲染（仅视觉隐藏），标签状态不会因开合而丢失。 */}
           <div className="w-full">
-            <div className="flex items-center gap-2">
+            {/* 标签筛选入口按钮与展开后的 chips 内联在同一个 flex-wrap 容器：
+                按钮是第一个元素，chips 跟在后面自然铺满换行；收起时只显示按钮。 */}
+            <div className="flex w-full flex-wrap items-center gap-2">
               <button
                 type="button"
                 aria-expanded={tagDrawerOpen}
                 aria-controls="community-tag-drawer"
                 onClick={() => setTagDrawerOpen(value => !value)}
-                className={`inline-flex min-h-11 sm:min-h-9 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-all duration-200 ${
+                className={`inline-flex min-h-11 sm:min-h-9 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-all duration-200 ${
                   tagDrawerOpen
                     ? 'border-purple-400 bg-purple-100 text-purple-900 shadow-sm'
                     : activeCategory !== null
@@ -434,7 +435,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                       : 'border-purple-200 bg-white/80 text-purple-700 hover:bg-purple-50'
                 }`}
               >
-                <Tag className="h-3.5 w-3.5" aria-hidden="true" />
+                <Tag className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span>标签筛选</span>
                 {activeCategory !== null && (
                   <span className="inline-flex max-w-[10rem] items-center rounded-full bg-purple-600 px-2 py-0.5 text-[10px] font-bold text-white">
@@ -445,97 +446,92 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   <ChevronDown className="h-3.5 w-3.5" />
                 </span>
               </button>
-              <span className="hidden truncate text-xs font-bold text-purple-600 sm:inline" aria-hidden="true">
+              <span className="hidden min-w-0 truncate text-xs font-bold text-purple-600 sm:inline" aria-hidden="true">
                 共 {tagFilters.length} 类标签 · {patternsState.length} 件作品
               </span>
-            </div>
-            <div
-              id="community-tag-drawer"
-              aria-hidden={!tagDrawerOpen}
-              className={`grid transition-all duration-300 ease-in-out motion-reduce:transition-none ${
-                tagDrawerOpen ? 'visible mt-2.5 grid-rows-[1fr] opacity-100' : 'invisible grid-rows-[0fr] opacity-0'
-              }`}
-            >
-              <div className="min-h-0 overflow-hidden">
-                <div className="rounded-2xl border border-purple-200 bg-white/85 p-3 shadow-sm backdrop-blur-sm">
-                  <div className="flex items-center justify-between gap-3 pb-2">
-                    <span className="sm:hidden text-[11px] font-bold text-purple-500">共 {tagFilters.length} 类标签 · {patternsState.length} 件作品</span>
-                    <span className="hidden sm:inline text-[11px] font-bold text-purple-500">按标签筛选，可与搜索、规格叠加使用</span>
-                    {activeCategory !== null && (
+              {/* 已选标签 sticky 选中区：独占一行固定在 chips 区上方，不随 chips 滚动；可单独移除当前选中。
+                  收起时仅视觉隐藏（display:none），节点保留在 DOM 中，状态不会因开合丢失。 */}
+              {activeCategory !== null && (
+                <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5`}>
+                  <span className="inline-flex min-w-0 items-center gap-2">
+                    <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
+                    <span className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
+                      <span className="min-w-0 truncate">{`#${selectedTagLabel}`}</span>
                       <button
                         type="button"
                         onClick={() => setActiveCategory(null)}
-                        className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100"
+                        aria-label={`移除已选标签 ${selectedTagLabel}`}
+                        className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
                       >
                         <X className="h-3 w-3" aria-hidden="true" />
-                        清空标签筛选
                       </button>
-                    )}
-                  </div>
-                  {/* 选中区：固定在抽屉顶部，不随 chips 区滚动；可单独移除当前选中。 */}
-                  {activeCategory !== null && (
-                    <div className="mb-2 flex items-center gap-2 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5">
-                      <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
-                      <span className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
-                        <span className="min-w-0 truncate">{`#${selectedTagLabel}`}</span>
-                        <button
-                          type="button"
-                          onClick={() => setActiveCategory(null)}
-                          aria-label={`移除已选标签 ${selectedTagLabel}`}
-                          className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
-                        >
-                          <X className="h-3 w-3" aria-hidden="true" />
-                        </button>
-                      </span>
-                    </div>
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveCategory(null)}
+                    className="inline-flex min-h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100"
+                  >
+                    <X className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    清空标签筛选
+                  </button>
+                </div>
+              )}
+              <div
+                id="community-tag-drawer"
+                aria-hidden={!tagDrawerOpen}
+                className={`min-w-0 flex-1 transition-opacity duration-200 motion-reduce:transition-none ${
+                  tagDrawerOpen ? 'visible opacity-100' : 'invisible absolute h-0 w-0 overflow-hidden opacity-0'
+                }`}
+              >
+                <div className="sm:hidden pb-2 text-[11px] font-bold text-purple-500">共 {tagFilters.length} 类标签 · {patternsState.length} 件作品</div>
+                <div className="hidden sm:block pb-2 text-[11px] font-bold text-purple-500">按标签筛选，可与搜索、规格叠加使用</div>
+                <div role="group" aria-label="按作品标签筛选" className="flex max-h-64 flex-wrap items-start gap-2 overflow-y-auto">
+                  {[
+                    { key: 'all', value: null as string | null, label: '全部', count: null as number | null, ariaLabel: '全部作品' },
+                    // chips 展示字典 name（原样大小写），筛选值用归一化键 tag。
+                    ...(showAllTags ? tagFilters : tagFilters.slice(0, TAG_CHIP_PREVIEW_COUNT)).map(({ tag, name, count }) => ({
+                      key: `tag:${tag}`, value: tag as string | null, label: `#${name}`, count: count as number | null, ariaLabel: `筛选标签：${name}`,
+                    })),
+                    { key: 'uncategorized', value: UNCATEGORIZED_FILTER, label: UNCATEGORIZED_LABEL, count: uncategorizedCount as number | null, ariaLabel: `筛选标签：${UNCATEGORIZED_LABEL}` },
+                  ].map(entry => (
+                    <button
+                      type="button"
+                      key={entry.key}
+                      aria-pressed={activeCategory === entry.value}
+                      aria-label={entry.ariaLabel}
+                      onClick={() => setActiveCategory(entry.value)}
+                      className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                        activeCategory === entry.value
+                          ? 'bg-purple-600 text-white shadow-sm'
+                          : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
+                      }`}
+                    >
+                      <span className="min-w-0 truncate">{entry.label}</span>
+                      {entry.count !== null ? <span className="ml-1 shrink-0 opacity-70">({entry.count})</span> : null}
+                    </button>
+                  ))}
+                  {tagFilters.length > TAG_CHIP_PREVIEW_COUNT && (
+                    <button
+                      type="button"
+                      aria-expanded={showAllTags}
+                      onClick={() => setShowAllTags(value => !value)}
+                      className="inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full border border-dashed border-purple-300 bg-white/60 px-3.5 py-1.5 text-xs font-bold text-purple-700 transition-colors hover:bg-purple-50"
+                    >
+                      {showAllTags ? '收起' : `更多 (${tagFilters.length - TAG_CHIP_PREVIEW_COUNT})`}
+                    </button>
                   )}
-                  <div role="group" aria-label="按作品标签筛选" className="flex max-h-64 flex-wrap items-start gap-2 overflow-y-auto">
-                    {[
-                      { key: 'all', value: null as string | null, label: '全部', count: null as number | null, ariaLabel: '全部作品' },
-                      // chips 展示字典 name（原样大小写），筛选值用归一化键 tag。
-                      ...(showAllTags ? tagFilters : tagFilters.slice(0, TAG_CHIP_PREVIEW_COUNT)).map(({ tag, name, count }) => ({
-                        key: `tag:${tag}`, value: tag as string | null, label: `#${name}`, count: count as number | null, ariaLabel: `筛选标签：${name}`,
-                      })),
-                      { key: 'uncategorized', value: UNCATEGORIZED_FILTER, label: UNCATEGORIZED_LABEL, count: uncategorizedCount as number | null, ariaLabel: `筛选标签：${UNCATEGORIZED_LABEL}` },
-                    ].map(entry => (
-                      <button
-                        type="button"
-                        key={entry.key}
-                        aria-pressed={activeCategory === entry.value}
-                        aria-label={entry.ariaLabel}
-                        onClick={() => setActiveCategory(entry.value)}
-                        className={`inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
-                          activeCategory === entry.value
-                            ? 'bg-purple-600 text-white shadow-sm'
-                            : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
-                        }`}
-                      >
-                        <span className="min-w-0 truncate">{entry.label}</span>
-                        {entry.count !== null ? <span className="ml-1 shrink-0 opacity-70">({entry.count})</span> : null}
-                      </button>
-                    ))}
-                    {tagFilters.length > TAG_CHIP_PREVIEW_COUNT && (
-                      <button
-                        type="button"
-                        aria-expanded={showAllTags}
-                        onClick={() => setShowAllTags(value => !value)}
-                        className="inline-flex min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full border border-dashed border-purple-300 bg-white/60 px-3.5 py-1.5 text-xs font-bold text-purple-700 transition-colors hover:bg-purple-50"
-                      >
-                        {showAllTags ? '收起' : `更多 (${tagFilters.length - TAG_CHIP_PREVIEW_COUNT})`}
-                      </button>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Sort selection — 移动端：排序 chips 独占一行，规格走下拉（两行结构，消除孤行断行）；
-              桌面端：排序 + 规格 chips 仍同一行。 */}
+          {/* Sort + spec filters — 排序与规格 chips 在同一个筛选容器内；
+              移动端规格 chips 单独另起一行自然换行，桌面端排序+规格仍同一行。 */}
           <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
           <div role="group" aria-label="作品排序" className="flex min-w-0 flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
             <span className="text-purple-600 font-medium px-2 flex items-center gap-1">
-              <Filter className="w-3 h-3" />
+              <Filter className="w-3 h-3 shrink-0" />
               排序:
             </span>
             <button
@@ -583,15 +579,27 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               ))}
             </span>
           </div>
+          {/* 移动端规格 chips：与排序在同一个筛选容器内，但单独另起一行自然换行。 */}
+          <div role="group" aria-label="按豆子数量筛选规格" className="flex min-w-0 flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs sm:hidden">
+            <span className="text-purple-600 font-medium px-2 flex items-center gap-1">
+              <Filter className="w-3 h-3 shrink-0" />
+              规格:
+            </span>
+            {SPEC_FILTER_OPTIONS.map(({ value, label }) => (
+              <button
+                type="button"
+                key={`m-spec:${value}`}
+                aria-pressed={specFilter === value}
+                onClick={() => setSpecFilter(value)}
+                className={`min-h-11 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="flex min-w-0 items-center gap-2 sm:contents">
-            <div className="min-w-0 flex-1 sm:hidden">
-              <MobileSelect
-                value={specFilter}
-                options={SPEC_FILTER_OPTIONS.map(({ value, label }) => ({ value, label }))}
-                onChange={(next) => setSpecFilter(next as SpecFilter)}
-                ariaLabel="按豆子数量筛选规格"
-              />
-            </div>
             <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); void refreshTagDictionary(); }} disabled={isLoading || isLoadingMore}
               aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
               title={isLoading ? '正在刷新社区' : '刷新社区'}

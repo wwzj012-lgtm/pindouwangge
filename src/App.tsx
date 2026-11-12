@@ -56,7 +56,7 @@ import { PublicAnnouncementModal } from './components/PublicAnnouncementModal';
 import { ImportBlueprintWizard } from './components/ImportBlueprintWizard';
 import { recognitionDraftToProject, saveConfirmedRecognition, type ConfirmedRecognitionDraft } from './utils/confirmedRecognition';
 import { MIN_CANVAS_ZOOM } from './utils/canvasViewport';
-import { alignGridToSize, clearConnectedColorRegion, flipGrid, normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes, type WidthExpandSide } from './utils/gridEditing';
+import { alignGridToSize, clearConnectedColorRegion, flipGrid, normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes } from './utils/gridEditing';
 import { PracticePanel } from './components/PracticePanel';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
@@ -614,8 +614,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [highlightColorIds, setHighlightColorIds] = useState<string[]>([]);
   const [completedColorIds, setCompletedColorIds] = useState<string[]>([]);
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
-  // 加列方向：宽度增大时新列加在行尾（右）还是行首（左）。纯 UI 选择，不进图纸存档。
-  const [widthExpandSide, setWidthExpandSide] = useState<WidthExpandSide>('right');
   const [customSymmetryAxes, setCustomSymmetryAxes] = useState<SymmetryAxes | null>(null);
   const symmetryAxes = normalizeSymmetryAxes(customSymmetryAxes, settings.width, settings.height);
   const [isPracticeMode, setIsPracticeMode] = useState(false);
@@ -1227,8 +1225,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     if (isConverting) return;
     const current = gridRef.current;
     if (current.length === settings.height && current.every(row => row.length === settings.width)) return;
-    applyGridChange(alignGridToSize(current, settings.width, settings.height, widthExpandSide));
-  }, [settings.width, settings.height, widthExpandSide, isConverting, applyGridChange]);
+    applyGridChange(alignGridToSize(current, settings.width, settings.height));
+  }, [settings.width, settings.height, isConverting, applyGridChange]);
 
   /** Explicitly merge small connected islands in the current in-memory grid only. */
   const handleConsolidateStrayBeads = useCallback((strength: StrayBeanStrength = 'standard', maxClusterSize?: number) => {
@@ -2329,8 +2327,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               backgroundCleanup={backgroundCleanup}
               editorActions={editorActions}
               completionSummary={completionSummary}
-              widthExpandSide={widthExpandSide}
-              onWidthExpandSideChange={setWidthExpandSide}
               grid={grid}
               paletteMap={paletteMap}
               settings={settings}
@@ -2400,8 +2396,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
               backgroundCleanup={backgroundCleanup}
               editorActions={editorActions}
               completionSummary={completionSummary}
-              widthExpandSide={widthExpandSide}
-              onWidthExpandSideChange={setWidthExpandSide}
               grid={grid}
               paletteMap={paletteMap}
               settings={settings}

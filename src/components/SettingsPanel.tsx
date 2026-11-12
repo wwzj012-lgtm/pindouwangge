@@ -13,8 +13,6 @@ import {
   Sparkles,
   Zap,
   Check,
-  ArrowLeftToLine,
-  ArrowRightToLine,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -30,9 +28,6 @@ import { canvasLimitForMembership } from '../utils/communityPatternAccess';
 interface SettingsPanelProps {
   settings: ConvertSettings;
   setSettings: React.Dispatch<React.SetStateAction<ConvertSettings>>;
-  /** 宽度增大时新列的落位：'left' 行首（左侧加列）/ 'right' 行尾（默认）。 */
-  widthExpandSide?: 'left' | 'right';
-  onWidthExpandSideChange?: (side: 'left' | 'right') => void;
   conversionDiagnostics: ConversionDiagnostics | null;
   onReconvert: () => void;
   hasImage: boolean;
@@ -55,8 +50,6 @@ const scaleFor = createPanelScale;
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   settings,
   setSettings,
-  widthExpandSide = 'right',
-  onWidthExpandSideChange,
   conversionDiagnostics,
   onReconvert,
   hasImage,
@@ -224,28 +217,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           <div className="flex-1 space-y-1">
             <div className="flex items-center justify-between gap-1">
               <span className={`text-purple-600 font-medium ${sz.micro}`}>{isEn ? 'Width (W)' : '宽度 (W)'}</span>
-              {/* 加列方向：默认行尾（右）；切到左侧后，加列/缩列都锚定左边。
-                  解决"左边少一列只能靠翻转绕路"的问题。 */}
-              {onWidthExpandSideChange && (
-                <span className="flex items-center gap-0.5" role="group" aria-label={isEn ? 'Column insert side' : '加列方向'}>
-                  <button
-                    type="button"
-                    onClick={() => onWidthExpandSideChange('left')}
-                    aria-pressed={widthExpandSide === 'left'}
-                    aria-label={isEn ? 'Add columns on the left' : '新列加在左边'}
-                    title={isEn ? 'New columns insert on the left' : '新列加在左边'}
-                    className={`inline-flex items-center justify-center rounded-lg border px-1.5 cursor-pointer transition-colors ${sz.control} ${widthExpandSide === 'left' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-200 bg-white text-purple-600 hover:bg-purple-50'}`}
-                  ><ArrowLeftToLine className="h-3 w-3" /></button>
-                  <button
-                    type="button"
-                    onClick={() => onWidthExpandSideChange('right')}
-                    aria-pressed={widthExpandSide === 'right'}
-                    aria-label={isEn ? 'Add columns on the right' : '新列加在右边'}
-                    title={isEn ? 'New columns insert on the right' : '新列加在右边'}
-                    className={`inline-flex items-center justify-center rounded-lg border px-1.5 cursor-pointer transition-colors ${sz.control} ${widthExpandSide === 'right' ? 'border-purple-600 bg-purple-600 text-white' : 'border-purple-200 bg-white text-purple-600 hover:bg-purple-50'}`}
-                  ><ArrowRightToLine className="h-3 w-3" /></button>
-                </span>
-              )}
               <span className={`font-mono text-purple-600 ${sz.micro}`}>{isEn ? 'Max:' : '上限:'}{maxCanvasLimit}</span>
             </div>
             <input

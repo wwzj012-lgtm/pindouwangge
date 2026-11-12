@@ -24,7 +24,6 @@ vi.mock('./CommunityPatternWorkspace', () => ({ CommunityPatternWorkspace: () =>
 
 import { CommunityView } from './CommunityView';
 import { CommunityPostCard, communityPostTags } from './CommunityPostCard';
-import { MobileSelect } from './ui/MobileSelect';
 
 type Node = { type?: unknown; props: Record<string, any> };
 const nodes = (tree: unknown): Node[] => Array.isArray(tree) ? tree.flatMap(nodes) : tree && typeof tree === 'object' && 'props' in tree ? [tree as Node, ...nodes((tree as Node).props.children)] : [];
@@ -217,25 +216,37 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(text(tree)).toContain('#字母 Logo');
   });
 
-  it('keeps desktop spec chips and swaps the spec filter to a 44px MobileSelect on mobile', () => {
+  it('keeps desktop spec chips and restores mobile spec chips (no MobileSelect dropdown)', () => {
     let tree = render();
-    // 桌面规格 chips 仍在（specButton 依赖它）；移动端走 MobileSelect 下拉。
+    // 桌面规格 chips 仍在（specButton 依赖它）；移动端回归 chips，不再用 MobileSelect 下拉。
     const specButton = (current: unknown, label: string) => {
       const node = nodes(current).find(node => node.type === 'button' && text(node).trim() === label && node.props['aria-label'] === undefined);
       if (!node) throw Error(`Missing spec button: ${label}`);
       return node;
     };
     specButton(tree, '≤500');
-    const select = nodes(tree).find(node => node.type === MobileSelect);
-    expect(select).toBeTruthy();
-    expect(select!.props['ariaLabel']).toBe('按豆子数量筛选规格');
-    expect(select!.props.options.map((option: { value: string }) => option.value))
-      .toEqual(['all', 'le500', 'le1000', 'le2000', 'le3000', 'le5000', 'le8000', 'gt8000']);
-    expect(select!.props.value).toBe('all');
-    select!.props.onChange('le500'); tree = render();
-    expect(nodes(tree).find(node => node.type === MobileSelect)!.props.value).toBe('le500');
+    // 移动端规格 chips 行：同一筛选容器内的独立一行，8 个规格桶齐全。
+    const mobileSpecGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格');
+    expect(mobileSpecGroup).toBeTruthy();
+    const mobileSpecValues = nodes(mobileSpecGroup)
+      .filter(node => node.type === 'button' && node.props['aria-label'] === undefined)
+      .map(node => text(node).trim());
+    expect(mobileSpecValues).toEqual(['全部', '≤500', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k']);
+    // 触控目标 ≥44px：移动端规格 chips 用 min-h-11。
+    for (const chip of nodes(mobileSpecGroup).filter(node => node.type === 'button')) {
+      expect(String(chip.props.className)).toContain('min-h-11');
+    }
+    // 点击移动端规格 chips 可筛选。
+    nodes(mobileSpecGroup)
+      .find(node => node.type === 'button' && text(node).trim() === '≤500')!.props.onClick();
+    tree = render();
+    const mobileGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格')!;
+    const pressed = nodes(mobileGroup).find(node => node.type === 'button' && node.props['aria-pressed'] === true);
+    expect(text(pressed).trim()).toBe('≤500');
     specButton(tree, '全部').props.onClick(); tree = render();
-    expect(nodes(tree).find(node => node.type === MobileSelect)!.props.value).toBe('all');
+    const resetGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格')!;
+    const pressedAll = nodes(resetGroup).find(node => node.type === 'button' && node.props['aria-pressed'] === true);
+    expect(text(pressedAll).trim()).toBe('全部');
   });
 
   it('filters posts by the specs bead count and keeps unknown-spec posts only in 全部', () => {

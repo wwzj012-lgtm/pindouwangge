@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // 与 CommunityView.ui.test.ts 同款 hook mock：useState/useRef 跨渲染持久槽位，
 // useEffect 真执行（依赖变化才跑），保证编辑模式的预填 effect 能写入状态。
 const hooks = vi.hoisted(() => ({ cursor: 0, slots: [] as unknown[], effects: [] as unknown[][] }));
-const communityApi = vi.hoisted(() => ({ checkCommunityModeration: vi.fn() }));
+const communityApi = vi.hoisted(() => ({ checkCommunityModeration: vi.fn(), fetchCommunityTags: vi.fn() }));
 vi.mock('react', () => ({
   default: {},
   useState: <T,>(initial: T | (() => T)) => {
@@ -29,7 +29,7 @@ vi.mock('react', () => ({
   useCallback: <T,>(fn: T) => fn,
 }));
 
-vi.mock('../utils/communityApi', () => ({ checkCommunityModeration: communityApi.checkCommunityModeration }));
+vi.mock('../utils/communityApi', () => ({ checkCommunityModeration: communityApi.checkCommunityModeration, fetchCommunityTags: communityApi.fetchCommunityTags }));
 
 import { PatternPublishDialog, moderationViolationMessage, type PatternEditingPost } from './PatternPublishDialog';
 
@@ -56,6 +56,11 @@ describe('PatternPublishDialog custom tag chips', () => {
     hooks.cursor = 0; hooks.slots = []; hooks.effects = [];
     vi.clearAllMocks();
     communityApi.checkCommunityModeration.mockResolvedValue({ ok: true, status: 200, data: { violations: [] } });
+    // 标签字典：弹窗打开时拉取；默认给一份与旧硬编码预设兼容的最小字典。
+    communityApi.fetchCommunityTags.mockResolvedValue({
+      ok: true, status: 200,
+      data: { tags: [{ tag: '像素拼豆', name: '像素拼豆', usageCount: 120 }, { tag: '人物', name: '人物', usageCount: 80 }, { tag: '动物', name: '动物', usageCount: 40 }, { tag: '风景', name: '风景', usageCount: 30 }, { tag: '动漫', name: '动漫', usageCount: 20 }, { tag: '原创', name: '原创', usageCount: 10 }, { tag: '节日', name: '节日', usageCount: 5 }, { tag: '字母 logo', name: '字母 Logo', usageCount: 2 }] },
+    });
   });
 
   it('renders custom tags as removable chips instead of swallowing them silently', () => {
@@ -93,6 +98,68 @@ describe('PatternPublishDialog custom tag chips', () => {
     tree = render();
     expect(nodes(tree).some(node => node.props['aria-label'] === '移除标签 自定标签甲')).toBe(false);
     expect(text(tree)).toContain('标签（1/5）');
+  });
+
+  it('fetches the tag dictionary on open and renders chips hot-first by API order', async () => {
+    const flush = async (): Promise<void> => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+    renderPrimed();
+    await flush();
+    let tree = render();
+    // 弹窗打开时拉取字典，chips 按服务端顺序（usage_count 降序）渲染，展示 name。
+    expect(communityApi.fetchCommunityTags).toHaveBeenCalled();
+    const dictionaryNames = ['像素拼豆', '人物', '动物', '风景', '动漫', '原创', '节日', '字母 Logo'];
+    const chipOrder = nodes(tree)
+      .filter(node => node.type === 'button' && typeof node.props['aria-pressed'] === 'boolean' && dictionaryNames.includes(text(node).trim()))
+      .map(node => text(node).trim());
+    expect(chipOrder).toEqual(dictionaryNames);
+  });
+
+  it('progressively discloses dictionary chips: 12 preview + 更多 (n), expanded area scrolls internally', async () => {
+    const flush = async (): Promise<void> => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+    const remoteTags = Array.from({ length: 15 }, (_, i) => ({ tag: `热度标签${i}`, name: `热度标签${i}`, usageCount: 100 - i }));
+    communityApi.fetchCommunityTags.mockResolvedValue({ ok: true, status: 200, data: { tags: remoteTags } });
+    renderPrimed();
+    await flush();
+    let tree = render();
+    // 默认只渲染前 12 个，其余收进"更多 (3)"。
+    for (const tag of remoteTags.slice(0, 12)) expect(nodes(tree).some(node => node.type === 'button' && text(node).trim() === tag.name)).toBe(true);
+    for (const tag of remoteTags.slice(12)) expect(nodes(tree).some(node => node.type === 'button' && text(node).trim() === tag.name)).toBe(false);
+    const more = button(tree, '更多 (3)');
+    expect(more).toBeTruthy();
+    more.props.onClick();
+    tree = render();
+    // 展开后全部可见，且展开区带 max-h + overflow-y-auto 内部滚动。
+    for (const tag of remoteTags) expect(nodes(tree).some(node => node.type === 'button' && text(node).trim() === tag.name)).toBe(true);
+    const chipsRow = nodes(tree).find(node => typeof node.props.className === 'string' && node.props.className.includes('max-h-64') && node.props.className.includes('overflow-y-auto'));
+    expect(chipsRow).toBeTruthy();
+    button(tree, '收起').props.onClick();
+    tree = render();
+    expect(nodes(tree).some(node => node.type === 'button' && text(node).trim() === '热度标签12')).toBe(false);
+  });
+
+  it('shows no 更多 button when the dictionary has at most 12 tags', () => {
+    const tree = renderPrimed();
+    expect(text(tree)).not.toContain('更多 (');
+    void tree;
+  });
+
+  it('falls back to the hardcoded preset order when the dictionary request fails', async () => {
+    const flush = async (): Promise<void> => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+    communityApi.fetchCommunityTags.mockResolvedValue({ ok: false, status: 0, error: '网络错误' });
+    renderPrimed();
+    await flush();
+    const tree = render();
+    expect(text(tree)).toContain('像素拼豆');
+    expect(text(tree)).toContain('字母 Logo');
+  });
+
+  it('renders the plus button as a text 添加 button with 44px touch target and aria-label', () => {
+    const tree = renderPrimed();
+    const add = nodes(tree).find(node => node.type === 'button' && node.props['aria-label'] === '添加标签');
+    expect(add).toBeTruthy();
+    expect(text(add).trim()).toBe('添加');
+    expect(String(add!.props.className)).toContain('min-h-11');
+    expect(String(add!.props.className)).not.toContain('w-11');
   });
 });
 

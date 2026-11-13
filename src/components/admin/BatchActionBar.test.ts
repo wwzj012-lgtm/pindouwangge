@@ -53,20 +53,20 @@ describe('BatchOutcomeList rendering', () => {
 
 describe('BatchActionBar rendering', () => {
   const actions = [ { key: 'ban', label: '封禁', requiresReason: true }, { key: 'unban', label: '解封' } ];
-  it('renders selected count and disabled actions with zero selection', () => {
+  it('renders nothing when nothing is selected (visual polish: no batch bar DOM at zero)', () => {
     const html = renderToStaticMarkup(React.createElement(BatchActionBar, {
       selectedCount: 0, actions, onRun: vi.fn(), onClear: vi.fn(),
     }));
-    expect(html).toContain('已勾选 0 项');
-    expect(html).toContain('data-batch-action="ban"');
-    expect(html).toContain('data-batch-action="unban"');
-    expect(html).toContain('disabled');
+    expect(html).toBe('');
+    expect(html).not.toContain('data-batch-bar');
+    expect(html).not.toContain('data-batch-action');
   });
-  it('exposes the batch count for larger selections', () => {
+  it('exposes the batch count for larger selections (fixed floating bar)', () => {
     const html = renderToStaticMarkup(React.createElement(BatchActionBar, {
       selectedCount: 7, actions, onRun: vi.fn(), onClear: vi.fn(),
     }));
-    expect(html).toContain('已勾选 7 项');
+    expect(html).toContain('已选 7 项');
     expect(html).toContain('data-batch-count');
+    expect(html).toContain('data-batch-bar');
   });
 });

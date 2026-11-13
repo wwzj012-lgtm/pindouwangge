@@ -35,7 +35,7 @@ describe('user list query serialization (batch 3 filters)', () => {
 });
 
 describe('AdminUsers filter and batch surface', () => {
-  it('renders the new filters, sortable header, batch bar and CSV export entry', () => {
+  it('renders the new filters, sortable header and CSV export entry', () => {
     const html = renderToStaticMarkup(React.createElement(AdminUsers, { request: vi.fn() as never }));
     expect(html).toContain('data-filter-role');
     expect(html).toContain('data-filter-vip');
@@ -44,10 +44,18 @@ describe('AdminUsers filter and batch surface', () => {
     expect(html).toContain('data-filter-registered-to');
     expect(html).toContain('data-filter-sort-by');
     expect(html).toContain('data-filter-sort-dir');
-    expect(html).toContain('data-batch-bar');
-    expect(html).toContain('data-batch-action="ban"');
-    expect(html).toContain('data-batch-action="unban"');
     expect(html).toContain('data-csv-export="users"');
+  });
+  it('visual polish: no query button, batch bar hidden at zero selection, page title deduplicated', () => {
+    const html = renderToStaticMarkup(React.createElement(AdminUsers, { request: vi.fn() as never }));
+    // 筛选收敛：无"查询"提交按钮（防抖即时生效），重置保留，更多筛选折叠存在。
+    expect(html).not.toContain('data-users-query');
+    expect(html).toContain('data-users-reset');
+    expect(html).toContain('data-more-filters');
+    // 批量条：selectedCount = 0 时不渲染。
+    expect(html).not.toContain('data-batch-bar');
+    // 页头去重："用户与会员"卡片标题已删除（页内唯一大标题在顶栏）。
+    expect(html).not.toContain('用户与会员');
   });
 });
 

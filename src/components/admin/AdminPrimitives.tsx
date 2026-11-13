@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from
 import { createPortal } from 'react-dom';
 import { CircleAlert, Inbox, Loader2, X } from 'lucide-react';
 import { adminErrorText } from './adminPresentation';
+import { LoadingSkeleton } from './shared/LoadingSkeleton';
 
 type Tone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 interface ButtonProps {
@@ -34,7 +35,8 @@ export function AdminToolbar({ children, actions, label = '页面操作' }: { ch
 }
 
 export function AdminLoading({ label = '正在加载数据…' }: { label?: string }) {
-  return <div className="admin-state" role="status" aria-live="polite"><Loader2 className="admin-spin" aria-hidden="true" /><p>{label}</p></div>;
+  // 交互简化（PRD C）：全局统一加载骨架（表格形状），禁用各板块自带 spinner。
+  return <LoadingSkeleton rows={4} columns={4} ariaLabel={label} />;
 }
 
 export function AdminEmptyState({ title = '暂无数据', description, action }: { title?: string; description?: string; action?: ReactNode }) {
@@ -86,7 +88,7 @@ interface DialogProps {
 }
 
 /** Shared modal lifecycle: topmost focus trap, safe dismissal, scroll lock and focus return. */
-function AdminDialog({ open, title, description, children, onClose, pending = false, dismissible = true, kind = 'dialog', side = 'right', className = '', footer }: DialogProps) {
+export function AdminDialog({ open, title, description, children, onClose, pending = false, dismissible = true, kind = 'dialog', side = 'right', className = '', footer }: DialogProps) {
   const id = useId();
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef({ onClose, pending, dismissible });

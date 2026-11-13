@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, Coins, Crown, FileClock, Gift, KeyRound, LayoutDashboard, LogOut, Megaphone, Menu, Palette, RefreshCw, ScrollText, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, Tags, Users, type LucideIcon } from 'lucide-react';
+import { Activity, Archive, ArrowLeft, ArrowUpRight, CheckCircle2, ChevronRight, Coins, FileClock, Gift, KeyRound, LayoutDashboard, LogOut, Megaphone, Menu, Palette, RefreshCw, ScrollText, Settings2, ShieldAlert, ShieldCheck, ShieldEllipsis, Tags, Users, type LucideIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { clearAdminSession, setAdminSessionToken } from '../../utils/api';
 import { AdminUsersRoles } from './AdminUsersRoles';
@@ -103,7 +103,7 @@ export function visibleMenuSections(capabilities: AdminCapabilities | null): Sec
 
 const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   dashboard: '查看用户增长、内容数据与服务运行情况；不可用项标记为 —。',
-  users: '查找用户，管理账号、会员与访问权限。',
+  users: '查找用户，管理账号、会员与访问权限；筛选变更后 300ms 自动生效。',
   credits: '查看真实积分余额与消费流水，核对账户快照和原因后调整积分。',
   codes: '生成、查询与管理兑换码，操作前核对范围。',
   welfare: '配置新注册自动赠送等福利规则，查看每条规则的发放统计。',
@@ -156,14 +156,6 @@ function Sidebar({ active, navigate, returnToApp, visibleSections }: { active: S
     })}</nav>
     <div className="admin-sidebar-footer"><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton></div>
   </>;
-}
-function MetricCard({ label, value, detail, icon: Icon, onOpen }: { label: string; value: unknown; detail: string; icon: LucideIcon; onOpen?: () => void }) {
-  const text = typeof value === 'string' ? value : formatAdminMetric(value);
-  const body = <><div className="admin-metric-head"><span>{label}</span><Icon aria-hidden="true" /></div><p className="admin-metric-value" data-metric={label}>{text}</p><p>{detail}</p></>;
-  // 数字是入口，不只是展示：能下钻的指标 hover 出箭头，点击跳到对应模块。
-  return onOpen
-    ? <button type="button" className="admin-metric" onClick={onOpen} aria-label={label + ' ' + text + '，查看明细'}>{body}<ArrowUpRight className="admin-metric-open" aria-hidden="true" /></button>
-    : <article className="admin-metric">{body}</article>;
 }
 function TrendChart({ label, points }: { label: string; points?: TrendPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
@@ -247,14 +239,15 @@ function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
   return <section className="admin-dashboard-section" aria-labelledby="admin-metrics-title" data-dashboard-metrics>
     <AdminToolbar><h2 id="admin-metrics-title">今日概览</h2><p>统计自今日 0 点起（UTC）；7 天注册趋势横轴为最近 7 天。</p></AdminToolbar>
     <div className="admin-metrics">
-      {cards.map((card) => <article className="admin-metric" key={card.key} data-metric-card={card.key}>
+      {cards.map((card) => <article className="admin-metric admin-metric--sm" key={card.key} data-metric-card={card.key}>
         <div className="admin-metric-head"><span>{card.label}</span><card.icon aria-hidden="true" /></div>
         <p className="admin-metric-value" data-metric-value={card.key}>{formatAdminMetric(card.value)}</p>
       </article>)}
     </div>
+    {/* 7 天注册趋势：横向 flex mini bar（CSS 落地横排），柱高按峰值归一。 */}
     {metrics.registerTrend7d.length > 0 && <div className="admin-register-trend" data-register-trend>
       {metrics.registerTrend7d.map((point, index) => <div key={point.date} className="admin-register-bar" title={point.date + '：' + point.count}>
-        <i style={{ height: heights[index] + '%' }} aria-hidden="true" />
+        <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + '%' }} /></span>
         <small>{point.date.slice(5)}</small>
       </div>)}
     </div>}
@@ -278,12 +271,28 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
     return { ...item, zero: samples.length > 0 && samples.every(point => point.count <= 0) };
   });
   const duration = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? formatAdminMetric(Math.max(0, Math.round(value))) + ' ms' : '—';
+  // 运营总览两级分层（PRD B6）：4 项核心指标合并为一张大卡（数字 ≥24px），不再 4 张独立小卡。
+  const overviewItems: { key: string; label: string; value: unknown; detail: string; target?: SectionId }[] = [
+    { key: 'totalUsers', label: '注册用户', value: overview?.totalUsers, detail: '近30天新增 ' + formatAdminMetric(overview?.newUsers30Days), target: 'users' },
+    { key: 'activeVipUsers', label: '活跃会员', value: overview?.activeVipUsers, detail: '当前有效 VIP / Pro', target: 'users' },
+    { key: 'works', label: '图纸与社区作品', value: sumAdminMetrics(overview?.works, overview?.communityPosts), detail: '图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts), target: 'community' },
+    { key: 'redeemedCodes', label: '累计兑换', value: overview?.redeemedCodes, detail: '近24小时错误 ' + formatAdminMetric(overview?.recentErrors), target: 'codes' },
+  ];
   return <section aria-label="运营概览" aria-busy={loading}>
     <AdminToolbar><h2>运营概览</h2></AdminToolbar>
     {loading && <p role="status" className="admin-muted">正在更新统计，当前结果暂时保留…</p>}
     <TodoCards todo={data.todo} navigate={navigate} />
     <MetricsPanel metrics={data.metrics} />
-    <div className="admin-metrics"><MetricCard label="注册用户" value={overview?.totalUsers} detail={'近30天新增 ' + formatAdminMetric(overview?.newUsers30Days)} icon={Users} onOpen={() => navigate('users')} /><MetricCard label="活跃会员" value={overview?.activeVipUsers} detail="当前有效 VIP / Pro" icon={Crown} onOpen={() => navigate('users')} /><MetricCard label="图纸与社区作品" value={sumAdminMetrics(overview?.works, overview?.communityPosts)} detail={'图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts)} icon={Archive} onOpen={() => navigate('community')} /><MetricCard label="累计兑换" value={overview?.redeemedCodes} detail={'近24小时错误 ' + formatAdminMetric(overview?.recentErrors)} icon={KeyRound} onOpen={() => navigate('codes')} /></div>
+    <div className="admin-overview-card" data-overview-card>
+      {overviewItems.map(item => {
+        const text = typeof item.value === 'string' ? item.value : formatAdminMetric(item.value);
+        return item.target
+          ? <button type="button" key={item.key} className="admin-overview-item" data-overview-item={item.key} aria-label={item.label + ' ' + text + '，查看明细'} onClick={() => navigate(item.target!)}>
+            <span>{item.label}</span><strong>{text}</strong><small>{item.detail}</small>
+          </button>
+          : <div key={item.key} className="admin-overview-item" data-overview-item={item.key}><span>{item.label}</span><strong>{text}</strong><small>{item.detail}</small></div>;
+      })}
+    </div>
     <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2><p>仅统计已采集的状态变更和服务端错误，不代表所有请求。</p></AdminToolbar>
       <div className="admin-ops">
         <div><span>24小时成功操作</span><strong>{formatAdminMetric(telemetry?.successfulActions24h)}</strong></div>
@@ -298,7 +307,12 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
     </section>
     <div className="admin-charts">{trendDefs.filter(item => !item.zero).map(item => <React.Fragment key={item.label}><TrendChart label={item.label} points={item.points} /></React.Fragment>)}</div>
     {trendDefs.some(item => item.zero) && <p className="admin-zero-note">近 7 天没有新增：{trendDefs.filter(item => item.zero).map(item => item.label.replace('趋势', '')).join('、')}。产生数据后这里会出现对应趋势图。</p>}
-    {Boolean(data.warnings?.length) && <div className="admin-warning" role="status"><strong>部分统计暂不可用</strong><ul>{data.warnings?.map(warning => <li key={warning}>{warning}</li>)}</ul></div>}
+    {/* 警告条降级（PRD B7）：页脚 footnote 灰字 + 展开箭头；展开后显示分段级 error 详情。 */}
+    {Boolean(data.warnings?.length) && <details className="admin-warnings-footnote" role="status" data-dashboard-warnings>
+      <summary>部分统计暂不可用（{data.warnings!.length} 项）</summary>
+      <ul>{data.warnings!.map(warning => <li key={warning}>{warning}</li>)}</ul>
+      {data.sections && Object.entries(data.sections).filter(([, section]) => section.available === false && section.error).map(([key, section]) => <p key={key}><span className="admin-mono">{key}</span>：{section.error}</p>)}
+    </details>}
   </section>;
 }
 type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;

@@ -33,3 +33,25 @@ export function adminErrorText(message: string): { summary: string; detail?: str
   if (/[\u3400-\u9fff]/u.test(message)) return { summary: message };
   return { summary: '操作未完成，请检查输入或稍后重试；如仍失败，请联系管理员。', detail: message };
 }
+
+/** 默认防抖窗口：筛选变更 300ms 后即时生效（无需"查询"按钮）。 */
+export const ADMIN_FILTER_DEBOUNCE_MS = 300;
+
+/**
+ * 筛选防抖器：每次变更调用 schedule()，静默 300ms 后执行一次 apply()；
+ * 连续变更只保留最后一次。cancel() 用于组件卸载/手动刷新时丢弃挂起的 apply。
+ * 提取为纯工厂便于用 vitest fake timers 直接验证"300ms 后生效"。
+ */
+export function createFilterDebounce(apply: () => void, delayMs: number = ADMIN_FILTER_DEBOUNCE_MS): { schedule: () => void; cancel: () => void; pending: () => boolean } {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return {
+    schedule() {
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; apply(); }, delayMs);
+    },
+    cancel() {
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+    },
+    pending() { return timer !== null; },
+  };
+}

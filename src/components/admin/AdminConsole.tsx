@@ -19,7 +19,7 @@ import { SettingsDiffView } from './SettingsDiffView';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
-import { parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations, trendBarHeights, type DashboardSection } from './adminDashboardModel';
+import { parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations, trendBarPixelHeights, type DashboardSection } from './adminDashboardModel';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -101,23 +101,6 @@ export function visibleMenuSections(capabilities: AdminCapabilities | null): Sec
     .map(item => item.id);
 }
 
-const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
-  dashboard: '查看用户增长、内容数据与服务运行情况；不可用项标记为 —。',
-  users: '查找用户，管理账号、会员与访问权限；筛选变更后 300ms 自动生效。',
-  credits: '查看真实积分余额与消费流水，核对账户快照和原因后调整积分。',
-  codes: '生成、查询与管理兑换码，操作前核对范围。',
-  welfare: '配置新注册自动赠送等福利规则，查看每条规则的发放统计。',
-  community: '查看帖子与图纸证据，填写原因后进行审核；审核队列与举报在板块内 tab。',
-  tagDictionary: '管理标签展示名与启停状态；隐藏即时生效，存量帖子上的标签保留。',
-  bannedwords: '管理发布拦截违禁词；只拦新增与编辑，修改后最多 5 分钟生效。',
-  brands: '先选择品牌，再管理该品牌的子颜色。已有图纸保留颜色快照。',
-  resources: '查看实际存储对象与预览，资源删除保持禁用。',
-  operationLogs: '结构化管理写操作审计；展开行查看改动前后字段级对比。',
-  runLogs: '运行日志 / 定时任务 / 管理会话合并板块；旧系统日志按数据源分流检索。',
-  announcements: '管理公告草稿、发布状态与展示范围。',
-  config: '查看功能配置，核对差异后提交变更；支持设置变更历史 diff。',
-  roles: '管理角色与权限，授权结果以服务端为准。',
-};
 const formatter = new Intl.NumberFormat('zh-CN');
 export function formatAdminMetric(value: unknown): string { return typeof value === 'number' && Number.isFinite(value) ? formatter.format(value) : '—'; }
 export function sumAdminMetrics(a: unknown, b: unknown): number | undefined { return typeof a === 'number' && typeof b === 'number' && Number.isFinite(a) && Number.isFinite(b) ? a + b : undefined; }
@@ -202,34 +185,35 @@ function TrendChart({ label, points }: { label: string; points?: TrendPoint[] })
     </> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
   </article>;
 }
-/** 批次 3：待办卡。数字来自服务端 todo 分段；缺失时不渲染（不伪造 0）。 */
+/** 批次 3：待办卡。数字来自服务端 todo 分段；缺失时不渲染（不伪造 0）。
+ * 密度改版：三张卡一行三列，label+数字同行+右侧状态徽标，卡高 ≤56px。 */
 function TodoCards({ todo, navigate }: { todo: DashboardData['todo']; navigate: (id: SectionId, query?: Record<string, string>) => void }) {
   if (!todo) return null;
-  const cards: { key: string; label: string; value: number; detail: string; tone: 'danger' | 'warning' | 'neutral'; target: SectionId; query: Record<string, string> }[] = [
-    { key: 'pendingReviews', label: '待审核帖子', value: todo.pendingReviews, detail: '命中违禁词或被举报后进入人工审核', tone: todo.pendingReviews > 0 ? 'warning' : 'neutral', target: 'community', query: todoDrillQuery('reviews') },
-    { key: 'pendingReports', label: '待处理举报', value: todo.pendingReports, detail: 'open 状态的内容举报', tone: todo.pendingReports > 0 ? 'danger' : 'neutral', target: 'community', query: todoDrillQuery('reports') },
-    { key: 'codes', label: '兑换码库存', value: todo.availableCodes ?? 0, detail: todo.lowStockCodes ? `低于阈值 ${todo.lowStockThreshold ?? '—'}，建议补充` : `阈值 ${todo.lowStockThreshold ?? '—'} 内，库存正常`, tone: todo.lowStockCodes ? 'danger' : 'neutral', target: 'codes', query: todoDrillQuery('codes') },
+  const cards: { key: string; label: string; value: number; tone: 'danger' | 'warning' | 'neutral'; target: SectionId; query: Record<string, string> }[] = [
+    { key: 'pendingReviews', label: '待审核帖子', value: todo.pendingReviews, tone: todo.pendingReviews > 0 ? 'warning' : 'neutral', target: 'community', query: todoDrillQuery('reviews') },
+    { key: 'pendingReports', label: '待处理举报', value: todo.pendingReports, tone: todo.pendingReports > 0 ? 'danger' : 'neutral', target: 'community', query: todoDrillQuery('reports') },
+    { key: 'codes', label: '兑换码库存', value: todo.availableCodes ?? 0, tone: todo.lowStockCodes ? 'danger' : 'neutral', target: 'codes', query: todoDrillQuery('codes') },
   ];
   return <section className="admin-dashboard-section" aria-labelledby="admin-todo-title" data-dashboard-todo>
-    <AdminToolbar><h2 id="admin-todo-title">待办事项</h2><p>点击卡片下钻到对应板块（带预置筛选）。</p></AdminToolbar>
-    <div className="admin-metrics">
-      {cards.map((card) => <button type="button" key={card.key} className="admin-metric" data-todo-card={card.key}
+    <AdminToolbar><h2 id="admin-todo-title">待办事项</h2></AdminToolbar>
+    <div className="admin-metrics admin-metrics--todo">
+      {cards.map((card) => <button type="button" key={card.key} className="admin-metric admin-metric--todo" data-todo-card={card.key}
         aria-label={card.label + ' ' + card.value + '，去处理'}
         onClick={() => navigate(card.target, card.query)}>
-        <div className="admin-metric-head"><span>{card.label}</span><AdminBadge tone={card.tone}>{card.tone === 'neutral' ? '正常' : '待处理'}</AdminBadge></div>
-        <p className="admin-metric-value" data-todo-value={card.key}>{formatAdminMetric(card.value)}</p>
-        <p>{card.detail}</p>
+        <span className="admin-metric-label">{card.label}</span>
+        <strong className="admin-metric-value" data-todo-value={card.key}>{formatAdminMetric(card.value)}</strong>
+        <AdminBadge tone={card.tone}>{card.tone === 'neutral' ? '正常' : '待处理'}</AdminBadge>
         <ArrowUpRight className="admin-metric-open" aria-hidden="true" />
       </button>)}
     </div>
   </section>;
 }
 
-/** 批次 3：今日指标 + 7 天注册趋势 mini bar。 */
+/** 批次 3：今日指标一行四列 compact 卡 + 7 天注册趋势柱状图。 */
 function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
   if (!metrics) return null;
   const registered = todayRegistrations(metrics);
-  const heights = trendBarHeights(metrics.registerTrend7d);
+  const heights = trendBarPixelHeights(metrics.registerTrend7d);
   const cards: { key: string; label: string; value: number | null; icon: LucideIcon }[] = [
     { key: 'works', label: '今日新作品', value: metrics.todayNewWorks, icon: Archive },
     { key: 'posts', label: '今日新帖子', value: metrics.todayNewPosts, icon: Activity },
@@ -237,17 +221,18 @@ function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
     { key: 'registrations', label: '今日新注册', value: registered, icon: Users },
   ];
   return <section className="admin-dashboard-section" aria-labelledby="admin-metrics-title" data-dashboard-metrics>
-    <AdminToolbar><h2 id="admin-metrics-title">今日概览</h2><p>统计自今日 0 点起（UTC）；7 天注册趋势横轴为最近 7 天。</p></AdminToolbar>
-    <div className="admin-metrics">
+    <AdminToolbar><h2 id="admin-metrics-title">今日概览</h2></AdminToolbar>
+    <div className="admin-metrics admin-metrics--today">
       {cards.map((card) => <article className="admin-metric admin-metric--sm" key={card.key} data-metric-card={card.key}>
-        <div className="admin-metric-head"><span>{card.label}</span><card.icon aria-hidden="true" /></div>
-        <p className="admin-metric-value" data-metric-value={card.key}>{formatAdminMetric(card.value)}</p>
+        <span className="admin-metric-label">{card.label}</span>
+        <strong className="admin-metric-value" data-metric-value={card.key}>{formatAdminMetric(card.value)}</strong>
+        <card.icon className="admin-metric-icon" aria-hidden="true" />
       </article>)}
     </div>
-    {/* 7 天注册趋势：横向 flex mini bar（CSS 落地横排），柱高按峰值归一。 */}
+    {/* 7 天注册趋势：每天一列 28px 柱宽居中排列，高度按峰值比例（最高 64px），零值 3px 灰柱。 */}
     {metrics.registerTrend7d.length > 0 && <div className="admin-register-trend" data-register-trend>
       {metrics.registerTrend7d.map((point, index) => <div key={point.date} className="admin-register-bar" title={point.date + '：' + point.count}>
-        <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + '%' }} /></span>
+        <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + 'px' }} data-zero={point.count <= 0 || undefined} /></span>
         <small>{point.date.slice(5)}</small>
       </div>)}
     </div>}
@@ -293,7 +278,7 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
           : <div key={item.key} className="admin-overview-item" data-overview-item={item.key}><span>{item.label}</span><strong>{text}</strong><small>{item.detail}</small></div>;
       })}
     </div>
-    <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2><p>仅统计已采集的状态变更和服务端错误，不代表所有请求。</p></AdminToolbar>
+    <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2></AdminToolbar>
       <div className="admin-ops">
         <div><span>24小时成功操作</span><strong>{formatAdminMetric(telemetry?.successfulActions24h)}</strong></div>
         <div><span>平均耗时</span><strong>{telemetry && telemetry.durationSamples24h > 0 ? duration(telemetry.averageDurationMs) : '—'}</strong></div>
@@ -578,7 +563,6 @@ function AdminConsoleSession(_props: { key?: string }) {
       <main ref={editorRoot} className="admin-main" id="admin-main" tabIndex={-1}
         onFocusCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, controlValue(event.target)); }}
         onChangeCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, '\u0000'); }}>
-        <p className="admin-page-description">{SECTION_DESCRIPTIONS[activeSection]}</p>
         {requestNotice && <AdminErrorState title="模块连接失败" message={requestNotice} retry={() => queueAction({ kind: 'refresh' })} busy={busy} />}
         {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} navigate={navigate} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
       </main>

@@ -111,18 +111,26 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
   };
   const eligibility = (user: AdminUser) => { const view = membershipPresentation(user);
     const expiry = view.expiry === '空到期值' ? '无到期限制' : view.expiry;
-    return <><span className="admin-eligibility">{view.effective}</span><small title={'接口付费字段 ' + view.paid + ' · 原到期值 ' + view.expiry}>{expiry}</small>{view.caveat && <small>{view.caveat}</small>}</>; };
-  // ===== 表格精修（PRD B5）：标签/最近活跃合并进账号副行，操作列改为 32px ghost 图标按钮 =====
+    return <><span className="admin-eligibility">{view.effective}</span><small className="admin-cell-note" title={'接口付费字段 ' + view.paid + ' · 原到期值 ' + view.expiry}>{expiry}</small>{view.caveat && <small className="admin-cell-note">{view.caveat}</small>}</>; };
+  // ===== 表格精修（密度改版）：账号列单行（姓名+邮箱+最多 2 个标签徽标，UID 进 tooltip），
+  // 行内副信息（限制到期/到期值）改为同一行 .admin-cell-note，行高压到 ≤40px =====
   const userColumns: Array<AdminDataTableColumn<AdminUser>> = [
     {
       key: 'label',
       label: '用户 / 账号',
-      render: user => <><strong>{userLabel(user)}</strong><small>{user.email}</small><small>标签：{tagText(user)} · 最近活动：{dateText(user.lastActiveAt)}</small><small className="admin-mono admin-uid" title={user.uid}>{user.uid.length > 13 ? user.uid.slice(0, 12) + '…' : user.uid}</small></>,
+      render: user => {
+        const tags = details[user.uid]?.tags ?? user.tags ?? [];
+        return <div className="admin-user-cell" title={user.uid}>
+          <strong>{userLabel(user)}</strong>
+          <span className="admin-user-email">{user.email}</span>
+          {tags.slice(0, 2).map(tag => <span className="admin-user-tag" key={tag.id}>{tag.displayName}</span>)}
+        </div>;
+      },
     },
     {
       key: 'status',
       label: '账号状态',
-      render: user => <><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small>限制至 {dateText(user.moderation.expiresAt)}</small>}</>,
+      render: user => <><StatusBadge status={user.moderation?.status} />{user.moderation?.expiresAt && <small className="admin-cell-note">限制至 {dateText(user.moderation.expiresAt)}</small>}</>,
     },
     { key: 'membership', label: '会员权益', render: user => eligibility(user) },
     {
@@ -193,7 +201,7 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
       </>}
       {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {adminPageCount(snapshot.total, snapshot.limit)} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= adminPageCount(snapshot.total, snapshot.limit)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
     </div>
-    <p className="admin-stage-footnote">筛选变更后 300ms 自动生效，无需提交。标签与最近活动合并展示在账号列副行；列表接口未返回时显示 —。排序仅支持注册时间与可用积分。勾选行后可批量封禁/解封；批量操作逐条提交，结果以服务端为准。</p>
+    <p className="admin-stage-footnote">筛选变更后 300ms 自动生效，无需提交。账号列单行展示姓名与邮箱，标签最多内联 2 个小徽标，完整 UID 悬停可见；列表接口未返回时显示 —。排序仅支持注册时间与可用积分。勾选行后可批量封禁/解封；批量操作逐条提交，结果以服务端为准。</p>
     {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} resetEntry={resetEntry} />}
     {resetUser && <AdminPasswordReset key={resetUser.uid} user={resetUser} currentUserUid={currentUser?.uid} request={request} onClose={() => setResetUser(null)} />}
   </section>;

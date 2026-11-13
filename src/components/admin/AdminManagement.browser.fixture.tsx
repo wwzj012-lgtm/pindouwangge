@@ -162,8 +162,10 @@ export async function runAdminManagementChecks() {
 
   auth.currentUser = { uid: 'operator', role: 'user', displayName: '测试管理员' }; sessionStatus = 200;
   await mount('normal', 'users');
-  // 页头去重：页内只剩一句页面描述，卡片级重复标题"用户与会员"已删除。
-  assert(text().includes('查找用户，管理账号') && !text().includes('用户与会员'), 'valid existing session shows normal management UI with deduplicated page title');
+  // 密度改版：页头只留面包屑 + 大标题（h1 在顶栏），板块描述行（"查找用户，管理账号…"）已删除；
+  // 卡片级重复标题"用户与会员"仍然不存在。
+  assert(document.querySelector('.admin-header h1')?.textContent === '用户管理'
+    && !text().includes('查找用户，管理账号') && !text().includes('用户与会员'), 'valid existing session shows title-only page header with deduplicated page title');
   assert(Array.from(document.querySelectorAll('[data-user-reset-password]')).some(visible), 'existing reset entry remains present');
   ensureNames(); noOverflow('users');
   if (innerWidth < 1024) {

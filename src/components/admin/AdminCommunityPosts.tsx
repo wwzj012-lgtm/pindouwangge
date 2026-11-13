@@ -459,7 +459,9 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
         <AdminButton iconOnly aria-label="下一页" disabled={queueLoading || !queueData || Math.ceil(queueData.total / TAB_LIMIT) <= queuePage + 1} onClick={() => setQueuePage(value => value + 1)}><ChevronRight aria-hidden="true" /></AdminButton>
       </div></div>
       {queueSelected && <div className="admin-community-detail" data-review-target={queueSelected.postId}>
-        <AdminToolbar><h2>审核决策</h2><p>{queueSelected.title || queueSelected.postId} · 来源：{queueSelected.reviewSource === 'banned_word' ? '违禁词命中' : '用户举报'}{queueSelected.reviewNote ? ' · 备注：' + queueSelected.reviewNote : ''}</p></AdminToolbar>
+        <AdminToolbar><h2>审核决策</h2></AdminToolbar>
+        {/* 运营事实行（标题·来源·备注）不用 toolbar-copy：display:none 只隐藏静态描述，不能连带运营数据。 */}
+        <p className="admin-fact-line" data-fact-line="review"><strong>{queueSelected.title || queueSelected.postId}</strong> · 来源：{queueSelected.reviewSource === 'banned_word' ? '违禁词命中' : '用户举报'}{queueSelected.reviewNote ? ' · 备注：' + queueSelected.reviewNote : ''}</p>
         <label className="admin-stage-field">审核意见<textarea value={queueNote} maxLength={500} disabled={reviewBusy} onChange={event => setQueueNote(event.target.value)} placeholder="留空使用服务端默认文案" /></label>
         <div className="admin-toolbar-actions">
           <AdminButton variant="primary" busy={reviewBusy} disabled={queueSelected.state !== 'pending'} onClick={() => void submitReview('approve')}>放行</AdminButton>
@@ -488,7 +490,8 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
         <AdminButton iconOnly aria-label="下一页" disabled={reportLoading || !reportData || Math.ceil(reportData.total / TAB_LIMIT) <= reportPage + 1} onClick={() => setReportPage(value => value + 1)}><ChevronRight aria-hidden="true" /></AdminButton>
       </div></div>
       {reportSelected && <div className="admin-community-detail" data-report-target={reportSelected.id}>
-        <AdminToolbar><h2>举报处置</h2><p>{reportSelected.post?.title || reportSelected.entityId} · 举报人：{reportSelected.reporter?.displayName || '匿名'}</p></AdminToolbar>
+        <AdminToolbar><h2>举报处置</h2></AdminToolbar>
+        <p className="admin-fact-line" data-fact-line="report"><strong>{reportSelected.post?.title || reportSelected.entityId}</strong> · 举报人：{reportSelected.reporter?.displayName || '匿名'}</p>
         <label className="admin-stage-field">处置方式<select value={reportResolution} disabled={resolveBusy} onChange={event => setReportResolution(event.target.value as ReportResolution)}>
           {(['delete_post', 'dismiss', 'ban_user'] as const).map(value => <option key={value} value={value}>{REPORT_RESOLUTION_LABEL[value]}</option>)}
         </select></label>

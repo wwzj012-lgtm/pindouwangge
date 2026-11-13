@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations, trendBarHeights,
+  parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations,
 } from './adminDashboardModel';
 
 describe('dashboard todo parsing (batch 3)', () => {
@@ -48,19 +48,6 @@ describe('dashboard metrics parsing (batch 3)', () => {
   it('todayRegistrations is null for an absent trend, never a made-up zero', () => {
     expect(todayRegistrations(null)).toBeNull();
     expect(todayRegistrations(parseDashboardMetrics({ todayNewWorks: 0, todayNewPosts: 0, todayNewReports: 0, registerTrend7d: [] }))).toBeNull();
-  });
-});
-
-describe('register trend mini bars', () => {
-  it('scales the peak to 100% and keeps zero days visible at 8%', () => {
-    const points = [
-      { date: 'd1', count: 0 }, { date: 'd2', count: 10 }, { date: 'd3', count: 5 }, { date: 'd4', count: 0 },
-    ];
-    expect(trendBarHeights(points)).toEqual([8, 100, 50, 8]);
-  });
-  it('an all-zero trend still renders a flat baseline', () => {
-    expect(trendBarHeights([{ date: 'a', count: 0 }, { date: 'b', count: 0 }])).toEqual([8, 8]);
-    expect(trendBarHeights([])).toEqual([]);
   });
 });
 

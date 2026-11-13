@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { MousePointerClick } from 'lucide-react';
 import { AdminButton, AdminConfirmDialog } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
 import {
@@ -151,7 +152,7 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
     {
       key: 'uid',
       label: '用户',
-      render: a => <><strong>{name(a)}</strong><small>{a.email}</small><small>{a.uid}</small></>,
+      render: a => <div className="admin-user-cell" title={a.uid}><strong>{name(a)}</strong><span className="admin-user-email">{a.email}</span></div>,
     },
     { key: 'availableUnits', label: '可用积分', numeric: true, render: a => formatCreditUnits(a.availableUnits), cellAttrs: () => ({ 'data-label': '可用' }) },
     { key: 'heldUnits', label: '冻结积分', numeric: true, render: a => formatCreditUnits(a.heldUnits), cellAttrs: () => ({ 'data-label': '冻结' }) },
@@ -166,7 +167,7 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
     {
       key: 'uid',
       label: '用户',
-      render: row => <><strong>{name(row)}</strong><small>{row.email}</small><small>{row.uid}</small></>,
+      render: row => <div className="admin-user-cell" title={row.uid}><strong>{name(row)}</strong><span className="admin-user-email">{row.email}</span></div>,
     },
     {
       key: 'purpose',
@@ -209,7 +210,7 @@ function AdminCreditsPanel({ request, canAdjust, operatorUid }: AdminCreditsProp
       <section className="admin-credits-card" aria-label="积分调整" data-empty={!uid || undefined}><h3>积分调整</h3>
         {writeError && <p role="alert">{writeError}</p>}
         {success && <p role="status" data-credit-success>调整已完成：用户 {success.uid} 的可用积分 {formatCreditUnits(success.beforeAvailableUnits)} → {formatCreditUnits(success.afterAvailableUnits)}；冻结 {formatCreditUnits(success.heldUnits)} 积分。审计编号 {success.id}</p>}
-        {!uid && <p className="admin-credits-hint">从左侧选一位用户，可查看余额明细与冻结积分，填写原因后提交调整。</p>}{detailLoading && <p role="status">正在读取最新余额…</p>}
+        {!uid && <p className="admin-credits-empty" data-credits-empty><MousePointerClick aria-hidden="true" />从左侧选一位用户后查看余额并调整积分。</p>}{detailLoading && <p role="status">正在读取最新余额…</p>}
         {detailError && <p role="alert">{detailError} <AdminButton onClick={()=>void readAccount(uid)}>重新读取</AdminButton></p>}
         {account && <><p data-credit-selected><strong>{name(account)}</strong> · {account.email} · {account.uid}</p>
           <dl className="admin-credits-balances"><div><dt>可用积分</dt><dd>{formatCreditUnits(account.availableUnits)}</dd></div><div><dt>冻结积分</dt><dd>{formatCreditUnits(account.heldUnits)}</dd></div></dl>

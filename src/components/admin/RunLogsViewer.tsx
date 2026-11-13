@@ -25,9 +25,9 @@ interface RunLogPage {
   type: RunLogSource; items: Array<ActivityLogItem | AuditLogItem>; total: number; limit: number; offset: number;
 }
 
-export const runLogSources: Array<{ id: RunLogSource; label: string; description: string }> = [
-  { id: 'activity', label: '用户活动', description: 'user_activity_logs：注册、发布、签到等用户行为事件。' },
-  { id: 'audit', label: '管理审计', description: 'audit_logs：旧版管理端审计行（legacy writeAudit）。' },
+export const runLogSources: Array<{ id: RunLogSource; label: string }> = [
+  { id: 'activity', label: '用户活动' },
+  { id: 'audit', label: '管理审计' },
 ];
 
 export function isActivityItem(item: ActivityLogItem | AuditLogItem): item is ActivityLogItem {
@@ -103,7 +103,6 @@ export function RunLogsViewer({ request, pageSize = 30, initialItems, initialSou
       {runLogSources.map(item => <AdminButton key={item.id} aria-pressed={source === item.id}
         variant={source === item.id ? 'primary' : 'secondary'} onClick={() => setSource(item.id)}>{item.label}</AdminButton>)}
     </div>
-    <p className="admin-page-description">{runLogSources.find(item => item.id === source)?.description}</p>
     {error && <AdminErrorState message={error} retry={() => void load(source)} busy={loading} />}
     <div className="admin-stage-panel" aria-busy={loading}>
       {!page ? loading ? <AdminLoading /> : <AdminEmptyState title="尚无成功读取结果" /> : page.items.length === 0

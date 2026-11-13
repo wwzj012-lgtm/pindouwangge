@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, ClipboardCopy, Copy, Download, KeyRound, Trash2, Undo2 } from 'lucide-react';
+import { ClipboardCopy, Copy, Download, KeyRound, Trash2, Undo2 } from 'lucide-react';
 import { maskCardCode } from '../../utils/vipCodeUtils';
 import type { AdminRequest } from './adminRequest';
 import { adminLabel, adminPageCount } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { AdminPagination } from './shared/AdminPagination';
 import { defaultTriggerDownload } from './CsvExportButton';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
 import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
@@ -30,15 +31,19 @@ export function generatedCodesFilename(count: number, now = new Date()): string 
   return `generated-codes-${stamp}-${count}.csv`;
 }
 
-function Pager({ page, total, loading, change }: { page: number; total: number; loading: boolean; change: (page: number) => void }) {
-  return <div className="admin-pagination"><span>共 {number(total)} 条 · 第 {page} / {Math.max(1, Math.ceil(total / 20))} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || page <= 1} onClick={() => change(page - 1)}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || page >= Math.ceil(total / 20)} onClick={() => change(page + 1)}><ChevronRight aria-hidden="true" /></AdminButton></div></div>;
+const LIST_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+
+function Pager({ page, total, limit, loading, change, onLimitChange, label }: { page: number; total: number; limit: number; loading: boolean; change: (page: number) => void; onLimitChange?: (limit: number) => void; label: string }) {
+  return <AdminPagination label={label} total={total} limit={limit} offset={(page - 1) * limit} busy={loading}
+    onPageChange={nextOffset => change(Math.floor(nextOffset / limit) + 1)}
+    pageSizeOptions={LIST_SIZE_OPTIONS} onLimitChange={onLimitChange} />;
 }
 export function AdminLogsCodes({ mode, request }: { mode: Mode; request: AdminRequest }) {
   return <div className="admin-codes-logs">{mode === 'logs' ? <LogsPanel request={request} /> : <CodesPanelV2 request={request} />}</div>;
 }
 
-interface LogQuery { kind: LogKind; from: string; to: string; operatorUid: string; level: string; page: number; }
-const emptyLogQuery = (): LogQuery => ({ kind: 'admin', from: '', to: '', operatorUid: '', level: '', page: 1 });
+interface LogQuery { kind: LogKind; from: string; to: string; operatorUid: string; level: string; page: number; limit: number; }
+const emptyLogQuery = (): LogQuery => ({ kind: 'admin', from: '', to: '', operatorUid: '', level: '', page: 1, limit: 20 });
 function LogsPanel({ request }: { request: AdminRequest }) {
   const [draft, setDraft] = useState(emptyLogQuery), [query, setQuery] = useState(emptyLogQuery);
   const [snapshot, setSnapshot] = useState<(Paged<LogEntry> & { page: number }) | null>(null);
@@ -49,13 +54,13 @@ function LogsPanel({ request }: { request: AdminRequest }) {
     const version = epoch.current.next(); setLoading(true); setError('');
     try {
       const dates = logDates(query.from, query.to);
-      const params = new URLSearchParams({ type: query.kind, page: String(query.page), limit: '20' });
+      const params = new URLSearchParams({ type: query.kind, page: String(query.page), limit: String(query.limit) });
       if (dates.start !== null) params.set('from', String(dates.start)); if (dates.end !== null) params.set('to', String(dates.end));
       if (query.operatorUid.trim()) params.set('operatorUid', query.operatorUid.trim()); if (query.level.trim()) params.set('level', query.level.trim());
       const result = await request<Paged<LogEntry>>('/api/admin/logs?' + params);
       if (!epoch.current.current(version)) return;
       if (!result.ok || !result.data || !Array.isArray(result.data.items) || !Number.isFinite(result.data.total) || result.data.total < 0) { setError(requestError(result, '读取日志')); return; }
-      const lastPage = adminPageCount(result.data.total);
+      const lastPage = adminPageCount(result.data.total, query.limit);
       if (query.page > lastPage) {
         setQuery(current => current === query ? { ...current, page: lastPage } : current);
         return; // Retain last successful snapshot until the effective last page is reread.
@@ -105,7 +110,8 @@ function LogsPanel({ request }: { request: AdminRequest }) {
       {loading && snapshot && <p role="status" className="admin-result-caption">正在查询，暂时保留已有记录…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取日志…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
         <AdminDataTable columns={logColumns} rows={snapshot.items} rowKey={item => item.id} ariaLabel="日志列表" minWidth={760} />
-        <Pager page={snapshot.page} total={snapshot.total} loading={loading || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
+        <Pager page={snapshot.page} total={snapshot.total} limit={snapshot.limit} loading={loading || Boolean(error)} label="日志列表分页"
+          change={page => setQuery(value => ({ ...value, page }))} onLimitChange={limit => setQuery(value => ({ ...value, limit, page: 1 }))} />
       </> : <AdminEmptyState title="没有匹配日志" description="调整查询条件或重置后重试。" />}
     </div>
     <p className="admin-stage-footnote">表中每一行都是已记录的动作；「结果未提供」表示服务端没有写入 success 字段，不等于失败。</p>
@@ -115,14 +121,14 @@ function LogsPanel({ request }: { request: AdminRequest }) {
   </section>;
 }
 
-interface CodeQuery { search: string; channel: string; memberType: 'all' | '1' | '2'; copied: 'all' | 'true' | 'false'; status: 'all' | 'delete-pending' | 'redeemed' | 'available'; page: number; }
-const emptyCodeQuery = (): CodeQuery => ({ search: '', channel: '', memberType: 'all', copied: 'all', status: 'all', page: 1 });
+interface CodeQuery { search: string; channel: string; memberType: 'all' | '1' | '2'; copied: 'all' | 'true' | 'false'; status: 'all' | 'delete-pending' | 'redeemed' | 'available'; page: number; limit: number; }
+const emptyCodeQuery = (): CodeQuery => ({ search: '', channel: '', memberType: 'all', copied: 'all', status: 'all', page: 1, limit: 20 });
 type Review = { kind: 'generation'; value: ReturnType<typeof freezeGeneration> } | { kind: 'row'; code: VipCode; updates: { copied?: boolean; deletePendingAt?: number | null }; label: string; impact: string };
 function CodesPanelV2({ request }: { request: AdminRequest }) {
   const [draft, setDraft] = useState(emptyCodeQuery), [query, setQuery] = useState(emptyCodeQuery);
   const [snapshot, setSnapshot] = useState<CodePage | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState('');
   const [records, setRecords] = useState<(Paged<Redemption> & { page: number; stats?: { total: number; vip: number; pro: number } }) | null>(null);
-  const [redemptionPage, setRedemptionPage] = useState(1), [recordsLoading, setRecordsLoading] = useState(false), [recordsError, setRecordsError] = useState('');
+  const [redemptionPage, setRedemptionPage] = useState(1), [redemptionLimit, setRedemptionLimit] = useState(20), [recordsLoading, setRecordsLoading] = useState(false), [recordsError, setRecordsError] = useState('');
   const [generation, setGeneration] = useState<GenerationDraft>({ days: 30, memberType: 1, count: 1, channel: '' });
   const [generationForm, setGenerationForm] = useState(0), [review, setReview] = useState<Review | null>(null), [reviewError, setReviewError] = useState('');
   const [result, setResult] = useState<{ codes: string[]; confirmed?: number } | null>(null), [copiedAll, setCopiedAll] = useState(false), [copyAllError, setCopyAllError] = useState('');
@@ -133,13 +139,13 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
   const loadCodes = useCallback(async (): Promise<boolean> => {
     const version = epoch.current.next(); setLoading(true); setError('');
     try {
-      const params = new URLSearchParams({ page: String(query.page), limit: '20' });
+      const params = new URLSearchParams({ page: String(query.page), limit: String(query.limit) });
       if (query.search.trim()) params.set('search', query.search.trim()); if (query.channel.trim()) params.set('channel', query.channel.trim());
       if (query.memberType !== 'all') params.set('memberType', query.memberType); if (query.copied !== 'all') params.set('copied', query.copied); if (query.status !== 'all') params.set('status', query.status);
       const response = await request<CodePage>('/api/admin/codes?' + params);
       if (!epoch.current.current(version)) return false;
       if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setError(requestError(response, '读取兑换码')); return false; }
-      const lastPage = adminPageCount(response.data.total);
+      const lastPage = adminPageCount(response.data.total, query.limit);
       if (query.page > lastPage) {
         setQuery(current => current === query ? { ...current, page: lastPage } : current);
         return false;
@@ -152,11 +158,11 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
   const loadRedemptions = useCallback(async () => {
     const version = redemptionEpoch.current.next(); setRecordsLoading(true); setRecordsError('');
     try {
-      const params = new URLSearchParams({ page: String(redemptionPage), limit: '20' }); if (query.search.trim()) params.set('code', query.search.trim());
+      const params = new URLSearchParams({ page: String(redemptionPage), limit: String(redemptionLimit) }); if (query.search.trim()) params.set('code', query.search.trim());
       const response = await request<Paged<Redemption> & { stats?: { total: number; vip: number; pro: number } }>('/api/admin/code-redemptions?' + params);
       if (!redemptionEpoch.current.current(version)) return;
       if (!response.ok || !response.data || !Array.isArray(response.data.items) || !Number.isFinite(response.data.total) || response.data.total < 0) { setRecordsError(requestError(response, '读取兑换记录')); return; }
-      const lastPage = adminPageCount(response.data.total);
+      const lastPage = adminPageCount(response.data.total, redemptionLimit);
       if (redemptionPage > lastPage) {
         setRedemptionPage(current => current === redemptionPage ? lastPage : current);
         return;
@@ -271,13 +277,14 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
       {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>
         <AdminDataTable columns={codeColumns} rows={snapshot.items} rowKey={code => code.id} ariaLabel="兑换码列表" minWidth={850}
           rowAttrs={code => ({ className: codeSaleRowClassName(code.copied), 'data-code-row': code.id })} />
-        <Pager page={snapshot.page ?? query.page} total={snapshot.total} loading={loading || anyWrite || Boolean(error)} change={page => setQuery(value => ({ ...value, page }))} />
+        <Pager page={snapshot.page ?? query.page} total={snapshot.total} limit={snapshot.limit} loading={loading || anyWrite || Boolean(error)} label="兑换码列表分页"
+          change={page => setQuery(value => ({ ...value, page }))} onLimitChange={limit => setQuery(value => ({ ...value, limit, page: 1 }))} />
       </> : <AdminEmptyState title="没有匹配兑换码" description="调整已提交筛选或重置后重试。" />}
     </section>
     <section className="admin-stage-panel" aria-busy={recordsLoading}><AdminToolbar><h2>兑换使用记录</h2><p>按当前卡密搜索条件分页；其它发行筛选不冒充兑换记录筛选。</p></AdminToolbar>
       {recordsError && <AdminErrorState message={recordsError} retry={() => void loadRedemptions()} busy={recordsLoading} />}
       <p className="admin-result-caption">服务端累计兑换 {number(records?.stats?.total)} · VIP {number(records?.stats?.vip)} · Pro {number(records?.stats?.pro)}</p>
-      {!records ? recordsLoading ? <AdminLoading label="正在读取兑换记录…" /> : <AdminEmptyState title="尚无成功读取结果" /> : records.items.length ? <><AdminDataTable columns={redemptionColumns} rows={records.items} rowKey={item => item.id} ariaLabel="兑换使用记录" minWidth={640} /><Pager page={records.page} total={records.total} loading={recordsLoading || Boolean(recordsError)} change={setRedemptionPage} /></> : <AdminEmptyState title="暂无匹配兑换记录" />}
+      {!records ? recordsLoading ? <AdminLoading label="正在读取兑换记录…" /> : <AdminEmptyState title="尚无成功读取结果" /> : records.items.length ? <><AdminDataTable columns={redemptionColumns} rows={records.items} rowKey={item => item.id} ariaLabel="兑换使用记录" minWidth={640} /><Pager page={records.page} total={records.total} limit={records.limit} loading={recordsLoading || Boolean(recordsError)} label="兑换记录分页" change={setRedemptionPage} onLimitChange={limit => { setRedemptionLimit(limit); setRedemptionPage(1); }} /></> : <AdminEmptyState title="暂无匹配兑换记录" />}
     </section>
     <AdminConfirmDialog open={Boolean(review)} title={review?.kind === 'generation' ? '确认生成这一批兑换码' : review?.label ?? '确认操作'} description="参数在打开确认时冻结，请核对范围后提交。"
       subject={review?.kind === 'generation' ? '新发行批次 · ' + number(review.value.quantity) + ' 张兑换码' : review ? maskCardCode(review.code.code) + ' · 记录 ID：' + review.code.id + ' · 本次仅 1 条' : undefined}

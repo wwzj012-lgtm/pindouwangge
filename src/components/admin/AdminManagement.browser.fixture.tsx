@@ -183,7 +183,7 @@ export async function runAdminManagementChecks() {
   assert(text().includes('第 2 页') && !text().includes('暂无匹配公告'), 'failed announcement read is not a new empty success');
   assert(button('上一页').disabled, 'failed announcement snapshot cannot paginate');
   readStatus = 200; announcementTotal = 1; await click('刷新公告');
-  assert(text().includes('测试公告') && text().includes('1/1页'), 'shrinking total returns from out-of-range page');
+  assert(text().includes('测试公告') && text().includes('共 1 条'), 'shrinking total returns from out-of-range page');
   await click('新建草稿');
   await change(top().querySelector('[data-announcement-title]')!, '新公告');
   await change(top().querySelector('[data-announcement-body]')!, '新正文');
@@ -243,7 +243,7 @@ export async function runAdminManagementChecks() {
   await mount('credits-read-only', 'credits');
   assert(Boolean(document.querySelector('.admin-credits')) && text().includes('测试积分用户'), 'credits.read mounts the actual component and real account endpoint');
   await flush(() => document.querySelector<HTMLButtonElement>('[data-credit-user="target"]')!.click());
-  assert(text().includes('当前为只读权限') && !document.querySelector('form[aria-label="填写积分调整"]'), 'read-only server capability reaches canAdjust without guessing role');
+  assert(Boolean(document.querySelector('.admin-credits')) && (text().includes('当前为只读权限') || top().innerText.includes('当前为只读权限')) && !document.querySelector('form[aria-label="填写积分调整"]'), 'read-only server capability reaches canAdjust without guessing role');
   ensureNames(); noOverflow('read-only credits');
   creditsAdjust = true;
   await mount('credits-adjust', 'credits');

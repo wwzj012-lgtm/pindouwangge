@@ -287,6 +287,20 @@
 .admin-root .admin-eligibility { font-weight:500; }
 .admin-root .admin-mono { font-family:ui-monospace,Consolas,monospace; overflow-wrap:anywhere; font-size:12px; }
 .admin-root .admin-pagination { display:flex; justify-content:space-between; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px; color:var(--admin-muted); font-size:13px; }
+/* 分页重设计：左「共 N 条」 / 中页码组 / 右「每页条数 + 跳页」。32px 控件、8px 圆角、border 仅分隔。 */
+.admin-root .admin-pagination-pages, .admin-root .admin-pagination-side { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+.admin-root .admin-pagination-side { gap:8px; }
+.admin-root .admin-pagination-page, .admin-root .admin-pagination-ellipsis { display:inline-flex; align-items:center; justify-content:center; min-width:32px; height:32px; padding:0 6px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-surface); color:var(--admin-ink); font:inherit; font-size:13px; font-variant-numeric:tabular-nums; cursor:pointer; }
+.admin-root .admin-pagination-page:hover:not(:disabled), .admin-root .admin-pagination-ellipsis:hover:not(:disabled) { background:var(--admin-subtle); }
+.admin-root .admin-pagination-page--current { background:var(--admin-primary-soft); color:var(--admin-primary); border-color:var(--admin-primary); font-weight:600; }
+.admin-root .admin-pagination-page:focus-visible, .admin-root .admin-pagination-ellipsis:focus-visible { outline:2px solid var(--admin-primary); outline-offset:2px; }
+.admin-root .admin-pagination-ellipsis { border-color:transparent; background:transparent; color:var(--admin-muted); }
+.admin-root .admin-pagination-size, .admin-root .admin-pagination-jump { display:inline-flex; align-items:center; gap:4px; color:var(--admin-muted); font-size:12px; white-space:nowrap; }
+.admin-root .admin-pagination-size select, .admin-root .admin-pagination-jump input { min-height:32px; padding:4px 8px; border:1px solid var(--admin-border); border-radius:8px; background:var(--admin-surface); color:var(--admin-ink); font:inherit; font-size:13px; }
+.admin-root .admin-pagination-jump input { width:64px; text-align:center; }
+.admin-root .admin-pagination-jump--invalid input { border-color:var(--admin-danger,#dc2626); outline:1px solid var(--admin-danger,#dc2626); }
+.admin-root .admin-pagination-jump-error { color:var(--admin-danger,#dc2626); font-size:12px; }
+.admin-root .admin-pagination--busy { opacity:.7; }
 .admin-root .admin-user-cards { display:none; }
 .admin-root .admin-user-card { border-radius:var(--admin-radius); background:var(--admin-surface); box-shadow:var(--admin-shadow); padding:10px 12px; min-width:0; }
 .admin-root .admin-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }

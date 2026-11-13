@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ShieldAlert, Trash2 } from 'lucide-react';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
+import { AdminToast } from './shared/AdminToast';
 import type { AdminRequest } from './adminRequest';
 
 export interface AdminBannedWordItem {
@@ -152,7 +153,7 @@ export function AdminBannedWords({ request }: { request: AdminRequest }) {
         <ShieldAlert aria-hidden="true" className="mr-1 inline h-3.5 w-3.5 align-[-2px]" />
         违禁词只在新增发布与编辑保存时拦截，不会回扫已有内容；词库缓存 5 分钟，修改后最多 5 分钟生效。
       </p>
-      {notice && <p className="mt-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700" role="status">{notice}</p>}
+      {notice && <AdminToast message={notice} onDismiss={() => setNotice('')} />}
       {actionError && <p className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700" role="alert">{actionError}</p>}
       {loading && !items ? <AdminLoading label="正在读取违禁词库…" />
         : error ? <AdminErrorState title="违禁词库暂不可用" message={error} retry={() => void load()} busy={loading} />

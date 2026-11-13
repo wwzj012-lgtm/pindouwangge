@@ -28,6 +28,31 @@ interface SettingHistoryPage { items: SettingHistoryItem[]; total: number; limit
 
 export interface SystemSettingItem { key: string; value: unknown; description?: string; updatedAt?: number }
 
+/** 设置列表分页拉取参数：后端校验 limit 1-100，循环页数封顶防失控。 */
+export const SETTING_KEYS_PAGE_SIZE = 100;
+export const SETTING_KEYS_MAX_PAGES = 10;
+
+/**
+ * 分页拉取全部系统设置键：limit=100 起步，按返回 total 循环拉后续 offset，
+ * 最多 SETTING_KEYS_MAX_PAGES 页（1000 条封顶）。任一页失败即抛错并携带后端原文。
+ */
+export async function fetchAllSettingKeys(request: AdminRequest, pageSize = SETTING_KEYS_PAGE_SIZE, maxPages = SETTING_KEYS_MAX_PAGES): Promise<string[]> {
+  const keys: string[] = [];
+  let offset = 0;
+  for (let page = 0; page < Math.max(1, maxPages); page++) {
+    const result = await request<{ items: SystemSettingItem[]; total: number }>(
+      `/api/admin/system-settings?limit=${pageSize}&offset=${offset}`);
+    if (!result.ok || !result.data || !Array.isArray(result.data.items)) {
+      throw new Error(result.error ?? '返回的设置列表无效，请重试');
+    }
+    for (const item of result.data.items) if (item && typeof item.key === 'string') keys.push(item.key);
+    offset += result.data.items.length;
+    const total = result.data.total;
+    if (!Number.isFinite(total) || result.data.items.length === 0 || offset >= total) break;
+  }
+  return keys;
+}
+
 const dateText = (at: number) => new Date(at).toLocaleString('zh-CN', { hour12: false });
 
 /** 快照转可 diff 的多行文本（对象/数组 pretty JSON，标量原样）。 */
@@ -109,14 +134,13 @@ export function SettingsDiffView({ request, initialKeys, initialHistory, initial
     const version = ++epoch.current;
     setLoading(true); setError('');
     try {
-      const result = await request<{ items: SystemSettingItem[]; total: number }>('/api/admin/system-settings?limit=200&offset=0');
+      const list = await fetchAllSettingKeys(request);
       if (version !== epoch.current) return;
-      if (result.ok && result.data && Array.isArray(result.data.items)) {
-        const list = result.data.items.map(item => item.key);
-        setKeys(list);
-        setSelectedKey(current => (current && list.includes(current) ? current : list[0] ?? ''));
-      } else setError('读取系统设置键列表失败：' + (result.error ?? '请重试'));
-    } catch { if (version === epoch.current) setError('读取系统设置键列表失败，请检查网络后重试。'); }
+      setKeys(list);
+      setSelectedKey(current => (current && list.includes(current) ? current : list[0] ?? ''));
+    } catch (caught) {
+      if (version === epoch.current) setError('读取系统设置列表失败：' + (caught instanceof Error ? caught.message : '请重试'));
+    }
     finally { if (version === epoch.current) setLoading(false); }
   }, [request]);
 

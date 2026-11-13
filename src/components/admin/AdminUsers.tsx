@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Ban, ChevronLeft, ChevronRight, Eye, KeyRound, Plus, X } from 'lucide-react';
+import { Ban, Eye, KeyRound, Plus, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { AdminPasswordReset } from './AdminPasswordReset';
 import { BatchActionBar } from './BatchActionBar';
@@ -8,6 +8,7 @@ import type { AdminRequest } from './adminRequest';
 import { adminPageCount, createFilterDebounce } from './adminPresentation';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { AdminPagination } from './shared/AdminPagination';
 import {
   LatestRequest, buildUserBatchBody, userOverview, dateText, emptyUserQuery, memberLabel, membershipDraft,
   membershipPresentation, membershipProposal, parseBatchOutcome, requestError, returnedExpiry, toggleUserSort,
@@ -199,7 +200,9 @@ function AdminUsersForAccount({ request }: { request: AdminRequest; key?: string
           rowAttrs={user => ({ 'data-user-row': user.uid })} /></div>
         <div className="admin-user-cards">{snapshot.items.map(user => <article className="admin-user-card" key={user.uid}><div className="admin-card-heading"><strong>{userLabel(user)}</strong><StatusBadge status={user.moderation?.status} /></div><p>{user.email}</p><p className="admin-mono admin-uid" title={user.uid}>{user.uid.length > 13 ? user.uid.slice(0, 12) + '…' : user.uid}</p><div className="admin-card-membership">{eligibility(user)}</div><p>标签：{tagText(user)}</p><p title={user.lastActiveAt == null ? '接口未返回该用户的最近活动时间' : undefined}>最近活动：{dateText(user.lastActiveAt)}</p><div className="admin-final-actions"><AdminButton data-user-open={user.uid} onClick={() => open(user)}>详情</AdminButton>{resetEntry(user)}</div></article>)}</div>
       </>}
-      {snapshot && <div className="admin-pagination"><span>共 {snapshot.total} 名 · 第 {snapshot.query.page} / {adminPageCount(snapshot.total, snapshot.limit)} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || Boolean(error) || snapshot.query.page <= 1} onClick={() => setQuery({ ...query, page: snapshot.query.page - 1 })}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || Boolean(error) || snapshot.query.page >= adminPageCount(snapshot.total, snapshot.limit)} onClick={() => setQuery({ ...query, page: snapshot.query.page + 1 })}><ChevronRight aria-hidden="true" /></AdminButton></div></div>}
+      {snapshot && <AdminPagination label="用户列表分页" total={snapshot.total} limit={snapshot.limit}
+        offset={(snapshot.query.page - 1) * snapshot.limit} busy={loading || Boolean(error)}
+        onPageChange={nextOffset => setQuery({ ...query, page: Math.floor(nextOffset / snapshot.limit) + 1 })} />}
     </div>
     <p className="admin-stage-footnote">筛选变更后 300ms 自动生效，无需提交。账号列单行展示姓名与邮箱，标签最多内联 2 个小徽标，完整 UID 悬停可见；列表接口未返回时显示 —。排序仅支持注册时间与可用积分。勾选行后可批量封禁/解封；批量操作逐条提交，结果以服务端为准。</p>
     {selected && <UserDetailDrawer key={selected.uid} user={selected} tags={tags} request={request} onClose={close} onRead={value => setDetails(current => ({ ...current, [value.user.uid]: value }))} onChanged={() => void load()} resetEntry={resetEntry} />}

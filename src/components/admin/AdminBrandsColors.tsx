@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Edit3, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading } from './AdminPrimitives';
+import { AdminPagination } from './shared/AdminPagination';
 import { BRAND_CODE_PATTERN, brandDeleteReason, colorValidation, filterBrandColors, isBrandMutationReceipt, isManagedBrandCatalog,
   normalizedCatalogCode, type ManagedBrand, type ManagedBrandCatalog, type ManagedBrandColor } from './AdminBrandsColors.model';
 import { refreshBrandCatalog } from '../../data/brandCatalog';
@@ -142,7 +143,8 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
           <div className="admin-brand-color-copy"><strong>{color.code}</strong>{color.name.trim() !== color.code.trim() && <span title={color.name}>{color.name}</span>}<code>{color.hex}</code>{color.screenReferenceOnly && <small>特殊材质 · 屏幕参考</small>}</div>
           <div className="admin-brand-color-actions"><AdminButton iconOnly variant="ghost" aria-label={`编辑颜色 ${color.code}`} disabled={locked} onClick={() => openEditor({ kind: 'color', brand, color })}><Edit3 aria-hidden="true" /></AdminButton><AdminButton iconOnly variant="ghost" aria-label={`删除颜色 ${color.code}`} disabled={locked || (brand.protected && brand.colorCount <= 1)} title={brand.protected && brand.colorCount <= 1 ? '默认 MARD 不能删除最后一个颜色' : '删除颜色'} onClick={() => { setWriteError(''); setDeletion({ brand, color }); }}><Trash2 aria-hidden="true" /></AdminButton></div>
         </article>)}</div> : <AdminEmptyState title={colorSearch ? '没有匹配的颜色' : '这个品牌还没有颜色'} description={colorSearch ? '试试其他色号、名称或 HEX。' : '添加颜色后，前台即可使用这个品牌。'} />}
-        {pages > 1 && <div className="admin-brand-pagination"><span>{currentPage + 1} / {pages}</span><div><AdminButton disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</AdminButton><AdminButton disabled={currentPage + 1 >= pages} onClick={() => setPage(currentPage + 1)}>下一页</AdminButton></div></div>}
+        {pages > 1 && <AdminPagination label="品牌颜色分页" total={colors.length} limit={48} offset={currentPage * 48}
+          onPageChange={nextOffset => setPage(Math.floor(nextOffset / 48))} />}
       </>}</div>
     </div>}
     <AdminDrawer open={Boolean(editor)} title={editor?.kind === 'brand' ? (editor.brand ? '编辑品牌' : '新增品牌') : (editor?.color ? '编辑颜色' : '新增颜色')} onClose={() => { if (!busy && !unknown) { setEditor(null); setWriteError(''); } }} pending={busy} dismissible={!unknown} className="admin-brand-editor">

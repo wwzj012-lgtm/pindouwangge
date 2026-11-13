@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { AdminPagination } from './shared/AdminPagination';
 import { dateText } from './adminUserModel';
 
 /**
@@ -47,25 +48,27 @@ const eventTone = (eventType: string): 'neutral' | 'success' | 'warning' | 'dang
 
 export function RunLogsViewer({ request, pageSize = 30, initialItems, initialSource = 'activity' }: { request: AdminRequest; pageSize?: number; initialItems?: Array<ActivityLogItem | AuditLogItem>; initialSource?: RunLogSource }) {
   const [source, setSource] = useState<RunLogSource>(initialSource);
+  const [limit, setLimit] = useState(pageSize);
+  const [offset, setOffset] = useState(0);
   const [page, setPage] = useState<RunLogPage | null>(() => initialItems
     ? { type: initialSource, items: initialItems, total: initialItems.length, limit: pageSize, offset: 0 }
     : null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const epoch = useRef(0);
-  const load = useCallback(async (target: RunLogSource) => {
+  const load = useCallback(async (target: RunLogSource, targetLimit: number, targetOffset: number) => {
     const version = ++epoch.current;
     setLoading(true); setError('');
     try {
-      const result = await request<RunLogPage>('/api/admin/run-logs' + runLogQuery(target, pageSize, 0));
+      const result = await request<RunLogPage>('/api/admin/run-logs' + runLogQuery(target, targetLimit, targetOffset));
       if (version !== epoch.current) return;
       if (result.ok && result.data && Array.isArray(result.data.items) && result.data.type === target) {
         setPage(result.data); setError('');
       } else setError((result.status === 403 ? '读取日志被服务端拒绝（403）：' : '运行日志读取失败：') + (result.error ?? '请重试'));
     } catch { if (version === epoch.current) setError('读取失败，请检查网络后重试。'); }
     finally { if (version === epoch.current) setLoading(false); }
-  }, [request, pageSize]);
-  useEffect(() => { void load(source); return () => { epoch.current++; }; }, [load, source]);
+  }, [request]);
+  useEffect(() => { void load(source, limit, offset); return () => { epoch.current++; }; }, [load, source, limit, offset]);
   const total = page?.total ?? 0;
   // 批次 5：共享表格列定义。两种数据源形状不同，列集合保持一致，单元格内按行分支。
   const columns: Array<AdminDataTableColumn<ActivityLogItem | AuditLogItem>> = [
@@ -95,21 +98,25 @@ export function RunLogsViewer({ request, pageSize = 30, initialItems, initialSou
     },
   ];
   return <section aria-label="运行日志" aria-busy={loading}>
-    <AdminToolbar actions={<AdminButton busy={loading} onClick={() => void load(source)}>刷新日志</AdminButton>}>
+    <AdminToolbar actions={<AdminButton busy={loading} onClick={() => void load(source, limit, offset)}>刷新日志</AdminButton>}>
       <h2>运行日志</h2>
       <p>原「系统日志」按数据源分流：用户活动与管理审计分开检索。</p>
     </AdminToolbar>
     <div className="admin-module-tabs" role="group" aria-label="日志来源">
       {runLogSources.map(item => <AdminButton key={item.id} aria-pressed={source === item.id}
-        variant={source === item.id ? 'primary' : 'secondary'} onClick={() => setSource(item.id)}>{item.label}</AdminButton>)}
+        variant={source === item.id ? 'primary' : 'secondary'}
+        onClick={() => { setSource(item.id); setOffset(0); }}>{item.label}</AdminButton>)}
     </div>
-    {error && <AdminErrorState message={error} retry={() => void load(source)} busy={loading} />}
+    {error && <AdminErrorState message={error} retry={() => void load(source, limit, offset)} busy={loading} />}
     <div className="admin-stage-panel" aria-busy={loading}>
       {!page ? loading ? <AdminLoading /> : <AdminEmptyState title="尚无成功读取结果" /> : page.items.length === 0
         ? <AdminEmptyState title="该来源暂无日志" />
         : <AdminDataTable columns={columns} rows={page.items} rowKey={item => item.id} ariaLabel="运行日志列表" minWidth={620}
           rowAttrs={item => ({ 'data-runlog-row': isActivityItem(item) ? 'activity' : 'audit' })} />}
-      {page && total > page.limit && <div className="admin-pagination"><span>共 {total} 条，本页显示前 {page.limit} 条</span></div>}
+      {page && <AdminPagination label="运行日志分页" total={total} limit={page.limit} offset={page.offset} busy={loading}
+        onPageChange={nextOffset => setOffset(nextOffset)}
+        pageSizeOptions={[10, 20, 30, 50, 100]}
+        onLimitChange={nextLimit => { setLimit(nextLimit); setOffset(0); }} />}
     </div>
   </section>;
 }

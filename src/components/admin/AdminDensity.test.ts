@@ -145,11 +145,12 @@ describe('admin density: global spacing scale 4/8/12/16/20', () => {
     expect(css).toMatch(/\.admin-dialog-body \{[^}]*padding:16px/);
     expect(css).toMatch(/\.admin-overlay \{[^}]*padding:16px/);
   });
-  it('keeps the credits adjust empty state compact (icon + one line, ≤120px)', () => {
+  it('keeps the credits adjust dialog compact (fixed ~480px, big balances, mini ledger)', () => {
     const creditsCss = readFileSync(fileURLToPath(new URL('./AdminCredits.css', import.meta.url)), 'utf8');
-    expect(creditsCss).toMatch(/\.admin-credits-empty \{[^}]*display:flex/);
-    expect(creditsCss).toMatch(/\.admin-credits-card\[data-empty\] \{[^}]*padding:10px 12px/);
+    expect(creditsCss).toMatch(/\.admin-credit-dialog \{[^}]*width:min\(480px,100vw\)/);
+    expect(creditsCss).toMatch(/\.admin-credit-dialog input[^{]*\{[^}]*min-height:32px/);
     const creditsSrc = readFileSync(fileURLToPath(new URL('./AdminCredits.tsx', import.meta.url)), 'utf8');
-    expect(creditsSrc).toContain('admin-credits-empty');
+    expect(creditsSrc).toContain('admin-credit-dialog');
+    expect(creditsSrc).toContain('data-credit-balance-available');
   });
 });

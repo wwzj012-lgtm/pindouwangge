@@ -73,8 +73,8 @@ export function saveCreditRecovery(operatorUid: string, body: CreditAdjustmentBo
   else sessionStorage.removeItem(recoveryKey(operatorUid));
 }
 
-export function creditLedgerQuery(q: string, type: CreditType, from: string, to: string, uid: string, page: number) {
-  const params = new URLSearchParams({ type, limit: String(CREDIT_PAGE_SIZE), offset: String(page*CREDIT_PAGE_SIZE) });
+export function creditLedgerQuery(q: string, type: CreditType, from: string, to: string, uid: string, page: number, limit = CREDIT_PAGE_SIZE) {
+  const params = new URLSearchParams({ type, limit: String(limit), offset: String(page*limit) });
   if (q.trim()) params.set('q',q.trim());
   if (uid) params.set('uid',uid);
   if (from) params.set('from', String(new Date(from).getTime()));

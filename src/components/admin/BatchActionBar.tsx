@@ -50,10 +50,11 @@ export function BatchOutcomeList({ outcome }: { outcome: BatchOutcome }) {
 export function BatchActionBar({ selectedCount, actions, onRun, onClear, disabled = false }: BatchActionBarProps) {
   const [pendingAction, setPendingAction] = useState<BatchActionOption | null>(null);
   const [reason, setReason] = useState('');
+  const [typedCount, setTypedCount] = useState('');
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<BatchRunResult | null>(null);
   const [directResultOpen, setDirectResultOpen] = useState(false);
-  const close = () => { if (running) return; setPendingAction(null); setReason(''); setResult(null); setDirectResultOpen(false); };
+  const close = () => { if (running) return; setPendingAction(null); setReason(''); setTypedCount(''); setResult(null); setDirectResultOpen(false); };
   const execute = async (actionKey: string, params: { reason: string }) => {
     setRunning(true); setResult(null);
     try { return await onRun(actionKey, params); }
@@ -61,7 +62,7 @@ export function BatchActionBar({ selectedCount, actions, onRun, onClear, disable
     finally { setRunning(false); }
   };
   const openAction = (action: BatchActionOption) => {
-    if (action.requiresReason) { setResult(null); setReason(''); setPendingAction(action); return; }
+    if (action.requiresReason) { setResult(null); setReason(''); setTypedCount(''); setPendingAction(action); return; }
     // 普通动作直接执行，不经过确认框；完成后以结果弹窗回显。
     setPendingAction(action); setDirectResultOpen(true);
     void execute(action.key, { reason: '' }).then(outcome => setResult(outcome));
@@ -72,6 +73,9 @@ export function BatchActionBar({ selectedCount, actions, onRun, onClear, disable
     setResult(outcome);
   };
   const reasonMissing = Boolean(pendingAction?.requiresReason) && !reason.trim();
+  // CRUD 细化：批量封禁 > 50 人时追加「输入数量确认」，避免一键误伤大批用户。
+  const needsCountConfirm = Boolean(pendingAction?.requiresReason) && selectedCount > 50;
+  const countMismatch = needsCountConfirm && typedCount.trim() !== String(selectedCount);
   // 验收：selectedCount = 0 时无批量条 DOM；选中后出现且 fixed 浮动不推挤布局。
   if (selectedCount === 0) return null;
   return <div className="admin-batch-bar" role="region" aria-label="批量操作" data-batch-bar>
@@ -88,15 +92,16 @@ export function BatchActionBar({ selectedCount, actions, onRun, onClear, disable
       open={Boolean(pendingAction?.requiresReason)}
       title={`批量${pendingAction?.label ?? ''}`}
       description={'将对勾选的 ' + selectedCount + ' 项逐条执行；单条失败不影响其它条。'}
-      subject={'已选 ' + selectedCount + ' 项'}
-      impact="逐条提交，逐条成功或失败；结果在提交后展示。"
+      subject={`已选 ${selectedCount} 项`}
+      impact={`${pendingAction?.label ?? ''} ${selectedCount} 项：逐条提交，逐条成功或失败；结果在提交后展示。`}
       reason={pendingAction?.requiresReason ? <label className="admin-stage-field">处理原因<textarea data-batch-reason value={reason} maxLength={500} disabled={running} onChange={(event) => setReason(event.target.value)} placeholder="每条审计记录都会带上该原因" /></label> : undefined}
       confirmLabel={'确认' + (pendingAction?.label ?? '')}
       pending={running}
-      confirmDisabled={reasonMissing}
+      confirmDisabled={reasonMissing || countMismatch}
       onClose={close}
       onConfirm={() => void run()}
     >
+      {needsCountConfirm && <label className="admin-stage-field">本次共 {selectedCount} 人，请输入数字 {selectedCount} 以确认<input data-batch-count-confirm inputMode="numeric" value={typedCount} disabled={running} onChange={(event) => setTypedCount(event.target.value)} placeholder={String(selectedCount)} /></label>}
       {result?.error && <AdminErrorState title="批量操作失败" message={result.error} />}
       {result?.outcome && <BatchOutcomeList outcome={result.outcome} />}
     </AdminConfirmDialog>

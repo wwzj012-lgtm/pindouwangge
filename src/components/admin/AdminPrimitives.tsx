@@ -190,9 +190,20 @@ export function AdminConfirmDialog({ open, title, description, confirmLabel = '�
   open: boolean; title: string; description: string; confirmLabel?: string; onConfirm: () => void; onClose: () => void; pending?: boolean; confirmDisabled?: boolean; children?: ReactNode;
   subject?: ReactNode; impact?: ReactNode; reason?: ReactNode; tone?: 'danger' | 'primary';
 }) {
+  // CRUD 细化：Enter 提交（textarea 内换行除外）；Esc 关闭由 AdminDialog 统一处理。
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'TEXTAREA' || target.tagName === 'BUTTON' || target.tagName === 'A' || target.tagName === 'SELECT') return;
+    if (pending || confirmDisabled) return;
+    event.preventDefault();
+    onConfirm();
+  };
   return <AdminDialog open={open} title={title} description={description} onClose={onClose} pending={pending} className={`admin-confirm admin-confirm--${tone}`}
     footer={<><p className="admin-dialog-hint" role="status">{pending ? '正在提交，请等待结果，勿重复操作。' : '请核对对象与影响后再确认。'}</p><div className="admin-dialog-actions"><AdminButton data-admin-autofocus onClick={onClose} disabled={pending}>取消</AdminButton>
       <AdminButton variant={tone} onClick={onConfirm} busy={pending} disabled={confirmDisabled}>{confirmLabel}</AdminButton></div></>}>
+    <div onKeyDown={handleKeyDown}>
     {(subject || impact || reason) && <dl className="admin-confirm-facts">{subject && <div><dt>操作对象</dt><dd>{subject}</dd></div>}{impact && <div><dt>影响范围</dt><dd>{impact}</dd></div>}{reason && <div><dt>操作原因</dt><dd>{reason}</dd></div>}</dl>}{children}
+    </div>
   </AdminDialog>;
 }

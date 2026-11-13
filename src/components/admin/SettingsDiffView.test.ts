@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import type { AdminRequest } from './adminRequest';
 import {
   SettingsDiffView,
+  fetchAllSettingKeys,
+  SETTING_KEYS_MAX_PAGES,
   settingDiffLines,
   settingSnapshotText,
   type SettingHistoryItem,
@@ -58,6 +60,47 @@ describe('settingDiffLines (红绿行 diff)', () => {
     expect(settingDiffLines('a\nb', 'a').map(l => l.kind)).toEqual(['same', 'removed']);
     expect(settingDiffLines('∅', '新值').map(l => l.kind)).toEqual(['removed', 'added']);
     expect(settingDiffLines('same', 'same')).toEqual([{ kind: 'same', text: 'same' }]);
+  });
+});
+
+describe('fetchAllSettingKeys（分页拉取设置键）', () => {
+  const ok = (data: unknown) => ({ ok: true, status: 200, data });
+
+  it('paginates with limit=100 and merges every page when total exceeds one page', async () => {
+    const paths: string[] = [];
+    const request: AdminRequest = async <T,>(path: string) => {
+      paths.push(path);
+      const offset = Number(new URL('https://x' + path).searchParams.get('offset'));
+      const limit = Number(new URL('https://x' + path).searchParams.get('limit'));
+      // total=150：第一页 100 条 + 第二页 50 条。
+      const items = Array.from({ length: Math.min(100, 150 - offset) }, (_v, i) => ({ key: `setting_${offset + i}`, value: null }));
+      return ok({ items, total: 150, limit, offset }) as unknown as T;
+    };
+    const keys = await fetchAllSettingKeys(request);
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toContain('limit=100&offset=0');
+    expect(paths[1]).toContain('limit=100&offset=100');
+    expect(keys).toHaveLength(150);
+    expect(keys[0]).toBe('setting_0');
+    expect(keys[149]).toBe('setting_149');
+  });
+
+  it('stops after a single page when total fits, and never exceeds the safety cap', async () => {
+    const paths: string[] = [];
+    const request: AdminRequest = async <T,>(path: string) => {
+      paths.push(path);
+      const offset = Number(new URL('https://x' + path).searchParams.get('offset'));
+      const items = Array.from({ length: 100 }, (_v, i) => ({ key: `setting_${offset + i}`, value: null }));
+      return ok({ items, total: 9999, limit: 100, offset }) as unknown as T;
+    };
+    const keys = await fetchAllSettingKeys(request);
+    expect(paths).toHaveLength(SETTING_KEYS_MAX_PAGES);
+    expect(keys).toHaveLength(SETTING_KEYS_MAX_PAGES * 100);
+  });
+
+  it('throws with the backend error text when a page fails', async () => {
+    const request: AdminRequest = async <T,>() => ({ ok: false, status: 400, error: 'limit 必须在 1-100 之间' } as unknown as T);
+    await expect(fetchAllSettingKeys(request)).rejects.toThrow('limit 必须在 1-100 之间');
   });
 });
 

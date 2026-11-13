@@ -1,10 +1,11 @@
 import { useAuth } from '../../context/AuthContext';
 import { contentRecoveryFor } from './adminWriteRecovery';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ChevronLeft, ChevronRight, Eye, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Eye, RefreshCw, ShieldAlert } from 'lucide-react';
 import { createAdminBlobRequest, type AdminBlobRequest, type AdminRequest } from './adminRequest';
 import { AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { AdminPagination } from './shared/AdminPagination';
 import { dateText } from './adminUserModel';
 
 type CommunityStatus = 'all' | 'public' | 'private' | 'blocked' | 'withdrawn';
@@ -316,7 +317,6 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
   }, [blobRequest, selected]);
 
   const applyFilters = () => { setPage(0); setSearch(searchDraft.trim()); setStatus(statusDraft); };
-  const maxPage = useMemo(() => Math.max(0, Math.ceil((snapshot?.total ?? 0) / LIMIT) - 1), [snapshot?.total]);
   const selectedPost = selected?.post;
   const canModerate = selectedPost?.withdrawnAt === null && (selectedPost?.moderation.state === 'hidden' || selectedPost?.visibility === 'public');
   const action = selectedPost?.moderation.state === 'hidden' ? 'restore' : 'takedown';
@@ -420,7 +420,8 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
           <div className="admin-community-table-wrap"><AdminDataTable className="table-fixed" columns={postColumns} rows={snapshot.items} rowKey={post => post.id} ariaLabel="社区帖子列表" minWidth={680}
             rowAttrs={post => ({ 'data-community-post': post.id })} /></div>
           <div className="admin-community-cards">{snapshot.items.map(post => <article className="admin-community-card" key={post.id}><strong>{post.title || post.id}</strong><small className="admin-mono" title={post.id}>{post.id}</small><p>{postStatus(post)} · 审核版本 {post.moderation.version}</p><AdminButton onClick={() => void readDetail(post.id)} disabled={detailLoading}>查看详情</AdminButton></article>)}</div>
-          <div className="admin-pagination"><span>共 {snapshot.total} 条 · 第 {page + 1} / {maxPage + 1} 页</span><div><AdminButton iconOnly aria-label="上一页" disabled={loading || page <= 0} onClick={() => setPage(value => value - 1)}><ChevronLeft aria-hidden="true" /></AdminButton><AdminButton iconOnly aria-label="下一页" disabled={loading || page >= maxPage} onClick={() => setPage(value => value + 1)}><ChevronRight aria-hidden="true" /></AdminButton></div></div>
+          <AdminPagination label="社区帖子分页" total={snapshot.total} limit={LIMIT} offset={page * LIMIT} busy={loading}
+            onPageChange={nextOffset => setPage(Math.floor(nextOffset / LIMIT))} />
         </>}
       </section>
       {/* 没有选中帖子时不渲染右栏：原来固定占 380px 只放一句"选择一个帖子"，大半屏被空面板吃掉。选中后才展开，列表自动收窄。 */}
@@ -454,10 +455,8 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
         : queueData.items.length === 0 ? <AdminEmptyState title="队列为空" description="当前筛选下没有待处理的帖子。" />
         : <div className="admin-community-table-wrap"><AdminDataTable className="table-fixed" columns={queueColumns} rows={queueData.items} rowKey={item => item.postId} ariaLabel="审核队列列表" minWidth={680}
           rowAttrs={item => ({ 'data-review-queue-item': item.postId })} /></div>}
-      <div className="admin-pagination"><span>共 {queueData?.total ?? 0} 条</span><div>
-        <AdminButton iconOnly aria-label="上一页" disabled={queueLoading || queuePage <= 0} onClick={() => setQueuePage(value => value - 1)}><ChevronLeft aria-hidden="true" /></AdminButton>
-        <AdminButton iconOnly aria-label="下一页" disabled={queueLoading || !queueData || Math.ceil(queueData.total / TAB_LIMIT) <= queuePage + 1} onClick={() => setQueuePage(value => value + 1)}><ChevronRight aria-hidden="true" /></AdminButton>
-      </div></div>
+      <AdminPagination label="审核队列分页" total={queueData?.total ?? 0} limit={TAB_LIMIT} offset={queuePage * TAB_LIMIT} busy={queueLoading}
+        onPageChange={nextOffset => setQueuePage(Math.floor(nextOffset / TAB_LIMIT))} />
       {queueSelected && <div className="admin-community-detail" data-review-target={queueSelected.postId}>
         <AdminToolbar><h2>审核决策</h2></AdminToolbar>
         {/* 运营事实行（标题·来源·备注）不用 toolbar-copy：display:none 只隐藏静态描述，不能连带运营数据。 */}
@@ -485,10 +484,8 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
         : reportData.items.length === 0 ? <AdminEmptyState title="没有匹配的举报" description="当前筛选下没有举报记录。" />
         : <div className="admin-community-table-wrap"><AdminDataTable className="table-fixed" columns={reportColumns} rows={reportData.items} rowKey={item => item.id} ariaLabel="举报列表" minWidth={680}
           rowAttrs={item => ({ 'data-report-item': item.id })} /></div>}
-      <div className="admin-pagination"><span>共 {reportData?.total ?? 0} 条</span><div>
-        <AdminButton iconOnly aria-label="上一页" disabled={reportLoading || reportPage <= 0} onClick={() => setReportPage(value => value - 1)}><ChevronLeft aria-hidden="true" /></AdminButton>
-        <AdminButton iconOnly aria-label="下一页" disabled={reportLoading || !reportData || Math.ceil(reportData.total / TAB_LIMIT) <= reportPage + 1} onClick={() => setReportPage(value => value + 1)}><ChevronRight aria-hidden="true" /></AdminButton>
-      </div></div>
+      <AdminPagination label="举报列表分页" total={reportData?.total ?? 0} limit={TAB_LIMIT} offset={reportPage * TAB_LIMIT} busy={reportLoading}
+        onPageChange={nextOffset => setReportPage(Math.floor(nextOffset / TAB_LIMIT))} />
       {reportSelected && <div className="admin-community-detail" data-report-target={reportSelected.id}>
         <AdminToolbar><h2>举报处置</h2></AdminToolbar>
         <p className="admin-fact-line" data-fact-line="report"><strong>{reportSelected.post?.title || reportSelected.entityId}</strong> · 举报人：{reportSelected.reporter?.displayName || '匿名'}</p>

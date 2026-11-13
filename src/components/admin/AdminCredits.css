@@ -9,12 +9,7 @@
 .admin-credits-filters label:first-child { flex:0 1 320px; }
 .admin-credits input,.admin-credits select,.admin-credits textarea { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:6px 10px; background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:32px; }
 .admin-credits input:focus-visible,.admin-credits select:focus-visible,.admin-credits textarea:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
-.admin-credits-columns { display:grid; grid-template-columns:minmax(0,1.3fr) minmax(280px,1fr); gap:12px; align-items:start; }
 .admin-credits-card { padding:12px 14px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px; min-width:0; background:var(--admin-surface,#fff); }
-/* 积分调整右栏空态：紧凑占位（图标 + 一行文字，高 ≤120px），不再占半屏。 */
-.admin-credits-card[data-empty] { padding:10px 12px; }
-.admin-credits-empty { display:flex; align-items:center; gap:8px; min-height:0; margin:0; color:var(--admin-muted,#6b7b72); font-size:13px; }
-.admin-credits-empty svg { width:16px; height:16px; flex-shrink:0; opacity:.6; }
 .admin-credits-hint { color:var(--admin-muted,#6b7b72); line-height:1.6; }
 .admin-credits-table { max-width:100%; overflow-x:auto; }
 .admin-credits table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }
@@ -22,9 +17,24 @@
    此处不再重复声明（会被更高特异性覆盖，属死规则）。 */
 .admin-credits th { font-weight:600; white-space:nowrap; }
 .admin-credits small { display:block; margin-top:2px; overflow-wrap:anywhere; font-size:12px; }
-.admin-credits fieldset { border:0; padding:0; margin:8px 0 0; display:grid; gap:10px; }
-.admin-credits fieldset:disabled { opacity:.65; }
-.admin-credits fieldset legend { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+.admin-credits fieldset, .admin-credit-dialog fieldset { border:0; padding:0; margin:8px 0 0; display:grid; gap:10px; }
+.admin-credits fieldset:disabled, .admin-credit-dialog fieldset:disabled { opacity:.65; }
+.admin-credits fieldset legend, .admin-credit-dialog fieldset legend { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+/* 积分调整弹窗（~480px）：余额大数字 + 调整表单 + 最近 10 条流水集中在一个窗口内。 */
+.admin-credit-dialog { width:min(480px,100vw); max-width:480px; }
+.admin-credit-dialog label { display:grid; gap:4px; font-size:13px; font-weight:600; min-width:0; }
+.admin-credit-dialog input, .admin-credit-dialog select, .admin-credit-dialog textarea { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:6px 10px; background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:32px; }
+.admin-credit-dialog input:focus-visible, .admin-credit-dialog select:focus-visible, .admin-credit-dialog textarea:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
+.admin-credit-dialog [role=alert] { color:var(--admin-danger,#a02c2c); }
+.admin-credit-dialog [data-credit-success] { padding:10px; border:1px solid #81a88b; border-radius:8px; }
+.admin-credit-mini-ledger { border-top:1px solid var(--admin-border,#d7e0d9); padding-top:10px; margin-top:10px; }
+.admin-credit-mini-ledger h3 { font-size:14px; }
+.admin-credit-mini-list { list-style:none; margin:0; padding:0; display:grid; gap:0; }
+.admin-credit-mini-list li { display:flex; align-items:baseline; gap:8px; padding:6px 0; border-bottom:1px solid var(--admin-border,#d7e0d9); font-size:13px; }
+.admin-credit-mini-list li:last-child { border-bottom:0; }
+.admin-credit-mini-list span { flex:1; min-width:0; overflow-wrap:anywhere; }
+.admin-credit-mini-list strong { font-variant-numeric:tabular-nums; white-space:nowrap; }
+.admin-credit-mini-list small { color:var(--admin-muted,#6b7b72); font-size:12px; white-space:nowrap; }
 .admin-credits-balances { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin:0; }
 .admin-credits-balances div { background:var(--admin-background,#f2f6f3); padding:10px; border-radius:8px; }
 .admin-credits-balances dt { font-size:12px; }
@@ -32,10 +42,8 @@
 .admin-credits-heading { display:flex; align-items:start; justify-content:space-between; gap:10px; }
 .admin-credits-recovery { padding:12px; border:1px solid #b58e37; background:var(--admin-warning-surface,#fff9eb); border-radius:10px; }
 .admin-credits-recovery .admin-button { margin:4px 8px 4px 0; }
-.admin-credits-pagination { display:flex; justify-content:flex-end; align-items:center; flex-wrap:wrap; gap:8px; padding-top:8px; font-size:12px; }
 .admin-credits [role=alert] { color:var(--admin-danger,#a02c2c); }
 .admin-credits [data-credit-success] { padding:10px; border:1px solid #81a88b; border-radius:8px; }
-@media (max-width:900px) { .admin-credits-columns { grid-template-columns:minmax(0,1fr); } }
 @media (max-width:520px) { .admin-credits-card { padding:12px; } .admin-credits-filters>label { flex:1 1 100%; } .admin-credits-heading { flex-wrap:wrap; } .admin-credits-balances dd { font-size:20px; } }
 
 /* 手机上这张表被压到 390px：邮箱从中间断词、「查看」被挤成竖排两个字。

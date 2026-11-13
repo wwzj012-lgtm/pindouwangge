@@ -3,6 +3,7 @@ import { Eye, FileImage, Lock, RefreshCw, Search, ShieldAlert, Trash2, X } from 
 import { getAdminSessionToken, getApiToken } from '../../utils/api';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar, AdminDrawer } from './AdminPrimitives';
+import { AdminPagination } from './shared/AdminPagination';
 
 export interface AdminAssetUsage {
   postCount: number;
@@ -166,9 +167,6 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
     if (preview?.url) URL.revokeObjectURL(preview.url);
   }, [preview?.url]);
 
-  const pages = Math.max(1, Math.ceil(total / limit));
-  const canPrevious = page > 1 && !loading && !error;
-  const canNext = page < pages && !loading && !error;
   const rows = useMemo(() => items, [items]);
 
   const openPreview = async (asset: AdminCommunityAsset) => {
@@ -218,7 +216,8 @@ export function AdminPaletteResources({ request, previewRequest = defaultPreview
       {loading ? <AdminLoading label="正在检查 KV 文件与引用关系…" /> : rows.length === 0 ? <AdminEmptyState title={error ? '尚无成功读取结果，请重试' : filtered ? '没有匹配的资源' : '暂无真实资源'} description={error ? undefined : filtered ? '换个状态、类型或清空搜索词再试。' : '列表只显示 community_assets 中有记录的真实资源。'} /> : <>
         <div className="hidden overflow-x-auto border md:block"><table className="w-full min-w-[1060px] text-left text-sm"><thead className="admin-final-surface text-xs admin-muted"><tr><th className="px-4 py-3">预览</th><th className="px-4 py-3">资源 / 所属用户</th><th className="px-4 py-3">类型 / 大小</th><th className="px-4 py-3">关联使用</th><th className="px-4 py-3">文件状态</th><th className="px-4 py-3 text-right">安全操作</th></tr></thead><tbody>{rows.map((asset) => { const availability = availabilityLabel(asset.availability); const deleteReason = assetDeleteReason(asset); return <tr key={asset.id} className="border-t"><td className="px-4 py-3"><button type="button" className="grid h-14 w-14 place-items-center border admin-final-surface" onClick={() => void openPreview(asset)} disabled={previewLoading === asset.id || asset.availability !== 'available'} aria-label={`预览资源 ${asset.id}`}>{previewLoading === asset.id ? <RefreshCw className="admin-spin" aria-hidden="true" /> : <Eye aria-hidden="true" />}</button></td><td className="max-w-[18rem] px-4 py-3"><p className="truncate font-mono text-xs">{asset.id}</p><p className="mt-1 truncate text-xs admin-muted">{asset.ownerUid}</p><p className="mt-1 text-xs admin-muted">{date(asset.createdAt)}</p></td><td className="px-4 py-3"><p>{asset.contentType}</p><p className="mt-1 text-xs admin-muted">{formatAssetBytes(asset.byteSize)}</p></td><td className="px-4 py-3"><p>{formatAssetUsage(asset.usage)}</p><p className="mt-1 text-xs admin-muted">活跃帖子 {asset.usage.activePostCount}</p></td><td className="px-4 py-3"><AdminBadge tone={availability.tone}>{availability.label}</AdminBadge></td><td className="px-4 py-3"><div className="flex justify-end"><AdminButton variant={deleteReason ? 'ghost' : 'danger'} disabled={readOnly || Boolean(deleteReason) || deleting} onClick={() => setDeleteTarget(asset)} title={deleteReason ?? '删除真实 KV 文件及其目录记录'}>{deleteReason ? <Lock aria-hidden="true" /> : <Trash2 aria-hidden="true" />}{deleteReason ? '受保护' : '删除'}</AdminButton></div></td></tr>; })}</tbody></table></div>
         <div className="space-y-2 md:hidden">{rows.map((asset) => { const availability = availabilityLabel(asset.availability); const deleteReason = assetDeleteReason(asset); return <article key={asset.id} className="border admin-final-surface p-3"><div className="flex gap-3"><button type="button" className="grid h-14 w-14 shrink-0 place-items-center border" onClick={() => void openPreview(asset)} disabled={previewLoading === asset.id || asset.availability !== 'available'} aria-label={`预览资源 ${asset.id}`}><Eye aria-hidden="true" /></button><div className="min-w-0 flex-1"><p className="truncate font-mono text-xs">{asset.id}</p><p className="mt-1 truncate text-xs admin-muted">{asset.ownerUid}</p><p className="mt-2 text-sm">{asset.contentType} · {formatAssetBytes(asset.byteSize)}</p><p className="mt-1 text-xs admin-muted">{formatAssetUsage(asset.usage)} · {availability.label}</p></div></div><div className="mt-3 flex justify-end"><AdminButton variant={deleteReason ? 'ghost' : 'danger'} disabled={readOnly || Boolean(deleteReason) || deleting} onClick={() => setDeleteTarget(asset)}>{deleteReason ? '受保护' : '删除真实文件'}</AdminButton></div></article>; })}</div>
-        <div className="admin-pagination mt-4"><span>共{total}条 · {page}/{pages}页</span><div className="flex gap-2"><AdminButton disabled={!canPrevious} onClick={() => setPage((value) => value - 1)}>上一页</AdminButton><AdminButton disabled={!canNext} onClick={() => setPage((value) => value + 1)}>下一页</AdminButton></div></div>
+        <AdminPagination label="真实资源分页" total={total} limit={limit} offset={(page - 1) * limit} busy={loading || Boolean(error)}
+          onPageChange={nextOffset => setPage(Math.floor(nextOffset / limit) + 1)} />
       </>}
     </div>
     <AdminConfirmDialog open={Boolean(deleteTarget)} title="删除真实资源文件？" description={deleteTarget ? `对象 ${deleteTarget.id} 将从 KV 删除，且 D1 目录记录也会删除。服务端会再次检查帖子和作品引用；任何引用都会拒绝操作。` : ''} confirmLabel="删除文件" onClose={() => { if (!deleting) setDeleteTarget(null); }} onConfirm={() => void deleteAsset()} pending={deleting} confirmDisabled={Boolean(deleteTarget && (readOnly || assetDeleteReason(deleteTarget)))}>

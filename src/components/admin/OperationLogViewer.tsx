@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
+import { AdminPagination } from './shared/AdminPagination';
 import { FilterBar } from './shared/FilterBar';
 import { dateText } from './adminUserModel';
 
@@ -141,15 +142,10 @@ export function OperationLogViewer({ request, pageSize = 30, initialItems }: { r
                 </table>
               </td></tr>
               : undefined} />
-          <div className="admin-pagination">
-            <span>共 {total} 条 · 第 {Math.floor(page.offset / page.limit) + 1} 页</span>
-            <div>
-              <AdminButton iconOnly aria-label="上一页" disabled={loading || page.offset <= 0}
-                onClick={() => setQuery({ ...query, offset: Math.max(0, query.offset - pageSize) })}>‹</AdminButton>
-              <AdminButton iconOnly aria-label="下一页" disabled={loading || page.offset + page.limit >= total}
-                onClick={() => setQuery({ ...query, offset: query.offset + pageSize })}>›</AdminButton>
-            </div>
-          </div>
+          <AdminPagination label="操作审计分页" total={total} limit={page.limit} offset={page.offset} busy={loading}
+            onPageChange={nextOffset => setQuery({ ...query, offset: nextOffset })}
+            pageSizeOptions={[10, 20, 30, 50, 100]}
+            onLimitChange={nextLimit => setQuery({ ...query, limit: nextLimit, offset: 0 })} />
         </>}
     </div>
   </section>;

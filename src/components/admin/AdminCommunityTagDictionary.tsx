@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Save } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
 import { AdminButton, AdminConfirmDialog, AdminErrorState, AdminToolbar } from './AdminPrimitives';
+import { AdminToast } from './shared/AdminToast';
 import { AdminStatusBadge } from './shared/StatusBadge';
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
 import { EmptyState } from './shared/EmptyState';
@@ -151,7 +152,7 @@ export function AdminCommunityTagDictionary({ request, initialItems }: { request
       <h2>标签字典</h2>
       <p>改展示名或隐藏标签即时生效；隐藏后前台发布器与筛选不再返回，存量帖子上的标签保留不回扫。</p>
     </AdminToolbar>
-    {notice && <p className="admin-success-message" role="status">{notice}</p>}
+    {notice && <AdminToast message={notice} onDismiss={() => setNotice('')} />}
     {actionError && <AdminErrorState title="标签更新未完成" message={actionError} retry={() => void load()} busy={loading || savingTag !== null} />}
     {error && <AdminErrorState title="标签字典暂不可用" message={error} retry={() => void load()} busy={loading} />}
     {!items ? loading ? <LoadingSkeleton rows={6} columns={5} ariaLabel="正在读取标签字典…" />

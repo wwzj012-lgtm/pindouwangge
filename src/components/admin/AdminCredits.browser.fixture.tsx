@@ -11,7 +11,7 @@ export async function runAdminCreditsChecks() {
   const check=(condition:unknown,label:string)=>{if(!condition)throw Error(label);checks.push(label);};
   const tick=()=>new Promise(r=>setTimeout(r,20));
   const wait=async(predicate:()=>unknown,label='DOM wait')=>{for(let i=0;i<100;i++){if(predicate())return;await tick();}throw Error(label);};
-  const text=()=>document.getElementById('root')!.textContent??'';
+  const text=()=>(document.getElementById('root')!.textContent??'')+((document.querySelector('[data-admin-portal]')?.textContent)??'');
   const requests:Array<{path:string;body?:CreditAdjustmentBody}>=[],writes:CreditAdjustmentBody[]=[];
   let operator='credit-operator',canRead=true,canAdjust=true,liveAvailable=123;
   let mode:'success'|'unknown'|'throw'|'malformed'|'deny'|'pending'='success';
@@ -50,7 +50,7 @@ export async function runAdminCreditsChecks() {
   const render=()=>flushSync(()=>root.render(<AdminCredits request={request} canRead={canRead} canAdjust={canAdjust} operatorUid={operator}/>));
   const button=(label:string,container:ParentNode|null=document)=>container?Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find(b=>b.textContent?.trim()===label):undefined;
   const click=(label:string,container:ParentNode=document)=>{const b=button(label,container);if(!b)throw Error('Missing button '+label);flushSync(()=>b.click());};
-  const field=(label:string)=>Array.from(document.querySelectorAll<HTMLLabelElement>('.admin-credits label')).find(l=>l.textContent?.startsWith(label))?.querySelector<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>('input,select,textarea');
+  const field=(label:string)=>Array.from(document.querySelectorAll<HTMLLabelElement>('.admin-credits label, [data-admin-portal] label')).find(l=>l.textContent?.startsWith(label))?.querySelector<HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement>('input,select,textarea');
   const set=(label:string,value:string)=>{
     const el=field(label);if(!el)throw Error('Missing field '+label);
     const proto=el instanceof HTMLSelectElement?HTMLSelectElement.prototype:el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;
@@ -58,8 +58,9 @@ export async function runAdminCreditsChecks() {
   };
   const submit=(label:string)=>{const form=document.querySelector<HTMLFormElement>(`form[aria-label="${label}"]`)!;flushSync(()=>form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));};
   const selectUser=async(uid='target')=>{const b=document.querySelector<HTMLButtonElement>(`[data-credit-user="${uid}"]`)!;flushSync(()=>b.click());await wait(()=>document.querySelector('[data-credit-selected]')?.textContent?.includes(uid));};
-  const prepare=async(amount='0.1',reason='核实积分补偿')=>{await selectUser();set('调整积分',amount);set('调整原因',reason);submit('填写积分调整');await wait(()=>document.querySelector('[role="dialog"]'));};
-  const dialog=()=>document.querySelector<HTMLElement>('[role="dialog"]')!;
+  const prepare=async(amount='0.1',reason='核实积分补偿')=>{await selectUser();set('调整积分',amount);set('调整原因',reason);submit('填写积分调整');await wait(()=>document.querySelector('[role="dialog"].admin-confirm'));};
+  // dialog() 指向复核确认弹窗（.admin-confirm），与长期打开的「积分调整」信息弹窗区分。
+  const dialog=()=>document.querySelector<HTMLElement>('[role="dialog"].admin-confirm')!;
 
   saveCreditRecovery(operator,null);saveCreditRecovery('second-operator',null);
   render();await wait(()=>document.querySelector('[data-credit-user="target"]'));
@@ -83,7 +84,7 @@ export async function runAdminCreditsChecks() {
   check(writes[0].deltaUnits===-1&&writes[0].expectedHeldUnits===20,'body has integer unit and held snapshot');
   check(writes[0].expectedAvailableUnits===123&&writes[0].idempotencyKey.length>=16,'body has confirmation and unique key');
   check(readCreditRecovery(operator).body?.idempotencyKey===writes[0].idempotencyKey,'intent persisted before response');
-  liveAvailable=122;pendingPost!(success(adjustment(writes[0])));await wait(()=>document.querySelector('[data-credit-success]'));
+  liveAvailable=122;pendingPost!(success(adjustment(writes[0])));await wait(()=>document.querySelector('[data-credit-success],[data-admin-toast]'));
   check(text().includes('12.3 → 12.2'),'success reports real before and after');check(readCreditRecovery(operator).body===null,'confirmed completion clears recovery');
 
   mode='unknown';await prepare('0.1','网络中断补偿');click('确认调整',dialog());await wait(()=>!dialog()&&text().includes('有一笔调整等待核查'));
@@ -103,7 +104,7 @@ export async function runAdminCreditsChecks() {
   check(readCreditRecovery(operator).body!==null,'retry rejection cannot erase uncertain original');
   lookup='fail';click('查询原请求结果');await wait(()=>text().includes('暂时无法确认'));
   check(readCreditRecovery(operator).body!==null,'failed lookup retains intent');
-  lookup='completed';click('查询原请求结果');await wait(()=>document.querySelector('[data-credit-success]'));
+  lookup='completed';click('查询原请求结果');await wait(()=>document.querySelector('[data-credit-success],[data-admin-toast]'));
   check(readCreditRecovery(operator).body===null,'lookup completion clears intent');
 
   mode='deny';await prepare('0.1','余额冲突');click('确认调整',dialog());await wait(()=>!dialog()&&text().includes('账户余额或版本已变化'));

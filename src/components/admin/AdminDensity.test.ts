@@ -91,21 +91,44 @@ describe('admin density: dashboard todo and today rows go horizontal', () => {
 });
 
 describe('admin density: register trend is a real bar chart', () => {
-  it('renders fixed 28px columns centered, max 64px tall, zero days as 3px gray bars', () => {
+  it('renders fixed 28px columns centered, max 44px tall, zero days as 3px gray bars', () => {
     const trend = css.match(/\.admin-register-trend \{[^}]*\}/)?.[0] ?? '';
-    expect(trend).toContain('justify-content:center');
+    expect(trend).toContain('flex-direction:column');
+    const bars = css.match(/\.admin-register-bars \{[^}]*\}/)?.[0] ?? '';
+    expect(bars).toContain('justify-content:center');
     const bar = css.match(/\.admin-register-bar \{[^}]*\}/)?.[0] ?? '';
     expect(bar).toContain('width:28px');
     expect(bar).toContain('flex-direction:column');
     const track = css.match(/\.admin-register-track \{[^}]*\}/)?.[0] ?? '';
-    expect(track).toContain('height:64px');
+    expect(track).toContain('height:44px');
     expect(track).toContain('align-items:flex-end');
     expect(css).toMatch(/\.admin-register-track i\[data-zero='true'\] \{[^}]*background:var\(--admin-border\)/);
   });
-  it('computes pixel heights with a 64px peak and 3px zero baseline in the model', () => {
+  it('computes pixel heights with a 44px peak and 3px zero baseline in the model', () => {
     expect(modelSrc).toContain('export function trendBarPixelHeights');
-    expect(modelSrc).toContain('peakHeight = 64');
+    expect(modelSrc).toContain('peakHeight = 44');
     expect(modelSrc).toContain('return points.map(() => 3)');
+  });
+  it('renders no chart when the 7-day total is zero, only a compact gray note', () => {
+    // 用户反馈"这个是什么意思，一堆数字"：全 0 时旧版渲染 3px 灰柱 + 64px 空轨道。
+    // 重做后 total===0 不渲染图表，只留一行 ≤24px 的灰字（不可下钻）。
+    expect(modelSrc).toContain('export function registerTrendTotal');
+    expect(consoleSrc).toMatch(/trendTotal === 0 && <p className="admin-register-empty" data-register-trend-empty>近 7 天无新注册<\/p>/);
+    expect(consoleSrc).toMatch(/trendTotal > 0 && <div className="admin-register-trend" data-register-trend>/);
+    const emptyRule = css.match(/\.admin-register-empty \{[^}]*\}/)?.[0] ?? '';
+    expect(emptyRule).toContain('font-size:12px');
+    expect(emptyRule).toContain('color:var(--admin-muted)');
+  });
+  it('shows numeric value labels above non-zero bars, marks the peak bar and tooltips MM-DD · N 人', () => {
+    expect(consoleSrc).toContain('admin-register-value');
+    expect(consoleSrc).toMatch(/data-peak=\{point\.count > 0 && point\.count === trendPeak \|\| undefined\}/);
+    expect(consoleSrc).toContain("point.date.slice(5) + ' · ' + point.count + ' 人'");
+    expect(css).toMatch(/\.admin-register-bar\[data-peak='true'\] \.admin-register-track i \{[^}]*background:var\(--admin-primary\)/);
+    expect(css).toMatch(/\.admin-register-bar\[data-peak='true'\] \.admin-register-value \{[^}]*color:var\(--admin-primary\)/);
+  });
+  it('caps the whole trend block (title + labels + bars + dates) at 110px when data exists', () => {
+    // 6*2 上下内边距 + 标题 15 + gap 2 + 数值标签 14 + gap 3 + 轨道 44 + gap 3 + 日期 13 = 106px。
+    expect(2 * 6 + 15 + 2 + 14 + 3 + 44 + 3 + 13).toBeLessThanOrEqual(110);
   });
   it('keeps the 7-column trend from filling the whole width (7 × 40px ≈ 280px centered)', () => {
     // 柱宽 28px + 两端 12px gap，7 柱总宽约 7×28 + 6×12 = 268px，远小于 1280 全宽。

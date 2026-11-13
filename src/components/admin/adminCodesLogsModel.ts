@@ -28,6 +28,21 @@ export function codeWriteFeedback(label: string, rereadSucceeded: boolean): { su
 }
 
 export interface GenerationDraft { days: number; memberType: 1 | 2; count: number; channel: string; }
+/**
+ * 发行渠道建议值（datalist）：从已加载的兑换码与兑换记录里去重收集既有渠道，
+ * 让"发行渠道"这个可选输入框能给出真实的可选值（用户反馈："可选呢？？"）。
+ * 保持首次出现顺序；非字符串/纯空白渠道忽略；渠道是自由字符串，不校验白名单。
+ */
+export function collectKnownChannels(...sources: Array<ReadonlyArray<{ channel?: string | null }>>): string[] {
+  const seen = new Set<string>();
+  for (const source of sources) {
+    for (const item of source) {
+      const channel = typeof item?.channel === 'string' ? item.channel.trim() : '';
+      if (channel) seen.add(channel);
+    }
+  }
+  return Array.from(seen);
+}
 export function freezeGeneration(draft: GenerationDraft) {
   if (draft.days === 7 && draft.memberType !== 1) throw new Error('7天体验卡仅支持普通VIP。');
   const quantity = Number.isFinite(draft.count) ? Math.min(500, Math.max(1, Math.floor(draft.count))) : 1;

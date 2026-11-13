@@ -8,7 +8,7 @@ import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTab
 import { AdminPagination } from './shared/AdminPagination';
 import { defaultTriggerDownload } from './CsvExportButton';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
-import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
+import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, collectKnownChannels, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
 
 type Mode = 'logs' | 'codes';
 type LogKind = 'admin' | 'user' | 'error';
@@ -253,13 +253,17 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     { key: 'redeemedAt', label: '兑换时间', render: item => dateText(item.redeemedAt) },
   ];
   const anyWrite = lockView.batch || lockView.rows.size > 0;
+  // 发行渠道是自由字符串（后端 maxLength 100，"不填则沿用既有渠道"）：从已加载的
+  // 兑换码与兑换记录里去重收集既有渠道值，给两处渠道输入框提供 datalist 可选项。
+  const knownChannels = useMemo(() => collectKnownChannels(snapshot?.items ?? [], records?.items ?? []), [snapshot, records]);
+  const filterChannelOptions = knownChannels.slice(0, 20);
   return <section>
     <AdminToolbar actions={<AdminButton busy={loading} disabled={anyWrite} onClick={refresh}>刷新兑换数据</AdminButton>}><h2>兑换码发行与管理</h2><p>复制和发售标记是两件事；同一张码同一时间只处理一项，不同码可以同时处理。</p></AdminToolbar>
     <form className="admin-stage-panel admin-code-generation" key={generationForm} onSubmit={event => { event.preventDefault(); previewGeneration(); }}>
       <label>权益类型<select data-generation-type value={generation.memberType} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, memberType: Number(event.target.value) as 1 | 2 }))}><option value={1}>普通VIP</option><option value={2} disabled={generation.days === 7}>商家Pro</option></select></label>
       <label>开通时长<select data-generation-days value={generation.days} disabled={anyWrite} onChange={event => { const days = Number(event.target.value); setGeneration(value => ({ ...value, days, memberType: days === 7 ? 1 : value.memberType })); }}>{[7,30,90,365].map(days => <option key={days} value={days}>{days}天{days === 7 ? '体验卡（仅VIP）' : ''}</option>)}</select></label>
       <label>生成数量<input data-generation-count type="number" min={1} max={500} value={generation.count} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, count: Number(event.target.value) }))} /></label>
-      <label>发行渠道<input data-generation-channel value={generation.channel} maxLength={100} disabled={anyWrite} onChange={event => setGeneration(value => ({ ...value, channel: event.target.value }))} placeholder="可选" title="不填则沿用既有渠道，系统不会新建渠道" /></label>
+      <label>发行渠道<input data-generation-channel value={generation.channel} maxLength={100} disabled={anyWrite} list="admin-generation-channel-options" onChange={event => setGeneration(value => ({ ...value, channel: event.target.value }))} placeholder="不填沿用既有渠道" title="不填则沿用既有渠道，系统不会新建渠道" /><datalist id="admin-generation-channel-options">{knownChannels.map(channel => <option key={channel} value={channel} />)}</datalist></label>
       <AdminButton data-generation-review type="submit" variant="primary" disabled={anyWrite}>确认参数并生成</AdminButton>
       <p className="admin-code-scope">本次：{generation.memberType === 2 ? '商家Pro' : '普通VIP'} · {generation.days}天 · 数量 {number(generation.count)}。7天体验卡只支持普通VIP，单批最多 500 张。</p>
     </form>
@@ -267,7 +271,7 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
     <div className="admin-code-statistics" aria-label="服务端筛选统计">{[['筛选总数',snapshot?.stats?.total],['可用',snapshot?.stats?.available],['已兑换',snapshot?.stats?.redeemed],['删除等待',snapshot?.stats?.deletePending],['发售标记',snapshot?.stats?.copied]].map(([label,value]) => <div className="admin-stage-panel" key={String(label)}><small>{label}</small><strong>{number(value)}</strong></div>)}</div>
     <p className="admin-stage-footnote">上面四个数字是打开页面时的统计，改动后点「刷新兑换数据」才会更新；「发售标记」不等于真实支付。</p>
     <div className="admin-stage-panel admin-code-filters" role="search" aria-label="兑换码查询">
-      <label>卡密搜索<input data-code-search value={draft.search} onChange={event => setDraft(value => ({ ...value, search: event.target.value }))} placeholder="卡密搜索" /></label><label>发行渠道<input value={draft.channel} onChange={event => setDraft(value => ({ ...value, channel: event.target.value }))} /></label>
+      <label>卡密搜索<input data-code-search value={draft.search} onChange={event => setDraft(value => ({ ...value, search: event.target.value }))} placeholder="卡密搜索" /></label><label>发行渠道<input value={draft.channel} list="admin-filter-channel-options" onChange={event => setDraft(value => ({ ...value, channel: event.target.value }))} placeholder="渠道筛选" /><datalist id="admin-filter-channel-options">{filterChannelOptions.map(channel => <option key={channel} value={channel} />)}</datalist></label>
       <label>权益<select value={draft.memberType} onChange={event => setDraft(value => ({ ...value, memberType: event.target.value as CodeQuery['memberType'] }))}><option value="all">全部</option><option value="1">普通VIP</option><option value="2">商家Pro</option></select></label>
       <label>发售标记<select value={draft.copied} onChange={event => setDraft(value => ({ ...value, copied: event.target.value as CodeQuery['copied'] }))}><option value="all">全部</option><option value="true">有标记</option><option value="false">无标记</option></select></label>
       <label>兑换 / 删除状态<select value={draft.status} onChange={event => setDraft(value => ({ ...value, status: event.target.value as CodeQuery['status'] }))}><option value="all">全部</option><option value="available">可用</option><option value="redeemed">已兑换</option><option value="delete-pending">删除等待</option></select></label>

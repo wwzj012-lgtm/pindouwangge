@@ -141,12 +141,21 @@
 .admin-root .admin-chart-axis { display:flex; justify-content:space-between; gap:4px; color:var(--admin-muted); font-size:11px; }
 /* 7 天注册趋势：真正的柱状图——每天一列 28px 固定柱宽、居中排列（7 柱 ≈ 340px，不占全宽），
    高度按峰值比例（最高 64px），零值 3px 灰柱；容器 subtle 底色做轨道。 */
-.admin-root .admin-register-trend { display:flex; flex-wrap:nowrap; justify-content:center; align-items:flex-end; gap:12px; margin-top:8px; padding:10px 12px 8px; border-top:1px solid var(--admin-border); border-radius:var(--admin-radius); background:var(--admin-subtle); }
-.admin-root .admin-register-bar { width:28px; flex:0 0 auto; min-width:0; display:flex; flex-direction:column; gap:4px; }
-.admin-root .admin-register-track { height:64px; width:28px; display:flex; align-items:flex-end; justify-content:center; }
-.admin-root .admin-register-track i { display:block; width:28px; min-height:3px; background:var(--admin-primary); border-radius:3px 3px 0 0; opacity:.85; }
-.admin-root .admin-register-track i[data-zero='true'] { background:var(--admin-border); opacity:1; }
-.admin-root .admin-register-bar small { flex:0 0 auto; text-align:center; font-size:11px; line-height:1.2; color:var(--admin-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* ===== 7 天注册趋势（重做）：标题 12px + 数值标签 11px + 44px 轨道 + 日期，
+   整段总高 ≤110px；全 0 时不渲染本块，改用 .admin-register-empty 一行灰字。 ===== */
+.admin-root .admin-register-trend { display:flex; flex-direction:column; gap:2px; margin-top:8px; padding:6px 12px; border-top:1px solid var(--admin-border); border-radius:var(--admin-radius); background:var(--admin-subtle); }
+.admin-root .admin-register-title { font-size:12px; line-height:1.25; color:var(--admin-muted); }
+.admin-root .admin-register-bars { display:flex; flex-wrap:nowrap; justify-content:center; align-items:flex-end; gap:12px; }
+.admin-root .admin-register-bar { position:relative; width:28px; flex:0 0 auto; min-width:0; display:flex; flex-direction:column; align-items:center; gap:3px; cursor:default; }
+.admin-root .admin-register-value { height:14px; font-size:11px; line-height:14px; font-weight:600; font-variant-numeric:tabular-nums; color:var(--admin-muted); }
+.admin-root .admin-register-bar[data-peak='true'] .admin-register-value { color:var(--admin-primary); }
+.admin-root .admin-register-track { height:44px; width:28px; display:flex; align-items:flex-end; justify-content:center; }
+.admin-root .admin-register-track i { display:block; width:28px; min-height:3px; background:var(--admin-primary-soft); border-radius:3px 3px 0 0; }
+.admin-root .admin-register-bar[data-peak='true'] .admin-register-track i { background:var(--admin-primary); }
+.admin-root .admin-register-track i[data-zero='true'] { background:var(--admin-border); }
+.admin-root .admin-register-bar small { flex:0 0 auto; max-width:28px; text-align:center; font-size:11px; line-height:1.2; color:var(--admin-faint); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* 全 0 趋势：一行紧凑灰字（12px muted，总高 ≤24px），占位但不画图、不可下钻。 */
+.admin-root .admin-register-empty { margin:8px 0 0; padding:1px 12px; color:var(--admin-muted); font-size:12px; line-height:22px; border-top:1px solid var(--admin-border); border-radius:var(--admin-radius); background:var(--admin-subtle); }
 .admin-root .admin-telemetry { border:0; border-radius:var(--admin-radius); background:var(--admin-surface); box-shadow:var(--admin-shadow); margin-top:12px; padding:10px 12px; }
 .admin-root .admin-telemetry-empty { display:flex; align-items:center; gap:8px; margin:8px 0 0; padding:8px 12px; border:1px solid var(--admin-success); border-radius:var(--admin-radius); background:var(--admin-success-soft); color:var(--admin-success); font-size:13px; }
 .admin-root .admin-telemetry-empty svg { width:16px; height:16px; flex-shrink:0; }
@@ -612,3 +621,18 @@
 .admin-root .admin-uid { font-size:11px; color:var(--admin-faint); letter-spacing:0; }
 /* 筛选区主按钮按内容宽度靠左。 */
 .admin-root :is(.admin-filters,.admin-user-filters,.admin-code-filters,.admin-log-filters,.admin-code-generation,.admin-community-filters) > .admin-button { justify-self:start; }
+/* ===== 输入控件观感统一（32px 密度不变，纯观感升级）：白底 + 浅描边 + 聚焦主色光圈。
+   选择器放在文件末尾以覆盖各模块的 :is(input,select,textarea) 规则；checkbox/radio 不参与。 ===== */
+.admin-root input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+.admin-root textarea,
+.admin-root select:not([multiple]) { background-color:var(--admin-surface); border:1px solid #E2E8F0; border-radius:8px; transition:border-color 150ms,box-shadow 150ms; }
+.admin-root :is(input,textarea)::placeholder { color:var(--admin-faint); opacity:1; }
+.admin-root input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):hover:not(:disabled),
+.admin-root textarea:hover:not(:disabled),
+.admin-root select:not([multiple]):not([size]):hover:not(:disabled) { border-color:#CBD5E1; }
+.admin-root input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):focus-visible,
+.admin-root textarea:focus-visible,
+.admin-root select:not([multiple]):not([size]):focus-visible { border-color:var(--admin-primary); box-shadow:0 0 0 3px var(--admin-primary-soft); outline:none; }
+/* select：去系统原生丑箭头，右侧 10px 内嵌 muted 色 chevron；disabled 用 subtle 底。 */
+.admin-root select:not([multiple]):not([size]) { appearance:none; -webkit-appearance:none; padding-right:26px; background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 10px center; background-size:12px 12px; }
+.admin-root select:not([multiple]):not([size]):disabled { background-color:var(--admin-subtle); color:var(--admin-muted); opacity:1; }

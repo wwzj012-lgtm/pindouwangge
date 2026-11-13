@@ -19,7 +19,7 @@ import { SettingsDiffView } from './SettingsDiffView';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
-import { parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations, trendBarPixelHeights, type DashboardSection } from './adminDashboardModel';
+import { parseDashboardMetrics, parseDashboardTodo, registerTrendTotal, todoDrillQuery, todayRegistrations, trendBarPixelHeights, type DashboardSection } from './adminDashboardModel';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -213,7 +213,12 @@ function TodoCards({ todo, navigate }: { todo: DashboardData['todo']; navigate: 
 function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
   if (!metrics) return null;
   const registered = todayRegistrations(metrics);
-  const heights = trendBarPixelHeights(metrics.registerTrend7d);
+  const trendPoints = metrics.registerTrend7d;
+  // 趋势重做（用户反馈"一堆数字看不懂"）：先算 7 天总和——
+  // 全 0 时不再渲染"3px 灰柱 + 大空轨道"，只给一行紧凑灰字；有数据才画柱状图。
+  const trendTotal = registerTrendTotal(trendPoints);
+  const trendPeak = trendPoints.reduce((max, point) => Math.max(max, point.count), 0);
+  const heights = trendBarPixelHeights(trendPoints);
   const cards: { key: string; label: string; value: number | null; icon: LucideIcon }[] = [
     { key: 'works', label: '今日新作品', value: metrics.todayNewWorks, icon: Archive },
     { key: 'posts', label: '今日新帖子', value: metrics.todayNewPosts, icon: Activity },
@@ -229,13 +234,23 @@ function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
         <card.icon className="admin-metric-icon" aria-hidden="true" />
       </article>)}
     </div>
-    {/* 7 天注册趋势：每天一列 28px 柱宽居中排列，高度按峰值比例（最高 64px），零值 3px 灰柱。 */}
-    {metrics.registerTrend7d.length > 0 && <div className="admin-register-trend" data-register-trend>
-      {metrics.registerTrend7d.map((point, index) => <div key={point.date} className="admin-register-bar" title={point.date + '：' + point.count}>
-        <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + 'px' }} data-zero={point.count <= 0 || undefined} /></span>
-        <small>{point.date.slice(5)}</small>
-      </div>)}
+    {/* 7 天注册趋势：每天一列 28px 柱宽居中；值>0 才在柱顶显示数值标签，
+        峰值柱用 primary 实色、其余 primary-soft；柱上 hover 显示「MM-DD · N 人」。
+        整段趋势区（标题+柱区+日期）总高 ≤110px，高度随有无数据自适应。 */}
+    {trendPoints.length > 0 && trendTotal > 0 && <div className="admin-register-trend" data-register-trend>
+      <span className="admin-register-title">近 7 天注册趋势</span>
+      <div className="admin-register-bars" role="img" aria-label={'近 7 天注册趋势，合计 ' + formatAdminMetric(trendTotal) + ' 人'}>
+        {trendPoints.map((point, index) => <div key={point.date} className="admin-register-bar"
+          data-peak={point.count > 0 && point.count === trendPeak || undefined}
+          title={point.date.slice(5) + ' · ' + point.count + ' 人'}>
+          <b className="admin-register-value">{point.count > 0 ? point.count : ''}</b>
+          <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + 'px' }} data-zero={point.count <= 0 || undefined} /></span>
+          <small>{point.date.slice(5)}</small>
+        </div>)}
+      </div>
     </div>}
+    {/* 全 0 的趋势不画图：一行 12px 灰字说明（高 ≤24px），不可下钻。 */}
+    {trendPoints.length > 0 && trendTotal === 0 && <p className="admin-register-empty" data-register-trend-empty>近 7 天无新注册</p>}
   </section>;
 }
 

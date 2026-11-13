@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, freezeGeneration, logDates, logDuration, logOutcome } from './adminCodesLogsModel';
+import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, collectKnownChannels, freezeGeneration, logDates, logDuration, logOutcome } from './adminCodesLogsModel';
 import { verifyCardChecksum } from '../../utils/vipCodeUtils';
 
 describe('per-code frontend write scope', () => {
@@ -39,4 +41,26 @@ describe('log results are actual collected fields', () => {
   it('does not claim every recorded action succeeded', () => { expect(logOutcome('admin',{})).toBe('已记录 · 结果未提供'); expect(logOutcome('user',{success:false})).toBe('记录为失败'); });
   it('distinguishes controlled error resolution metadata', () => { expect(logOutcome('error',{},null)).toBe('未处理'); expect(logOutcome('error',{},123)).toBe('已处理'); });
   it('keeps original local day bounds and rejects inverted ranges', () => { const valid=logDates('2026-10-13','2026-10-13'); expect(valid.error).toBe(''); expect(valid.end! - valid.start!).toBe(86_400_000-1); expect(logDates('2026-10-14','2026-10-13').error).toContain('开始日期'); });
+});
+describe('channel datalist suggestions (发行渠道"可选呢？？"修复)', () => {
+  it('collects distinct existing channels from loaded codes and redemptions in first-seen order', () => {
+    expect(collectKnownChannels(
+      [{ channel: '闪烁' }, { channel: null }, { channel: '淘宝旗舰店' }, { channel: '闪烁' }],
+      [{ channel: '微信私域社群' }, { channel: ' 闪烁 ' }, {}],
+    )).toEqual(['闪烁', '淘宝旗舰店', '微信私域社群']);
+  });
+  it('ignores blank and non-string channels without inventing values', () => {
+    expect(collectKnownChannels([{ channel: '   ' }, { channel: undefined }, {}, {}])).toEqual([]);
+    expect(collectKnownChannels()).toEqual([]);
+  });
+  it('wires the generation form and filter input to real channel options via datalist', () => {
+    const src = readFileSync(fileURLToPath(new URL('./AdminLogsCodes.tsx', import.meta.url)), 'utf8');
+    expect(src).toContain('collectKnownChannels');
+    expect(src).toContain('list="admin-generation-channel-options"');
+    expect(src).toContain('list="admin-filter-channel-options"');
+    expect(src).toContain('placeholder="不填沿用既有渠道"');
+    expect(src).not.toContain('placeholder="可选"');
+    // 筛选区渠道建议取前 20 个既有渠道。
+    expect(src).toContain('knownChannels.slice(0, 20)');
+  });
 });

@@ -71,12 +71,18 @@ export function todayRegistrations(metrics: DashboardMetrics | null): number | n
 
 /**
  * 密度改版：注册趋势柱状图的像素高度——每天一列固定 28px 柱宽，
- * 高度按值比例（峰值 = peakHeight，默认 64px）；零值/空趋势 3px（配合 CSS 灰柱）。
+ * 高度按值比例（峰值 = peakHeight，默认 44px，为"标题+数值标签+日期"留出
+ * 整段 ≤110px 的总高预算）；零值/空趋势 3px（配合 CSS 灰柱）。
  */
-export function trendBarPixelHeights(points: TrendPoint[], peakHeight = 64): number[] {
+export function trendBarPixelHeights(points: TrendPoint[], peakHeight = 44): number[] {
   const peak = Math.max(0, ...points.map((point) => point.count));
   if (peak === 0) return points.map(() => 3);
   return points.map((point) => Math.max(3, Math.round((Math.max(0, point.count) / peak) * peakHeight)));
+}
+
+/** 7 天注册趋势总和：非法样本按 0 处理；总和为 0 时前端不渲染图表（改一行灰字）。 */
+export function registerTrendTotal(points: TrendPoint[]): number {
+  return points.reduce((sum, point) => sum + (Number.isFinite(point.count) && point.count > 0 ? point.count : 0), 0);
 }
 
 /** 待办卡下钻查询参数（写入 URL，目标板块可读取预置筛选）。 */

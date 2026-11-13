@@ -270,6 +270,22 @@ function parsePaletteHex(hex: string): { r: number; g: number; b: number } {
 }
 
 const AdminPage = lazy(() => import('./pages/AdminPage'));
+
+/** 加载提速（用户反馈"页面加载的太慢了"）：主站空闲时预取后台 AdminPage chunk，
+ *  运营从主站进入 /admin 时模块已在缓存里，免一次网络往返。
+ *  仅桌面（视口宽 ≥1024px）预取，移动端省流量；requestIdleCallback 不可用时
+ *  退化为 2s 定时；预取失败静默——进入后台仍走上方正常 lazy 加载，不影响功能。 */
+let adminChunkPrefetched = false;
+export function prefetchAdminPageChunk(win: Window = window): void {
+  if (adminChunkPrefetched || !win.matchMedia('(min-width: 1024px)').matches) return;
+  adminChunkPrefetched = true;
+  const schedule = (task: () => void) => {
+    const idle = (win as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number }).requestIdleCallback;
+    if (typeof idle === 'function') idle.call(win, task, { timeout: 4000 });
+    else win.setTimeout(task, 2000);
+  };
+  schedule(() => { import('./pages/AdminPage').catch(() => { /* 预取尽力而为：失败静默，正常懒加载兜底 */ }); });
+}
 const CommunityView = lazy(() =>
   import('./components/CommunityView').then(({ CommunityView: Component }) => ({ default: Component })),
 );
@@ -2742,6 +2758,8 @@ function PublicAppRoute() {
 }
 
 export default function App() {
+  // 主站空闲时预取后台 chunk（/admin 路由下 lazy 已在拉取，此处幂等跳过）。
+  useEffect(() => { prefetchAdminPageChunk(); }, []);
   return /^\/admin(?:\/|$)/.test(window.location.pathname)
     ? <Suspense fallback={<AdminPageLoading />}><AdminPage /></Suspense>
     : <PublicAppRoute />;

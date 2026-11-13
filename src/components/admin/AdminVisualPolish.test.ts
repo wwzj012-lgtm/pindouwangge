@@ -60,8 +60,8 @@ describe('three-tier button system (32px, no outlined secondary)', () => {
 });
 
 describe('register trend horizontal mini bars (7-day registration trend fix)', () => {
-  it('lays the register trend out as a horizontal non-wrapping flex row', () => {
-    const rule = css.match(/\.admin-register-trend \{[^}]*\}/)?.[0] ?? '';
+  it('lays the register bars out as a horizontal non-wrapping flex row under a compact title', () => {
+    const rule = css.match(/\.admin-register-bars \{[^}]*\}/)?.[0] ?? '';
     expect(rule).toContain('display:flex');
     expect(rule).toContain('flex-wrap:nowrap');
   });
@@ -70,6 +70,11 @@ describe('register trend horizontal mini bars (7-day registration trend fix)', (
     expect(barRule).toContain('flex-direction:column');
     const trackRule = css.match(/\.admin-register-track \{[^}]*\}/)?.[0] ?? '';
     expect(trackRule).toContain('align-items:flex-end');
+  });
+  it('collapses an all-zero trend to a single gray line instead of an empty 64px track band', () => {
+    const rule = css.match(/\.admin-register-empty \{[^}]*\}/)?.[0] ?? '';
+    expect(rule).toContain('color:var(--admin-muted)');
+    expect(rule).toMatch(/line-height:2[0-9]px/);
   });
 });
 

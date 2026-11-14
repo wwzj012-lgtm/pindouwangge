@@ -91,3 +91,28 @@ export function todoDrillQuery(card: 'reviews' | 'reports' | 'codes'): Record<st
   if (card === 'reports') return { preset: 'reports' };
   return { preset: 'low-stock' };
 }
+
+const tooltipNumber = new Intl.NumberFormat('zh-CN');
+
+/**
+ * 趋势悬浮提示的日期文案：服务端 "2025-11-11" 口径 → "11月11日"（有语义）。
+ * 7 天趋势窗口内不会跨年，年份省略；月日超出真实日历区间（或格式非法）时
+ * 原样返回，不猜——"2025-13-45"、"2025-02-30" 都不是合法日期。
+ */
+export function trendTooltipDate(date: string): string {
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(date.trim());
+  if (!match) return date;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return date;
+  // 走一遍真实日历回读：JS Date 会把 2月30日 归一化成 3月2日，
+  // 回读月份/日期不一致即说明该月日在真实日历中不存在。
+  const parsed = new Date(Date.UTC(Number(match[1]), month - 1, day));
+  if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return date;
+  return String(month) + '月' + String(day) + '日';
+}
+
+/** 趋势悬浮提示的数值文案：类型词 + 千分位数量 → "新建 1 个"。 */
+export function trendTooltipValue(action: string, count: number): string {
+  return action + ' ' + tooltipNumber.format(Math.max(0, count)) + ' 个';
+}

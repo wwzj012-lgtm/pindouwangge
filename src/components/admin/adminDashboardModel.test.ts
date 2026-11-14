@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseDashboardMetrics, parseDashboardTodo, todoDrillQuery, todayRegistrations,
+  trendTooltipDate, trendTooltipValue,
 } from './adminDashboardModel';
 
 describe('dashboard todo parsing (batch 3)', () => {
@@ -56,5 +57,29 @@ describe('todo drill-down query', () => {
     expect(todoDrillQuery('reviews')).toEqual({ preset: 'review-queue' });
     expect(todoDrillQuery('reports')).toEqual({ preset: 'reports' });
     expect(todoDrillQuery('codes')).toEqual({ preset: 'low-stock' });
+  });
+});
+
+describe('trend tooltip copy (semantic hover, user feedback)', () => {
+  it('renders ISO dates as a readable M月D日 label', () => {
+    expect(trendTooltipDate('2025-11-11')).toBe('11月11日');
+    expect(trendTooltipDate('2025-07-06')).toBe('7月6日');
+    expect(trendTooltipDate(' 2025-11-01 ')).toBe('11月1日');
+  });
+  it('returns non-standard dates verbatim instead of guessing', () => {
+    expect(trendTooltipDate('bad')).toBe('bad');
+    expect(trendTooltipDate('')).toBe('');
+    expect(trendTooltipDate('2025/11/11')).toBe('2025/11/11');
+    // 格式合法但月日越界同样原样返回：不把 13月45日、2月30日 说成日期。
+    expect(trendTooltipDate('2025-13-45')).toBe('2025-13-45');
+    expect(trendTooltipDate('2025-02-30')).toBe('2025-02-30');
+    expect(trendTooltipDate('2025-00-10')).toBe('2025-00-10');
+    expect(trendTooltipDate('2025-11-00')).toBe('2025-11-00');
+  });
+  it('pairs the chart action word with a thousands-formatted count', () => {
+    expect(trendTooltipValue('新建', 1)).toBe('新建 1 个');
+    expect(trendTooltipValue('发布', 12)).toBe('发布 12 个');
+    expect(trendTooltipValue('错误', 1234)).toBe('错误 1,234 个');
+    expect(trendTooltipValue('操作', -3)).toBe('操作 0 个');
   });
 });

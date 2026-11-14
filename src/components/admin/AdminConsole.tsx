@@ -19,7 +19,7 @@ import { SettingsDiffView } from './SettingsDiffView';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
-import { parseDashboardMetrics, parseDashboardTodo, registerTrendTotal, todoDrillQuery, todayRegistrations, trendBarPixelHeights, type DashboardSection } from './adminDashboardModel';
+import { parseDashboardMetrics, parseDashboardTodo, registerTrendTotal, todoDrillQuery, todayRegistrations, trendBarPixelHeights, trendTooltipDate, trendTooltipValue, type DashboardSection } from './adminDashboardModel';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -140,7 +140,7 @@ function Sidebar({ active, navigate, returnToApp, visibleSections }: { active: S
     <div className="admin-sidebar-footer"><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton></div>
   </>;
 }
-function TrendChart({ label, points }: { label: string; points?: TrendPoint[] }) {
+function TrendChart({ label, action, points }: { label: string; action: string; points?: TrendPoint[] }) {
   const [hover, setHover] = useState<number | null>(null);
   const samples = (Array.isArray(points) ? points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
   const count = samples.length;
@@ -176,9 +176,10 @@ function TrendChart({ label, points }: { label: string; points?: TrendPoint[] })
             aria-label={point.date + '：' + formatAdminMetric(point.count)}
             onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)} />)}
         </div>
-        {hover !== null && <div className="admin-chart-tip"
+        {hover !== null && <div className="admin-chart-tip" data-trend-tooltip
           style={{ left: at(hover)[0] + '%', transform: 'translateX(' + (at(hover)[0] < 14 ? '0' : at(hover)[0] > 86 ? '-100%' : '-50%') + ')' }}>
-          <span>{samples[hover].date.slice(5)}</span><b>{formatAdminMetric(samples[hover].count)}</b>
+          <span className="admin-chart-tip-date">{trendTooltipDate(samples[hover].date)}</span>
+          <b className="admin-chart-tip-value">{trendTooltipValue(action, samples[hover].count)}</b>
         </div>}
       </div>
       <div className="admin-chart-axis">{samples.map(point => <span key={point.date}>{point.date.slice(5)}</span>)}</div>
@@ -259,13 +260,14 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
   if (error) return <AdminErrorState title="统计暂不可用" message={error} retry={retry} busy={loading} />;
   if (!data) return <AdminEmptyState title="尚无统计结果" description="未知值不会显示为零。" action={<AdminButton onClick={retry}>刷新统计</AdminButton>} />;
   const overview = data.overview, telemetry = data.telemetry;
+  // 每张趋势图配一个类型词：悬浮提示「11月11日 · 新建 1 个」里的动词，与图标题对应。
   const trendDefs = ([
-    { label: '用户新增趋势', points: data.trends?.days7?.users },
-    { label: '图纸创建趋势', points: data.trends?.days7?.works },
-    { label: '社区发布趋势', points: data.trends?.days7?.communityPosts },
-    { label: '成功操作趋势', points: data.trends?.days7?.successfulActions },
-    { label: '服务端错误趋势', points: data.trends?.days7?.errors },
-  ] as { label: string; points?: TrendPoint[] }[]).map(item => {
+    { label: '用户新增趋势', action: '注册', points: data.trends?.days7?.users },
+    { label: '图纸创建趋势', action: '新建', points: data.trends?.days7?.works },
+    { label: '社区发布趋势', action: '发布', points: data.trends?.days7?.communityPosts },
+    { label: '成功操作趋势', action: '操作', points: data.trends?.days7?.successfulActions },
+    { label: '服务端错误趋势', action: '错误', points: data.trends?.days7?.errors },
+  ] as { label: string; action: string; points?: TrendPoint[] }[]).map(item => {
     const samples = (Array.isArray(item.points) ? item.points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
     // 全 0 的图不再占一张大卡：它只是"这段时间没发生"，折叠成一行说明。
     return { ...item, zero: samples.length > 0 && samples.every(point => point.count <= 0) };
@@ -305,7 +307,7 @@ function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardD
       </div>
       {telemetry && Array.isArray(telemetry.errorCodes) && telemetry.errorCodes.length > 0 && <div className="admin-telemetry"><h3>错误码分布</h3><div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div></div>}
     </section>
-    <div className="admin-charts">{trendDefs.filter(item => !item.zero).map(item => <React.Fragment key={item.label}><TrendChart label={item.label} points={item.points} /></React.Fragment>)}</div>
+    <div className="admin-charts">{trendDefs.filter(item => !item.zero).map(item => <React.Fragment key={item.label}><TrendChart label={item.label} action={item.action} points={item.points} /></React.Fragment>)}</div>
     {trendDefs.some(item => item.zero) && <p className="admin-zero-note">近 7 天没有新增：{trendDefs.filter(item => item.zero).map(item => item.label.replace('趋势', '')).join('、')}。产生数据后这里会出现对应趋势图。</p>}
     {/* 警告条降级（PRD B7）：页脚 footnote 灰字 + 展开箭头；展开后显示分段级 error 详情。 */}
     {Boolean(data.warnings?.length) && <details className="admin-warnings-footnote" role="status" data-dashboard-warnings>
@@ -355,9 +357,11 @@ function AdminConsoleSession(_props: { key?: string }) {
   const requestNotice = requestNotices[activeSection] ?? '';
   const connectionNotices = useRef(new AdminConnectionNotices());
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
-  const [logoutOpen, setLogoutOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  // 退出免确认：失败（网络/服务端错误）才弹一行 toast，可点顶栏按钮重试。
   const [logoutError, setLogoutError] = useState('');
+  const logoutToastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (logoutToastTimer.current) clearTimeout(logoutToastTimer.current); }, []);
   const generation = useRef(0);
   const capabilityRevision = useRef(0);
   const edits = useRef(new Map<Control, string>());
@@ -385,7 +389,7 @@ function AdminConsoleSession(_props: { key?: string }) {
     const requestGeneration = generation.current;
     const result = await fetchAdmin<T>(path, init);
     if (result.status === 401 && path !== '/api/admin/session' && requestGeneration === generation.current) {
-      clearAdminSession(); setMobileNavigation(false); setLogoutOpen(false); setPendingAction(null); edits.current.clear(); setCapabilities(null); capabilityRevision.current++;
+      clearAdminSession(); setMobileNavigation(false); setPendingAction(null); edits.current.clear(); setCapabilities(null); capabilityRevision.current++;
       setAccess(signedIn ? 'session-required' : 'signed-out'); setAccessError('后台会话已过期。请重新进入后台，或返回前台登录。');
     }
     return result;
@@ -496,8 +500,14 @@ function AdminConsoleSession(_props: { key?: string }) {
     setLoggingOut(true); setLogoutError('');
     try {
       const result = await adminRequest('/api/admin/session/logout', { method: 'POST', body: JSON.stringify({}) });
-      if (!result.ok) { setLogoutError(result.error ?? '退出请求失败，后台会话尚未确认撤销。'); return; }
-      generation.current++; clearAdminSession(); setDashboard(null); setLogoutOpen(false); setAccess(signedIn ? 'session-required' : 'signed-out'); setAccessError('');
+      if (!result.ok) {
+        // 只有失败才打扰用户：一行可自动消失的 toast，顶栏按钮仍可重试。
+        setLogoutError(result.error ?? '退出请求失败，请检查网络后重试。');
+        if (logoutToastTimer.current) clearTimeout(logoutToastTimer.current);
+        logoutToastTimer.current = setTimeout(() => setLogoutError(''), 3200);
+        return;
+      }
+      generation.current++; clearAdminSession(); setDashboard(null); setAccess(signedIn ? 'session-required' : 'signed-out'); setAccessError('');
     } finally { setLoggingOut(false); }
   };
   // Hook order must stay unconditional: this memo sits above the early gate return.
@@ -573,7 +583,7 @@ function AdminConsoleSession(_props: { key?: string }) {
       <div><nav className="admin-breadcrumb" aria-label="面包屑"><span>管理工作台</span><ChevronRight aria-hidden="true" /><span>{GROUPS.find(group => group.id === section.group)?.label}</span></nav><h1>{section.label}</h1></div>
     </div><div className="admin-header-actions"><div className="admin-account"><span className="admin-account-name">{currentUser?.displayName || currentUser?.email || '管理员'}</span><span className="admin-account-session" title="后台会话有效；会话会定时失效，届时需重新进入"><i aria-hidden="true" />会话有效</span></div>
       <AdminButton data-admin-refresh data-admin-focus-fallback iconOnly variant="ghost" aria-label={'刷新' + section.label} title={'只刷新' + section.label} busy={busy} onClick={() => queueAction({ kind: 'refresh' })}>{!busy && <RefreshCw aria-hidden="true" />}</AdminButton>
-      <AdminButton iconOnly variant="ghost" aria-label="退出后台会话" title="退出后台会话" onClick={() => { setLogoutError(''); setLogoutOpen(true); }}><LogOut aria-hidden="true" /></AdminButton>
+      <AdminButton iconOnly variant="ghost" aria-label="退出后台会话" title="退出后台会话" busy={loggingOut} onClick={() => { if (!loggingOut) void logout(); }}><LogOut aria-hidden="true" /></AdminButton>
     </div></header>
       <main ref={editorRoot} className="admin-main" id="admin-main" tabIndex={-1}
         onFocusCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, controlValue(event.target)); }}
@@ -584,6 +594,6 @@ function AdminConsoleSession(_props: { key?: string }) {
     </div>
     <AdminDrawer open={mobileNavigation} title="后台菜单" side="left" className="admin-navigation-drawer" onClose={() => setMobileNavigation(false)}><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} visibleSections={visibleSections} /></AdminDrawer>
     <AdminConfirmDialog open={Boolean(pendingAction)} title="存在未保存编辑" description="取消会保留当前输入。确认后将继续刷新或切换页面。" subject={section.label} impact="尚未保存的编辑可能丢失，请先核对。" confirmLabel="放弃编辑并继续" onClose={() => { if (pendingAction?.kind === 'navigate' && pendingAction.fromHistory) { const url = new URL(window.location.href); url.searchParams.set('section', activeSection); window.history.replaceState({}, '', url); } setPendingAction(null); }} onConfirm={() => { const action = pendingAction; setPendingAction(null); edits.current.clear(); if (action) performAction(action); }} />
-    <AdminConfirmDialog open={logoutOpen} title="退出后台会话" description="确认后将请求撤销当前后台会话。" subject={currentUser?.displayName || currentUser?.email || '当前管理员'} impact="退出后台管理，保留前台登录；未保存编辑可能丢失。" confirmLabel="退出后台会话" pending={loggingOut} onClose={() => setLogoutOpen(false)} onConfirm={() => void logout()}>{logoutError && <AdminErrorState message={logoutError} />}</AdminConfirmDialog>
+    {logoutError && <div className="admin-toast" role="status" aria-live="polite" data-admin-logout-toast>{logoutError}</div>}
   </div>;
 }

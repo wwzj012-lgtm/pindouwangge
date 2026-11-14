@@ -152,6 +152,70 @@ describe('admin density: sidebar scrollbar is thin and hover-only', () => {
   });
 });
 
+describe('admin density: trend tooltip is a semantic surface card (user feedback)', () => {
+  // 用户反馈：悬浮深色小框只有「11-11 1」，无语义无样式。
+  // 改造后：日期 muted 12px 在上 + 「类型词 N 个」16px 600 tabular-nums 在下，
+  // 白底 surface 卡（1px --admin-border + --admin-shadow + 8px 圆角）。
+  const tip = css.match(/\.admin-root \.admin-chart-tip \{[^}]*\}/)?.[0] ?? '';
+  it('renders one shared tooltip with the data-trend-tooltip anchor', () => {
+    expect(consoleSrc).toContain('data-trend-tooltip');
+    // 组件共享：TrendChart 是唯一悬浮实现（className="admin-chart-tip" 只渲染一份）。
+    expect(consoleSrc.match(/className="admin-chart-tip"/g)).toHaveLength(1);
+    expect(consoleSrc).toContain('admin-chart-tip-date');
+    expect(consoleSrc).toContain('admin-chart-tip-value');
+  });
+  it('styles the tooltip as a white surface card with border, radius and shadow tokens', () => {
+    expect(tip).toContain('background:var(--admin-surface)');
+    expect(tip).toContain('border:1px solid var(--admin-border)');
+    expect(tip).toContain('border-radius:var(--admin-radius)');
+    expect(tip).toContain('box-shadow:var(--admin-shadow)');
+    expect(tip).toContain('pointer-events:none');
+  });
+  it('stacks a 12px muted date above a 16px 600 tabular-nums value', () => {
+    expect(tip).toContain('flex-direction:column');
+    const dateRule = css.match(/\.admin-root \.admin-chart-tip-date \{[^}]*\}/)?.[0] ?? '';
+    expect(dateRule).toContain('font-size:12px');
+    expect(dateRule).toContain('color:var(--admin-muted)');
+    const valueRule = css.match(/\.admin-root \.admin-chart-tip-value \{[^}]*\}/)?.[0] ?? '';
+    expect(valueRule).toContain('font-size:16px');
+    expect(valueRule).toContain('font-weight:600');
+    expect(valueRule).toContain('font-variant-numeric:tabular-nums');
+  });
+  it('maps every trend chart to a semantic action word and the shared copy helpers', () => {
+    expect(consoleSrc).toContain("{ label: '图纸创建趋势', action: '新建'");
+    expect(consoleSrc).toContain("{ label: '社区发布趋势', action: '发布'");
+    expect(consoleSrc).toContain("{ label: '成功操作趋势', action: '操作'");
+    expect(consoleSrc).toContain("{ label: '服务端错误趋势', action: '错误'");
+    expect(consoleSrc).toContain("{ label: '用户新增趋势', action: '注册'");
+    expect(consoleSrc).toContain('trendTooltipDate(samples[hover].date)');
+    expect(consoleSrc).toContain('trendTooltipValue(action, samples[hover].count)');
+    expect(modelSrc).toContain('export function trendTooltipDate');
+    expect(modelSrc).toContain('export function trendTooltipValue');
+  });
+});
+
+describe('admin density: leaving the admin console needs no confirmation (user feedback)', () => {
+  // 用户反馈：点顶栏退出还要再弹 AdminConfirmDialog 确认一遍。改为直接执行
+  // logout（接口/数据流不变），只有失败才弹自动消失的 toast，按钮可重试。
+  it('removes the logout confirm dialog and fires logout directly from the header button', () => {
+    expect(consoleSrc).not.toContain('logoutOpen');
+    expect(consoleSrc).not.toMatch(/AdminConfirmDialog open=\{logoutOpen\}/);
+    expect(consoleSrc).not.toContain('确认后将请求撤销当前后台会话');
+    expect(consoleSrc).toMatch(/aria-label="退出后台会话"[^>]*busy=\{loggingOut\} onClick=\{\(\) => \{ if \(!loggingOut\) void logout\(\); \}\}/);
+    // 退出接口与清理流程保持不变。
+    expect(consoleSrc).toContain("adminRequest('/api/admin/session/logout'");
+    expect(consoleSrc).toContain('clearAdminSession()');
+  });
+  it('shows failures as an auto-dismissing toast instead of a dialog', () => {
+    expect(consoleSrc).toContain('data-admin-logout-toast');
+    expect(consoleSrc).toContain('setTimeout(() => setLogoutError(\'\'), 3200)');
+    expect(consoleSrc).toMatch(/className="admin-toast" role="status" aria-live="polite" data-admin-logout-toast/);
+    const toastRule = css.match(/\.admin-root \.admin-toast \{[^}]*\}/)?.[0] ?? '';
+    expect(toastRule).toContain('position:fixed');
+    expect(toastRule).toContain('border-radius:var(--admin-radius)');
+  });
+});
+
 describe('admin density: global spacing scale 4/8/12/16/20', () => {
   it('declares the five-step spacing tokens', () => {
     expect(css).toContain('--admin-space-1:4px');

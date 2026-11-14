@@ -135,8 +135,13 @@
 .admin-root .admin-chart-hits { position:absolute; inset:0; display:flex; }
 .admin-root .admin-chart-hit { flex:1; padding:0; border:0; border-radius:0; background:transparent; cursor:pointer; transition:background-color 120ms; }
 .admin-root .admin-chart-hit:hover, .admin-root .admin-chart-hit:focus-visible { background:var(--admin-primary-soft); outline:none; }
-.admin-root .admin-chart-tip { position:absolute; top:-6px; z-index:2; display:flex; align-items:baseline; gap:6px; padding:3px 8px; border-radius:6px; background:var(--admin-ink); color:var(--admin-surface); font-size:11px; white-space:nowrap; pointer-events:none; box-shadow:0 4px 12px rgb(15 23 42 / .18); }
-.admin-root .admin-chart-tip b { font-size:13px; font-variant-numeric:tabular-nums; }
+/* 趋势悬浮提示（反馈改造）：白底 surface 卡，日期 muted 12px 在上、类型词+数值 16px 600 在下；
+   锚定在绘图区顶部并按悬浮点水平钳位（0%/-50%/-100%），不超出图卡容器。 */
+.admin-root .admin-chart-tip { position:absolute; top:0; z-index:2; display:flex; flex-direction:column; gap:1px; padding:6px 10px; border:1px solid var(--admin-border); border-radius:var(--admin-radius); background:var(--admin-surface); color:var(--admin-ink); white-space:nowrap; pointer-events:none; box-shadow:var(--admin-shadow); }
+.admin-root .admin-chart-tip-date { font-size:12px; line-height:1.3; color:var(--admin-muted); }
+.admin-root .admin-chart-tip-value { font-size:16px; line-height:1.3; font-weight:600; font-variant-numeric:tabular-nums; }
+/* 退出失败 toast（退出免确认改造）：顶部居中一行深色提示，3.2s 自动消失，不阻断操作。 */
+.admin-root .admin-toast { position:fixed; top:16px; left:50%; transform:translateX(-50%); z-index:70; padding:8px 14px; border-radius:var(--admin-radius); background:var(--admin-ink); color:var(--admin-surface); font-size:12px; line-height:1.4; box-shadow:var(--admin-shadow); }
 .admin-root .admin-chart-flat { position:absolute; inset:0; display:grid; place-items:center; margin:0; color:var(--admin-muted); font-size:12px; pointer-events:none; }
 .admin-root .admin-chart-axis { display:flex; justify-content:space-between; gap:4px; color:var(--admin-muted); font-size:11px; }
 /* 7 天注册趋势：真正的柱状图——每天一列 28px 固定柱宽、居中排列（7 柱 ≈ 340px，不占全宽），

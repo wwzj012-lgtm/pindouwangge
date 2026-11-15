@@ -5,6 +5,9 @@ import {
 } from '../utils/backgroundIslandCleanup';
 import type { GridSnapshot } from '../utils/historyTransactions';
 
+/** 阈值档位：1~32 粒，覆盖从单粒噪点到中等碎块（UI 下拉与 setThreshold 白名单共用，勿两处各写一份）。 */
+export const CLEANUP_THRESHOLD_OPTIONS = [1, 2, 3, 4, 6, 8, 12, 16, 24, 32] as const;
+
 export interface BackgroundCleanupPreview {
   analysis: BackgroundIslandAnalysis;
   protectedIds: ReadonlySet<number>;
@@ -88,7 +91,9 @@ export function useBackgroundCleanup({ grid, context, enabled, onApply, onBefore
   }, []);
 
   const setThreshold = useCallback((value: number) => {
-    if (![1, 2, 4, 8, 16].includes(value)) return;
+    // 白名单必须与 CLEANUP_THRESHOLD_OPTIONS 一致——此前写死 [1,2,4,8,16]，
+    // 下拉里的 3/6/12/24/32 全被静默丢弃，表现为"怎么点都 ≤4"（2026-11-15 用户反馈）。
+    if (!CLEANUP_THRESHOLD_OPTIONS.includes(value as typeof CLEANUP_THRESHOLD_OPTIONS[number])) return;
     setSession(current => current ? { ...current, threshold: value } : current);
   }, []);
 

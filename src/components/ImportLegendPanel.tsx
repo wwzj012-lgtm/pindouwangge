@@ -5,6 +5,7 @@ import {
   LEGEND_LOW_CONFIDENCE,
   parseLegend,
   suggestCodeFromRgb,
+  strictCodeFromRgb,
   type LegendFrameRect,
   type LegendParseResult,
 } from '../utils/importLegend';
@@ -125,31 +126,43 @@ export function parseEntriesToRows(
 ): LegendLockRow[] {
   const rows: LegendLockRow[] = [];
   for (const entry of entries) {
-    if (entry.code.length === 0 && palette && palette.length) {
+    let code = entry.code;
+    let warn = entry.warn;
+    if (code.length === 0 && palette && palette.length) {
       // 空白行治理：色点先验是最强证据（整块印刷色），建议色必须过 ΔE 上限。
       const suggestion = entry.dotRgb ? suggestCodeFromRgb(entry.dotRgb, palette) : null;
       if (!suggestion) continue;
-      rows.push({
-        code: suggestion.code,
-        count: entry.count,
-        countLocked: false,
-        enabled: paletteCodes.has(suggestion.code),
-        confidence: entry.confidence,
-        warn: [entry.warn, 'codeFromSwatch'].filter(Boolean).join(';'),
-      });
-      continue;
+      code = suggestion.code;
+      warn = [warn, 'codeFromSwatch'].filter(Boolean).join(';');
     }
-    if (entry.code.length === 0) continue;
+    if (code.length === 0) continue;
+    // 色板外错读码纠正（2026-11-15 用户实测「为什么出现不是这里面的」）：
+    // D23→H1、M14→M10 这类 OCR 错读的色点仍是整块真印刷色——严格条件
+    // （ΔE≤8 + 次近邻 margin≥3）下改判色板最近色；歧义/超限保留原码。
+    if (palette && palette.length && !paletteCodes.has(code) && entry.dotRgb) {
+      const strict = strictCodeFromRgb(entry.dotRgb, palette);
+      if (strict) {
+        code = strict.code;
+        warn = [warn, 'codeFromSwatch'].filter(Boolean).join(';');
+      }
+    }
     rows.push({
-      code: entry.code,
+      code,
       count: entry.count,
       countLocked: false,
-      enabled: entry.code.length > 0 && paletteCodes.has(entry.code),
+      enabled: paletteCodes.has(code),
       confidence: entry.confidence,
-      warn: entry.warn,
+      warn,
     });
   }
-  return rows;
+  // 同码去重（2026-11-15 用户实测「27 色里竟然有重复的」）：错读码经
+  // 色点纠正后可能撞上真码（两条 H1），保 confidence 最高的一条。
+  const byCode = new Map<string, LegendLockRow>();
+  for (const row of rows) {
+    const prev = byCode.get(row.code);
+    if (!prev || row.confidence > prev.confidence) byCode.set(row.code, row);
+  }
+  return [...byCode.values()];
 }
 
 /** 解析条目里因「色号未读出且无法建议」被省略的数量（供 parseNote 说明）。 */
@@ -383,6 +396,10 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
       }
       context.drawImage(imageElement, 0, 0, dimensions.width, dimensions.height);
       const pixels = context.getImageData(0, 0, dimensions.width, dimensions.height);
+      // ⚠️ 解析必须用全色板（2026-11-15 白名单塌缩事故回退）：收窄解析域
+      // 会形成正反馈——首漏的码被错配到收窄域内近码 → 去重后行集塌缩 →
+      // 再解析进一步收窄 → 整图被压成几个颜色。白名单只管网格识别
+      // （importRecognition），解析层靠 shouldAutoWhitelist 的命中率守卫。
       const result = parseLegend(
         { data: pixels.data, ...dimensions },
         calibration,

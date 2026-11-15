@@ -431,7 +431,6 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   const legendHeaderFont = `bold ${Math.round(18 * scale)}px sans-serif`;
   const legendSubFont = `${Math.round(13 * scale)}px sans-serif`;
   const legendCodeFont = `bold ${Math.round(14 * scale)}px monospace`;
-  const legendNameFont = `${Math.round(13 * scale)}px sans-serif`;
   const legendCountFont = `bold ${Math.round(14 * scale)}px sans-serif`;
 
   // 4. Calculate Legend Layout & Canvas Bounds
@@ -499,10 +498,22 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
   ctx.font = subTitleFont;
   ctx.fillText(
     isEn
-      ? `Brand: ${brandName} | Size: ${width}x${height} Beads (${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} board(s) of ${boardSize}x${boardSize})`
-      : `品牌: ${brandName} | 尺寸: ${width}x${height} 豆 (需 ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} 个 ${boardSize}x${boardSize} 板)`,
+      ? `Brand: ${brandName} | Needs ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} board(s) of ${boardSize}x${boardSize}`
+      : `品牌: ${brandName} | 需 ${Math.ceil(width / boardSize) * Math.ceil(height / boardSize)} 个 ${boardSize}x${boardSize} 板`,
     20,
     Math.round(58 * Math.max(1, scale * 0.7))
+  );
+
+  // 尺寸标签：放大并右对齐到画布右上角（图例面板上方）——2026-11-15 用户指定位置。
+  // 与标题同行基线，右缘留 20px；字号随图例 scale 放大，保证整图缩放后仍可读。
+  ctx.fillStyle = '#1E293B';
+  ctx.font = `bold ${Math.round(20 * Math.max(1, scale * 0.7))}px sans-serif`;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(
+    isEn ? `Size: ${width}x${height} Beads` : `尺寸: ${width}x${height} 豆`,
+    totalCanvasWidth - 20,
+    Math.round(36 * Math.max(1, scale * 0.7))
   );
 
   // 6. Coordinate Labels (A..Z top, 1..N left)
@@ -757,12 +768,6 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.font = legendCodeFont;
     ctx.fillStyle = '#0F172A';
     ctx.fillText(`${bead.code}`, itemX + swatchSize + Math.round(8 * scale), itemY + swatchSize / 2);
-
-    // Name
-    ctx.font = legendNameFont;
-    ctx.fillStyle = '#334155';
-    const nameStr = bead.name.length > 8 ? bead.name.slice(0, 8) + '..' : bead.name;
-    ctx.fillText(nameStr, itemX + swatchSize + Math.round(62 * scale), itemY + swatchSize / 2);
 
     // Count
     ctx.font = legendCountFont;

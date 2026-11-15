@@ -42,6 +42,14 @@ const CONTRAST = 60;
 const DOT_CONTRAST = 12;
 /** 色点先验的色板距离上限：印刷色差通常 < 6，放宽到 12。 */
 const PRIOR_MAX_DELTA_E = 12;
+/** 决定性先验锁：色票底色是印刷原色时（自家导出回灌/高清截图），色点远比
+ * 7px 小字的字形 OCR 可靠——先验 ΔE 足够小且对同长度次名有显著领先时，
+ * 直接锁定先验，不让全局求解用错位的字形装配覆盖它。 */
+const PRIOR_LOCK_MAX_DELTA_E = 6;
+const PRIOR_LOCK_MARGIN = 3.5;
+/** 原色级先验（ΔE 极小，如无损 PNG 回灌）：领先要求放宽。 */
+const PRIOR_LOCK_EXACT_DELTA_E = 1.2;
+const PRIOR_LOCK_EXACT_MARGIN = 1.5;
 /** 色点先验在最终置信度里的权重上限口径（与 symbolAssist 同量级）。 */
 const COLOR_PRIOR_WEIGHT = 0.3;
 /** 一行文字行里至少这么多暗像素才算"文字行"（按带宽度的比例下限）。 */
@@ -56,6 +64,10 @@ const MIN_LINE_HEIGHT = 5;
 const GLYPH_MAX_DISTANCE = 0.35;
 /** 切片匹配的拒绝阈值（切片含邻居渗入，比整字稍严）。 */
 const SPLIT_MAX_DISTANCE = 0.4;
+/** 合成模板优先采信上限：模糊字形对干净合成模板的距离普遍 0.2-0.4。 */
+const SYNTH_PRIMARY_MAX_DISTANCE = 0.45;
+/** 浏览器内合成锚自洽度上限：同字体渲染下标注可信，直接优先于代码锚。 */
+const SYNTH_TRUSTED_MAX_MEDDIST = 0.45;
 /** 计数字体模板的匹配阈值（计数区自建字体，同字距离更紧）。 */
 const COUNT_MAX_DISTANCE = 0.32;
 /** 计数字形聚类的同字符阈值（同字体同字符距离 ~0.1）。 */
@@ -64,6 +76,9 @@ const COUNT_GROUP_JACCARD = 0.22;
 const COUNT_MERGE_JACCARD = 0.26;
 /** 诊断：最近一次计数模板构建的指派表（簇大小 → 数字），dbg 脚本用。 */
 export const countTemplateAssignment: Array<{ size: number; dims: string; digit: string }> = [];
+/** 最近一次 buildCountTemplates 选中的合成锚（多高度候选胜者）。recognizeEntry
+ * 的联合匹配（matchCount）复用它——候选渲染高度由仲裁选出，调用方无需重复推断。 */
+export const lastSyntheticAnchors: { current: Map<string, Bitmap> | null } = { current: null };
 /** code|count 形状打平时改信先验所需的领先度下限。 */
 const SHAPE_AMBIGUOUS_MARGIN = 0.08;
 /** 少于这个条目数就不认为是图例条（单"条目"更可能是噪点或水印）。 */
@@ -331,8 +346,54 @@ const bitmapJaccard = (a: Bitmap, b: Bitmap): number => {
   return best;
 };
 
+/** 居中填充到位图框（不拉伸）：跨尺寸比对时保形。 */
+function padCenterBitmap(b: Bitmap, w: number, h: number): Bitmap {
+  if (b.w === w && b.h === h) return b;
+  const data = new Uint8Array(w * h);
+  const ox = Math.floor((w - b.w) / 2);
+  const oy = Math.floor((h - b.h) / 2);
+  for (let y = 0; y < b.h; y += 1) {
+    for (let x = 0; x < b.w; x += 1) {
+      data[(y + oy) * w + (x + ox)] = b.data[y * b.w + x];
+    }
+  }
+  return { data, w, h };
+}
+
+/**
+ * 居中填充版位图 Jaccard：与 bitmapJaccard 同样的 ±shift 搜索，但用居中
+ * 填充代替拉伸对齐。跨尺寸比对（合成锚 '4' 6px 宽 vs 真实字形 5px 宽）
+ * 时拉伸会压掉 '4' 的斜线使其形似 '5'——浏览器实测簇误标的根因。
+ */
+const bitmapJaccardPad = (a: Bitmap, b: Bitmap): number => {
+  const w = Math.max(a.w, b.w);
+  const h = Math.max(a.h, b.h);
+  const pa = padCenterBitmap(a, w, h);
+  const pb = padCenterBitmap(b, w, h);
+  let best = 1;
+  for (let dy = -GLYPH_SHIFT; dy <= GLYPH_SHIFT; dy += 1) {
+    for (let dx = -GLYPH_SHIFT; dx <= GLYPH_SHIFT; dx += 1) {
+      let inter = 0, union = 0;
+      for (let y = 0; y < h; y += 1) {
+        const ay = y + dy;
+        if (ay < 0 || ay >= h) continue;
+        for (let x = 0; x < w; x += 1) {
+          const ax = x + dx;
+          const av = ax >= 0 && ax < w ? pa.data[ay * w + ax] : 0;
+          const bv = pb.data[y * w + x];
+          if (av && bv) inter += 1;
+          if (av || bv) union += 1;
+        }
+      }
+      const d = union === 0 ? 1 : 1 - inter / union;
+      if (d < best) best = d;
+    }
+  }
+  return best;
+};
+
 /** 位图等分切片：把粘连的 k 个字符按宽度等分（用于粘连数字回收）。 */
-function splitBitmap(b: Bitmap, k: number): Bitmap[] {
+export function splitBitmap(b: Bitmap, k: number): Bitmap[] {
   const out: Bitmap[] = [];
   for (let i = 0; i < k; i += 1) {
     const gx0 = Math.floor((i * b.w) / k);
@@ -1019,6 +1080,29 @@ export function suggestCodeFromRgb(
 }
 
 /**
+ * 色板外错读码的严格纠正（2026-11-15 用户实测：D23→H1、M14→M10 这类
+ * 色号 OCR 错读，但色点仍是整块真印刷色）。与 suggestCodeFromRgb 的
+ * 区别：OCR 是有证据的读数，色点纠正只在"唯一近色"时推翻——ΔE 上限
+ * 更紧（≤8），且要求对次近邻有明显领先（margin ≥ 3），近邻歧义一律
+ * 放弃纠正（保留错读码 + codeNotInPalette warn 让用户手动改）。
+ */
+export function strictCodeFromRgb(
+  rgb: [number, number, number],
+  palette: ReadonlyArray<BeadColor>,
+  maxDeltaE = 8,
+  minMargin = 3,
+): { code: string; deltaE: number } | null {
+  const lab = rgbToLab(...rgb);
+  const ranked = palette
+    .filter(color => color.enabled !== false)
+    .map(color => ({ code: color.code, d: deltaE2000(lab, rgbToLab(...color.rgb)) }))
+    .sort((a, b) => a.d - b.d);
+  if (!ranked.length || ranked[0].d > maxDeltaE) return null;
+  if (ranked.length > 1 && ranked[1].d - ranked[0].d < minMargin) return null;
+  return { code: ranked[0].code, deltaE: ranked[0].d };
+}
+
+/**
  * 自举标注的自洽守卫（毒化拦截，2026-11-14 用户图实测）：
  * 全局求解错误的 code（'5' 被解成 '8' 等）会把异形字形注入同字符桶，
  * 再经 buildTemplates → codeDigitTemplates 毒化计数簇标注——色号对但
@@ -1042,7 +1126,7 @@ function pruneInconsistentLabels(labeled: Map<string, Bitmap[]>): Map<string, Bi
 }
 
 /** 逐实例拉伸平均 → 字符模板（阈值 0.4，同 symbolOCR 口径）。 */
-function buildTemplates(labeled: Map<string, Bitmap[]>): Map<string, Bitmap> {
+export function buildTemplates(labeled: Map<string, Bitmap[]>): Map<string, Bitmap> {
   const templates = new Map<string, Bitmap>();
   for (const [label, glyphs] of labeled) {
     if (!glyphs.length) continue;
@@ -1086,12 +1170,14 @@ function buildTemplates(labeled: Map<string, Bitmap[]>): Map<string, Bitmap> {
 export function annotateCountClusters(
   clusters: Bitmap[][],
   codeDigitTemplates: Map<string, Bitmap>,
+  padAnchors = false,
 ): string[] {
   if (!clusters.length) return [];
   const digits = [...codeDigitTemplates.keys()].sort();
   if (!digits.length) return clusters.map(() => '');
+  const dist = padAnchors ? bitmapJaccardPad : bitmapJaccard;
   const meanDist = (members: Bitmap[], template: Bitmap) =>
-    members.reduce((sum, bitmap) => sum + bitmapJaccard(bitmap, template), 0) / members.length;
+    members.reduce((sum, bitmap) => sum + dist(bitmap, template), 0) / members.length;
   const relabel = (assign: string[]) => {
     const map = new Map<string, Bitmap[]>();
     clusters.forEach((members, index) => {
@@ -1161,56 +1247,222 @@ function averageLinkage<T>(items: T[], dist: (a: T, b: T) => number, threshold: 
   return clusters;
 }
 
-function buildCountTemplates(
+/**
+ * 合成数字模板（计数标注锚，2026-11-15）：计数与码字是两套字体/字重，
+ * 代码字形模板跨字体 Jaccard 系统性失效（同字距离贴着异字距离、且色号里
+ * 没出现过的数字根本没有锚）。解析与渲染发生在同一浏览器（同字体引擎），
+ * 直接用 Canvas 渲染 0-9 合成锚，字号按计数字实际高度换算。
+ * 渲染质量：4× 超采样 + imageSmoothing 平滑缩放 + 0.5 阈值——小字号
+ * （8-9px）直渲的位图形状失真，实测 '0' 簇被错标成 '4'。
+ */
+export function renderSyntheticDigitTemplates(digitHeightPx: number): Map<string, Bitmap> | null {
+  try {
+    const SS = 4;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx || !(digitHeightPx >= 5)) return null;
+    const probeFont = 100;
+    ctx.font = `bold ${probeFont}px sans-serif`;
+    const probe = ctx.measureText('0');
+    const probeH = (probe.actualBoundingBoxAscent ?? 0) + (probe.actualBoundingBoxDescent ?? 0);
+    if (!probeH) return null;
+    const fontPx = Math.max(9, Math.round((digitHeightPx * probeFont) / probeH));
+    const bigFontPx = fontPx * SS;
+    canvas.width = Math.ceil(bigFontPx * 1.8);
+    canvas.height = Math.ceil(bigFontPx * 1.8);
+    ctx.font = `bold ${bigFontPx}px sans-serif`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#000';
+    const small = document.createElement('canvas');
+    const sctx = small.getContext('2d');
+    if (!sctx) return null;
+    const out = new Map<string, Bitmap>();
+    for (const ch of '0123456789') {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillText(ch, Math.ceil(bigFontPx * 0.2), Math.ceil(bigFontPx * 1.25));
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let x0 = canvas.width, x1 = -1, y0 = canvas.height, y1 = -1;
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+          if (img[(y * canvas.width + x) * 4 + 3] > 127) {
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+          }
+        }
+      }
+      if (x1 < x0) continue;
+      const bw = x1 - x0 + 1, bh = y1 - y0 + 1;
+      // 高分辨率字形裁片（drawImage 按画布坐标裁）→ 平滑缩到目标字号 → 阈值
+      small.width = Math.max(1, Math.round(bw / SS));
+      small.height = Math.max(1, Math.round(bh / SS));
+      sctx.clearRect(0, 0, small.width, small.height);
+      sctx.imageSmoothingEnabled = true;
+      sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(canvas, x0, y0, bw, bh, 0, 0, small.width, small.height);
+      const scaled = sctx.getImageData(0, 0, small.width, small.height).data;
+      const w = small.width, h = small.height;
+      const data = new Uint8Array(w * h);
+      for (let i = 0; i < w * h; i += 1) data[i] = scaled[i * 4 + 3] >= 128 ? 1 : 0;
+      out.set(ch, { data, w, h });
+    }
+    return out.size >= 8 ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildCountTemplates(
   rawEntries: RawEntry[],
   splits: Array<SplitResult | null>,
   digitW: number,
   codeDigitTemplates: Map<string, Bitmap>,
+  syntheticDigits?: Map<string, Bitmap> | Array<Map<string, Bitmap> | null> | null,
+  synthTrusted = false,
 ): Map<string, Bitmap> {
-  const singles: Bitmap[] = [];
+  // 兼容单锚与多高度候选两种传参（诊断脚本传单锚）。
+  const synthCandidates = (Array.isArray(syntheticDigits) ? syntheticDigits : [syntheticDigits])
+    .filter((m): m is Map<string, Bitmap> => !!m && m.size >= 8);
+  lastSyntheticAnchors.current = null;
+  const singlesRaw: Bitmap[] = [];
   for (let i = 0; i < rawEntries.length; i += 1) {
     const split = splits[i];
     if (!split) continue;
     for (const glyph of split.countGlyphs) {
-      if (widthOf(glyph) <= digitW * 1.4) singles.push(glyph.bitmap);
+      // 宽度门（1.4×digitW）：更宽的是粘连块走切片路径；蓝墨场景粒块
+      // 由 buildCountTemplates 调用方决定（见 synth 路径注释）。
+      if (widthOf(glyph) <= digitW * 1.4) singlesRaw.push(glyph.bitmap);
     }
   }
-  if (!singles.length || !codeDigitTemplates.size) return new Map();
-  // 聚类（平均连接，挡单链接的形近链）→ 簇模板合并 → 标注。若聚类退化
-  // （最大簇吞掉 >40% 单字——小字号+JPEG 模糊时不同数字两两距离全部贴着
-  // 阈值，任何链接策略都会链成巨簇），退回逐单字标注：去噪交给 EM 轮次
-  // 里按标注聚合的同字体临时模板。
+  // 高度守卫：单字池曾混入"粒"块（h≈11，蓝墨同色）与水印碎片（h≤5），
+  // 聚类直接退化成单字 EM、标注全乱。计数字高度中位附近才收。
+  const singles = (() => {
+    if (singlesRaw.length < 4) return singlesRaw;
+    const hs = singlesRaw.map(b => b.h);
+    const medH = median(hs);
+    const kept = singlesRaw.filter((_, i) => hs[i] >= medH * 0.7 && hs[i] <= medH * 1.35);
+    return kept.length >= 4 ? kept : singlesRaw;
+  })();
+  const hasSynthetic = synthCandidates.length > 0;
+  if (!singles.length || (!codeDigitTemplates.size && !hasSynthetic)) return new Map();
   countTemplateAssignment.length = 0;
-  const rawClusters = averageLinkage(singles, (a, b) => bitmapJaccard(a, b), COUNT_GROUP_JACCARD);
-  const degenerate = Math.max(...rawClusters.map(members => members.length)) > singles.length * 0.4;
-  let groupsAll: Bitmap[][];
-  if (degenerate) {
-    countTemplateAssignment.push({ size: singles.length, dims: '', digit: 'SINGLETON/EM' });
-    groupsAll = singles.map(bitmap => [bitmap]);
-  } else {
-    countTemplateAssignment.push({ size: rawClusters.length, dims: '', digit: `CLUSTER/${rawClusters.length}` });
-    const clusterPairs = rawClusters.map(members => ({
-      members,
-      template: buildTemplates(new Map([['x', members]])).get('x')!,
-    }));
-    const merged = averageLinkage(
-      clusterPairs,
-      (a, b) => bitmapJaccard(a.template, b.template),
-      COUNT_MERGE_JACCARD,
-    );
-    countTemplateAssignment[0].digit = `CLUSTER/${rawClusters.length}->${merged.length}`;
-    groupsAll = merged.map(cluster => cluster.flatMap(p => p.members));
+
+  /**
+   * 一条标注路径：分组 → argmin 标注 → 真实实例模板 → 质量分。
+   * 质量分 = 全部单字对其被派字符模板的中位 Jaccard 距离（越低越自洽）。
+   */
+  const runPath = (mode: 'code' | 'synth'): { labeled: Map<string, Bitmap[]>; medDist: number; degenerate: boolean; candidate?: Map<string, Bitmap> } | null => {
+    if (mode === 'code' ? !codeDigitTemplates.size : !synthCandidates.length) return null;
+    let groups: Bitmap[][];
+    let degenerate = false;
+    if (mode === 'synth') {
+      // 合成锚与真实渲染同字体，但真实字形带 JPEG 模糊——单字形argmin
+      // 噪声大（浏览器实测 '2'→'1'、'5'→'6'、'8'→'9' 混淆），改用与
+      // code 路径一致的聚类共识：簇代表标注，簇内多字形互相纠偏。
+      const clusters = averageLinkage(singles, (a, b) => bitmapJaccard(a, b), COUNT_GROUP_JACCARD);
+      degenerate = Math.max(...clusters.map(members => members.length)) > singles.length * 0.4;
+      if (degenerate) {
+        groups = singles.map(bitmap => [bitmap]);
+      } else {
+        const clusterPairs = clusters.map(members => ({
+          members,
+          template: buildTemplates(new Map([['x', members]])).get('x')!,
+        }));
+        const merged = averageLinkage(clusterPairs, (a, b) => bitmapJaccard(a.template, b.template), COUNT_MERGE_JACCARD);
+        groups = merged.map(cluster => cluster.flatMap(p => p.members));
+      }
+    } else {
+      const clusters = averageLinkage(singles, (a, b) => bitmapJaccard(a, b), COUNT_GROUP_JACCARD);
+      degenerate = Math.max(...clusters.map(members => members.length)) > singles.length * 0.4;
+      if (degenerate) {
+        groups = singles.map(bitmap => [bitmap]);
+      } else {
+        const clusterPairs = clusters.map(members => ({
+          members,
+          template: buildTemplates(new Map([['x', members]])).get('x')!,
+        }));
+        const merged = averageLinkage(clusterPairs, (a, b) => bitmapJaccard(a.template, b.template), COUNT_MERGE_JACCARD);
+        groups = merged.map(cluster => cluster.flatMap(p => p.members));
+      }
+    }
+    const buildAttempt = (anchors: Map<string, Bitmap>): { labeled: Map<string, Bitmap[]>; medDist: number } | null => {
+      const labeled = new Map<string, Bitmap[]>();
+      const assignment = annotateCountClusters(groups, anchors, mode === 'synth');
+      groups.forEach((members, index) => {
+        const digit = assignment[index];
+        if (!digit) return;
+        const list = labeled.get(digit) ?? [];
+        list.push(...members);
+        labeled.set(digit, list);
+      });
+      // 成员复核（2026-11-15 浏览器实测）：模糊字形链会把 '1'/'4'/'2' 并进
+      // 同一簇，簇共识标签污染整组（'1' 字形对污染 '4' 模板距离低至 0.14，
+      // 联合匹配也救不回）。合成锚与真实渲染同字体，对簇内每个字形独立
+      // 复核：意见不同的成员迁移到对应字符组——簇结构保平稳，标签去污染。
+      if (mode === 'synth') {
+        for (const [char, members] of [...labeled]) {
+          for (const member of members) {
+            const sm = matchGlyph(member, anchors, true);
+            if (sm && sm.char !== char) {
+              const list = labeled.get(char)!;
+              const idx = list.indexOf(member);
+              if (idx >= 0) list.splice(idx, 1);
+              const target = labeled.get(sm.char) ?? [];
+              target.push(member);
+              labeled.set(sm.char, target);
+            }
+          }
+        }
+        for (const [char, list] of [...labeled]) if (!list.length) labeled.delete(char);
+      }
+      const finalTemplates = buildTemplates(labeled);
+      const dists: number[] = [];
+      groups.forEach((members, index) => {
+        const template = finalTemplates.get(assignment[index]);
+        if (!template) return;
+        for (const bitmap of members) dists.push(bitmapJaccard(bitmap, template));
+      });
+      if (!dists.length) return null;
+      return { labeled, medDist: median(dists) };
+    };
+    if (mode === 'code') {
+      const attempt = buildAttempt(codeDigitTemplates);
+      return attempt ? { ...attempt, degenerate } : null;
+    }
+    // 多高度候选（2026-11-15 框选路径实测）：合成锚按单一中位高度渲染时，
+    // 框选路径的高度分布与直通路径不同，±1px 偏差就让 medDist 超阈回落
+    // code 模板（5→8/2→4/3→1 混淆重现）。逐候选标注取自洽度最高者。
+    let best: { labeled: Map<string, Bitmap[]>; medDist: number; degenerate: boolean; candidate: Map<string, Bitmap> } | null = null;
+    for (const candidate of synthCandidates) {
+      const attempt = buildAttempt(candidate);
+      if (attempt && (!best || attempt.medDist < best.medDist)) {
+        best = { ...attempt, degenerate, candidate };
+      }
+    }
+    return best;
+  };
+
+  const codePath = runPath('code');
+  const synthPath = hasSynthetic ? runPath('synth') : null;
+  // 仲裁（2026-11-15 浏览器实测修订）：合成锚与实际渲染同字体引擎时
+  // （浏览器），跨字体代码锚会系统性缺字（water-box 7 簇只标出 0123478，
+  // 缺 5/6/9 → 953 读成 83）——两者都存在时按中位自洽距离竞争，代码锚
+  // 聚类退化时也兜底。Node/无 DOM 下合成锚为 null，维持代码锚优先
+  // （Node 字体与真实渲染不一致，分数竞争不可信，实测 Σ 更差）。
+  const winner = synthPath && (!codePath || codePath.degenerate
+      || (synthTrusted && synthPath.medDist <= SYNTH_TRUSTED_MAX_MEDDIST)
+      || synthPath.medDist <= codePath.medDist)
+    ? 'synth'
+    : 'code';
+  countTemplateAssignment.push({ size: 0, dims: `code=${codePath ? codePath.medDist.toFixed(3) : '-'}${codePath?.degenerate ? '(deg)' : ''} synth=${synthPath ? synthPath.medDist.toFixed(3) : '-'}`, digit: `WINNER/${winner}` });
+  const chosen = winner === 'synth' ? synthPath! : codePath;
+  if (winner === 'synth' && synthPath?.candidate) lastSyntheticAnchors.current = synthPath.candidate;
+  if (!chosen) return new Map();
+  for (const [digit, members] of chosen.labeled) {
+    countTemplateAssignment.push({ size: members.length, dims: members.map(m => `${m.w}x${m.h}`).slice(0, 12).join(','), digit: `${digit}×${members.length}` });
   }
-  // 标注（argmin + 同字体 EM 自纠），两段式实现见导出的 annotateCountClusters。
-  const labeled = new Map<string, Bitmap[]>();
-  const assignment = annotateCountClusters(groupsAll, codeDigitTemplates);
-  groupsAll.forEach((members, index) => {
-    const list = labeled.get(assignment[index]) ?? [];
-    list.push(...members);
-    labeled.set(assignment[index], list);
-    countTemplateAssignment.push({ size: members.length, dims: members.map(m => `${m.w}x${m.h}`).join(','), digit: assignment[index] });
-  });
-  return buildTemplates(labeled);
+  return buildTemplates(chosen.labeled);
 }
 
 interface GlyphMatch {
@@ -1219,12 +1471,14 @@ interface GlyphMatch {
   secondDistance: number;
 }
 
-/** 单字形对模板集匹配：返回最优字符与次优距离。 */
-function matchGlyph(glyph: Bitmap, templates: Map<string, Bitmap>): GlyphMatch | null {
+/** 单字形对模板集匹配：返回最优字符与次优距离。pad=true 用居中填充比对
+ * （合成锚跨尺寸场景，防止拉伸变形），默认拉伸（同源真实字形场景）。 */
+export function matchGlyph(glyph: Bitmap, templates: Map<string, Bitmap>, pad = false): GlyphMatch | null {
+  const dist = pad ? bitmapJaccardPad : bitmapJaccard;
   let best: GlyphMatch | null = null;
   let second = Number.POSITIVE_INFINITY;
   for (const [char, template] of templates) {
-    const d = bitmapJaccard(glyph, template);
+    const d = dist(glyph, template);
     if (!best || d < best.distance) {
       second = best ? best.distance : second;
       best = { char, distance: d, secondDistance: 0 };
@@ -1241,6 +1495,8 @@ interface SplitResult {
   codeGlyphs: GlyphComp[];
   countGlyphs: GlyphComp[];
   splitSuspicious: boolean;
+  /** 计数列是独立彩色墨（蓝墨）印出：可用合成数字模板当标注锚。 */
+  blueInkCount?: boolean;
 }
 
 /**
@@ -1255,6 +1511,33 @@ interface SplitResult {
  */
 function splitEntry(glyphs: GlyphComp[], prior: { code: string; deltaE: number } | null, digitW: number): SplitResult | null {
   if (glyphs.length < 2) return null;
+  // 蓝墨计数分离（2026-11-15 自家导出实测）：导出图例的计数与"粒"用高饱
+  // 和蓝墨印刷，码字黑墨、名字灰墨——按墨色直接分离比空格间隙判据可靠
+  // （灰名字与码字同属冷灰系，间隙判据经常跨列错切）。门控：蓝墨字形 ≥2
+  // 且深墨字形 ≥2 才走此路（yao/water-box 计数是黑墨，蓝墨 ~0 不触发）。
+  const isBlueInk = (comp: GlyphComp) => {
+    const [r, g, b] = comp.modeRgb;
+    return b >= 140 && b - r >= 50 && b - g >= 30;
+  };
+  const blue = glyphs.filter(isBlueInk);
+  const dark = glyphs.filter(glyph => !isBlueInk(glyph));
+  // 浏览器门控：蓝墨粗体计数与代码字形是两套字重，模板链必须靠 Canvas
+  // 合成数字锚（buildCountTemplates 的 syntheticDigits）——Node/无 DOM
+  // 环境合成锚为 null，蓝墨分离只会让计数全灭，此时保留旧切分路径。
+  if (typeof document !== 'undefined'
+    && blue.length >= 2 && dark.length >= 2 && blue.length + dark.length === glyphs.length) {
+    // 蓝墨尾部宽块 = 中文单位（粒/颗）：数字宽 ≈ digitW，单位字明显更宽。
+    // 不剥会混进计数单字池毒化聚类。
+    const blueWidths = blue.map(widthOf);
+    const lastBlue = blueWidths[blueWidths.length - 1];
+    const blueMedianRest = median(blueWidths.slice(0, -1));
+    const blueBody = lastBlue > digitW * 1.35 && blueMedianRest > 0 && lastBlue > blueMedianRest * 1.2
+      ? blue.slice(0, -1)
+      : blue;
+    if (blueBody.length >= 1) {
+      return { codeGlyphs: dark, countGlyphs: blueBody, splitSuspicious: false, blueInkCount: true };
+    }
+  }
   const widths = glyphs.map(widthOf);
   const medianRest = median(widths.slice(0, -1));
   const lastW = widths[widths.length - 1];
@@ -1298,6 +1581,46 @@ function splitEntry(glyphs: GlyphComp[], prior: { code: string; deltaE: number }
     countGlyphs: usable.slice(splitIndex),
     splitSuspicious: suspicious,
   };
+}
+
+/**
+ * codeGlyphs 结构收窄（2026-11-15 用户口径）：色号 = 字母 + 1-2 数字
+ * 紧贴相连（共 2-3 字形），色号与数量之间有空格级间隔。自家导出图例把
+ * 同一色号印两份（色票小字 + 文本列），切分/去重失败时 codeGlyphs 会
+ * 同时含两份副本——按列间隙聚簇，取"有效长度 ∈ {2,3}"的最右簇（文本列
+ * 副本通常最完整；粘连块按宽度折算字数）。无合格簇时保守不动。
+ */
+function reduceCodeToStructuralCluster(split: SplitResult, digitW: number): void {
+  const glyphs = split.codeGlyphs;
+  if (digitW <= 0 || glyphs.length < 2) return;
+  // 现有 codeGlyphs 有效长度已落在色号长度域（2-3）时不干预——已经合理，
+  // 贸然换簇会把正确切分改错（water-box D23 实测 131→831 的回归来源）。
+  const effLenAll = glyphs
+    .reduce((sum, glyph) => sum + Math.max(1, Math.round(widthOf(glyph) / digitW)), 0);
+  if (effLenAll >= 2 && effLenAll <= 3) return;
+  const columnGap = Math.max(10, Math.round(digitW * 1.6));
+  const clusters: GlyphComp[][] = [];
+  let current: GlyphComp[] = [glyphs[0]];
+  for (let i = 1; i < glyphs.length; i += 1) {
+    if (glyphs[i].x0 - glyphs[i - 1].x1 - 1 >= columnGap) {
+      clusters.push(current);
+      current = [glyphs[i]];
+    } else {
+      current.push(glyphs[i]);
+    }
+  }
+  clusters.push(current);
+  if (clusters.length < 2) return;
+  const effLen = (cluster: GlyphComp[]) => cluster
+    .reduce((sum, glyph) => sum + Math.max(1, Math.round(widthOf(glyph) / digitW)), 0);
+  const candidates = clusters.filter(cluster => {
+    const len = effLen(cluster);
+    return len >= 2 && len <= 3;
+  });
+  if (!candidates.length) return;
+  const chosen = candidates[candidates.length - 1];
+  if (chosen.length === glyphs.length) return;
+  split.codeGlyphs = chosen;
 }
 
 /** 全局一致性求解出的条目 code（null = 求解失败，走模板/先验兜底）。 */
@@ -1362,7 +1685,32 @@ function resolveCodes(
     candidates.push(ranked.filter(p => p.deltaE <= window).map(p => p.code));
   }
 
-  // 2. 字形聚类：union-find，同字符字形 Jaccard 距离极小。
+  // 2. 决定性先验锁（在字形传播前）：锁定项占用全局唯一名额，其余条目
+  // 求解时自动避开；其字形不参与传播约束（自家导出实测：dedupe 残影会让
+  // codeGlyphs 数 ≠ 真码长，组→字符映射错位会污染其它条目）。
+  const resolved: Array<ResolvedCode | null> = new Array(n).fill(null);
+  const taken = new Set<string>();
+  for (let i = 0; i < n; i += 1) {
+    const prior = priors[i];
+    if (!prior || !rawEntries[i].dotRgb) continue;
+    const dotLab = rgbToLab(...rawEntries[i].dotRgb);
+    const ranked = prepared
+      .filter(p => p.color.code.length === prior.code.length)
+      .map(p => ({ code: p.color.code, deltaE: deltaE2000(dotLab, p.lab) }))
+      .sort((a, b) => a.deltaE - b.deltaE);
+    if (!ranked.length || ranked[0].code !== prior.code) continue;
+    const margin = ranked.length > 1 ? ranked[1].deltaE - ranked[0].deltaE : Number.POSITIVE_INFINITY;
+    // 先验锁整体停用（2026-11-15 归因）：此前 `false && A || B` 因优先级
+    // 导致 B（原色级先验锁）仍然生效——误导色点 ΔE=0 恰好满足 B，先验被
+    // 锁死，全局一致性求解没有纠正机会（mechanism 1 单测回归的根源）。
+    const decisive = false && ((prior.deltaE <= PRIOR_LOCK_MAX_DELTA_E && margin >= PRIOR_LOCK_MARGIN)
+      || (prior.deltaE <= PRIOR_LOCK_EXACT_DELTA_E && margin >= PRIOR_LOCK_EXACT_MARGIN));
+    if (!decisive) continue;
+    resolved[i] = { code: prior.code, deltaE: prior.deltaE, unique: true };
+    taken.add(prior.code);
+  }
+
+  // 3. 字形聚类：union-find，同字符字形 Jaccard 距离极小。
   const parent = new Map<string, string>();
   const find = (key: string): string => {
     const p = parent.get(key);
@@ -1427,9 +1775,7 @@ function resolveCodes(
     if (!changed) break;
   }
 
-  // 4. 定解（全局唯一）。
-  const resolved: Array<ResolvedCode | null> = new Array(n).fill(null);
-  const taken = new Set<string>();
+  // 4. 定解（全局唯一；先验锁定项已占用名额）。
   for (let round = 0; round < n + 1; round += 1) {
     let progress = false;
     const order = candidates
@@ -1488,8 +1834,20 @@ function recognizeEntry(
   paletteCodes: Set<string>,
   digitW: number,
   countW: number,
+  synthTemplates?: Map<string, Bitmap> | null,
 ): EntryParse {
   const warns: string[] = [];
+  // 计数匹配（2026-11-15 浏览器实测）：真实字形模板捕获 JPEG 模糊，但
+  // 模糊也会让 '1'（旗形头）贴上 '4' 模板——干净合成模板并入候选池取
+  // 最小距离，两者互补（真实模板近时不受影响）。
+  const matchCount = (bitmap: Bitmap): GlyphMatch | null => {
+    const m = countTemplates.size ? matchGlyph(bitmap, countTemplates) : null;
+    if (synthTemplates && synthTemplates.size) {
+      const m2 = matchGlyph(bitmap, synthTemplates, true);
+      if (m2 && (!m || m2.distance < m.distance)) return m2;
+    }
+    return m;
+  };
   if (!split) {
     const fallback = resolved?.code ?? (prior && paletteCodes.has(prior.code) ? prior.code : '');
     return { code: fallback, count: 0, confidence: fallback ? 0.3 : 0.1, warns: ['entryTooShort'] };
@@ -1569,7 +1927,7 @@ function recognizeEntry(
     const w = widthOf(glyph);
     // 宽度守卫：单字宽的 1.4 倍以上必然是粘连块（数字对 / 数字+粒），
     // 直接匹配会退化成"取中间",必须走切片回收。
-    const match = countTemplates.size && w <= digitW * 1.4 ? matchGlyph(glyph.bitmap, countTemplates) : null;
+    const match = w <= digitW * 1.4 ? matchCount(glyph.bitmap) : null;
     if (match && match.distance <= GLYPH_MAX_DISTANCE) {
       digits.push(match.char);
       digitDistances.push(match.distance);
@@ -1582,21 +1940,29 @@ function recognizeEntry(
     const centerK = countW > 0 ? Math.round(w / countW) : 0;
     const ks: number[] = [];
     for (const k of [centerK - 1, centerK, centerK + 1]) {
-      if (k >= 2 && k <= 4 && countW > 0 && w >= countW * 0.92 * k) ks.push(k);
+      if (k >= 2 && k <= 4 && countW > 0 && w >= countW * 0.82 * k) ks.push(k);
     }
     let bestK = -1;
     let bestAvg = Number.POSITIVE_INFINITY;
     let bestPrefix = 0;
+    // 尾块位数预算（2026-11-15 浏览器实测）：末位数字常与"粒"粘连，k 切片
+    // 会把粒也切成数字（粒形似'0'全匹配）→ 总位数超 3 判 countUnread
+    // （H1 953、E14 241 等 7 条全灭的根因）。尾块可贡献位数 = 3 - 已读位数。
+    const tailBudget = Math.max(0, 3 - digits.length);
     if (countTemplates.size) {
       for (const k of ks) {
         const slices = splitBitmap(glyph.bitmap, k);
-        const matches = slices.map(slice => matchGlyph(slice, countTemplates));
+        const matches = slices.map(slice => matchCount(slice));
         let prefix = 0;
         let distSum = 0;
         while (prefix < matches.length) {
           const m = matches[prefix];
           if (m && m.distance <= SPLIT_MAX_DISTANCE) { distSum += m.distance; prefix += 1; }
           else break;
+        }
+        if (isLast && prefix > tailBudget) {
+          prefix = tailBudget;
+          distSum = matches.slice(0, prefix).reduce((s, m) => s + (m ? m.distance : 0), 0);
         }
         const fullMatch = prefix === k;
         if (isLast) {
@@ -1610,7 +1976,7 @@ function recognizeEntry(
     }
     if (bestK > 0 && bestPrefix > 0) {
       const slices = splitBitmap(glyph.bitmap, bestK);
-      const matches = slices.map(slice => matchGlyph(slice, countTemplates));
+      const matches = slices.map(slice => matchCount(slice));
       for (let s = 0; s < bestPrefix; s += 1) {
         digits.push(matches[s]!.char);
         digitDistances.push(matches[s]!.distance);
@@ -1811,12 +2177,15 @@ export function debugLegendLines(
 
 export interface LegendDebugParse {
   rawEntries: RawEntry[];
+  /** 逐行连通域与锚点判定（anchorTrace），诊断误锚切行。 */
+  anchorTrace?: Array<{ y0: number; y1: number; comps: Array<{ x0: number; x1: number; y0: number; y1: number; area: number; anchor: boolean }> }>;
   priors: Array<{ code: string; deltaE: number } | null>;
   splits: Array<SplitResult | null>;
   resolvedCodes: Array<ResolvedCode | null>;
   digitW: number;
   templateChars: string[];
   countTemplateChars: string[];
+  countTemplateAscii?: string;
   parsed: EntryParse[];
 }
 
@@ -1862,9 +2231,16 @@ function collectFramedEntries(
     const groups: GlyphComp[][] = [];
     if (located.anchored) {
       // 锚定行：色票锚点即条目起点，按锚点切段；锚点前的杂字形自成一组。
+      // 假锚守卫（2026-11-15 自家导出图实测）：加粗计数数字会粘连成实心块
+      // （"27"→18×8 fill 0.70，与真色票 fill 0.7-0.9 同档、高度比也与
+      // water-box 真锚点 1.0-1.44 重叠——几何特征无法区分），但它后面只剩
+      // 1-2 个字形（余数+粒）；真色票锚点之后必然跟着整列内容（码字+计数
+      // ≥3 字形）。剩余字形不足 3 时不切，把假锚点并回当前条目（它本来就是
+      // 计数的一部分，缺了它计数少一位）。
       let current: GlyphComp[] = [];
-      for (const comp of comps) {
-        if (isSwatchAnchor(comp, ctx) && current.length) {
+      for (let i = 0; i < comps.length; i += 1) {
+        const comp = comps[i];
+        if (isSwatchAnchor(comp, ctx) && current.length && comps.length - i - 1 >= 3) {
           groups.push(current);
           current = [comp];
         } else current.push(comp);
@@ -1987,6 +2363,67 @@ function dedupeDuplicateCodeColumns(
       if (same) split.codeGlyphs = split.codeGlyphs.slice(0, len);
       break;
     }
+  }
+}
+
+/**
+ * 按列修复 code 字形（先验锚定行）：自家导出图例的行结构是
+ * [色票][码字列][码字名列][计数字列][粒]，码字印两份。dedupe 后的
+ * codeGlyphs 可能跨两列（JPEG 让某一份缺字/粘连，列簇合并失败），
+ * 长度碰巧凑成 L 时垃圾字形会以"对齐"假象进入自举标注，毒化数字
+ * 模板。已知 L 时逐列重选：有恰好 L 个单字形的列直接用；否则找总宽
+ * ≈ L×digitW 的列按宽度占比切片凑 L（粘连 "C2"+"1" → C,2,1）。
+ */
+function repairCodeFromColumns(
+  split: SplitResult,
+  prior: { code: string; deltaE: number },
+  digitW: number,
+): void {
+  const len = prior.code.length;
+  const glyphs = split.codeGlyphs;
+  if (glyphs.length === 0 || glyphs.length === len) return;
+  const columnGap = Math.max(10, Math.round(digitW * 1.6));
+  const columns: GlyphComp[][] = [];
+  let current: GlyphComp[] = [glyphs[0]];
+  for (let k = 1; k < glyphs.length; k += 1) {
+    if (glyphs[k].x0 - glyphs[k - 1].x1 - 1 >= columnGap) { columns.push(current); current = [glyphs[k]]; }
+    else current.push(glyphs[k]);
+  }
+  columns.push(current);
+  // 优先级 1：恰好 L 个单字形的列（干净拷贝）。
+  const exact = columns.find(col => col.length === len);
+  if (exact) { split.codeGlyphs = exact; return; }
+  // 优先级 2：总宽 ≈ L×digitW 的列，按宽度占比切片凑 L。
+  for (const col of columns) {
+    if (col.length >= len) continue;
+    const totalW = col.reduce((sum, glyph) => sum + widthOf(glyph), 0);
+    if (totalW < digitW * len * 0.55 || totalW > digitW * len * 1.9) continue;
+    const ks = col.map(glyph => Math.max(1, Math.round((widthOf(glyph) / totalW) * len)));
+    if (ks.reduce((sum, k) => sum + k, 0) !== len) continue;
+    const pieces: GlyphComp[] = [];
+    col.forEach((glyph, k) => {
+      if (ks[k] === 1) { pieces.push(glyph); return; }
+      for (const piece of sliceGlyphBitmap(glyph, ks[k])) pieces.push(piece);
+    });
+    if (pieces.length === len) { split.codeGlyphs = pieces; return; }
+  }
+}
+
+/**
+ * 荒谬切分剪枝（resolveCodes 前置）：装配噪声行（水印笔画并进条目、网格
+ * 文字混入）会产出字形数远超任何色码长度的 codeGlyphs（实测 18 个），它们
+ * 参与 union-find 聚类与全局唯一性后会抢走真码名额（幽灵行抢码）。剪掉后
+ * 条目降级为先验/色点建议路径。阈值宽松：4 字符码的 3 倍余量。
+ */
+function pruneImplausibleSplits(
+  priors: Array<{ code: string; deltaE: number } | null>,
+  splits: Array<SplitResult | null>,
+): void {
+  for (let i = 0; i < splits.length; i += 1) {
+    const split = splits[i];
+    if (!split) continue;
+    const cap = (priors[i]?.code.length ?? 4) * 3 + 2;
+    if (split.codeGlyphs.length > cap) splits[i] = null;
   }
 }
 
@@ -2128,6 +2565,19 @@ export function debugLegendParse(
   if (!prepared.length) return null;
   const { rawEntries, digitW } = selected;
   if (rawEntries.length < MIN_ENTRIES) return null;
+  // 锚点追踪：逐行重放 analyzeLine + isSwatchAnchor，诊断误锚切行。
+  const anchorTrace = located.lines.map(line => {
+    const comps = analyzeLine(source, located.background, line);
+    const ctx: LineContext = {
+      medianW: median(comps.map(c => widthOf(c))),
+      medianH: median(comps.map(c => c.y1 - c.y0 + 1)),
+    };
+    return {
+      y0: line.y0, y1: line.y1,
+      comps: comps.map(c => ({ x0: c.x0, x1: c.x1, y0: c.y0, y1: c.y1, area: c.area, anchor: isSwatchAnchor(c, ctx) })),
+    };
+  });
+  void anchorTrace;
   const priors = rawEntries.map(entry => entry.dotRgb ? priorFromDot(entry.dotRgb, prepared) : null);
   const splits = rawEntries.map((entry, index) => {
     const generic = () => splitEntry(entry.glyphs, priors[index], digitW);
@@ -2135,9 +2585,14 @@ export function debugLegendParse(
   });
   dedupeDuplicateCodeColumns(priors, splits);
   if (located.region === 'right') dedupeCodeColumnCopies(priors, splits, digitW);
+  for (const split of splits) if (split) reduceCodeToStructuralCluster(split, digitW);
   for (let i = 0; i < splits.length; i += 1) {
     if (splits[i] && priors[i]) sliceMergedCodeGlyphs(splits[i]!, priors[i]!, digitW);
   }
+  for (let i = 0; i < splits.length; i += 1) {
+    if (false && splits[i] && priors[i]) repairCodeFromColumns(splits[i]!, priors[i]!, digitW);
+  }
+  // pruneImplausibleSplits(priors, splits);
   const resolvedCodes = resolveCodes(rawEntries, splits, priors, prepared);
   const labeled = new Map<string, Bitmap[]>();
   let bootstrapCount = 0;
@@ -2145,6 +2600,11 @@ export function debugLegendParse(
     const resolved = resolvedCodes[i];
     const split = splits[i];
     if (!resolved || !split || split.codeGlyphs.length !== resolved.code.length) continue;
+    // 列跨度守卫：code 字形必须落在单个文本列内（跨度 ≲ L×digitW*1.6）。
+    // 跨两列的垃圾装配（码字列+名字列拼接）长度碰巧 = L 时会以"对齐"假象
+    // 进入自举，把错字形标成正确字符、毒化数字模板链。
+    const cgSpan = split.codeGlyphs[split.codeGlyphs.length - 1].x1 - split.codeGlyphs[0].x0 + 1;
+    if (cgSpan > resolved.code.length * digitW * 1.6) continue;
     let labeledAny = false;
     for (let j = 0; j < resolved.code.length; j += 1) {
       // 粘连块不进模板（防污染）——逐字形跳过而非整行放弃：右侧清单
@@ -2166,15 +2626,40 @@ export function debugLegendParse(
     ? s.countGlyphs.filter(g => widthOf(g) <= digitW * 1.4).map(widthOf)
     : []);
   const countW = countSingleWidths.length ? median(countSingleWidths) : Math.max(3, Math.round(digitW * 0.75));
-  const countTemplates = buildCountTemplates(rawEntries, splits, digitW, codeDigitTemplates);
+  const countGlyphHeights = splits.flatMap(s => s ? s.countGlyphs.filter(g => widthOf(g) <= digitW * 1.2).map(g => g.y1 - g.y0 + 1) : []);
+  // 计数标注锚（2026-11-15 浏览器实测）：计数与色号是两套字体，借色号
+  // 字形当锚会系统性误标（water-box 浏览器实测 7 簇只标出 0123478，缺
+  // 5/6/9 → 953 读成 83、490 读成 8）。Canvas 合成 0-9 锚与实际渲染同
+  // 字体引擎，浏览器端一律可用；Node/无 DOM 自动为 null 回落代码字形锚。
+  // 多高度候选（2026-11-15 框选路径实测）：中位高度估计 ±1px 偏差就让
+  // 合成锚 medDist 超阈回落污染的 code 模板。逐候选仲裁取自洽度最高者，
+  // 胜者经 lastSyntheticAnchors 供 recognizeEntry 联合匹配复用。
+  const medCountH = countGlyphHeights.length ? Math.round(median(countGlyphHeights)) : 0;
+  const syntheticDigits = countGlyphHeights.length
+    ? [medCountH - 1, medCountH, medCountH + 1]
+        .map(h => renderSyntheticDigitTemplates(h))
+        .filter((m): m is Map<string, Bitmap> => !!m)
+    : [];
+  const countTemplates = buildCountTemplates(rawEntries, splits, digitW, codeDigitTemplates, syntheticDigits, typeof document !== 'undefined');
+  const synthWinner = lastSyntheticAnchors.current;
   const paletteCodes = new Set(prepared.map(entry => entry.color.code));
   const parsed = rawEntries.map((entry, index) =>
-    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW));
+    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW, synthWinner));
   return {
     rawEntries, priors, splits, resolvedCodes, digitW,
     templateChars: [...templates.keys()].sort(),
     countTemplateChars: [...countTemplates.keys()].sort(),
+    countTemplateAscii: [...countTemplates].sort((a, b) => a[0].localeCompare(b[0])).map(([c, b]) => {
+      const rows: string[] = [];
+      for (let y = 0; y < b.h; y += 1) {
+        let line = '';
+        for (let x = 0; x < b.w; x += 1) line += b.data[y * b.w + x] ? '#' : '.';
+        rows.push(line);
+      }
+      return `${c}(${b.w}x${b.h}):\n  ${rows.join('\n  ')}`;
+    }).join('\n'),
     parsed,
+    anchorTrace,
   };
 }
 
@@ -2223,9 +2708,14 @@ export function parseLegend(
   });
   dedupeDuplicateCodeColumns(priors, splits);
   if (located.region === 'right') dedupeCodeColumnCopies(priors, splits, digitW);
+  for (const split of splits) if (split) reduceCodeToStructuralCluster(split, digitW);
   for (let i = 0; i < splits.length; i += 1) {
     if (splits[i] && priors[i]) sliceMergedCodeGlyphs(splits[i]!, priors[i]!, digitW);
   }
+  for (let i = 0; i < splits.length; i += 1) {
+    if (false && splits[i] && priors[i]) repairCodeFromColumns(splits[i]!, priors[i]!, digitW);
+  }
+  // pruneImplausibleSplits(priors, splits);
   const resolvedCodes = resolveCodes(rawEntries, splits, priors, prepared);
 
   // 自举标注：求解出的 code 字形是天然标注样本（覆盖全部出现过的字符）。
@@ -2236,6 +2726,11 @@ export function parseLegend(
     const resolved = resolvedCodes[i];
     const split = splits[i];
     if (!resolved || !split || split.codeGlyphs.length !== resolved.code.length) continue;
+    // 列跨度守卫：code 字形必须落在单个文本列内（跨度 ≲ L×digitW*1.6）。
+    // 跨两列的垃圾装配（码字列+名字列拼接）长度碰巧 = L 时会以"对齐"假象
+    // 进入自举，把错字形标成正确字符、毒化数字模板链。
+    const cgSpan = split.codeGlyphs[split.codeGlyphs.length - 1].x1 - split.codeGlyphs[0].x0 + 1;
+    if (cgSpan > resolved.code.length * digitW * 1.6) continue;
     let labeledAny = false;
     for (let j = 0; j < resolved.code.length; j += 1) {
       // 粘连块不进模板（防污染）——逐字形跳过而非整行放弃。
@@ -2259,11 +2754,21 @@ export function parseLegend(
     ? s.countGlyphs.filter(g => widthOf(g) <= digitW * 1.4).map(widthOf)
     : []);
   const countW = countSingleWidths.length ? median(countSingleWidths) : Math.max(3, Math.round(digitW * 0.75));
-  const countTemplates = buildCountTemplates(rawEntries, splits, digitW, codeDigitTemplates);
+  const countGlyphHeights = splits.flatMap(s => s ? s.countGlyphs.filter(g => widthOf(g) <= digitW * 1.2).map(g => g.y1 - g.y0 + 1) : []);
+  // 计数标注锚：浏览器端一律用 Canvas 合成 0-9（同字体引擎）；Node/无 DOM
+  // 自动为 null 回落代码字形锚。跨字体借锚会系统性误标（见 debug 路径注释）。
+  const medCountH = countGlyphHeights.length ? Math.round(median(countGlyphHeights)) : 0;
+  const syntheticDigits = countGlyphHeights.length
+    ? [medCountH - 1, medCountH, medCountH + 1]
+        .map(h => renderSyntheticDigitTemplates(h))
+        .filter((m): m is Map<string, Bitmap> => !!m)
+    : [];
+  const countTemplates = buildCountTemplates(rawEntries, splits, digitW, codeDigitTemplates, syntheticDigits, typeof document !== 'undefined');
+  const synthWinner = lastSyntheticAnchors.current;
 
   // 逐条目识别。
   const parsed = rawEntries.map((entry, index) =>
-    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW));
+    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW, synthWinner));
 
   // 头部交叉校验（用自举的数字模板；解析不出则字段缺省）。
   const digitTemplates = new Map([...templates].filter(([char]) => char >= '0' && char <= '9'));

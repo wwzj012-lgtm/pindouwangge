@@ -170,10 +170,12 @@ describe('export quality changes only pixel density, never HD logical layout', (
   it.each(['right', 'bottom'] as const)('pins existing HD dimensions and the entire draw trace: %s', legendPosition => {
     const hd = render(options({ legendPosition }));
     const digest = createHash('sha256').update(JSON.stringify(hd.events)).digest('hex');
-    // Captured from the original HD renderer before the density-only fix.
+    // Captured 2026-11-15: legend rows drop the color-name column (code + count
+    // only per user request); size label split out of the subtitle and drawn
+    // enlarged right-aligned at the top-right corner.
     const baseline = legendPosition === 'right'
-      ? { width: 1373, height: 569, digest: 'd6f53216a61473c1d34764eb7cb0b7950d8eccb12a308ecb491014f53ef149d2' }
-      : { width: 548, height: 1230, digest: '54f4024fc5f83783eb2817ff1a0a023545201f8893d733fd76a67c9c7455c271' };
+      ? { width: 1373, height: 569, digest: '95dca3e19fa74dd45935b3ea451af26023ae5fcdb8eb2b8eef3799836e3dd7ed' }
+      : { width: 548, height: 1230, digest: '95957a75017663575215346a6f125f402a180d4b4b2d7a3bb7faf695f9a731b2' };
     expect({ width: hd.canvas.width, height: hd.canvas.height, digest }).toEqual(baseline);
   });
 });

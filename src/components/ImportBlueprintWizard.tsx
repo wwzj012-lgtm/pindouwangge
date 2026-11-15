@@ -27,7 +27,8 @@ import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import { getRecognitionBackgroundCandidate, getRecognitionBackgroundCells, recognitionBackgroundCorrections, releaseRecognitionBackgroundCell } from '../utils/recognitionBackground';
 import './ImportBlueprintWizard.css';
 import { confirmRecognitionResult, type ConfirmedRecognitionDraft } from '../utils/confirmedRecognition';
-import { ImportGridAlignmentCanvas } from './ImportGridAlignmentCanvas';
+import { ImportGridAlignmentCanvas, type LegendRegionRect } from './ImportGridAlignmentCanvas';
+import { ImportLegendPanel, type LegendLockState } from './ImportLegendPanel';
 import {
   clipRecognitionRegion,
   createDefaultGridAlignment,
@@ -75,6 +76,8 @@ function initialPaletteChoice(palette: BeadColor[]): PaletteChoice {
 }
 
 type WizardStep = 'upload' | 'calibrate' | 'recognize';
+/** 识别步骤的侧栏分区：设置（识别前）/ 复核（逐格修正）/ 结果（统计与保存）。 */
+type RecognizeTab = 'setup' | 'review' | 'result';
 type StatusTone = 'neutral' | 'error' | 'success';
 
 interface ImportBlueprintWizardProps {
@@ -127,6 +130,16 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   const [beadPhoto, setBeadPhoto] = useState(false);
   const [smoothNoise, setSmoothNoise] = useState(false);
   const [symbolAssist, setSymbolAssist] = useState(false);
+  // 图例锁定：解析图纸下方图例得到的「色板白名单 + 数量配额」。null/空行 =
+  // 未启用，识别请求与未开启时完全一致。
+  const [legendLock, setLegendLock] = useState<LegendLockState>({ rows: [] });
+  /** 用户框选的图例区域（图像像素坐标）；null = 自动定位图例带。 */
+  const [legendRegion, setLegendRegion] = useState<LegendRegionRect | null>(null);
+  /** 画布处于「框选图例」模式（面板按钮与画布工具栏双向同步）。 */
+  const [legendFraming, setLegendFraming] = useState(false);
+  // 识别步骤侧栏的分区标签：八个 section 一页堆叠太长太杂，按使用时机
+  // 分成 设置（识别前）/ 复核（修正）/ 结果（统计保存）三页。
+  const [recognizeTab, setRecognizeTab] = useState<RecognizeTab>('setup');
   const [pitchHint, setPitchHint] = useState<string | null>(null);
   // 精修会整体改写格距：留一份手动对齐的备份，用户不满意可一键还原。
   const [refineBackup, setRefineBackup] = useState<ImportGridAlignment | null>(null);
@@ -195,6 +208,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setOnlyReview(false);
     setColorSearch('');
     invalidateConfirmation();
+    setRecognizeTab('setup');
   }, [cancelRecognition, resetBackground, invalidateConfirmation]);
 
   const clearImage = useCallback(() => {
@@ -215,6 +229,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setRecognition(null);
     setRecognitionMode('precision');
     setAdjustmentStep(0.1);
+    setLegendLock({ rows: [] });
     setEdgeInsetRatio(0);
     setIsDraggingFile(false);
     setSelectedCell(null);
@@ -373,9 +388,30 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     setCorrections({});
     resetBackground();
     invalidateConfirmation();
+    setRecognizeTab('setup');
     setStep('recognize');
     setStatus({ tone: 'neutral', message: '校准已冻结，请选择识别模式并开始识别。' });
   }, [calibration, imageDimensions, imageUrl, resetBackground, invalidateConfirmation]);
+
+  const changeLegendLock = useCallback((next: LegendLockState) => {
+    setLegendLock(next);
+    invalidateRecognition();
+  }, [invalidateRecognition]);
+
+  // 锁定参数只在「色板白名单」总开关打开且有勾选行时才传入；关闭/空锁定 =
+  // options 为空对象，识别行为与未开启时逐位一致（回归铁律）。白名单默认关
+  // 的裁决（瑶图实测）：解析色号有错时白名单会把整图压成少数几种颜色。
+  const legendOptions = useMemo(() => {
+    if (!legendLock.whitelist) return {};
+    const enabled = legendLock.rows.filter(row => row.enabled && row.code);
+    if (!enabled.length) return {};
+    const paletteLock = [...new Set(enabled.map(row => row.code))];
+    const countQuota: Record<string, number> = {};
+    for (const row of enabled) {
+      if (row.countLocked && row.count > 0 && !(row.code in countQuota)) countQuota[row.code] = Math.round(row.count);
+    }
+    return { paletteLock, countQuota };
+  }, [legendLock]);
 
   const runRecognition = useCallback(async () => {
     if (recognitionControllerRef.current || !imageElement || !imageDimensions || !snapshot || localPalette.length === 0) return;
@@ -389,6 +425,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     invalidateConfirmation();
     setOnlyReview(false);
     setSelectedCell(null);
+    setRecognizeTab('setup');
     setStatus({ tone: 'neutral', message: '正在准备图片像素…' });
     try {
       const canvas = document.createElement('canvas');
@@ -421,11 +458,12 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         undefined,
         { signal: controller.signal, onProgress: value => {
           if (mountedRef.current && openRef.current && recognitionControllerRef.current === controller && !controller.signal.aborted) setRecognitionProgress(Math.floor(value));
-        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise, symbolAssist },
+        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise, symbolAssist, ...legendOptions },
       );
       if (!mountedRef.current || !openRef.current || recognitionControllerRef.current !== controller || controller.signal.aborted) return;
       setRecognition(result);
       setSelectedCell({ row: 0, column: 0 });
+      setRecognizeTab('result');
       const qualityLabel = result.summary.quality === 'good' ? '较好' : result.summary.quality === 'fair' ? '一般' : '较低，请核对预览';
       setStatus({
         tone: result.summary.quality === 'good' ? 'success' : 'neutral',
@@ -442,7 +480,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         setIsRecognizing(false);
       }
     }
-  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, symbolAssist, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
+  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, symbolAssist, legendOptions, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
 
   const backgroundCorrections = useMemo(() => recognitionBackgroundCorrections(backgroundHistory), [backgroundHistory]);
   const effectiveCorrections = useMemo(() => ({ ...corrections, ...backgroundCorrections }), [corrections, backgroundCorrections]);
@@ -793,12 +831,28 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
           {step === 'recognize' && effectiveRecognition && imageElement ? <>
             {currentInset > 0 && <div className="ir-result-note">每格各边忽略 {Math.round(currentInset * 100)}% · 原始占比仅统计内部有效区域</div>}
             <ImportRecognitionCanvas image={imageElement} result={effectiveRecognition} selected={selectedCell} pending={pendingKeys} onlyReview={onlyReview} onSelect={setSelectedCell} />
-          </> : imageElement && <ImportGridAlignmentCanvas image={imageElement} alignment={alignment} region={region} onAlignmentChange={setAlignmentValue} onRegionChange={setRegionValue} readOnly={step !== 'calibrate'} />}
+          </> : imageElement && <ImportGridAlignmentCanvas
+            image={imageElement}
+            alignment={alignment}
+            region={region}
+            onAlignmentChange={setAlignmentValue}
+            onRegionChange={setRegionValue}
+            readOnly={step !== 'calibrate'}
+            legendRegion={legendRegion}
+            onLegendRegionChange={setLegendRegion}
+            requestedTool={legendFraming ? 'legend' : undefined}
+            onToolChange={next => { if (next !== 'legend') setLegendFraming(false); }}
+          />}
 
         </section>
         <aside className="ir-sidebar" aria-label={step === 'calibrate' ? '校准设置' : '识别与复核设置'}>
           {step === 'calibrate' && <section className="ir-section ir-calibration-panel"><div className="ir-section-title"><span className="ir-step-kicker">第 1 步 · 校准</span><span className="ir-badge">约 10 秒</span></div><h2 className="ir-panel-title">让网格贴合图纸方格</h2><p className="ir-help">先对齐位置和格子大小，再框选需要识别的区域。预览会实时显示识别到的行列数。</p><div className="ir-legend-row"><span><i className="ir-dot ir-dot-red" />拖红点：移动网格</span><span><i className="ir-dot ir-dot-blue" />拖蓝点：调整格距</span></div><p className="ir-help ir-wheel-note">滚轮缩放预览 · 网格最小 5 px</p></section>}
-          <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>
+          {step === 'calibrate' && <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>}
+          {step !== 'calibrate' && <div className="ir-tabs" role="tablist" aria-label="识别面板分区">
+            <button type="button" role="tab" id="ir-tab-setup" aria-selected={recognizeTab === 'setup'} aria-controls="ir-panel-setup" onClick={() => setRecognizeTab('setup')}>识别设置</button>
+            <button type="button" role="tab" id="ir-tab-review" aria-selected={recognizeTab === 'review'} aria-controls="ir-panel-review" disabled={!recognition} onClick={() => setRecognizeTab('review')}>修正{recognition && pendingCells.length > 0 && <span className="ir-tab-count">{pendingCells.length > 99 ? '99+' : pendingCells.length}</span>}</button>
+            <button type="button" role="tab" id="ir-tab-result" aria-selected={recognizeTab === 'result'} aria-controls="ir-panel-result" disabled={!recognition} onClick={() => setRecognizeTab('result')}>结果与保存</button>
+          </div>}
           {step === 'calibrate' ? <section className="ir-section">
             <div className="ir-section-title"><h2>网格微调</h2><span className="ir-badge">正方形 · 原图像素</span></div>
             <p className="ir-help">拖红点移动网格、蓝点调整格距，大致贴合即可；点「自动对齐网格」由系统按图纸格线精确锁定全图。也可在下方直接输入数值。</p>
@@ -815,18 +869,25 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
             <div className="ir-coverage" aria-live="polite" aria-atomic="true"><div className="ir-section-title"><h3>识别区域内完整格</h3><span className="ir-review-count">{calibration ? `${calibration.columns * calibration.rows} 格` : '0 格'}</span></div><div className="ir-stats"><div><strong>{calibration?.columns ?? '—'}</strong><span>实际列数</span></div><div><strong>{calibration?.rows ?? '—'}</strong><span>实际行数</span></div></div><p className="ir-help">橙框 {Number((derived?.region.width ?? 0).toFixed(2))} × {Number((derived?.region.height ?? 0).toFixed(2))} px · 绿色区域为实际识别范围。仅纳入完整方格，边缘不足一格的像素不参与识别。</p>{derived?.error && <p className="ir-status" data-tone="error" role="alert">{derived.error}</p>}</div>
             <p className="ir-help">聚焦画布后，方向键移动 1 px，Shift + 方向键移动 10 px，Alt + 方向键微调 0.1 px。最小格距为原图 5 px。</p>
           </section> : <>
+            {recognizeTab === 'setup' && <div className="ir-tab-panel" id="ir-panel-setup" role="tabpanel" aria-labelledby="ir-tab-setup">
+            <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>
             <section className="ir-section"><div className="ir-section-title"><h2>识别设置</h2><span className="ir-review-count">{snapshot?.calibration.columns} 列 × {snapshot?.calibration.rows} 行</span></div>
               <div className="ir-mode-buttons" role="group" aria-label="识别模式">{(['fast', 'precision'] as const).map(mode => <button type="button" key={mode} aria-pressed={recognitionMode === mode} onClick={() => { if (mode !== recognitionMode) { invalidateRecognition(); setRecognitionMode(mode); setStatus({ tone: 'neutral', message: '识别模式已更新，请重新识别。' }); } }}><strong>{mode === 'fast' ? '快速识别' : '高精度识别'}</strong><small>{mode === 'fast' ? '均匀采样 · 估算占比' : '像素面积 · 主色占比'}</small></button>)}</div>
               <label className="ir-inset">忽略边线<select aria-label="忽略边线" value={edgeInsetRatio} onChange={event => { invalidateRecognition(); setEdgeInsetRatio(Number(event.target.value)); setStatus({ tone: 'neutral', message: '忽略边线设置已更新，请重新识别。' }); }}><option value={0}>关闭 · 整格</option><option value={.05}>每边 5%</option><option value={.1}>每边 10%</option><option value={.15}>每边 15%</option></select></label>
               <p className="ir-help">按有效像素面积选择占比最高的色板颜色。忽略边线时仅统计每格内部区域；透明像素不参与占比。</p>
               <div className="ir-autocorrect-toggles">
-                <label className="ir-check"><input type="checkbox" checked={beadPhoto} onChange={event => { invalidateRecognition(); setBeadPhoto(event.target.checked); }} />实物照片模式（拍下来的成品豆板）</label>
-                <label className="ir-check"><input type="checkbox" checked={autoColorBalance} onChange={event => { invalidateRecognition(); setAutoColorBalance(event.target.checked); }} />校正整体色偏（需要画面里有白色或灰白区域）</label>
-                <label className="ir-check"><input type="checkbox" checked={autoAlign} onChange={event => { invalidateRecognition(); setAutoAlign(event.target.checked); }} />对齐整体偏移（整张图都框歪了再用）</label>
                 <label className="ir-check"><input type="checkbox" checked={smoothNoise} onChange={event => { invalidateRecognition(); setSmoothNoise(event.target.checked); }} />去除杂色（糊掉的孤立格按周围多数修正）</label>
                 <label className="ir-check"><input type="checkbox" checked={symbolAssist} onChange={event => { invalidateRecognition(); setSymbolAssist(event.target.checked); }} />图纸色号辅助（格子里印着色号文字的图纸；文字直接定色号，白底空格不放豆）</label>
               </div>
-              <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、并按画面白点归一曝光。</p>
+              <details className="ir-details">
+                <summary>照片与特殊图纸选项（默认关闭）</summary>
+                <div className="ir-autocorrect-toggles">
+                  <label className="ir-check"><input type="checkbox" checked={beadPhoto} onChange={event => { invalidateRecognition(); setBeadPhoto(event.target.checked); }} />实物照片模式（拍下来的成品豆板）</label>
+                  <label className="ir-check"><input type="checkbox" checked={autoColorBalance} onChange={event => { invalidateRecognition(); setAutoColorBalance(event.target.checked); }} />校正整体色偏（需要画面里有白色或灰白区域）</label>
+                  <label className="ir-check"><input type="checkbox" checked={autoAlign} onChange={event => { invalidateRecognition(); setAutoAlign(event.target.checked); }} />对齐整体偏移（整张图都框歪了再用）</label>
+                </div>
+                <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、并按画面白点归一曝光。</p>
+              </details>
               {recognition && describeAutoCorrection(recognition) && (
                 <p className="ir-help ir-autocorrect" role="status">
                   <strong>本次自动校正：</strong>{describeAutoCorrection(recognition)}
@@ -839,10 +900,20 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
                 </p>
               )}
             </section>
-            {recognition && effectiveRecognition && <>
-              <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats" aria-label="当前结果统计"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>总用豆数</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}
-                <details className="ir-details"><summary>原始自动识别测量</summary><p className="ir-summary-line">平均主色占比 {recognition.summary.meanConfidence === null ? '—' : `${(recognition.summary.meanConfidence * 100).toFixed(1)}%`} · 平均色差 ΔE {recognition.summary.meanDistance?.toFixed(1) ?? '—'}</p><p className="ir-help">占比不代表准确率。此处保留原始测量，不以人工修正后的数据计算质量。</p></details>
-              </section>
+            <ImportLegendPanel
+              imageElement={imageElement}
+              dimensions={imageDimensions}
+              calibration={snapshot?.calibration ?? null}
+              palette={localPalette}
+              value={legendLock}
+              onChange={changeLegendLock}
+              busy={isRecognizing}
+              legendRegion={legendRegion}
+              onFrameRequest={() => setLegendFraming(current => !current)}
+              onClearRegion={() => { setLegendRegion(null); setLegendFraming(false); }}
+            />
+            </div>}
+            {recognizeTab === 'review' && recognition && effectiveRecognition && <div className="ir-tab-panel" id="ir-panel-review" role="tabpanel" aria-labelledby="ir-tab-review">
               <section className="ir-section ir-background-panel" aria-labelledby="ir-background-title">
                 <div className="ir-section-title"><h2 id="ir-background-title">一键去背景</h2><span className="ir-badge">已移除 {removedBackgroundCount} 格</span></div>
                 <label className="ir-label">候选背景色<select aria-label="候选背景色" value={backgroundColorId} onChange={event => { setBackgroundColorId(event.target.value); setBackgroundStatus(null); }}>
@@ -870,14 +941,27 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
                 </>}
               </section>
               <section className="ir-section"><div className="ir-section-title"><h2>最终色号统计</h2><span className="ir-review-count">{effectiveRecognition.summary.total} 格</span></div><p className="ir-help">统计与复制矩阵均包含当前人工修正和背景移除。</p><div className="ir-counts">{colorCounts.map(item => <div className="ir-count-row" key={item.code}><i style={{ background: item.hex }} /><strong>{item.code}</strong><span>{item.name}</span><b>{item.count}</b></div>)}</div><button type="button" className="ir-button ir-full" style={{ marginTop: 12 }} onClick={copyCodeMatrix}><Clipboard size={14} />复制颜色代码矩阵</button><button type="button" className="ir-text-button" disabled={!manualCount && !removedBackgroundCount} onClick={restoreAutomaticResult}>恢复全部自动结果（手改 {manualCount} 格 / 去背景 {removedBackgroundCount} 格）</button></section>
-            </>}
-          </>}
-          {effectiveRecognition && <section className="ir-section">
+            </div>}
+            {recognizeTab === 'result' && recognition && effectiveRecognition && <div className="ir-tab-panel" id="ir-panel-result" role="tabpanel" aria-labelledby="ir-tab-result">
+              <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats" aria-label="当前结果统计"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>总用豆数</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}
+                {effectiveRecognition.legendBalance && (effectiveRecognition.legendBalance.moved > 0 || !effectiveRecognition.legendBalance.satisfied) && (
+                  <p className="ir-help ir-autocorrect" role="status">
+                    <strong>数量平衡：</strong>已按图例配额移动 {effectiveRecognition.legendBalance.moved} 格。
+                    {effectiveRecognition.legendBalance.satisfied
+                      ? '全部锁定色号已配平到恰好目标粒数。'
+                      : `有 ${Object.keys(effectiveRecognition.legendBalance.residual).length} 个色号未达成（${Object.entries(effectiveRecognition.legendBalance.residual).map(([code, diff]) => `${code} ${diff > 0 ? '+' : ''}${diff}`).join('、')}），已如实保留，请核对图例数值或复核面板。`}
+                  </p>
+                )}
+                <details className="ir-details"><summary>原始自动识别测量</summary><p className="ir-summary-line">平均主色占比 {recognition.summary.meanConfidence === null ? '—' : `${(recognition.summary.meanConfidence * 100).toFixed(1)}%`} · 平均色差 ΔE {recognition.summary.meanDistance?.toFixed(1) ?? '—'}</p><p className="ir-help">占比不代表准确率。此处保留原始测量，不以人工修正后的数据计算质量。</p></details>
+              </section>
+              <section className="ir-section">
             <div className="ir-section-title"><h2>确认与保存</h2><span className="ir-badge">{currentConfirmation ? '已确认当前版本' : '待确认'}</span></div>
             <label className="ir-label">作品名称<input aria-label="识别作品名称" maxLength={60} value={resultTitle} onChange={event => { invalidateConfirmation(); setResultTitle(event.target.value); setStatus({ tone: 'neutral', message: '作品名称已修改，请重新确认当前结果。' }); }} placeholder="输入作品名称" /></label>
             <p className="ir-help">确认后保存的是当前色号、人工修正和背景移除结果。修改结果或名称后，需要重新确认；保存不会替换当前画板。</p>
             {!canSave && <p className="ir-help">图库保存需要登录。登录不会清空本次识别结果。</p>}
-          </section>}
+          </section>
+            </div>}
+          </>}
           {status && <p role={status.tone === 'error' ? 'alert' : 'status'} className="ir-status" data-tone={status.tone}>{status.message}</p>}
           <div className="ir-actions">{step === 'calibrate' ? <button type="button" className="ir-button ir-primary" disabled={!calibration} onClick={nextStep}>确认网格，进入识别<ChevronRight size={16} /></button> : <>
             {isRecognizing && <div className="ir-progress" role="status"><div className="ir-progress-label"><span>逐格统计颜色面积</span><span>{recognitionProgress}%</span></div><div className="ir-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={recognitionProgress} aria-label="图纸颜色识别进度"><div className="ir-progress-fill" style={{ width: `${recognitionProgress}%` }} /></div></div>}

@@ -718,6 +718,52 @@
   max-width:150px;
   font-size:11px
 }
+/* ===== 识别侧栏分区标签（设置 / 修正 / 结果） ===== */
+.ir-tabs {
+  position:sticky;
+  top:0;
+  z-index:3;
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:4px;
+  margin:0 -2px 4px;
+  padding:8px 2px 9px;
+  background:linear-gradient(var(--ir-bg) 72%,#24123200)
+}
+.ir-tabs [role=tab] {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:5px;
+  min-height:40px;
+  padding:7px 6px;
+  border:1px solid var(--ir-line);
+  border-radius:10px;
+  background:var(--ir-surface);
+  color:var(--ir-muted);
+  font-size:12px;
+  font-weight:700;
+  white-space:nowrap
+}
+.ir-tabs [role=tab][aria-selected=true] {
+  background:var(--ir-tint);
+  border-color:var(--ir-purple);
+  color:var(--ir-purple)
+}
+.ir-tabs [role=tab]:disabled {
+  opacity:.45
+}
+.ir-tabs .ir-tab-count {
+  min-width:18px;
+  padding:1px 5px;
+  border-radius:999px;
+  background:var(--ir-purple);
+  color:#fff;
+  font-size:10px;
+  font-weight:750;
+  line-height:1.5;
+  font-variant-numeric:tabular-nums
+}
 .ir-actions {
   position:sticky;
   bottom:-2px;
@@ -1183,6 +1229,9 @@
   .ir-sidebar .ir-adjust-row button,.ir-sidebar .ir-text-button {
     min-height:44px
   }
+  .ir-tabs [role=tab] {
+    min-height:44px
+  }
 }
 @media(min-width:1600px) {
   .ir-layout {
@@ -1277,6 +1326,15 @@
     max-height:none;
     overflow:visible
   }
+  .ir-tabs {
+    padding:6px 0 8px;
+    gap:5px
+  }
+  .ir-tabs [role=tab] {
+    min-height:42px;
+    font-size:11px;
+    border-radius:9px
+  }
   .ir-section {
     padding:16px 3px
   }
@@ -1335,4 +1393,432 @@
   .ir-workbench * {
     transition:none!important
   }
+}
+
+/* ===== 图例锁定面板（ImportLegendPanel，.ir-lg-* 命名空间） ===== */
+.ir-legend-panel .ir-legend-actions {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:10px 0 4px
+}
+/* 画布「框选图例」工具：按下态用紫色以区别识别区域（橙） */
+.ir-tool-legend[aria-pressed=true] {
+  background:color-mix(in srgb,#8b5cf6 14%,var(--ir-surface));
+  color:#7c3aed;
+  box-shadow:0 1px 3px #2412320d
+}
+.ir-alignment-viewport[data-tool=legend] canvas {
+  cursor:crosshair
+}
+.ir-dot-violet {
+  background:#8b5cf6
+}
+.ir-lg-region {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin:6px 0 0;
+  padding:7px 10px;
+  border:1px solid color-mix(in srgb,#8b5cf6 35%,var(--ir-line));
+  border-radius:9px;
+  background:color-mix(in srgb,#8b5cf6 8%,var(--ir-soft));
+  font-size:11px;
+  color:var(--ir-muted)
+}
+.ir-lg-region svg {
+  color:#7c3aed;
+  flex:none
+}
+.ir-lg-region .ir-text-button {
+  margin-left:auto
+}
+.ir-lg-badge {
+  font-variant-numeric:tabular-nums
+}
+.ir-lg-note {
+  margin:6px 0 0;
+  padding:7px 10px;
+  border:1px solid var(--ir-line);
+  border-radius:9px;
+  background:var(--ir-soft);
+  font-size:11px
+}
+.ir-lg-toolbar {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  margin-top:10px
+}
+.ir-lg-toolbar-info {
+  font-size:11px;
+  color:var(--ir-muted);
+  font-variant-numeric:tabular-nums
+}
+.ir-lg-toolbar-info strong {
+  color:var(--ir-ink);
+  font-weight:700
+}
+.ir-lg-toolbar-actions {
+  display:flex;
+  gap:6px
+}
+.ir-lg-mini {
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  min-height:26px;
+  padding:0 9px;
+  border:1px solid var(--ir-line);
+  border-radius:8px;
+  background:var(--ir-surface);
+  color:var(--ir-muted);
+  font-size:11px;
+  font-weight:600;
+  cursor:pointer;
+  transition:color .15s ease,border-color .15s ease,background .15s ease
+}
+.ir-lg-mini:hover:not(:disabled) {
+  color:var(--ir-purple);
+  border-color:var(--ir-purple)
+}
+.ir-lg-mini:disabled {
+  opacity:.45;
+  cursor:not-allowed
+}
+.ir-lg-rows {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin-top:7px;
+  max-height:336px;
+  overflow-y:auto;
+  padding-right:2px
+}
+/* 行卡片：整行只有一个边框，内部控件全部扁平无边框——之前的"每个控件
+ * 一个白盒子"是界面杂乱的主因。 */
+.ir-lg-row {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border:1px solid var(--ir-line);
+  border-radius:9px;
+  background:var(--ir-surface);
+  transition:border-color .15s ease,background .15s ease,box-shadow .15s ease
+}
+.ir-lg-row:focus-within {
+  border-color:var(--ir-purple)
+}
+.ir-lg-row.is-locked {
+  border-color:#b79aec;
+  background:color-mix(in srgb,var(--ir-tint) 55%,var(--ir-surface))
+}
+.ir-lg-row.is-locked .ir-lg-dot {
+  box-shadow:0 0 0 2px #b79aec66
+}
+.ir-lg-row.has-warn {
+  box-shadow:inset 3px 0 0 #e6c34a
+}
+.ir-lg-row.is-invalid {
+  box-shadow:inset 3px 0 0 #e0705c
+}
+.ir-lg-dot {
+  width:15px;
+  height:15px;
+  border-radius:50%;
+  border:1px solid var(--ir-line);
+  box-shadow:inset 0 0 0 1.5px #ffffff55;
+  flex:none
+}
+/* 色号下拉是自绘 listbox（CodeListbox）：原生 select 弹层系统级渲染，在
+ * 侧栏滚动/变换容器里会脱锚"飞"走；行列表 overflow-y 会裁剪普通绝对
+ * 定位菜单，故菜单用 fixed 定位 + 任意外部滚动即关。 */
+.ir-lg-code-btn {
+  flex:1;
+  min-width:0;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  border:none;
+  background:transparent;
+  font-size:12px;
+  font-weight:700;
+  padding:5px 2px;
+  min-height:30px;
+  color:var(--ir-ink);
+  cursor:pointer;
+  text-align:left
+}
+.ir-lg-code-btn>svg {
+  flex:none;
+  color:var(--ir-muted)
+}
+/* 色号按钮只显示色号（全名在 title 与菜单里），撑满剩余宽度。 */
+.ir-lg-code-btn .ir-lg-code-code {
+  flex:none;
+  max-width:7em;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.ir-lg-code-btn .ir-lg-code-flex {
+  flex:1;
+  min-width:0
+}
+.ir-lg-code-menu {
+  position:fixed;
+  z-index:120;
+  display:flex;
+  flex-direction:column;
+  background:var(--ir-surface);
+  border:1px solid var(--ir-line);
+  border-radius:10px;
+  box-shadow:0 12px 32px #1c143040;
+  overflow:hidden
+}
+.ir-lg-code-search {
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin:7px 7px 4px;
+  padding:5px 9px;
+  border:1px solid var(--ir-line);
+  border-radius:8px;
+  color:var(--ir-muted);
+  transition:border-color .15s ease
+}
+/* 焦点态收敛到容器边框变色：全局 2px 紫色 outline 在这里是一个巨大紫圈。 */
+.ir-lg-code-search:focus-within {
+  border-color:var(--ir-purple)
+}
+.ir-lg-code-search input {
+  flex:1;
+  min-width:0;
+  min-height:0;
+  border:none;
+  background:transparent;
+  font-size:12px;
+  padding:0;
+  color:var(--ir-ink)
+}
+.ir-lg-code-search input:focus-visible {
+  outline:none
+}
+.ir-lg-code-list {
+  overflow-y:auto;
+  padding:0 6px 6px
+}
+.ir-lg-code-empty {
+  font-size:11px;
+  color:var(--ir-muted);
+  padding:10px 8px;
+  margin:0
+}
+.ir-lg-code-opt {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  width:100%;
+  padding:5px 8px;
+  border:none;
+  border-radius:7px;
+  background:transparent;
+  font-size:12px;
+  color:var(--ir-ink);
+  cursor:pointer;
+  text-align:left
+}
+.ir-lg-code-opt:hover {
+  background:var(--ir-soft)
+}
+.ir-lg-code-opt.is-active {
+  background:color-mix(in srgb,var(--ir-tint) 70%,var(--ir-surface));
+  font-weight:700
+}
+.ir-lg-code-opt .ir-lg-dot {
+  width:12px;
+  height:12px
+}
+.ir-lg-code-opt-code {
+  flex:none
+}
+.ir-lg-code-opt small {
+  flex:1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--ir-muted);
+  font-size:10px
+}
+.ir-lg-count-wrap {
+  display:inline-flex;
+  align-items:baseline;
+  gap:3px;
+  flex:none;
+  width:62px;
+  justify-content:center
+}
+/* 双类名提高特异性：全局 .ir-workbench input（0,1,1）会压过单类选择器，
+ * border/min-height/padding 必须在这里赢回来，否则数量框是 40px 白盒子。 */
+.ir-lg-count.ir-lg-count {
+  width:100%;
+  min-width:0;
+  min-height:0;
+  border:none;
+  background:transparent;
+  font-size:12px;
+  font-weight:700;
+  padding:0 1px;
+  text-align:center;
+  font-variant-numeric:tabular-nums;
+  color:var(--ir-ink);
+  /* 隐藏 type=number 步进按钮：占宽度导致 215 这类三位数被裁成两位 */
+  appearance:textfield
+}
+.ir-lg-count::-webkit-outer-spin-button,
+.ir-lg-count::-webkit-inner-spin-button {
+  -webkit-appearance:none;
+  margin:0
+}
+.ir-lg-count-wrap>span {
+  font-size:10px;
+  color:var(--ir-muted)
+}
+.ir-lg-lock {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:30px;
+  height:28px;
+  border:1px solid var(--ir-line);
+  border-radius:8px;
+  background:transparent;
+  color:var(--ir-muted);
+  cursor:pointer;
+  flex:none;
+  transition:all .15s ease
+}
+.ir-lg-lock:hover {
+  color:var(--ir-purple);
+  border-color:var(--ir-purple)
+}
+.ir-lg-lock.is-on {
+  background:var(--ir-purple);
+  border-color:var(--ir-purple);
+  color:#fff
+}
+.ir-lg-conf {
+  font-size:10px;
+  color:var(--ir-muted);
+  font-variant-numeric:tabular-nums;
+  min-width:26px;
+  text-align:right;
+  flex:none
+}
+.ir-lg-conf.is-low {
+  color:#a06a12;
+  font-weight:700
+}
+.ir-lg-warn {
+  display:inline-flex;
+  color:#d19a2a;
+  flex:none
+}
+.ir-lg-row.is-invalid .ir-lg-warn {
+  color:#e0705c
+}
+/* 锁定/删除连体按钮组：色号区空间充裕，按钮给到 34×32 保证点按舒适。 */
+.ir-lg-btns {
+  display:inline-flex;
+  align-items:stretch;
+  flex:none
+}
+.ir-lg-btns .ir-lg-lock {
+  width:34px;
+  height:32px;
+  border-radius:9px 0 0 9px
+}
+.ir-lg-btns .ir-icon-button.ir-lg-del {
+  width:34px;
+  height:32px;
+  border-radius:0 9px 9px 0;
+  border-left:none
+}
+.ir-lg-btns .ir-icon-button.ir-lg-del:hover {
+  background:var(--ir-soft);
+  color:#e0705c
+}
+/* 色板白名单总开关：整块可点的声明式开关，视觉上与行列表分开。 */
+.ir-lg-whitelist {
+  display:flex;
+  align-items:flex-start;
+  gap:9px;
+  margin-top:9px;
+  padding:9px 11px;
+  border:1px solid var(--ir-line);
+  border-radius:10px;
+  background:var(--ir-soft);
+  cursor:pointer
+}
+.ir-lg-whitelist.is-on {
+  border-color:#b79aec;
+  background:color-mix(in srgb,var(--ir-tint) 60%,var(--ir-surface))
+}
+.ir-lg-whitelist input {
+  margin-top:2px
+}
+.ir-lg-whitelist span {
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  min-width:0
+}
+.ir-lg-whitelist strong {
+  font-size:12px;
+  color:var(--ir-ink)
+}
+.ir-lg-whitelist.is-on strong {
+  color:var(--ir-purple)
+}
+.ir-lg-whitelist small {
+  font-size:10px;
+  line-height:1.55;
+  color:var(--ir-muted)
+}
+.ir-lg-sum {
+  margin-top:10px
+}
+.ir-lg-sum-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  font-size:12px;
+  color:var(--ir-muted)
+}
+.ir-lg-sum-head strong {
+  font-variant-numeric:tabular-nums;
+  color:var(--ir-ink)
+}
+.ir-lg-sum-head strong.ir-legend-sum-over {
+  color:#b0523f
+}
+.ir-lg-sum-bar {
+  height:8px;
+  border-radius:4px;
+  background:var(--ir-line);
+  overflow:hidden;
+  margin-top:4px
+}
+.ir-lg-sum-bar>span {
+  display:block;
+  height:100%;
+  border-radius:4px;
+  background:var(--ir-purple);
+  transition:width .2s ease
+}
+.ir-legend-hint {
+  margin-top:8px
 }

@@ -4,6 +4,7 @@ import { deltaE2000, preparePaletteLab, rgbToLab, type PreparedPaletteColor } fr
 import { NEUTRAL_GAINS, estimateChannelGains, isClippedRgb, type ChannelGains } from './importColorBalance';
 import type { ImportGridCalibration } from './importGridCalibration';
 import { extractBeadSymbols } from './importSymbolOCR';
+import { applyCountBalance } from './importLegendBalance';
 
 /** Precision integrates all intersecting pixels; fast estimates area with uniform strata. */
 export type ImportRecognitionMode = 'fast' | 'precision';
@@ -81,6 +82,11 @@ export interface ImportRecognitionResult {
     offsetGain: number;
     sampledCells: number;
   };
+  /**
+   * 图例数量平衡的结果统计；仅在 paletteLock + countQuota 同时生效时存在。
+   * moved=改写格数；satisfied=全部配额恰好达成；residual=未达成差额（负=仍缺）。
+   */
+  legendBalance?: { moved: number; satisfied: boolean; residual: Record<string, number> };
   /** Fraction excluded on each cell edge during this run; zero retains whole-cell area. */
   edgeInsetRatio?: number;
   calibration: ImportGridCalibration;
@@ -136,6 +142,18 @@ export interface ImportRecognitionOptions {
    * 第一遍的猜测即使错了，最坏也只是保持原答案。**默认跟随 `beadPhoto`**。
    */
   shadingReference?: boolean;
+  /**
+   * 色板白名单（code 列表，来自图例锁定）。undefined/空 = 不锁定，
+   * 行为与未开启时逐位一致。锁定后分类只能落在白名单子集内——
+   * 一处过滤，classifySample/matchCache/symbolAssist/refine 全链生效。
+   */
+  paletteLock?: string[];
+  /**
+   * 数量配额（code → 目标粒数，来自图例数量锁定）。仅在 `paletteLock`
+   * 生效时参与：refine 链全部结束后按"超配让格"把计数配平；
+   * 结果统计见 `legendBalance`。
+   */
+  countQuota?: Record<string, number>;
 }
 
 /** 全局网格偏移，单位是"格"：{ x: -0.16, y: 0 } 表示整张图向左偏了 16% 格。 */
@@ -262,7 +280,12 @@ function isValidSource(source: ImportImagePixels): boolean {
     && source.data.length >= source.width * source.height * 4;
 }
 
-function qualityFor(confidence: number, distance: number): ImportQuality {
+/**
+ * 质量 = 主色占比 + 色差 → good/fair/poor。
+ * 导出给 importLegendBalance 复用：平衡改写格后按同一口径重评质量，
+ * 保证全链 quality 语义一致（内部约定，不属于公开 API 面）。
+ */
+export function qualityFor(confidence: number, distance: number): ImportQuality {
   if (confidence + RATIO_EPSILON < LOW_CONFIDENCE || distance > 15) return 'poor';
   if (confidence < 0.8 || distance > 8) return 'fair';
   return 'good';
@@ -440,6 +463,8 @@ interface RecognitionContext {
   mode: ImportRecognitionMode;
   edgeInsetRatio: number;
   preparedPalette: PreparedPaletteColor[];
+  /** 色板白名单过滤后的色板（未锁定时与传入 palette 全等）；symbolAssist 用。 */
+  lockedPalette: BeadColor[];
   matchCache: Map<number, SampleMatch>;
   /** 通道增益与全局网格偏移：先抽样估计，再整幅统一使用。 */
   gains: ChannelGains;
@@ -463,9 +488,14 @@ function createRecognitionContext(
   const edgeInsetRatio = Number.isFinite(options.edgeInsetRatio) ? Math.max(0, Math.min(0.2, options.edgeInsetRatio!)) : 0;
   const validGeometry = [calibration.originX, calibration.originY, calibration.cellWidth, calibration.cellHeight].every(Number.isFinite)
     && calibration.cellWidth > 0 && calibration.cellHeight > 0;
-  const preparedPalette = isValidSource(source) && validGeometry && palette.length > 0 ? preparePaletteLab(palette) : [];
+  // 色板锁定：白名单过滤放在 preparePaletteLab 之前——一处收窄，
+  // classifySample/matchCache/symbolAssist/refine 全链自动生效。
+  // 未锁定（undefined/空）时不过滤，与 7acbd6f 行为逐位一致。
+  const lockCodes = options.paletteLock?.length ? new Set(options.paletteLock) : null;
+  const lockedPalette = lockCodes ? palette.filter(color => lockCodes.has(color.code)) : palette;
+  const preparedPalette = isValidSource(source) && validGeometry && lockedPalette.length > 0 ? preparePaletteLab(lockedPalette) : [];
   const base = {
-    source, alphaCutoff, calibration: outputCalibration, mode, edgeInsetRatio, preparedPalette,
+    source, alphaCutoff, calibration: outputCalibration, mode, edgeInsetRatio, preparedPalette, lockedPalette,
     gains: NEUTRAL_GAINS, offset: { x: 0, y: 0 },
     autoAlign: options.autoAlign === true, beadPhoto: options.beadPhoto === true,
     chartMode: options.symbolAssist === true,
@@ -1166,11 +1196,13 @@ export function recognizeImportImage(
   };
   const cells = runCells(tuned);
   if (options.symbolAssist === true) {
-    const symbolStats = applySymbolAssist(source, tuned.calibration, palette, cells);
-    const result = createRecognitionResult(mode, context.calibration, cells, context.edgeInsetRatio, {
+    const symbolStats = applySymbolAssist(source, tuned.calibration, tuned.lockedPalette, cells);
+    const balanced = attachCountBalance(cells, options, tuned.preparedPalette);
+    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? cells, context.edgeInsetRatio, {
       colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
     });
     result.symbolAssist = symbolStats;
+    if (balanced) result.legendBalance = balanceStat(balanced);
     return result;
   }
   const wantsShading = options.shadingReference === true || (options.shadingReference === undefined && options.beadPhoto === true);
@@ -1181,12 +1213,16 @@ export function recognizeImportImage(
   // fallback 链必须包含 shading：smooth 与 twin 都关闭时，refine 的输出
   // 只能靠这一链传递——漏掉它会让"局部阴影再参考"静默失效，
   // 而界面还照常报告 refined 计数（修过一次的老坑，别再踩）。
-  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells, context.edgeInsetRatio, {
+  // 数量平衡挂在整个链条之后：先取链结果，再产出新数组（不改链本身）。
+  const finalCells = unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells;
+  const balanced = attachCountBalance(finalCells, options, tuned.preparedPalette);
+  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? finalCells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
   if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
+  if (balanced) result.legendBalance = balanceStat(balanced);
   return result;
 }
 
@@ -1259,11 +1295,13 @@ export async function recognizeImportImageAsync(
   }
   throwIfAborted(options.signal);
   if (options.symbolAssist === true) {
-    const symbolStats = applySymbolAssist(source, tuned.calibration, palette, cells);
-    const result = createRecognitionResult(mode, context.calibration, cells, context.edgeInsetRatio, {
+    const symbolStats = applySymbolAssist(source, tuned.calibration, tuned.lockedPalette, cells);
+    const balanced = attachCountBalance(cells, options, tuned.preparedPalette);
+    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? cells, context.edgeInsetRatio, {
       colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
     });
     result.symbolAssist = symbolStats;
+    if (balanced) result.legendBalance = balanceStat(balanced);
     report(100);
     return result;
   }
@@ -1275,18 +1313,39 @@ export async function recognizeImportImageAsync(
   const unified = unify ? unifyTwinColors(smoothed?.cells ?? shading?.cells ?? cells, tuned) : null;
   // fallback 链必须包含 shading（与同步入口同坑）：smooth 与 twin 都关闭时
   // refine 的输出只能靠这一链传递，漏掉会让"局部阴影再参考"静默失效。
-  const result = createRecognitionResult(mode, context.calibration, unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells, context.edgeInsetRatio, {
+  // 数量平衡挂在整个链条之后（与同步入口同一挂点语义）。
+  const finalCells = unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells;
+  const balanced = attachCountBalance(finalCells, options, tuned.preparedPalette);
+  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? finalCells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
   if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
+  if (balanced) result.legendBalance = balanceStat(balanced);
   report(100);
   return result;
 }
 
 function yieldToEventLoop(): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, 0));
+}
+
+/**
+ * 数量平衡挂点：仅当 paletteLock 与 countQuota 同时生效才执行；
+ * 否则返回 null（结果与未开启时逐位一致，result 上也不出现 legendBalance）。
+ */
+function attachCountBalance(
+  cells: ImportRecognitionCell[][],
+  options: ImportRecognitionOptions,
+  preparedPalette: PreparedPaletteColor[],
+): ReturnType<typeof applyCountBalance> | null {
+  if (!options.paletteLock?.length || !options.countQuota) return null;
+  return applyCountBalance(cells, options.countQuota, preparedPalette);
+}
+
+function balanceStat(balanced: NonNullable<ReturnType<typeof applyCountBalance>>): NonNullable<ImportRecognitionResult['legendBalance']> {
+  return { moved: balanced.moved, satisfied: balanced.satisfied, residual: balanced.residual };
 }
 
 /** 品牌探测最多采样的格子数（大网格按步长抽稀）。 */

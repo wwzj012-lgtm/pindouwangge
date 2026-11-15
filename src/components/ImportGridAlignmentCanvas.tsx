@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Grid2X2, Maximize2, Minus, Move, Plus, RotateCcw, ScanSearch } from 'lucide-react';
+import { Grid2X2, Maximize2, Minus, Move, Plus, RotateCcw, ScanSearch, SquareDashed } from 'lucide-react';
 import { clampCanvasViewport } from '../utils/canvasViewport';
 import {
   clipRecognitionRegion,
@@ -10,11 +10,11 @@ import {
   type ImportRecognitionRegion,
 } from '../utils/importGridAlignment';
 
-type Tool = 'grid' | 'pan' | 'region';
+type Tool = 'grid' | 'pan' | 'region' | 'legend';
 type Point = { x: number; y: number };
 type View = Point & { zoom: number };
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
-type DragMode = 'pan' | 'grid' | 'pitch' | 'draw' | 'region' | Corner;
+type DragMode = 'pan' | 'grid' | 'pitch' | 'draw' | 'region' | 'legendDraw' | Corner;
 interface Drag {
   pointerId: number;
   mode: DragMode;
@@ -24,6 +24,14 @@ interface Drag {
   view: View;
 }
 
+/** 图例区域（图像像素坐标，含端点）。与 importLegend 的 LegendFrameRect 同构。 */
+export interface LegendRegionRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 interface Props {
   image: HTMLImageElement;
   alignment: ImportGridAlignment;
@@ -31,6 +39,13 @@ interface Props {
   onAlignmentChange: (alignment: ImportGridAlignment) => void;
   onRegionChange: (region: ImportRecognitionRegion) => void;
   readOnly?: boolean;
+  /** 用户框选的图例区域；null = 未框选。 */
+  legendRegion?: LegendRegionRect | null;
+  onLegendRegionChange?: (region: LegendRegionRect | null) => void;
+  /** 外部请求切入的工具（如面板「框选图例区域」按钮）；undefined = 不接管。 */
+  requestedTool?: Tool;
+  /** 内部工具切换回调（供外部同步「框选模式已退出」等状态）。 */
+  onToolChange?: (tool: Tool) => void;
 }
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
@@ -38,12 +53,17 @@ const CORNER_LABELS = { nw: '左上', ne: '右上', sw: '左下', se: '右下' }
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 /** All edits use original image pixels; view transforms never enter recognition. */
-export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmentChange, onRegionChange, readOnly = false }: Props) {
+export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmentChange, onRegionChange, readOnly = false, legendRegion = null, onLegendRegionChange, requestedTool, onToolChange }: Props) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dragRef = useRef<Drag | null>(null);
   const spaceRef = useRef(false);
-  const [tool, setTool] = useState<Tool>('grid');
+  const [internalTool, setInternalTool] = useState<Tool>('grid');
+  const tool = requestedTool ?? internalTool;
+  const setTool = useCallback((next: Tool) => {
+    setInternalTool(next);
+    onToolChange?.(next);
+  }, [onToolChange]);
   const [activeDrag, setActiveDrag] = useState(false);
   const [view, setView] = useState<View>({ zoom: 1, x: 0, y: 0 });
   const [size, setSize] = useState({ width: 1, height: 1 });
@@ -206,6 +226,20 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
     ctx.lineWidth = 2 / view.zoom;
     ctx.setLineDash([7 / view.zoom, 4 / view.zoom]);
     ctx.strokeRect(roi.x, roi.y, roi.width, roi.height);
+    ctx.setLineDash([]);
+    if (legendRegion) {
+      const lx0 = Math.min(legendRegion.x0, legendRegion.x1);
+      const ly0 = Math.min(legendRegion.y0, legendRegion.y1);
+      const lw = Math.abs(legendRegion.x1 - legendRegion.x0);
+      const lh = Math.abs(legendRegion.y1 - legendRegion.y0);
+      ctx.fillStyle = 'rgba(139, 92, 246, .12)';
+      ctx.fillRect(lx0, ly0, lw, lh);
+      ctx.strokeStyle = '#8b5cf6';
+      ctx.lineWidth = 2 / view.zoom;
+      ctx.setLineDash([6 / view.zoom, 4 / view.zoom]);
+      ctx.strokeRect(lx0, ly0, lw, lh);
+      ctx.setLineDash([]);
+    }
     ctx.restore();
 
     if (!readOnly && tool === 'grid') {
@@ -215,7 +249,7 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
         ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.stroke();
       }
     }
-  }, [image, alignment, block, derived, dimensions, view, size, sparseStride, tool, readOnly, blockStart.x, blockStart.y, blockEnd.x, blockEnd.y, redHandle.x, redHandle.y, blueHandle.x, blueHandle.y]);
+  }, [image, alignment, block, derived, dimensions, view, size, sparseStride, tool, readOnly, legendRegion, blockStart.x, blockStart.y, blockEnd.x, blockEnd.y, redHandle.x, redHandle.y, blueHandle.x, blueHandle.y]);
 
   const sourcePoint = (event: { clientX: number; clientY: number }) => {
     const rect = viewportRef.current!.getBoundingClientRect();
@@ -229,9 +263,11 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
     const point = sourcePoint(event);
     const insideImage = point.x >= 0 && point.y >= 0 && point.x <= dimensions.width && point.y <= dimensions.height;
     let mode = requested;
-    if (readOnly || (!requested && (tool === 'pan' || event.shiftKey || spaceRef.current))) mode = 'pan';
-    if (!mode) {
-      if (tool === 'grid') mode = 'grid';
+    if (!requested) {
+      if (event.shiftKey || spaceRef.current) mode = 'pan';
+      else if (tool === 'legend') mode = 'legendDraw';
+      else if (tool === 'pan' || readOnly) mode = 'pan';
+      else if (tool === 'grid') mode = 'grid';
       else if (insideImage) mode = 'draw';
       else return;
     }
@@ -260,8 +296,15 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       const x = clamp(drag.region.x + dx, 0, dimensions.width - drag.region.width);
       const y = clamp(drag.region.y + dy, 0, dimensions.height - drag.region.height);
       onRegionChange({ ...drag.region, x, y });
-    } else if (drag.mode === 'draw') onRegionChange(clipRecognitionRegion({ x: drag.start.x, y: drag.start.y, width: dx, height: dy }, dimensions));
-    else {
+    }     else if (drag.mode === 'draw') onRegionChange(clipRecognitionRegion({ x: drag.start.x, y: drag.start.y, width: dx, height: dy }, dimensions));
+    else if (drag.mode === 'legendDraw') {
+      if (!onLegendRegionChange) return;
+      const x0 = clamp(Math.min(drag.start.x, point.x), 0, dimensions.width);
+      const y0 = clamp(Math.min(drag.start.y, point.y), 0, dimensions.height);
+      const x1 = clamp(Math.max(drag.start.x, point.x), 0, dimensions.width);
+      const y1 = clamp(Math.max(drag.start.y, point.y), 0, dimensions.height);
+      onLegendRegionChange({ x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x1), y1: Math.round(y1) });
+    } else {
       const r = drag.region;
       const fromWest = drag.mode.endsWith('w');
       const fromNorth = drag.mode.startsWith('n');
@@ -282,6 +325,11 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
   const keyDown = (event: React.KeyboardEvent<HTMLElement>, handle?: 'grid' | 'pitch' | Corner) => {
     if (event.code === 'Space' && !handle) { event.preventDefault(); spaceRef.current = true; return; }
     if (event.key === '0') { event.preventDefault(); fit(); return; }
+    if (event.key === 'Escape' && tool === 'legend') {
+      event.preventDefault();
+      onLegendRegionChange?.(null);
+      return;
+    }
     if (['+', '=', '-'].includes(event.key)) {
       event.preventDefault();
       zoomAt(event.key === '-' ? 1 / 1.3 : 1.3);
@@ -306,16 +354,28 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
 
   return <div className="ir-viewer ir-alignment-viewer">
     <div className="ir-canvas-toolbar">
-      {!readOnly ? <div className="ir-segment ir-alignment-tools" role="group" aria-label="校准操作模式">
-        <button type="button" aria-pressed={tool === 'grid'} onClick={() => setTool('grid')}><Grid2X2 size={14} />调整网格</button>
-        <button type="button" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Move size={14} />平移视图</button>
-        <button type="button" aria-pressed={tool === 'region'} onClick={() => setTool('region')}><ScanSearch size={14} />框选识别区域</button>
-      </div> : <span className="ir-help">校准已冻结，准备识别</span>}
+      <div className="ir-segment ir-alignment-tools" role="group" aria-label="校准操作模式">
+        {!readOnly && <>
+          <button type="button" aria-pressed={tool === 'grid'} onClick={() => setTool('grid')}><Grid2X2 size={14} />调整网格</button>
+          <button type="button" aria-pressed={tool === 'pan'} onClick={() => setTool('pan')}><Move size={14} />平移视图</button>
+          <button type="button" aria-pressed={tool === 'region'} onClick={() => setTool('region')}><ScanSearch size={14} />框选识别区域</button>
+        </>}
+        {onLegendRegionChange && (
+          <button
+            type="button"
+            className="ir-tool-legend"
+            aria-pressed={tool === 'legend'}
+            onClick={() => setTool(tool === 'legend' ? (readOnly ? 'pan' : 'grid') : 'legend')}
+            title="框住图纸上的图例条（色点 + 色号 + 粒数），图例锁定只解析框内内容"
+          ><SquareDashed size={14} />框选图例</button>
+        )}
+        {readOnly && <span className="ir-help">校准已冻结，准备识别</span>}
+      </div>
       <div className="ir-zoom-tools"><button type="button" aria-label="缩小校准视图" onClick={() => zoomAt(1 / 1.3)}><Minus size={16} /></button><span className="ir-zoom-value">{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="放大校准视图" onClick={() => zoomAt(1.3)}><Plus size={16} /></button><button type="button" aria-label="适应校准视图" onClick={fit}><Maximize2 size={16} /></button><button type="button" aria-label="重置校准视图" onClick={fit}><RotateCcw size={16} /></button></div>
     </div>
-    {!readOnly && <div className="ir-alignment-instructions" id="ir-alignment-instructions">{tool === 'grid' ? <><span className="ir-handle-key ir-handle-key-red" />红点拖动：对齐网格 <span className="ir-handle-key ir-handle-key-blue" />蓝点拖动：改变格距 <span className="ir-gesture-hint">滚轮 / 触控板：缩放预览</span></> : tool === 'pan' ? '拖动画布：平移图片 · 滚轮 / 触控板：缩放预览 · 工具栏可适应视图' : <>拖动画布框选 · 拖橙色中心移动 · 拖方形角点缩放<button type="button" className="ir-text-button" onClick={() => onRegionChange({ x: 0, y: 0, ...dimensions })}>选择全图</button></>}</div>}
-    <div ref={viewportRef} className="ir-viewport ir-alignment-viewport" data-tool={readOnly ? 'pan' : tool}>
-      <canvas ref={canvasRef} tabIndex={0} onPointerDown={event => startDrag(event)} {...pointerProps} onKeyDown={event => keyDown(event)} onBlur={() => { spaceRef.current = false; }} aria-label="图纸网格校准预览，红点移动网格，蓝点调整格距，橙框限定识别区域" aria-describedby={readOnly ? undefined : 'ir-alignment-instructions'} />
+    {(!readOnly || tool === 'legend') && <div className="ir-alignment-instructions" id="ir-alignment-instructions">{tool === 'legend' ? <>拖动画布框住整条图例 · 框错可重新拖 · <button type="button" className="ir-text-button" onClick={() => onLegendRegionChange?.(null)}>清除框选</button></> : tool === 'grid' ? <><span className="ir-handle-key ir-handle-key-red" />红点拖动：对齐网格 <span className="ir-handle-key ir-handle-key-blue" />蓝点拖动：改变格距 <span className="ir-gesture-hint">滚轮 / 触控板：缩放预览</span></> : tool === 'pan' ? '拖动画布：平移图片 · 滚轮 / 触控板：缩放预览 · 工具栏可适应视图' : <>拖动画布框选 · 拖橙色中心移动 · 拖方形角点缩放<button type="button" className="ir-text-button" onClick={() => onRegionChange({ x: 0, y: 0, ...dimensions })}>选择全图</button></>}</div>}
+    <div ref={viewportRef} className="ir-viewport ir-alignment-viewport" data-tool={readOnly && tool !== 'legend' ? 'pan' : tool}>
+      <canvas ref={canvasRef} tabIndex={0} onPointerDown={event => startDrag(event)} {...pointerProps} onKeyDown={event => keyDown(event)} onBlur={() => { spaceRef.current = false; }} aria-label="图纸网格校准预览，红点移动网格，蓝点调整格距，橙框限定识别区域，紫框为图例区域" aria-describedby={!readOnly || tool === 'legend' ? 'ir-alignment-instructions' : undefined} />
       {!readOnly && tool === 'grid' && <>
         <button type="button" className="ir-lattice-handle ir-lattice-anchor" style={{ left: redHandle.x, top: redHandle.y }} aria-label="红色锚点：移动周期网格" title="移动网格 · 方向键微调" onPointerDown={event => startDrag(event, 'grid')} {...pointerProps} onKeyDown={event => keyDown(event, 'grid')}><span /></button>
         <button type="button" className="ir-lattice-handle ir-lattice-size" style={{ left: blueHandle.x, top: blueHandle.y }} aria-label="蓝色控制点：调整三格大小" title="调整 3 格大小 · 方向键微调" onPointerDown={event => startDrag(event, 'pitch')} {...pointerProps} onKeyDown={event => keyDown(event, 'pitch')}><span /></button>
@@ -328,6 +388,6 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       })}
       {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && <button type="button" className="ir-region-move" style={{ left: clamp((derived.region.x + derived.region.width / 2) * view.zoom + view.x, 25, Math.max(25, size.width - 25)), top: clamp((derived.region.y + derived.region.height / 2) * view.zoom + view.y, 25, Math.max(25, size.height - 25)) }} aria-label="移动识别区域" title="拖动以移动识别区域" onPointerDown={event => startDrag(event, 'region')} {...pointerProps} onKeyDown={event => keyDown(event)}><Move size={18} /></button>}
     </div>
-    <div className="ir-canvas-caption"><span><i className="ir-dot ir-dot-cyan" />周期网格 <i className="ir-dot ir-dot-green" />纳入识别的完整格 <i className="ir-dot ir-dot-amber" />识别区域</span><span>{sparseStride > 1 ? `缩略显示每 ${sparseStride} 条网格线 · ` : ''}实际格距 {Number(alignment.cellSize.toFixed(3))} px · 中央青色小块仅为拖拽手柄，识别范围以绿色区域为准</span></div>
+    <div className="ir-canvas-caption"><span><i className="ir-dot ir-dot-cyan" />周期网格 <i className="ir-dot ir-dot-green" />纳入识别的完整格 <i className="ir-dot ir-dot-amber" />识别区域{legendRegion ? <> <i className="ir-dot ir-dot-violet" />图例区域</> : null}</span><span>{sparseStride > 1 ? `缩略显示每 ${sparseStride} 条网格线 · ` : ''}实际格距 {Number(alignment.cellSize.toFixed(3))} px · 中央青色小块仅为拖拽手柄，识别范围以绿色区域为准</span></div>
   </div>;
 }

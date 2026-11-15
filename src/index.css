@@ -68,10 +68,13 @@ body {
 
 /* iOS Safari zooms the whole page when a text field smaller than 16px receives
    focus. That leaves the layout scaled up and usually hides the primary button
-   behind the keyboard. Force a 16px entry size on phone-width viewports only;
-   everything around the field keeps its compact scale. */
-@media (max-width: 639px) {
-  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit']),
+   behind the keyboard. Force a 16px entry size on phone viewports only —
+   (pointer: coarse) keeps desktop narrow viewports (embedded preview panels,
+   split windows) at their designed compact scale. `:where()` zeroes the :not()
+   chain's specificity so component rules (.ir-lg-count 等 12px) still win on
+   coarse-pointer devices. */
+@media (max-width: 639px) and (pointer: coarse) {
+  input:where(:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='button']):not([type='submit'])),
   textarea,
   select {
     font-size: 16px;

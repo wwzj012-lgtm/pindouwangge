@@ -597,4 +597,105 @@ describe('import recognition', () => {
     expect(after.cells[0][9].colorId).toBe('darkred');
   });
 
+  it('keeps unlocked results bit-identical to the pre-legend pipeline (no legendBalance field)', () => {
+    // 回归铁律：不传 paletteLock/countQuota 时，新代码路径一个都不走——
+    // 结果与 7acbd6f 逐位一致，且 result 上不出现 legendBalance 字段。
+    const source = image(12, 4, (x) => x < 6 ? red : blue);
+    const grid: ImportGridCalibration = { originX: 0, originY: 0, cellWidth: 4, cellHeight: 4, columns: 3, rows: 1 };
+    const baseline = recognizeImportImage(source, grid, areaPalette, 'precision');
+    const explicitEmpty = recognizeImportImage(source, grid, areaPalette, 'precision', undefined, {});
+    const withQuotaOnly = recognizeImportImage(source, grid, areaPalette, 'precision', undefined, { countQuota: { red: 1 } });
+    expect(explicitEmpty).toEqual(baseline);
+    expect(withQuotaOnly).toEqual(baseline);
+    expect('legendBalance' in baseline).toBe(false);
+    expect('legendBalance' in explicitEmpty).toBe(false);
+    expect('legendBalance' in withQuotaOnly).toBe(false);
+    const asyncBaseline = recognizeImportImage(source, grid, areaPalette, 'precision');
+    expect(asyncBaseline).toEqual(baseline);
+  });
+
+  it('constrains every mapped cell to the palette whitelist when paletteLock is given', () => {
+    // 混入 4 支无关色：锁定后分类只能落在白名单里。
+    const lockPalette: BeadColor[] = [
+      ...areaPalette,
+      { id: 'cyan', code: 'C', name: 'Cyan', hex: '#00ffff', rgb: [0, 255, 255], brand: 'CUSTOM' },
+      { id: 'yellow', code: 'Y', name: 'Yellow', hex: '#ffff00', rgb: [255, 255, 0], brand: 'CUSTOM' },
+    ];
+    const source = image(8, 4, (x) => x < 4 ? red : blue);
+    const grid: ImportGridCalibration = { originX: 0, originY: 0, cellWidth: 4, cellHeight: 4, columns: 2, rows: 1 };
+    const locked = recognizeImportImage(source, grid, lockPalette, 'precision', undefined, {
+      paletteLock: ['R', 'B'],
+    });
+    const whitelist = new Set(lockPalette.filter(color => ['R', 'B'].includes(color.code)).map(color => color.id));
+    for (const cell of locked.cells.flat()) {
+      if (cell.status !== 'mapped') continue;
+      expect(whitelist.has(cell.colorId!)).toBe(true);
+    }
+    expect(recognitionResultToCodeMatrix(locked)).toEqual([['R', 'B']]);
+    // 白名单里没有的 code 不参与分类；全部排除时退化为 invalid（与空色板同语义）。
+    const empty = recognizeImportImage(source, grid, lockPalette, 'precision', undefined, { paletteLock: ['NOPE'] });
+    expect(empty.summary.invalid).toBe(2);
+    expect('legendBalance' in empty).toBe(false);
+  });
+
+  it('applies count balancing through the pipeline only when both lock and quota are given', () => {
+    // 6 格暖（后 3 格低置信）+ 2 格冷，ΔE 守卫内的近邻色对：锁定 + 配额让 1 格。
+    const extended: BeadColor[] = [
+      { id: 'WA', code: 'WA', name: 'Warm', hex: '#d27a5c', rgb: [210, 122, 92], brand: 'CUSTOM' },
+      { id: 'CB', code: 'CB', name: 'Cool', hex: '#e19a76', rgb: [225, 154, 118], brand: 'CUSTOM' },
+      ...areaPalette,
+    ];
+    const warm: Rgba = [210, 122, 92, 255];
+    const cool: Rgba = [225, 154, 118, 255];
+    const source = image(32, 4, (x) => x < 24 ? warm : cool);
+    const grid: ImportGridCalibration = { originX: 0, originY: 0, cellWidth: 4, cellHeight: 4, columns: 8, rows: 1 };
+    const quota = { WA: 5, CB: 3 };
+    const unlocked = recognizeImportImage(source, grid, extended, 'precision');
+    expect(unlocked.summary.mapped).toBe(8);
+    const balanced = recognizeImportImage(source, grid, extended, 'precision', undefined, {
+      paletteLock: ['WA', 'CB'],
+      countQuota: quota,
+    });
+    expect(balanced.legendBalance).toBeDefined();
+    expect(balanced.legendBalance!.moved).toBe(1);
+    // 平衡后计数与配额一致（恰好语义）。
+    const counts = new Map<string, number>();
+    for (const cell of balanced.cells.flat()) {
+      if (cell.status !== 'mapped' || !cell.colorId) continue;
+      counts.set(cell.colorId, (counts.get(cell.colorId) ?? 0) + 1);
+    }
+    expect(counts.get('WA')).toBe(5);
+    expect(counts.get('CB')).toBe(3);
+    expect(balanced.legendBalance!.satisfied).toBe(true);
+    expect(balanced.legendBalance!.residual).toEqual({});
+    // 未锁定时同一 quota 不参与（返回与 baseline 逐位一致）。
+    expect(recognizeImportImage(source, grid, extended, 'precision', undefined, { countQuota: quota })).toEqual(unlocked);
+  });
+
+  it('runs count balancing after the symbolAssist overwrite in chart mode', () => {
+    // 图纸模式：symbolAssist 覆写后是"最后阶段"，平衡挂在其后。
+    const extended: BeadColor[] = [
+      { id: 'WA', code: 'WA', name: 'Warm', hex: '#d27a5c', rgb: [210, 122, 92], brand: 'CUSTOM' },
+      { id: 'CB', code: 'CB', name: 'Cool', hex: '#e19a76', rgb: [225, 154, 118], brand: 'CUSTOM' },
+    ];
+    const warm: Rgba = [210, 122, 92, 255];
+    const cool: Rgba = [225, 154, 118, 255];
+    const source = image(32, 4, (x) => x < 24 ? warm : cool);
+    const grid: ImportGridCalibration = { originX: 0, originY: 0, cellWidth: 4, cellHeight: 4, columns: 8, rows: 1 };
+    const balanced = recognizeImportImage(source, grid, extended, 'precision', undefined, {
+      symbolAssist: true,
+      paletteLock: ['WA', 'CB'],
+      countQuota: { WA: 5, CB: 3 },
+    });
+    expect(balanced.symbolAssist).toBeDefined();
+    expect(balanced.legendBalance).toBeDefined();
+    const counts = new Map<string, number>();
+    for (const cell of balanced.cells.flat()) {
+      if (cell.status !== 'mapped' || !cell.colorId) continue;
+      counts.set(cell.colorId, (counts.get(cell.colorId) ?? 0) + 1);
+    }
+    expect(counts.get('WA')).toBe(5);
+    expect(counts.get('CB')).toBe(3);
+  });
+
 });

@@ -468,10 +468,67 @@ function refineAxisByLines(source: ImportImagePixels, axis: 'x' | 'y', currentPi
 }
 
 /**
- * 「手动对齐了局部、远端漂移」的自动修复：把用户当前对齐当先验，
- * 用暗线投影在全图峰列上把**格距**精修到位。原点一律不动。
+ * 格内颜色纯度评分：整图均匀采样 K×K 个格子，每格取中心 + 四象限 5 个
+ * 样点，返回格内颜色方差的均值（越低 = 每格越接近同一颗豆的颜色 = 相位越准）。
  *
- * 原点为什么不动（两版教训）：
+ * 用途：精修算出的全图最优相位与用户拖动的原点差得远时，谁对谁错不能只
+ * 信投影峰（v2 教训：文字污染的投影相位天然偏半格）——让图片直接投票：
+ * 相位正确时每个采样格落在同一颗豆/同一片色块内部，格内方差小；错半格时
+ * 每格骑在豆子边界上，格内方差显著变大。
+ */
+function gridCellVarianceScore(
+  source: ImportImagePixels,
+  cellSize: number,
+  originX: number,
+  originY: number,
+): number {
+  const { data, width, height } = source;
+  const K = 24;
+  const offsets: Array<[number, number]> = [
+    [0, 0],
+    [-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22],
+  ];
+  let total = 0;
+  let cells = 0;
+  for (let ky = 0; ky < K; ky += 1) {
+    for (let kx = 0; kx < K; kx += 1) {
+      const cx = originX + (kx + 0.5) * cellSize;
+      const cy = originY + (ky + 0.5) * cellSize;
+      if (cx < 2 || cy < 2 || cx > width - 3 || cy > height - 3) continue;
+      const samples: Array<[number, number, number]> = [];
+      for (const [ox, oy] of offsets) {
+        const x = Math.round(cx + ox * cellSize);
+        const y = Math.round(cy + oy * cellSize);
+        const i = (y * width + x) * 4;
+        samples.push([data[i], data[i + 1], data[i + 2]]);
+      }
+      const meanR = samples.reduce((sum, s) => sum + s[0], 0) / samples.length;
+      const meanG = samples.reduce((sum, s) => sum + s[1], 0) / samples.length;
+      const meanB = samples.reduce((sum, s) => sum + s[2], 0) / samples.length;
+      let variance = 0;
+      for (const s of samples) {
+        variance += (s[0] - meanR) ** 2 + (s[1] - meanG) ** 2 + (s[2] - meanB) ** 2;
+      }
+      total += variance / samples.length;
+      cells += 1;
+    }
+  }
+  return cells > 0 ? total / cells : Number.POSITIVE_INFINITY;
+}
+
+/** 把相位差折算到 (-p/2, p/2]，用于"离用户原点最近的等价相位"。 */
+function wrapPhaseDiff(target: number, current: number, pitch: number): number {
+  let diff = (target - current) % pitch;
+  if (diff > pitch / 2) diff -= pitch;
+  if (diff < -pitch / 2) diff += pitch;
+  return diff;
+}
+
+/**
+ * 「手动对齐了局部、远端漂移」的自动修复：把用户当前对齐当先验，
+ * 用暗线投影在全图峰列上把**格距**精修到位。原点默认不动。
+ *
+ * 原点为什么默认不动（两版教训）：
  *  - v1 把原点套用成全图相位均值（wrap 到 [0,pitch)）→ 网格整格"跳走"，
  *    用户拖的锚点被覆盖。
  *  - v2 把相位均值折算成离用户原点最近的等价原点（±半格微调）→ 实测
@@ -479,8 +536,14 @@ function refineAxisByLines(source: ImportImagePixels, axis: 'x' | 'y', currentPi
  *    与深色豆块边界，其相位天然偏真实格线半格——"半格微调"正好把用户
  *    本来对齐的网格挪到文字中心上，整图错位半格。
  *  - 结论：用户看得见格线，原点拖得准；拖不准的是格距（蓝点基线只有
- *    3 格）。精修只修格距：原点在真格线上时，修正格距后近端几乎不动、
+ *    3 格）。精修默认只修格距：原点在真格线上时，修正格距后近端几乎不动、
  *    远端逐格收敛到真格线，正是理想行为。
+ *
+ * v3.1 相位吸附（唯一例外）：投影相位与用户原点差 ≥0.15 格时，用户多半
+ * 没拖准（瑶图实测：起点 (270,110) 相位差 1/3 格，精修后采样仍骑在豆子
+ * 边界上，识别整图混色）。此时生成"吸附候选"，用格内颜色纯度让图片投票
+ * ——吸附后格内方差显著更低（<92%）才采纳。文字污染的假相位在纯度投票
+ * 下会输给用户原本正确的原点，v2 的失败模式被这条判据挡住。
  *
  * 输入的对齐只需粗略正确（±8% 内），输出可直接套用；格线证据不足
  * （照片/截图无印刷网格）时 applied=false 并说明原因，不碰当前对齐。
@@ -512,17 +575,40 @@ export function refineGridAlignment(
   const cell = Number(((x.pitch + y.pitch) / 2).toFixed(2));
   const stretched = Math.abs(x.pitch - y.pitch) / Math.max(x.pitch, y.pitch) > 0.015;
   const drift = Math.abs(cell - base) / base;
+
+  // 相位吸附（v3.1）：格内纯度投票，显著更纯才动原点。
+  let originX = alignment.originX;
+  let originY = alignment.originY;
+  let snapNote = '';
+  const phaseX = ((alignment.originX % cell) + cell) % cell;
+  const phaseY = ((alignment.originY % cell) + cell) % cell;
+  const dx = wrapPhaseDiff(x.origin, phaseX, cell);
+  const dy = wrapPhaseDiff(y.origin, phaseY, cell);
+  const snapGate = cell * 0.15;
+  if (Math.abs(dx) >= snapGate || Math.abs(dy) >= snapGate) {
+    const snapX = Math.abs(dx) >= snapGate ? dx : 0;
+    const snapY = Math.abs(dy) >= snapGate ? dy : 0;
+    const userScore = gridCellVarianceScore(source, cell, phaseX, phaseY);
+    const snappedScore = gridCellVarianceScore(source, cell, phaseX + snapX, phaseY + snapY);
+    if (Number.isFinite(userScore) && snappedScore < userScore * 0.92) {
+      originX = alignment.originX + snapX;
+      originY = alignment.originY + snapY;
+      snapNote = `；原点吸附 ${Math.round(Math.hypot(snapX, snapY))} px（你拖动的相位与全图格线差得较远，吸附后格内颜色更纯，已按图片投票确认）`;
+    }
+  }
+
   return {
     applied: true,
     cell,
-    originX: alignment.originX,
-    originY: alignment.originY,
+    originX,
+    originY,
     confidence: Math.min(x.coherence * x.inlierRatio, y.coherence * y.inlierRatio),
     coherenceX: x.coherence,
     coherenceY: y.coherence,
     stretched,
-    message: `全图格线精修完成：格距 ${base.toFixed(2)} → ${x.pitch.toFixed(2)} / ${y.pitch.toFixed(2)} px，相位相干 ${(x.coherence * 100).toFixed(0)}% / ${(y.coherence * 100).toFixed(0)}%。`
-      + '网格位置保留你拖动的原点，未做任何移动；格线偏移随距离逐渐收敛。'
+    message: `全图格线精修完成：格距 ${base.toFixed(2)} → ${x.pitch.toFixed(2)} / ${y.pitch.toFixed(2)} px，相位相干 ${(x.coherence * 100).toFixed(0)}% / ${(y.coherence * 100).toFixed(0)}%`
+      + (snapNote || '；网格位置保留你拖动的原点，未做任何移动，格线偏移随距离逐渐收敛')
+      + '。'
       + (drift > 0.03 ? `本次格距修正幅度 ${ (drift * 100).toFixed(1) }% 较大，请核对绿色区域行列数是否与图纸一致。` : '')
       + (stretched ? '横纵格距相差超过 1.5%，图片可能被非等比拉伸过——正方形网格只能取平均近似。' : '')
       + '若精修后反而错位（图纸格线太浅、系统读到的是文字边缘），请撤销后以手动对齐为准。',

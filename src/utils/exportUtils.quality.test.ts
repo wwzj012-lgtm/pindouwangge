@@ -174,8 +174,8 @@ describe('export quality changes only pixel density, never HD logical layout', (
     // only per user request); size label split out of the subtitle and drawn
     // enlarged right-aligned at the top-right corner.
     const baseline = legendPosition === 'right'
-      ? { width: 1373, height: 569, digest: '95dca3e19fa74dd45935b3ea451af26023ae5fcdb8eb2b8eef3799836e3dd7ed' }
-      : { width: 548, height: 1230, digest: '95957a75017663575215346a6f125f402a180d4b4b2d7a3bb7faf695f9a731b2' };
+      ? { width: 1373, height: 569, digest: '918d84712d1d5ddf213311c3f8a39d7f0e34635e23d2dc3339b62b87960ec2ac' }
+      : { width: 548, height: 1230, digest: '89955c0fc46e408428e83db33d88e4e4c84ece8efc2e04bd33bed818f198b735' };
     expect({ width: hd.canvas.width, height: hd.canvas.height, digest }).toEqual(baseline);
   });
 });

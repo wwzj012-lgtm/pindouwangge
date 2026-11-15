@@ -769,9 +769,9 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.fillStyle = '#0F172A';
     ctx.fillText(`${bead.code}`, itemX + swatchSize + Math.round(8 * scale), itemY + swatchSize / 2);
 
-    // Count
+    // Count（2026-11-15 用户要求：数量与色号同色黑墨，蓝墨只在自家解析时用于分离）
     ctx.font = legendCountFont;
-    ctx.fillStyle = '#2563EB';
+    ctx.fillStyle = '#0F172A';
     ctx.textAlign = 'right';
     ctx.fillText(isEn ? `${count}` : `${count} 粒`, itemX + legendColWidth - Math.round(15 * scale), itemY + swatchSize / 2);
   });

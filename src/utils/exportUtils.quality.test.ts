@@ -30,6 +30,8 @@ function canvasSpy() {
     rotate: (angle: number) => multiply([Math.cos(angle), Math.sin(angle), -Math.sin(angle), Math.cos(angle), 0, 0]),
     setTransform: (...value: Matrix) => { matrix = [...value]; },
     setLineDash: (dash: number[]) => { state.dash = [...dash]; },
+    // Monospace bold advance ≈ 0.6em; only used for legend count placement.
+    measureText: (text: string) => ({ width: text.length * 14 * 0.6 }),
     save: () => { stack.push({ state: snapshotState(), matrix: [...matrix] }); },
     restore: () => {
       const saved = stack.pop();
@@ -170,12 +172,11 @@ describe('export quality changes only pixel density, never HD logical layout', (
   it.each(['right', 'bottom'] as const)('pins existing HD dimensions and the entire draw trace: %s', legendPosition => {
     const hd = render(options({ legendPosition }));
     const digest = createHash('sha256').update(JSON.stringify(hd.events)).digest('hex');
-    // Captured 2026-11-15: legend rows drop the color-name column (code + count
-    // only per user request); size label split out of the subtitle and drawn
-    // enlarged right-aligned at the top-right corner.
+    // Captured 2026-11-15: legend rows draw count right after the code with a
+    // fixed small gap (user feedback) and widen the column pitch 200→240.
     const baseline = legendPosition === 'right'
-      ? { width: 1373, height: 569, digest: '918d84712d1d5ddf213311c3f8a39d7f0e34635e23d2dc3339b62b87960ec2ac' }
-      : { width: 548, height: 1230, digest: '89955c0fc46e408428e83db33d88e4e4c84ece8efc2e04bd33bed818f198b735' };
+      ? { width: 1533, height: 569, digest: '0d8ca01173e2ce5d5138f99d4e719223393a4d40933495dfde00d723c1e6035d' }
+      : { width: 560, height: 1230, digest: '349489be63d042015f376a47d633be94e1f41afb61e11fce1eb624bc1e78da18' };
     expect({ width: hd.canvas.width, height: hd.canvas.height, digest }).toEqual(baseline);
   });
 });
@@ -183,7 +184,7 @@ describe('export quality changes only pixel density, never HD logical layout', (
 describe('40M pixel gate uses rounded final physical dimensions before allocation', () => {
   it.each([
     { width: 124, height: 881, exportQuality: 'normal' as const, hdWidth: 3533, hdHeight: 22188, allowed: false },
-    { width: 125, height: 875, exportQuality: 'normal' as const, hdWidth: 3558, hdHeight: 22038, allowed: true },
+    { width: 117, height: 911, exportQuality: 'normal' as const, hdWidth: 3418, hdHeight: 22938, allowed: true },
   ])('takes integer rounding into account at the budget boundary: $width x $height, $exportQuality', fixture => {
     const { width, height, exportQuality, hdWidth, hdHeight, allowed } = fixture;
     const factor = factors[exportQuality];

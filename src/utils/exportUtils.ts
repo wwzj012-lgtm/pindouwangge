@@ -426,7 +426,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
 
   const swatchSize = Math.round(22 * scale);
   const rowHeight = Math.round(32 * scale);
-  const legendColWidth = Math.round(200 * scale);
+  // 2026-11-15 用户反馈：色卡之间间隔大一些（列距 200→240）
+  const legendColWidth = Math.round(240 * scale);
 
   const legendHeaderFont = `bold ${Math.round(18 * scale)}px sans-serif`;
   const legendSubFont = `${Math.round(13 * scale)}px sans-serif`;
@@ -767,13 +768,20 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     ctx.textBaseline = 'middle';
     ctx.font = legendCodeFont;
     ctx.fillStyle = '#0F172A';
-    ctx.fillText(`${bead.code}`, itemX + swatchSize + Math.round(8 * scale), itemY + swatchSize / 2);
+    const codeText = `${bead.code}`;
+    const codeX = itemX + swatchSize + Math.round(8 * scale);
+    ctx.fillText(codeText, codeX, itemY + swatchSize / 2);
+    const codeW = ctx.measureText(codeText).width;
 
-    // Count（2026-11-15 用户要求：数量与色号同色黑墨，蓝墨只在自家解析时用于分离）
+    // Count（2026-11-15 用户反馈：数量紧随色号固定小间隔，不再右对齐到列尾；
+    // 黑墨——蓝墨只在自家解析时用于分离）
     ctx.font = legendCountFont;
     ctx.fillStyle = '#0F172A';
-    ctx.textAlign = 'right';
-    ctx.fillText(isEn ? `${count}` : `${count} 粒`, itemX + legendColWidth - Math.round(15 * scale), itemY + swatchSize / 2);
+    ctx.fillText(
+      isEn ? `${count}` : `${count} 粒`,
+      codeX + codeW + Math.round(14 * scale),
+      itemY + swatchSize / 2
+    );
   });
 
   // Footer Watermark

@@ -38,6 +38,7 @@ function canvasSpy() {
     strokeRect: vi.fn((...args: number[]) => record('strokeRect', args)),
     fillRect: vi.fn((...args: number[]) => record('fillRect', args)),
     fillText: vi.fn((_text: string, _x: number, _y: number) => {}),
+    measureText: vi.fn((text: string) => ({ width: text.length * 14 * 0.6 })),
     setLineDash: vi.fn((value: number[]) => { dash = [...value]; }),
     save: vi.fn(() => { stack.push({ state: {
       strokeStyle: state.strokeStyle, fillStyle: state.fillStyle,

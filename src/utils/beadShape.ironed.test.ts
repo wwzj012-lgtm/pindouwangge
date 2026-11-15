@@ -109,6 +109,7 @@ describe('ironed bead rendering', () => {
     const context = new Proxy<Record<PropertyKey, unknown>>({}, {
       get(target, property) {
         if (typeof property === 'symbol') return target[property];
+        if (property === 'measureText') return (text: string) => ({ width: text.length * 14 * 0.6 });
         if (!(property in target)) target[property] = vi.fn();
         return target[property];
       },

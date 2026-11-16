@@ -1180,6 +1180,23 @@
   box-shadow:0 0 0 1px #92400e;
   pointer-events:none
 }
+/* 单边调整手柄：长条胶囊，纵向边（e/w）竖长、横向边（n/s）横长 */
+.ir-region-edge>span {
+  width:10px;
+  height:20px;
+  border-radius:5px;
+  background:#f59e0b
+}
+.ir-region-edge-n>span,.ir-region-edge-s>span {
+  width:20px;
+  height:10px
+}
+.ir-region-edge-n,.ir-region-edge-s {
+  cursor:ns-resize
+}
+.ir-region-edge-e,.ir-region-edge-w {
+  cursor:ew-resize
+}
 .ir-region-move {
   width:44px;
   height:44px;

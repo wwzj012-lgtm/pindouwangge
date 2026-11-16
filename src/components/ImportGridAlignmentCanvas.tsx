@@ -14,7 +14,9 @@ type Tool = 'grid' | 'pan' | 'region' | 'legend';
 type Point = { x: number; y: number };
 type View = Point & { zoom: number };
 type Corner = 'nw' | 'ne' | 'sw' | 'se';
-type DragMode = 'pan' | 'grid' | 'pitch' | 'draw' | 'region' | 'legendDraw' | Corner;
+type Edge = 'n' | 's' | 'e' | 'w';
+type BoxHandle = Corner | Edge;
+type DragMode = 'pan' | 'grid' | 'pitch' | 'draw' | 'region' | 'legendDraw' | BoxHandle;
 interface Drag {
   pointerId: number;
   mode: DragMode;
@@ -50,6 +52,8 @@ interface Props {
 
 const CORNERS: Corner[] = ['nw', 'ne', 'sw', 'se'];
 const CORNER_LABELS = { nw: '左上', ne: '右上', sw: '左下', se: '右下' };
+const EDGES: Edge[] = ['n', 's', 'e', 'w'];
+const EDGE_LABELS = { n: '上', s: '下', e: '右', w: '左' };
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 /** All edits use original image pixels; view transforms never enter recognition. */
@@ -322,7 +326,7 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   const pointerProps = { onPointerMove: moveDrag, onPointerUp: endDrag, onPointerCancel: endDrag, onLostPointerCapture: endDrag };
-  const keyDown = (event: React.KeyboardEvent<HTMLElement>, handle?: 'grid' | 'pitch' | Corner) => {
+  const keyDown = (event: React.KeyboardEvent<HTMLElement>, handle?: 'grid' | 'pitch' | BoxHandle) => {
     if (event.code === 'Space' && !handle) { event.preventDefault(); spaceRef.current = true; return; }
     if (event.key === '0') { event.preventDefault(); fit(); return; }
     if (event.key === 'Escape' && tool === 'legend') {
@@ -342,7 +346,7 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
     const dy = event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0;
     if (readOnly || (!handle && tool === 'pan')) setView(boundView({ ...view, x: view.x + dx * 10, y: view.y + dy * 10 }));
     else if (handle === 'pitch') onAlignmentChange(resizeGridAlignment(block, { x: block.originX + 3 * block.cellSize + dx, y: block.originY + 3 * block.cellSize + dy }, 3));
-    else if (handle && CORNERS.includes(handle as Corner)) {
+    else if (handle && (CORNERS.includes(handle as Corner) || EDGES.includes(handle as Edge))) {
       const r = derived.region;
       const west = handle.endsWith('w'); const north = handle.startsWith('n');
       onRegionChange(clipRecognitionRegion({ x: r.x + (west ? dx : 0), y: r.y + (north ? dy : 0), width: r.width + (west ? -dx : dx), height: r.height + (north ? -dy : dy) }, dimensions));
@@ -373,7 +377,7 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       </div>
       <div className="ir-zoom-tools"><button type="button" aria-label="缩小校准视图" onClick={() => zoomAt(1 / 1.3)}><Minus size={16} /></button><span className="ir-zoom-value">{Math.round(view.zoom * 100)}%</span><button type="button" aria-label="放大校准视图" onClick={() => zoomAt(1.3)}><Plus size={16} /></button><button type="button" aria-label="适应校准视图" onClick={fit}><Maximize2 size={16} /></button><button type="button" aria-label="重置校准视图" onClick={fit}><RotateCcw size={16} /></button></div>
     </div>
-    {(!readOnly || tool === 'legend') && <div className="ir-alignment-instructions" id="ir-alignment-instructions">{tool === 'legend' ? <>拖动画布框住整条图例 · 框错可重新拖 · <button type="button" className="ir-text-button" onClick={() => onLegendRegionChange?.(null)}>清除框选</button></> : tool === 'grid' ? <><span className="ir-handle-key ir-handle-key-red" />红点拖动：对齐网格 <span className="ir-handle-key ir-handle-key-blue" />蓝点拖动：改变格距 <span className="ir-gesture-hint">滚轮 / 触控板：缩放预览</span></> : tool === 'pan' ? '拖动画布：平移图片 · 滚轮 / 触控板：缩放预览 · 工具栏可适应视图' : <>拖动画布框选 · 拖橙色中心移动 · 拖方形角点缩放<button type="button" className="ir-text-button" onClick={() => onRegionChange({ x: 0, y: 0, ...dimensions })}>选择全图</button></>}</div>}
+    {(!readOnly || tool === 'legend') && <div className="ir-alignment-instructions" id="ir-alignment-instructions">{tool === 'legend' ? <>拖动画布框住整条图例 · 框错可重新拖 · <button type="button" className="ir-text-button" onClick={() => onLegendRegionChange?.(null)}>清除框选</button></> : tool === 'grid' ? <><span className="ir-handle-key ir-handle-key-red" />红点拖动：对齐网格 <span className="ir-handle-key ir-handle-key-blue" />蓝点拖动：改变格距 <span className="ir-gesture-hint">滚轮 / 触控板：缩放预览</span></> : tool === 'pan' ? '拖动画布：平移图片 · 滚轮 / 触控板：缩放预览 · 工具栏可适应视图' : <>拖动画布框选 · 拖橙色中心移动 · 拖角点或边中点调整<button type="button" className="ir-text-button" onClick={() => onRegionChange({ x: 0, y: 0, ...dimensions })}>选择全图</button></>}</div>}
     <div ref={viewportRef} className="ir-viewport ir-alignment-viewport" data-tool={readOnly && tool !== 'legend' ? 'pan' : tool}>
       <canvas ref={canvasRef} tabIndex={0} onPointerDown={event => startDrag(event)} {...pointerProps} onKeyDown={event => keyDown(event)} onBlur={() => { spaceRef.current = false; }} aria-label="图纸网格校准预览，红点移动网格，蓝点调整格距，橙框限定识别区域，紫框为图例区域" aria-describedby={!readOnly || tool === 'legend' ? 'ir-alignment-instructions' : undefined} />
       {!readOnly && tool === 'grid' && <>
@@ -385,6 +389,13 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
         const p = toScreen({ x: r.x + (corner.endsWith('e') ? r.width : 0), y: r.y + (corner.startsWith('s') ? r.height : 0) });
         if ((p.x < -22 || p.y < -22 || p.x > size.width + 22 || p.y > size.height + 22) && dragRef.current?.mode !== corner) return null;
         return <button key={corner} type="button" className="ir-region-handle" style={{ left: clamp(p.x, 22, size.width - 22), top: clamp(p.y, 22, size.height - 22) }} aria-label={`识别区域${CORNER_LABELS[corner]}角`} onPointerDown={event => startDrag(event, corner)} {...pointerProps} onKeyDown={event => keyDown(event, corner)}><span /></button>;
+      })}
+      {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && EDGES.map(edge => {
+        const r = derived.region;
+        const horizontal = edge === 'e' || edge === 'w';
+        const p = toScreen({ x: r.x + (edge === 'e' ? r.width : edge === 'w' ? 0 : r.width / 2), y: r.y + (edge === 's' ? r.height : edge === 'n' ? 0 : r.height / 2) });
+        if ((p.x < -22 || p.y < -22 || p.x > size.width + 22 || p.y > size.height + 22) && dragRef.current?.mode !== edge) return null;
+        return <button key={edge} type="button" className={`ir-region-handle ir-region-edge ir-region-edge-${edge}`} style={{ left: clamp(p.x, 22, size.width - 22), top: clamp(p.y, 22, size.height - 22) }} aria-label={`识别区域${EDGE_LABELS[edge]}边：单边拖动调整`} title="拖动单边调整范围" onPointerDown={event => startDrag(event, edge)} {...pointerProps} onKeyDown={event => keyDown(event, edge)}><span /></button>;
       })}
       {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && <button type="button" className="ir-region-move" style={{ left: clamp((derived.region.x + derived.region.width / 2) * view.zoom + view.x, 25, Math.max(25, size.width - 25)), top: clamp((derived.region.y + derived.region.height / 2) * view.zoom + view.y, 25, Math.max(25, size.height - 25)) }} aria-label="移动识别区域" title="拖动以移动识别区域" onPointerDown={event => startDrag(event, 'region')} {...pointerProps} onKeyDown={event => keyDown(event)}><Move size={18} /></button>}
     </div>

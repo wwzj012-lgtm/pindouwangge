@@ -169,12 +169,24 @@ function lineSpikeProfile(source: ImportImagePixels, axis: 'x' | 'y'): Float64Ar
 
 /** 暗线峰：局部极大（±4px）高于投影最大值的 25%，近邻（≤5px）并入最高峰。 */
 function lineSpikes(source: ImportImagePixels, axis: 'x' | 'y'): number[] {
+  return lineSpikesWithStrength(source, axis).map(spike => spike.position);
+}
+
+/**
+ * 带强度的暗线峰。强度 = 该列暗线像素数 / 投影最大值（0~1）。
+ *
+ * 实物拼豆板的判别关键（2026-11-16 合成板实测）：缝列（珠间隙，贯穿全高）
+ * 强度 ≈1.0，孔列（每颗豆中心的小孔，只在孔位行变暗）强度 ≈0.26——
+ * 孔列在真周期处与缝列反相，把相干度破坏到 ~0.59，而半周期处全部同相
+ * （相干 1.0、覆盖 1.0），估算器高置信锁死半周期（真值 17.05 估成 8.5）。
+ */
+function lineSpikesWithStrength(source: ImportImagePixels, axis: 'x' | 'y'): Array<{ position: number; weight: number }> {
   const profile = lineSpikeProfile(source, axis);
   let max = 0;
   for (let i = 0; i < profile.length; i += 1) max = Math.max(max, profile[i]);
   if (max <= 0) return [];
   const threshold = max * 0.25;
-  const spikes: number[] = [];
+  const spikes: Array<{ position: number; weight: number }> = [];
   for (let i = 5; i < profile.length - 5; i += 1) {
     if (profile[i] < threshold) continue;
     let isPeak = true;
@@ -183,11 +195,11 @@ function lineSpikes(source: ImportImagePixels, axis: 'x' | 'y'): number[] {
     }
     if (!isPeak) continue;
     const last = spikes[spikes.length - 1];
-    if (last !== undefined && i - last <= 5) {
-      if (profile[i] > profile[last]) spikes[spikes.length - 1] = i;
+    if (last !== undefined && i - last.position <= 5) {
+      if (profile[i] > profile[last.position]) spikes[spikes.length - 1] = { position: i, weight: profile[i] / max };
       continue;
     }
-    spikes.push(i);
+    spikes.push({ position: i, weight: profile[i] / max });
   }
   return spikes;
 }
@@ -214,7 +226,8 @@ function phaseCoherence(spikes: number[], pitch: number): number {
  * 取覆盖率最高者，两种失败模式（漏峰锁 2×、整除锁 1/2）一并排除。
  */
 function estimateAxisByLines(source: ImportImagePixels, axis: 'x' | 'y'): AxisResult | null {
-  const spikes = lineSpikes(source, axis);
+  const spikeData = lineSpikesWithStrength(source, axis);
+  const spikes = spikeData.map(spike => spike.position);
   if (spikes.length < LINE_MIN_SPIKES) return null;
   const span = Math.max(1, spikes[spikes.length - 1] - spikes[0]);
   let maxCoherence = 0;
@@ -232,6 +245,16 @@ function estimateAxisByLines(source: ImportImagePixels, axis: 'x' | 'y'): AxisRe
     if (coverage > bestCoverage + 1e-9) { bestCoverage = coverage; bestPitch = p; }
   }
   if (bestPitch === 0 || bestCoverage < LINE_COVERAGE_MIN) return null;
+  // 孔洞交替：实物拼豆板豆心孔列与缝列在半周期处同相骗过相干+覆盖裁决
+  // （合成板实测 17.05→8.5 conf 0.96），强弱交替 + 强类 2p 相干一致才翻倍。
+  // 翻倍后只用强类（缝列）精修周期与原点——孔列在真周期处反相，
+  // 混进内点率会把解拖回 null（12.7 板实测回落色差剖面 37.3）。
+  const alternation = detectHoleAlternation(spikeData, bestPitch);
+  if (alternation) {
+    const doubled = refinePitch(alternation, bestPitch * 2);
+    if (!doubled) return null;
+    return { pitch: doubled.pitch, correlation: Math.min(1, maxCoherence * doubled.inlierRatio), origin: doubled.origin };
+  }
   // 相位均值 → 原点
   let cosSum = 0;
   let sinSum = 0;
@@ -253,6 +276,43 @@ function estimateAxisByLines(source: ImportImagePixels, axis: 'x' | 'y'): AxisRe
   return { pitch: bestPitch, correlation: Math.min(1, maxCoherence * inlierRatio), origin };
 }
 
+
+/**
+ * 孔洞交替检测：半周期假解的判别（2026-11-16 实物拼豆板实测）。
+ *
+ * 拼豆板每个豆心的小孔在暗线投影里形成与缝列交替的**弱**峰列：半周期处
+ * 缝+孔全部同相（相干 1.0、覆盖 1.0，覆盖率裁决失效），真周期处孔列反相
+ * 相干崩塌。判据：按 bestPitch 把峰分成奇偶两类，若两类**强度**系统性
+ * 悬殊（弱/强 ≤0.55）且强类在 2×bestPitch 处相位高度一致，则真周期翻倍——
+ * 印刷图纸的均匀格线两类强度接近，不会误翻。
+ */
+function detectHoleAlternation(
+  spikeData: Array<{ position: number; weight: number }>,
+  pitch: number,
+): number[] | null {
+  const assigned = spikeData
+    .map(spike => ({ ...spike, k: Math.round(spike.position / pitch) }))
+    .filter(spike => Math.abs(spike.position - spike.k * pitch) <= pitch * REFINE_OUTLIER_RATIO);
+  const even = assigned.filter(spike => spike.k % 2 === 0);
+  const odd = assigned.filter(spike => spike.k % 2 !== 0);
+  if (even.length < 2 || odd.length < 2) return null;
+  const mean = (list: typeof assigned) => list.reduce((sum, spike) => sum + spike.weight, 0) / list.length;
+  const meanEven = mean(even);
+  const meanOdd = mean(odd);
+  const ratio = Math.min(meanEven, meanOdd) / Math.max(meanEven, meanOdd);
+  if (ratio > 0.55) return null;
+  // 强类在 2×pitch 处必须相位一致（孔洞假设下强类=真格线）
+  const strong = meanEven >= meanOdd ? even : odd;
+  let cosSum = 0;
+  let sinSum = 0;
+  for (const spike of strong) {
+    const angle = (2 * Math.PI * spike.position) / (2 * pitch);
+    cosSum += Math.cos(angle);
+    sinSum += Math.sin(angle);
+  }
+  if (Math.hypot(cosSum, sinSum) / strong.length < 0.85) return null;
+  return strong.map(spike => spike.position);
+}
 
 function estimateAxis(profile: Float64Array, length: number): AxisResult | null {
   const maxLag = Math.min(MAX_PITCH, Math.floor(length / 5));

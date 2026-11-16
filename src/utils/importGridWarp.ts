@@ -89,7 +89,33 @@ function subpixelOffset(profile: Float64Array, peak: number): number | null {
   return Math.max(-1, Math.min(1, (0.5 * (left - right)) / denom));
 }
 
-/** 对块带内每条预测格线测偏移，返回中位数（无足够有效线返回 NaN）。 */
+/** 块内线偏移簇分离阈值（格为单位）：同族抖动 <0.2 格，缝/孔两族相距 ~0.5 格。 */
+const OFFSET_CLUSTER_GAP = 0.2;
+/** 多簇时多数簇至少要占到的比例，否则视为缝/孔混锁、整块弃权。 */
+const OFFSET_CLUSTER_DOMINANCE = 0.7;
+
+/**
+ * 线偏移按间隙聚簇，返回最大簇（缝/孔双族混锁时只认多数簇）。
+ * 深色豆区孔线族可能比缝线族更强，不加守卫块中位数会锁错族造成过冲
+ * （芝宝图实测个别块过冲 0.3~0.4 格）。簇不足 MIN_VALID_LINES 视为无效。
+ */
+function dominantOffsetCluster(offsets: number[], cellSize: number): number[] | null {
+  if (offsets.length === 0) return null;
+  const sorted = [...offsets].sort((a, b) => a - b);
+  const gap = cellSize * OFFSET_CLUSTER_GAP;
+  const clusters: number[][] = [[sorted[0]]];
+  for (let i = 1; i < sorted.length; i += 1) {
+    if (sorted[i] - sorted[i - 1] > gap) clusters.push([]);
+    clusters[clusters.length - 1].push(sorted[i]);
+  }
+  let best = clusters[0];
+  for (const c of clusters) if (c.length > best.length) best = c;
+  if (clusters.length > 1 && best.length / sorted.length < OFFSET_CLUSTER_DOMINANCE) return null;
+  if (best.length < MIN_VALID_LINES) return null;
+  return best;
+}
+
+/** 对块带内每条预测格线测偏移，返回多数簇中位数（无足够有效线返回 NaN）。 */
 function tileAxisOffset(
   source: ImportImagePixels,
   axis: 'x' | 'y',
@@ -121,8 +147,9 @@ function tileAxisOffset(
     offsets.push(peak + (fine ?? 0) - predicted);
   }
   if (offsets.length < MIN_VALID_LINES) return NaN;
-  offsets.sort((a, b) => a - b);
-  return offsets[offsets.length >> 1];
+  const cluster = dominantOffsetCluster(offsets, cellSize);
+  if (!cluster) return NaN;
+  return cluster[cluster.length >> 1];
 }
 
 /** 3×3 中值滤波（跳过 NaN：只对有效邻居取中位，全无效保持 NaN）。 */

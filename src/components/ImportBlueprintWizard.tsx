@@ -720,23 +720,23 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     const refinement = refineGridAlignment(source, working);
     if (refinement.applied) parts.push(refinement.message);
 
-    const changed = working !== alignment || refinement.applied;
+    let finalAlignment: ImportGridAlignment = refinement.applied
+      ? { ...working, cellSize: refinement.cell, originX: refinement.originX, originY: refinement.originY }
+      : working;
+    // 分区相位场（透视校正）：仅实物照片模式启用——拍下来的成品豆板有透视/镜头畸变；
+    // 数字图纸截图没有，不应被触碰。旧 warp 一律重估替换（含模式关闭时清空）。
+    const warp = beadPhoto ? estimateGridWarp(source, finalAlignment) : null;
+    finalAlignment = { ...finalAlignment, warp: warp ?? null };
+    const changed = working !== alignment || refinement.applied || !!warp;
     if (!changed) {
       setPitchHint('识别不到足够的图纸格线（照片或格线太浅的图纸），请手动拖红点、蓝点对齐。');
       return;
     }
     setRefineBackup(alignment);
-    const finalAlignment = refinement.applied
-      ? { ...working, cellSize: refinement.cell, originX: refinement.originX, originY: refinement.originY }
-      : working;
-    // 分区相位场（透视校正）：精修后残差仍超阈值才启用；图纸截图无透视 →
-    // estimateGridWarp 返回 null，行为与从前一致。旧 warp 一律重估替换。
-    const warp = estimateGridWarp(source, finalAlignment);
-    const warpAlignment: ImportGridAlignment = { ...finalAlignment, warp: warp ?? null };
     if (warp) {
       parts.push(`检测到透视形变，已启用分区校正（最大偏移 ${warp.maxResidual.toFixed(2)} 格）`);
     }
-    setAlignmentValue(warpAlignment);
+    setAlignmentValue(finalAlignment);
     updateDraft('cellSize', String(Number(finalAlignment.cellSize.toFixed(1))));
     updateDraft('originX', String(Number(finalAlignment.originX.toFixed(1))));
     updateDraft('originY', String(Number(finalAlignment.originY.toFixed(1))));
@@ -890,11 +890,11 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
               <details className="ir-details">
                 <summary>照片与特殊图纸选项（默认关闭）</summary>
                 <div className="ir-autocorrect-toggles">
-                  <label className="ir-check"><input type="checkbox" checked={beadPhoto} onChange={event => { invalidateRecognition(); setBeadPhoto(event.target.checked); }} />实物照片模式（拍下来的成品豆板）</label>
+                  <label className="ir-check"><input type="checkbox" checked={beadPhoto} onChange={event => { invalidateRecognition(); setBeadPhoto(event.target.checked); if (!event.target.checked && alignment?.warp) setAlignmentValue({ ...alignment, warp: null }); }} />实物照片模式（拍下来的成品豆板）</label>
                   <label className="ir-check"><input type="checkbox" checked={autoColorBalance} onChange={event => { invalidateRecognition(); setAutoColorBalance(event.target.checked); }} />校正整体色偏（需要画面里有白色或灰白区域）</label>
                   <label className="ir-check"><input type="checkbox" checked={autoAlign} onChange={event => { invalidateRecognition(); setAutoAlign(event.target.checked); }} />对齐整体偏移（整张图都框歪了再用）</label>
                 </div>
-                <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、并按画面白点归一曝光。</p>
+                <p className="ir-help">三项默认关闭。网格对准、素材是数字原图时不需要打开；对着成品拍照时先勾「实物照片模式」，它会把孔洞与反光排除、按画面白点归一曝光，并在自动对齐时尝试分区透视校正（取消勾选即还原）。</p>
               </details>
               {recognition && describeAutoCorrection(recognition) && (
                 <p className="ir-help ir-autocorrect" role="status">

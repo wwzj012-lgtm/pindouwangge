@@ -528,6 +528,77 @@ function refineAxisByLines(source: ImportImagePixels, axis: 'x' | 'y', currentPi
 }
 
 /**
+ * 折叠直方图回退（v3.2，2026-11-16 芝宝实物图）：矢量求和相干对**双峰族**
+ * 失效——实物豆板的缝列（豆间隙）与孔列（豆心小孔）相距半格，两组峰矢量
+ * 相互抵消，coherence 掉到阈值之下，refine 直接放弃（applied=false）。
+ *
+ * 折叠法不要求峰列同相：把所有峰按周期折叠进相位桶，双族会形成两个峰包，
+ * 取主峰相位即可。峰族归属（缝 or 孔）1D 投影区分不了，也不需要区分——
+ * 返回「主峰相位」与「+半格备选相位」两个候选，交给格内纯度投票裁决
+ * （选错的族会把格心放到另一族上，格内方差显著更高）。
+ *
+ * 仅在矢量相干路径失败后调用，已成功的图零影响。
+ */
+function foldAxisPhase(
+  spikeData: Array<{ position: number; weight: number }>,
+  pitch: number,
+): { phase: number; sharpness: number } | null {
+  const bins = 64;
+  const hist = new Float64Array(bins);
+  for (const { position, weight } of spikeData) {
+    const ph = ((position % pitch) + pitch) % pitch;
+    const f = (ph / pitch) * bins;
+    const i0 = Math.floor(f) % bins;
+    const frac = f - Math.floor(f);
+    hist[i0] += weight * (1 - frac);
+    hist[(i0 + 1) % bins] += weight * frac;
+  }
+  // 环形平滑（±1 桶），容忍峰位抖动与亚桶分布
+  const smooth = new Float64Array(bins);
+  for (let i = 0; i < bins; i += 1) {
+    smooth[i] = (hist[(i + bins - 1) % bins] + 2 * hist[i] + hist[(i + 1) % bins]) / 4;
+  }
+  let max = 0;
+  let maxI = 0;
+  let sum = 0;
+  for (let i = 0; i < bins; i += 1) {
+    sum += smooth[i];
+    if (smooth[i] > max) { max = smooth[i]; maxI = i; }
+  }
+  if (sum <= 0) return null;
+  const left = smooth[(maxI + bins - 1) % bins];
+  const right = smooth[(maxI + 1) % bins];
+  const denom = left - 2 * smooth[maxI] + right;
+  const sub = denom < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (left - right)) / denom)) : 0;
+  // 桶 i 覆盖相位 [(i)/bins, (i+1)/bins)，主峰中心 = (maxI + 0.5 + sub)/bins
+  const phase = (((maxI + 0.5 + sub) / bins) % 1) * pitch;
+  return { phase, sharpness: max / (sum / bins) };
+}
+
+/** 折叠回退的轴结果：周期 + 主峰相位 + 锐度（>1.25 才算有折叠结构）。 */
+const FOLD_SHARPNESS_MIN = 1.25;
+
+function refineAxisByFold(
+  source: ImportImagePixels,
+  axis: 'x' | 'y',
+  currentPitch: number,
+): { pitch: number; phase: number; sharpness: number } | null {
+  const spikeData = lineSpikesWithStrength(source, axis);
+  if (spikeData.length < LINE_MIN_SPIKES) return null;
+  const window = currentPitch * 0.08;
+  let bestPitch = 0;
+  let bestSharpness = 0;
+  let bestPhase = 0;
+  for (let p = Math.max(MIN_PITCH, currentPitch - window); p <= currentPitch + window; p += 0.01) {
+    const fold = foldAxisPhase(spikeData, p);
+    if (!fold) continue;
+    if (fold.sharpness > bestSharpness) { bestSharpness = fold.sharpness; bestPitch = p; bestPhase = fold.phase; }
+  }
+  if (bestPitch === 0 || bestSharpness < FOLD_SHARPNESS_MIN) return null;
+  return { pitch: bestPitch, phase: bestPhase, sharpness: bestSharpness };
+}
+
+/**
  * 格内颜色纯度评分：整图均匀采样 K×K 个格子，每格取中心 + 四象限 5 个
  * 样点，返回格内颜色方差的均值（越低 = 每格越接近同一颗豆的颜色 = 相位越准）。
  *
@@ -629,11 +700,35 @@ export function refineGridAlignment(
   const base = Math.max(MIN_PITCH, alignment.cellSize);
   const x = refineAxisByLines(source, 'x', base);
   const y = refineAxisByLines(source, 'y', base);
-  if (!x || !y) {
-    return { ...untouched, message: '图上检测不到足够的贯穿格线（照片或无格线的截图精修不了），请保持手动微调。' };
+  // 折叠回退（v3.2）：矢量相干对缝/孔双峰族失效（矢量抵消）——两轴都失败时
+  // 改用折叠直方图求周期与主峰相位，相位归属交给格内纯度投票。
+  let cell: number;
+  let stretched: boolean;
+  let foldCandidates: { x: number[]; y: number[] } | null = null;
+  let foldSharpness = 0;
+  if (x && y) {
+    cell = Number(((x.pitch + y.pitch) / 2).toFixed(2));
+    stretched = Math.abs(x.pitch - y.pitch) / Math.max(x.pitch, y.pitch) > 0.015;
+  } else {
+    const fx = x ? null : refineAxisByFold(source, 'x', base);
+    const fy = y ? null : refineAxisByFold(source, 'y', base);
+    if ((!x && !fx) || (!y && !fy)) {
+      return { ...untouched, message: '图上检测不到足够的贯穿格线（照片或无格线的截图精修不了），请保持手动微调。' };
+    }
+    const pitchX = x ? x.pitch : fx!.pitch;
+    const pitchY = y ? y.pitch : fy!.pitch;
+    cell = Number(((pitchX + pitchY) / 2).toFixed(2));
+    stretched = Math.abs(pitchX - pitchY) / Math.max(pitchX, pitchY) > 0.015;
+    foldSharpness = Math.min(x ? Number.POSITIVE_INFINITY : fx!.sharpness, y ? Number.POSITIVE_INFINITY : fy!.sharpness);
+    // 峰族归属（缝 or 孔）1D 投影区分不了：主峰 + 主峰+半格两组候选都给投票；
+    // 矢量相干成功的轴不需要候选，保留用户相位（空数组 = 不动该轴）
+    const phaseX0 = ((alignment.originX % cell) + cell) % cell;
+    const phaseY0 = ((alignment.originY % cell) + cell) % cell;
+    foldCandidates = {
+      x: x ? [phaseX0] : [fx!.phase, fx!.phase + cell / 2],
+      y: y ? [phaseY0] : [fy!.phase, fy!.phase + cell / 2],
+    };
   }
-  const cell = Number(((x.pitch + y.pitch) / 2).toFixed(2));
-  const stretched = Math.abs(x.pitch - y.pitch) / Math.max(x.pitch, y.pitch) > 0.015;
   const drift = Math.abs(cell - base) / base;
 
   // 相位吸附（v3.1）：格内纯度投票，显著更纯才动原点。
@@ -642,31 +737,59 @@ export function refineGridAlignment(
   let snapNote = '';
   const phaseX = ((alignment.originX % cell) + cell) % cell;
   const phaseY = ((alignment.originY % cell) + cell) % cell;
-  const dx = wrapPhaseDiff(x.origin, phaseX, cell);
-  const dy = wrapPhaseDiff(y.origin, phaseY, cell);
-  const snapGate = cell * 0.15;
-  if (Math.abs(dx) >= snapGate || Math.abs(dy) >= snapGate) {
-    const snapX = Math.abs(dx) >= snapGate ? dx : 0;
-    const snapY = Math.abs(dy) >= snapGate ? dy : 0;
+  if (foldCandidates) {
+    // 折叠路径：4 个相位组合（各轴主峰 / 主峰+半格）让图片投票，显著更纯才动原点
     const userScore = gridCellVarianceScore(source, cell, phaseX, phaseY);
-    const snappedScore = gridCellVarianceScore(source, cell, phaseX + snapX, phaseY + snapY);
-    if (Number.isFinite(userScore) && snappedScore < userScore * 0.92) {
-      originX = alignment.originX + snapX;
-      originY = alignment.originY + snapY;
-      snapNote = `；原点吸附 ${Math.round(Math.hypot(snapX, snapY))} px（你拖动的相位与全图格线差得较远，吸附后格内颜色更纯，已按图片投票确认）`;
+    let best = { score: Number.POSITIVE_INFINITY, px: phaseX, py: phaseY };
+    for (const px of foldCandidates.x) {
+      for (const py of foldCandidates.y) {
+        const score = gridCellVarianceScore(source, cell, px, py);
+        if (score < best.score) best = { score, px, py };
+      }
+    }
+    if (Number.isFinite(userScore) && best.score < userScore * 0.92) {
+      const dxF = wrapPhaseDiff(best.px, phaseX, cell);
+      const dyF = wrapPhaseDiff(best.py, phaseY, cell);
+      originX = alignment.originX + dxF;
+      originY = alignment.originY + dyF;
+      snapNote = `；投影为缝/孔双峰族，折叠相位经格内纯度投票吸附 ${Math.round(Math.hypot(dxF, dyF))} px（吸附后格内颜色更纯）`;
+    } else {
+      snapNote = '；折叠相位候选未通过格内纯度投票，保持你拖动的原点';
+    }
+  } else {
+    const dx = wrapPhaseDiff(x!.origin, phaseX, cell);
+    const dy = wrapPhaseDiff(y!.origin, phaseY, cell);
+    const snapGate = cell * 0.15;
+    if (Math.abs(dx) >= snapGate || Math.abs(dy) >= snapGate) {
+      const snapX = Math.abs(dx) >= snapGate ? dx : 0;
+      const snapY = Math.abs(dy) >= snapGate ? dy : 0;
+      const userScore = gridCellVarianceScore(source, cell, phaseX, phaseY);
+      const snappedScore = gridCellVarianceScore(source, cell, phaseX + snapX, phaseY + snapY);
+      if (Number.isFinite(userScore) && snappedScore < userScore * 0.92) {
+        originX = alignment.originX + snapX;
+        originY = alignment.originY + snapY;
+        snapNote = `；原点吸附 ${Math.round(Math.hypot(snapX, snapY))} px（你拖动的相位与全图格线差得较远，吸附后格内颜色更纯，已按图片投票确认）`;
+      }
     }
   }
 
+  const foldPath = !x || !y;
+  const confidence = foldPath
+    ? Math.min(1, foldSharpness / 8)
+    : Math.min(x!.coherence * x!.inlierRatio, y!.coherence * y!.inlierRatio);
+  const pitchText = foldPath
+    ? `格距 ${base.toFixed(2)} → ${cell.toFixed(2)} px（折叠直方图，锐度 ${foldSharpness.toFixed(1)}）`
+    : `格距 ${base.toFixed(2)} → ${x!.pitch.toFixed(2)} / ${y!.pitch.toFixed(2)} px，相位相干 ${(x!.coherence * 100).toFixed(0)}% / ${(y!.coherence * 100).toFixed(0)}%`;
   return {
     applied: true,
     cell,
     originX,
     originY,
-    confidence: Math.min(x.coherence * x.inlierRatio, y.coherence * y.inlierRatio),
-    coherenceX: x.coherence,
-    coherenceY: y.coherence,
+    confidence,
+    coherenceX: x ? x.coherence : 0,
+    coherenceY: y ? y.coherence : 0,
     stretched,
-    message: `全图格线精修完成：格距 ${base.toFixed(2)} → ${x.pitch.toFixed(2)} / ${y.pitch.toFixed(2)} px，相位相干 ${(x.coherence * 100).toFixed(0)}% / ${(y.coherence * 100).toFixed(0)}%`
+    message: `全图格线精修完成：${pitchText}`
       + (snapNote || '；网格位置保留你拖动的原点，未做任何移动，格线偏移随距离逐渐收敛')
       + '。'
       + (drift > 0.03 ? `本次格距修正幅度 ${ (drift * 100).toFixed(1) }% 较大，请核对绿色区域行列数是否与图纸一致。` : '')

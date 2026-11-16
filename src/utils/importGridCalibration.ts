@@ -1,3 +1,5 @@
+import type { GridWarpField } from './importGridWarp';
+
 export const IMPORT_GRID_LIMITS = {
   minColumns: 1,
   maxColumns: 312,
@@ -23,6 +25,8 @@ export interface ImportGridCalibration {
   cellHeight: number;
   columns: number;
   rows: number;
+  /** 分区相位场（透视校正）；undefined = 未启用，采样与历史行为逐位一致。 */
+  warp?: GridWarpField;
 }
 
 export interface ImportCalibrationSnapshot {

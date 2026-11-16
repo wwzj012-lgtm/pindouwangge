@@ -9,6 +9,7 @@ import {
   type ImportGridAlignment,
   type ImportRecognitionRegion,
 } from '../utils/importGridAlignment';
+import { warpOffsetAt } from '../utils/importGridWarp';
 
 type Tool = 'grid' | 'pan' | 'region' | 'legend';
 type Point = { x: number; y: number };
@@ -194,13 +195,41 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
     ctx.beginPath();
     ctx.lineWidth = 0.85 / view.zoom;
     ctx.strokeStyle = 'rgba(6, 182, 212, .8)';
-    for (let k = Math.ceil((left - phaseX) / pitch / sparseStride) * sparseStride; phaseX + k * pitch <= right; k += sparseStride) {
-      const x = phaseX + k * pitch;
-      ctx.moveTo(x, top); ctx.lineTo(x, bottom);
-    }
-    for (let k = Math.ceil((top - phaseY) / pitch / sparseStride) * sparseStride; phaseY + k * pitch <= bottom; k += sparseStride) {
-      const y = phaseY + k * pitch;
-      ctx.moveTo(left, y); ctx.lineTo(right, y);
+    const warp = alignment.warp;
+    if (warp) {
+      // 分区相位场启用时画弯曲网格线：每条线沿轴逐格采样偏移后连线
+      const stride = Math.max(1, sparseStride);
+      for (let k = Math.ceil((left - phaseX) / pitch / stride) * stride; phaseX + k * pitch <= right; k += stride) {
+        const x = phaseX + k * pitch;
+        const firstY = Math.max(top, phaseY + Math.ceil((top - phaseY) / pitch) * pitch);
+        let moved = false;
+        for (let y = firstY; y <= bottom + pitch * 0.5; y += pitch) {
+          const off = warpOffsetAt(warp, x, y);
+          const px = x + off.dx;
+          const py = y + off.dy;
+          if (!moved) { ctx.moveTo(px, py); moved = true; } else ctx.lineTo(px, py);
+        }
+      }
+      for (let k = Math.ceil((top - phaseY) / pitch / stride) * stride; phaseY + k * pitch <= bottom; k += stride) {
+        const y = phaseY + k * pitch;
+        const firstX = Math.max(left, phaseX + Math.ceil((left - phaseX) / pitch) * pitch);
+        let moved = false;
+        for (let x = firstX; x <= right + pitch * 0.5; x += pitch) {
+          const off = warpOffsetAt(warp, x, y);
+          const px = x + off.dx;
+          const py = y + off.dy;
+          if (!moved) { ctx.moveTo(px, py); moved = true; } else ctx.lineTo(px, py);
+        }
+      }
+    } else {
+      for (let k = Math.ceil((left - phaseX) / pitch / sparseStride) * sparseStride; phaseX + k * pitch <= right; k += sparseStride) {
+        const x = phaseX + k * pitch;
+        ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+      }
+      for (let k = Math.ceil((top - phaseY) / pitch / sparseStride) * sparseStride; phaseY + k * pitch <= bottom; k += sparseStride) {
+        const y = phaseY + k * pitch;
+        ctx.moveTo(left, y); ctx.lineTo(right, y);
+      }
     }
     ctx.stroke();
     if (calibration) {

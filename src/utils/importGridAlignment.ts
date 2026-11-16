@@ -1,4 +1,5 @@
 import type { ImportGridCalibration, ImportImageDimensions } from './importGridCalibration';
+import type { GridWarpField } from './importGridWarp';
 import { MAX_GRID_DIMENSION } from './patternGridCodec';
 
 export const MIN_ALIGNMENT_CELL_SIZE = 5;
@@ -9,6 +10,8 @@ export interface ImportGridAlignment {
   originX: number;
   originY: number;
   cellSize: number;
+  /** 分区相位场（透视校正）；null = 未启用。手动拖动/缩放时随 base 透传保留。 */
+  warp?: GridWarpField | null;
 }
 
 export interface ImportRecognitionRegion {
@@ -26,6 +29,7 @@ export function normalizeGridAlignment(value: ImportGridAlignment): ImportGridAl
     originX: finite(value.originX, 0),
     originY: finite(value.originY, 0),
     cellSize: Math.min(MAX_ALIGNMENT_CELL_SIZE, Math.max(MIN_ALIGNMENT_CELL_SIZE, finite(value.cellSize, MIN_ALIGNMENT_CELL_SIZE))),
+    warp: value.warp ?? undefined,
   };
 }
 
@@ -104,6 +108,8 @@ export function deriveAlignedCalibration(
       cellWidth: cellSize,
       cellHeight: cellSize,
       columns, rows,
+      // warp 场以估计时的 alignment 原点为基准（图像空间），origin 重定基不影响它
+      warp: lattice.warp ?? undefined,
     },
     region: clipped,
     error: null,

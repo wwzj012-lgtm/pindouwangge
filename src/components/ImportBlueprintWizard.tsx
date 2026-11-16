@@ -53,6 +53,7 @@ import {
 } from '../utils/importRecognition';
 import { describeGains } from '../utils/importColorBalance';
 import { estimateBeadPitch, refineGridAlignment } from '../utils/importGridPitch';
+import { estimateGridWarp } from '../utils/importGridWarp';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
@@ -90,7 +91,7 @@ interface ImportBlueprintWizardProps {
   onEdit: (draft: ConfirmedRecognitionDraft, saved: boolean) => boolean;
 }
 
-type NumericDrafts = Record<keyof ImportGridAlignment, string>;
+type NumericDrafts = Record<'cellSize' | 'originX' | 'originY', string>;
 type RegionDrafts = Record<keyof ImportRecognitionRegion, string>;
 
 function createRegionDrafts(region: ImportRecognitionRegion): RegionDrafts {
@@ -728,7 +729,14 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
     const finalAlignment = refinement.applied
       ? { ...working, cellSize: refinement.cell, originX: refinement.originX, originY: refinement.originY }
       : working;
-    setAlignmentValue(finalAlignment);
+    // 分区相位场（透视校正）：精修后残差仍超阈值才启用；图纸截图无透视 →
+    // estimateGridWarp 返回 null，行为与从前一致。旧 warp 一律重估替换。
+    const warp = estimateGridWarp(source, finalAlignment);
+    const warpAlignment: ImportGridAlignment = { ...finalAlignment, warp: warp ?? null };
+    if (warp) {
+      parts.push(`检测到透视形变，已启用分区校正（最大偏移 ${warp.maxResidual.toFixed(2)} 格）`);
+    }
+    setAlignmentValue(warpAlignment);
     updateDraft('cellSize', String(Number(finalAlignment.cellSize.toFixed(1))));
     updateDraft('originX', String(Number(finalAlignment.originX.toFixed(1))));
     updateDraft('originY', String(Number(finalAlignment.originY.toFixed(1))));

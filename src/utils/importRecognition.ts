@@ -3,6 +3,7 @@ import { BRAND_ORDER, BRAND_PALETTES } from '../data/palettes';
 import { deltaE2000, preparePaletteLab, rgbToLab, type PreparedPaletteColor } from './colorUtils';
 import { NEUTRAL_GAINS, estimateChannelGains, isClippedRgb, type ChannelGains } from './importColorBalance';
 import type { ImportGridCalibration } from './importGridCalibration';
+import { warpOffsetAt } from './importGridWarp';
 import { extractBeadSymbols } from './importSymbolOCR';
 import { applyCountBalance } from './importLegendBalance';
 
@@ -172,6 +173,8 @@ const DEFAULT_ALPHA_CUTOFF = 24;
 const LOW_CONFIDENCE = 0.6;
 const RATIO_EPSILON = 1e-9;
 const FAST_STRATA_PER_AXIS = 8;
+/** 无 warp 时的零偏移常量（避免每格新建对象）。 */
+const ZERO_WARP = { dx: 0, dy: 0 };
 const MAX_SLICE_WORK = 2048;
 const MAX_SLICE_MS = 8;
 const MAX_CACHED_COLORS = 1e9;
@@ -535,10 +538,16 @@ function* sampleCellGen(
   const { source, alphaCutoff, calibration, mode, edgeInsetRatio, preparedPalette, matchCache, gains } = context;
   const offset = overrideOffset ?? context.offset;
   const inset = probeStrata > 0 ? Math.min(0.2, edgeInsetRatio + 0.08) : edgeInsetRatio;
-  const left = Math.max(0, calibration.originX + (column + offset.x + inset) * calibration.cellWidth);
-  const top = Math.max(0, calibration.originY + (row + offset.y + inset) * calibration.cellHeight);
-  const right = Math.min(source.width, calibration.originX + (column + offset.x + 1 - inset) * calibration.cellWidth);
-  const bottom = Math.min(source.height, calibration.originY + (row + offset.y + 1 - inset) * calibration.cellHeight);
+  // 分区相位场：本格中心的透视偏移（无 warp 时为 0，坐标与历史逐位一致）
+  const warpOff = calibration.warp
+    ? warpOffsetAt(calibration.warp,
+      calibration.originX + (column + offset.x + 0.5) * calibration.cellWidth,
+      calibration.originY + (row + offset.y + 0.5) * calibration.cellHeight)
+    : ZERO_WARP;
+  const left = Math.max(0, calibration.originX + (column + offset.x + inset) * calibration.cellWidth + warpOff.dx);
+  const top = Math.max(0, calibration.originY + (row + offset.y + inset) * calibration.cellHeight + warpOff.dy);
+  const right = Math.min(source.width, calibration.originX + (column + offset.x + 1 - inset) * calibration.cellWidth + warpOff.dx);
+  const bottom = Math.min(source.height, calibration.originY + (row + offset.y + 1 - inset) * calibration.cellHeight + warpOff.dy);
   if (right <= left || bottom <= top) return emptyCell(row, column, 'invalid');
 
   const sampledArea = (right - left) * (bottom - top);

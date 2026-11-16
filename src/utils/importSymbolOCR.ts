@@ -2,6 +2,7 @@ import type { BeadColor } from '../types';
 import { deltaE2000, rgbToLab } from './colorUtils';
 import type { ImportImagePixels } from './importRecognition';
 import type { ImportGridCalibration } from './importGridCalibration';
+import { warpOffsetAt } from './importGridWarp';
 
 /**
  * 图纸色号文字识别（symbol OCR，整串匹配架构）。
@@ -229,8 +230,14 @@ function analyzeCells(
   let totalCells = 0;
   for (let row = 0; row < calibration.rows; row += 1) {
     for (let column = 0; column < calibration.columns; column += 1) {
-      const x0 = Math.round(column * calibration.cellWidth + calibration.originX);
-      const y0 = Math.round(row * calibration.cellHeight + calibration.originY);
+      // 分区相位场：本格中心的透视偏移（无 warp 时为 0）
+      const warpOff = calibration.warp
+        ? warpOffsetAt(calibration.warp,
+          calibration.originX + (column + 0.5) * calibration.cellWidth,
+          calibration.originY + (row + 0.5) * calibration.cellHeight)
+        : { dx: 0, dy: 0 };
+      const x0 = Math.round(column * calibration.cellWidth + calibration.originX + warpOff.dx);
+      const y0 = Math.round(row * calibration.cellHeight + calibration.originY + warpOff.dy);
       const rx0 = Math.max(0, x0 + Math.round(calibration.cellWidth * 0.14));
       const ry0 = Math.max(0, y0 + Math.round(calibration.cellHeight * 0.14));
       const rx1 = Math.min(source.width, x0 + Math.round(calibration.cellWidth * 0.86));

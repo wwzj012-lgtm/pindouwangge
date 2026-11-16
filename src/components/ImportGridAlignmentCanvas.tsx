@@ -310,12 +310,16 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       onLegendRegionChange({ x0: Math.round(x0), y0: Math.round(y0), x1: Math.round(x1), y1: Math.round(y1) });
     } else {
       const r = drag.region;
+      const cornerMode = drag.mode.length === 2;
       const fromWest = drag.mode.endsWith('w');
       const fromNorth = drag.mode.startsWith('n');
+      // 纯边（n/s/e/w）只调本边，另一轴锁定——窗口式单边调整
+      const moveX = cornerMode || fromWest || drag.mode === 'e';
+      const moveY = cornerMode || fromNorth || drag.mode === 's';
       const fixedX = fromWest ? r.x + r.width : r.x;
       const fixedY = fromNorth ? r.y + r.height : r.y;
-      const movingX = clamp((fromWest ? r.x : r.x + r.width) + dx, 0, dimensions.width);
-      const movingY = clamp((fromNorth ? r.y : r.y + r.height) + dy, 0, dimensions.height);
+      const movingX = clamp((fromWest ? r.x : r.x + r.width) + (moveX ? dx : 0), 0, dimensions.width);
+      const movingY = clamp((fromNorth ? r.y : r.y + r.height) + (moveY ? dy : 0), 0, dimensions.height);
       onRegionChange(clipRecognitionRegion({ x: Math.min(fixedX, movingX), y: Math.min(fixedY, movingY), width: Math.abs(movingX - fixedX), height: Math.abs(movingY - fixedY) }, dimensions));
     }
   };
@@ -392,10 +396,16 @@ export function ImportGridAlignmentCanvas({ image, alignment, region, onAlignmen
       })}
       {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && EDGES.map(edge => {
         const r = derived.region;
-        const horizontal = edge === 'e' || edge === 'w';
-        const p = toScreen({ x: r.x + (edge === 'e' ? r.width : edge === 'w' ? 0 : r.width / 2), y: r.y + (edge === 's' ? r.height : edge === 'n' ? 0 : r.height / 2) });
-        if ((p.x < -22 || p.y < -22 || p.x > size.width + 22 || p.y > size.height + 22) && dragRef.current?.mode !== edge) return null;
-        return <button key={edge} type="button" className={`ir-region-handle ir-region-edge ir-region-edge-${edge}`} style={{ left: clamp(p.x, 22, size.width - 22), top: clamp(p.y, 22, size.height - 22) }} aria-label={`识别区域${EDGE_LABELS[edge]}边：单边拖动调整`} title="拖动单边调整范围" onPointerDown={event => startDrag(event, edge)} {...pointerProps} onKeyDown={event => keyDown(event, edge)}><span /></button>;
+        const x = r.x * view.zoom + view.x;
+        const y = r.y * view.zoom + view.y;
+        const w = r.width * view.zoom;
+        const h = r.height * view.zoom;
+        const T = 16; // 热区厚度：整条边任意位置可抓，光标随边向变双向箭头
+        const style = edge === 'n' ? { left: x, top: y - T / 2, width: w, height: T }
+          : edge === 's' ? { left: x, top: y + h - T / 2, width: w, height: T }
+          : edge === 'w' ? { left: x - T / 2, top: y, width: T, height: h }
+          : { left: x + w - T / 2, top: y, width: T, height: h };
+        return <div key={edge} role="button" tabIndex={0} className={`ir-region-edgezone ir-region-edgezone-${edge}`} style={style} aria-label={`识别区域${EDGE_LABELS[edge]}边：拖动单边调整`} title="拖动调整这一边" onPointerDown={event => startDrag(event, edge)} {...pointerProps} onKeyDown={event => keyDown(event, edge)} />;
       })}
       {!readOnly && tool === 'region' && derived.region.width > 0 && derived.region.height > 0 && <button type="button" className="ir-region-move" style={{ left: clamp((derived.region.x + derived.region.width / 2) * view.zoom + view.x, 25, Math.max(25, size.width - 25)), top: clamp((derived.region.y + derived.region.height / 2) * view.zoom + view.y, 25, Math.max(25, size.height - 25)) }} aria-label="移动识别区域" title="拖动以移动识别区域" onPointerDown={event => startDrag(event, 'region')} {...pointerProps} onKeyDown={event => keyDown(event)}><Move size={18} /></button>}
     </div>

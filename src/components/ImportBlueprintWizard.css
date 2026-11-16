@@ -1180,22 +1180,37 @@
   box-shadow:0 0 0 1px #92400e;
   pointer-events:none
 }
-/* 单边调整手柄：长条胶囊，纵向边（e/w）竖长、横向边（n/s）横长 */
-.ir-region-edge>span {
-  width:10px;
-  height:20px;
-  border-radius:5px;
-  background:#f59e0b
+/* 单边热区：整条边任意位置可拖（窗口式），光标随边向变双向箭头 */
+.ir-region-edgezone {
+  position:absolute;
+  z-index:1;
+  touch-action:none
 }
-.ir-region-edge-n>span,.ir-region-edge-s>span {
-  width:20px;
-  height:10px
-}
-.ir-region-edge-n,.ir-region-edge-s {
+.ir-region-edgezone-n,.ir-region-edgezone-s {
   cursor:ns-resize
 }
-.ir-region-edge-e,.ir-region-edge-w {
+.ir-region-edgezone-e,.ir-region-edgezone-w {
   cursor:ew-resize
+}
+.ir-region-edgezone:focus {
+  outline:none
+}
+.ir-region-edgezone:focus-visible {
+  outline:2px dashed #f59e0b;
+  outline-offset:-2px
+}
+/* 悬停提示：沿该边亮起一条细线，暗示可抓 */
+.ir-region-edgezone-n:hover,.ir-region-edgezone-s:hover {
+  background:linear-gradient(to bottom,rgba(217,119,6,.35),rgba(217,119,6,.05))
+}
+.ir-region-edgezone-s:hover {
+  background:linear-gradient(to top,rgba(217,119,6,.35),rgba(217,119,6,.05))
+}
+.ir-region-edgezone-w:hover {
+  background:linear-gradient(to right,rgba(217,119,6,.35),rgba(217,119,6,.05))
+}
+.ir-region-edgezone-e:hover {
+  background:linear-gradient(to left,rgba(217,119,6,.35),rgba(217,119,6,.05))
 }
 .ir-region-move {
   width:44px;

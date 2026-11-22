@@ -40,7 +40,7 @@ export default defineConfig(() => {
       },
     },
     test: {
-      include: ['src/**/*.test.ts', 'functions/api/**/*.test.ts'],
+      include: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'functions/api/**/*.test.ts'],
       // backend-review is a temporary Worker checkout, not part of this Vite project.
       exclude: ['**/node_modules/**', '**/dist/**', '**/backend-review/**'],
     },

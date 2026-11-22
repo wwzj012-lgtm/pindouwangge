@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend (tsc + unit/component + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci || npm install
+      # Browser end-to-end tests (playwright-core + local Chrome) stay on the
+      # developer machine; CI covers type safety, unit/component and build.
+      - run: npx tsc --noEmit
+      - run: npx vitest run --exclude "**/*.browser.test.ts"
+      - run: npm run build
+
+  backend:
+    name: Backend (node:test suite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ../stellabean-worker
+    # The worker lives in a separate repository; this job only runs when both
+    # checkouts are available (workflow_dispatch from the backend repo triggers
+    # its own pipeline). Kept here as a placeholder for monorepo migration.
+    if: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - run: npm test

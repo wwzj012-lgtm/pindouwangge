@@ -38,7 +38,7 @@ function adjustment(body: CreditAdjustmentBody): CreditAdjustment {
     idempotencyKey: body.idempotencyKey, deltaUnits: body.deltaUnits, reason: body.reason,
     beforeVersion: body.expectedVersion, afterVersion: body.expectedVersion + 1,
     beforeAvailableUnits: body.expectedAvailableUnits, heldUnits: body.expectedHeldUnits,
-    afterAvailableUnits: body.expectedAvailableUnits + body.deltaUnits, completedAt: 1,
+    afterAvailableUnits: body.expectedAvailableUnits + body.deltaUnits, createdAt: 1764000000000,
   };
 }
 

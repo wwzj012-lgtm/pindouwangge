@@ -13,7 +13,8 @@
     "test:image-regression": "node scripts/image-regression.mjs",
     "test:algorithm-materials": "node scripts/algorithm-material-report.mjs",
     "test:serial": "vitest run --no-file-parallelism",
-    "verify": "tsc --noEmit && vite build && vitest run --no-file-parallelism"
+    "verify": "tsc --noEmit && vite build && vitest run --no-file-parallelism",
+    "test:coverage": "vitest run --coverage --exclude \"**/*.browser.test.ts\" --exclude \"**/practiceBrowser.test.ts\" --exclude \"**/importLegend.test.ts\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",
@@ -27,6 +28,7 @@
   "devDependencies": {
     "@types/node": "^22.14.0",
     "@types/react": "^19.3.0",
+    "@vitest/coverage-v8": "4.1.10",
     "autoprefixer": "^10.4.21",
     "playwright-core": "^1.65.1",
     "sharp": "^0.35.3",

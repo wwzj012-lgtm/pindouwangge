@@ -22,6 +22,18 @@ jobs:
       - run: npx tsc --noEmit
       - run: npx vitest run --exclude "**/*.browser.test.ts"
       - run: npm run build
+      # Coverage report (non-blocking gate): visible in the Actions log.
+      - run: npm run test:coverage
+        continue-on-error: true
+      # Dependency audit (non-blocking until the 4 known highs are fixed).
+      - run: npx pnpm audit --audit-level=high
+        continue-on-error: true
+      # Coverage report (non-blocking gate): visible in the Actions log.
+      - run: npm run test:coverage
+        continue-on-error: true
+      # Dependency audit (non-blocking until the 4 known highs are fixed).
+      - run: npx pnpm audit --audit-level=high
+        continue-on-error: true
 
   backend:
     name: Backend (node:test suite)

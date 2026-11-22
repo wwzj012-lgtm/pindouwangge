@@ -17,7 +17,7 @@ import type { CreditAdjustment, CreditAdjustmentBody, CreditPage, CreditAccount,
 const roots: Root[] = [];
 const containers: HTMLElement[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0)) root.unmount();
+  for (const root of roots.splice(0)) act(() => { root.unmount(); });
   for (const container of containers.splice(0)) container.remove();
   // jsdom sessionStorage persists across tests in the same file; leftover
   // recovery snapshots would silently block the prepare() flow.

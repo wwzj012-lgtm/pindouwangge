@@ -104,7 +104,7 @@ describe('AdminBannedWords flow', () => {
         expect(sent.word).toBe('洗钱');
         return Promise.resolve({ ok: true, data: { item: item({ id: 2, word: '洗钱' }) } });
       }
-      return Promise.resolve({ ok: true, data: page([item(), item({ word: '洗钱' })]) });
+      return Promise.resolve({ ok: true, data: page([item(), item({ id: 2, word: '洗钱' })]) });
     });
     await rendered(request);
     setInput('[aria-label="新违禁词"]', '  洗钱  ');

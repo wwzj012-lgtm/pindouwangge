@@ -48,7 +48,7 @@ async function runAxe(container: HTMLElement): Promise<string[]> {
 
 describe('accessibility smoke (axe-core, jsdom)', () => {
   it.afterEach(() => {
-    for (const root of roots.splice(0)) root.unmount();
+    for (const root of roots.splice(0)) act(() => { root.unmount(); });
     for (const container of containers.splice(0)) container.remove();
     document.head.querySelectorAll('script').forEach((script) => script.remove());
   });

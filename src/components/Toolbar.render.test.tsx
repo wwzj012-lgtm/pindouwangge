@@ -6,6 +6,7 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act } from 'react';
 import { actRender, actUnmountAll, clickAriaLabel, bodyText } from '../test/jsdomTestUtils';
 import { Toolbar, type ToolbarProps } from './Toolbar';
 

@@ -34,7 +34,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { createPressRepeatController, type PressRepeatController } from '../utils/pressRepeat';
 import { SymmetryAxisControls, type WorkspaceEditingActions } from './SymmetryAxisControls';
 
-interface ToolbarProps {
+export interface ToolbarProps {
   onOpenBackgroundCleanup?: () => void;
   canCleanupBackground?: boolean;
   editorActions?: WorkspaceEditingActions;

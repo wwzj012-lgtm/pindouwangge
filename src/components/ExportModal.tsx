@@ -42,7 +42,7 @@ import {
   isWeChatBrowser,
 } from '../utils/exportUtils';
 
-interface ExportModalProps {
+export interface ExportModalProps {
   isOpen: boolean;
   unlocked: boolean;
   onClose: () => void;

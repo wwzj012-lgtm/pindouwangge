@@ -7,6 +7,7 @@
  * @vitest-environment jsdom
  */
 import { act } from 'react';
+import { vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;

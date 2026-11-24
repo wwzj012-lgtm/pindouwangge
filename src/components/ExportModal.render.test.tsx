@@ -130,7 +130,7 @@ describe('ExportModal: single-board download', () => {
     document.body.appendChild(container);
     const root = createRoot(container);
     act(() => {
-      root.render(<ExportModal {...baseProps({ unlocked, isVip: true })} />);
+      root.render(<ExportModal {...baseProps({ unlocked })} />);
     });
     roots.push(root);
     await flush();

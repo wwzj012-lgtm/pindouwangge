@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Edit3, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
+import { Download, Edit3, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading } from './AdminPrimitives';
 import { AdminPagination } from './shared/AdminPagination';
 import { BRAND_CODE_PATTERN, brandDeleteReason, colorValidation, filterBrandColors, isBrandMutationReceipt, isManagedBrandCatalog,
   normalizedCatalogCode, type ManagedBrand, type ManagedBrandCatalog, type ManagedBrandColor } from './AdminBrandsColors.model';
 import { refreshBrandCatalog } from '../../data/brandCatalog';
+import { exportPaletteExcel } from '../../utils/excelExport';
 import './AdminBrandsColors.css';
 
 export interface AdminBrandsColorsProps { request: AdminRequest; readOnly?: boolean; operatorUid?: string }
@@ -23,6 +24,7 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
   const [editor, setEditor] = useState<Editor | null>(null), [deletion, setDeletion] = useState<Deletion | null>(null);
   const [form, setForm] = useState({ code: '', name: '', hex: '#A3B18A', enabled: true, special: false });
   const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState<PendingOperation | null>(null);
+  const [exporting, setExporting] = useState(false);
   const writeLock = useRef(false), loadGeneration = useRef(0);
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
@@ -115,6 +117,16 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
     void submit(`/api/admin/brands${deletion.color ? '/colors' : ''}`, 'DELETE', { brandCode: deletion.brand.code,
       expectedVersion: deletion.brand.version, ...(deletion.color ? { colorId: deletion.color.id } : {}) });
   };
+  // 导出色卡：按系列字母分列的网格 xlsx（A1..An 纵向，单元格填色+色号），全量颜色不受搜索分页影响。
+  const exportBrand = async () => {
+    if (!brand || !brand.colors.length) return;
+    setExporting(true);
+    try {
+      await exportPaletteExcel(brand.name, brand.colors.map(color => ({ code: color.code, name: color.name, hex: color.hex })));
+      setSuccess(`已导出 ${brand.name} 色卡（${brand.colors.length} 色，按系列分列）。`);
+    } catch { setWriteError('色卡导出失败，请重试。'); }
+    finally { setExporting(false); }
+  };
   const mutationNotice = <>{writeError && <p className="admin-brand-message admin-brand-message--error" role="alert">{writeError}</p>}
     {unknown && <div className="admin-brand-message" role="status"><p>待核对操作：<code>{unknown.id}</code></p><p>核对前暂停其他写入，请勿刷新页面后重复新建。</p><AdminButton busy={busy} onClick={() => void reconcile()} disabled={readOnly}>核对结果 / 重试同一操作</AdminButton></div>}</>;
   return <section className="admin-brands" aria-label="品牌与子颜色管理" aria-busy={loading || busy}>
@@ -133,7 +145,7 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
       </aside>
       <div className="admin-brand-detail">{brand && <>
         <div className="admin-brand-detail-heading"><div><div className="admin-brand-title"><h3>{brand.name}</h3><AdminBadge tone={brand.enabled ? 'success' : 'warning'}>{brand.enabled ? '已启用' : '已禁用'}</AdminBadge><AdminBadge>{brand.builtin ? '内建初始化' : '新增品牌'}</AdminBadge></div><p>{brand.code} · {brand.colorCount} 个颜色{brand.protected ? ' · 默认品牌须保留至少一个颜色' : ''}</p></div>
-          <div className="admin-brand-actions"><AdminButton disabled={locked} onClick={() => openEditor({ kind: 'brand', brand })}><Edit3 aria-hidden="true" />编辑品牌</AdminButton><AdminButton variant="danger" disabled={locked || Boolean(brandDeleteReason(brand))} title={brandDeleteReason(brand) ?? '删除空品牌'} onClick={() => { setWriteError(''); setDeletion({ brand }); }}><Trash2 aria-hidden="true" />删除品牌</AdminButton></div></div>
+          <div className="admin-brand-actions"><AdminButton disabled={locked || exporting} onClick={() => void exportBrand()} title="导出按系列分列的色卡 Excel（每格填色+色号）"><Download aria-hidden="true" />{exporting ? '导出中…' : '导出色卡'}</AdminButton><AdminButton disabled={locked} onClick={() => openEditor({ kind: 'brand', brand })}><Edit3 aria-hidden="true" />编辑品牌</AdminButton><AdminButton variant="danger" disabled={locked || Boolean(brandDeleteReason(brand))} title={brandDeleteReason(brand) ?? '删除空品牌'} onClick={() => { setWriteError(''); setDeletion({ brand }); }}><Trash2 aria-hidden="true" />删除品牌</AdminButton></div></div>
         {!brand.enabled && <p className="admin-brand-message">此品牌已停止用于前台新转换。历史图纸仍使用保存的颜色快照。</p>}
         {!brand.colorCount && <p className="admin-brand-message">新增第一个颜色后，已启用的品牌才会出现在前台品牌选项中。</p>}
         <div className="admin-brand-colors-toolbar"><label className="admin-brand-search"><Search aria-hidden="true" /><span className="sr-only">搜索当前品牌颜色</span><input value={colorSearch} onChange={event => { setColorSearch(event.target.value); setPage(0); }} placeholder="搜索色号、名称或 HEX" /></label><AdminButton variant="primary" disabled={locked || brand.colorCount >= 1023} onClick={() => openEditor({ kind: 'color', brand })}><Plus aria-hidden="true" />新增颜色</AdminButton></div>

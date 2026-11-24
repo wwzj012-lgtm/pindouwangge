@@ -128,11 +128,11 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
       check(document.querySelector('[aria-label="拼豆品牌"]').options.length===7,'all fixed brands without custom');
       check(count()===0,'unrecorded stock renders zero');
       check(localStorage.getItem(probe.store.INVENTORY_STORAGE_KEY)===null,'initial display never populates storage');
-      check(document.querySelectorAll('.bead-stock__card').length===36,'bounded first page');
+      check(document.querySelectorAll('.bead-stock__row').length===36,'bounded first page');
       check(!document.querySelector('.bead-stock').textContent.includes('添加新色号'),'no custom color creation');
       for(const option of [...document.querySelector('[aria-label="拼豆品牌"]').options]) {
         select('拼豆品牌',option.value);await wait();
-        check(document.querySelector('.bead-stock__card').dataset.colorId===probe.catalog[option.value][0].id,'real first catalog color for '+option.value);
+        check(document.querySelector('.bead-stock__row').dataset.colorId===probe.catalog[option.value][0].id,'real first catalog color for '+option.value);
         check([...document.querySelectorAll('.bead-stock__quantity input')].every(el=>el.value==='0'),'default zero for '+option.value);
       }
       check(localStorage.getItem(probe.store.INVENTORY_STORAGE_KEY)===null,'browsing every brand never writes storage');
@@ -143,8 +143,8 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
       select('拼豆品牌','MARD');await wait();check(count()===0,'same A1 isolated between Mard variants');
       input('A1 库存数量','17');await wait();document.querySelector('[aria-label="保存 A1 库存"]').click();await wait();check(count()===17,'second brand own quantity');
       select('拼豆品牌','MARD_291');await wait();check(count()===123,'switch back preserves first brand');
-      select('拼豆品牌','COCO');await wait();check(document.querySelectorAll('.bead-stock__card').length===36,'other manufacturer full paged catalog');
-      check(document.querySelector('.bead-stock__card').dataset.colorId===probe.catalog.COCO[0].id,'other manufacturer uses real IDs');
+      select('拼豆品牌','COCO');await wait();check(document.querySelectorAll('.bead-stock__row').length===36,'other manufacturer full paged catalog');
+      check(document.querySelector('.bead-stock__row').dataset.colorId===probe.catalog.COCO[0].id,'other manufacturer uses real IDs');
       input('批量数量','2');await wait();button('批量设置').click();await wait();
       check(probe.catalog.COCO.every(color=>snapshot()[color.id]?.count===2),'whole-brand batch includes every offscreen page');
       check(snapshot().MARD_A1.count===17&&snapshot().MARD_291_A1.count===123,'whole-brand batch leaves other brands intact');
@@ -152,7 +152,7 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
       check(probe.catalog.COCO.every(color=>snapshot()[color.id]?.count===0),'whole-brand subtract floors every page at zero');
       select('拼豆品牌','MARD_291');await wait();
       const search=document.querySelector('.bead-stock input[type=search]');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(search,'ZG8');search.dispatchEvent(new Event('input',{bubbles:true}));await wait();
-      check(document.querySelectorAll('.bead-stock__card').length===1&&document.querySelector('.bead-stock__card').dataset.colorId==='MARD_291_ZG8','search reaches real special color ZG8 beyond first page');
+      check(document.querySelectorAll('.bead-stock__row').length===1&&document.querySelector('.bead-stock__row').dataset.colorId==='MARD_291_ZG8','search reaches real special color ZG8 beyond first page');
       input('批量数量','8');await wait();button('批量设置').click();await wait();check(snapshot().MARD_291_ZG8.count===8,'batch set filtered real special color');
       button('批量增加').click();await wait();check(snapshot().MARD_291_ZG8.count===16,'batch increase');
       button('批量减少').click();await wait();check(snapshot().MARD_291_ZG8.count===8,'batch decrease');
@@ -163,7 +163,7 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
       select('拼豆品牌','MARD');await wait();input('A1 库存数量','-1');await wait();check(document.querySelector('[aria-label="保存 A1 库存"]').disabled,'negative single quantity rejected');
       select('拼豆品牌','MARD_291');await wait();
       const groups=document.querySelectorAll('.bead-stock__groups button');[...groups].find(el=>el.textContent==='ZG').click();await wait();
-      check(document.querySelectorAll('.bead-stock__card').length===probe.catalog.MARD_291.filter(c=>c.code.startsWith('ZG')).length,'dynamic multi-letter group contains full real catalog group');
+      check(document.querySelectorAll('.bead-stock__row').length===probe.catalog.MARD_291.filter(c=>c.code.startsWith('ZG')).length,'dynamic multi-letter group contains full real catalog group');
       select('拼豆品牌','MARD');await wait();
       const kept=snapshot();probe.store.writeBeadInventory({...kept,oldA2:{colorId:'MARD_A2',code:'A2',name:'旧记录',hex:'#fff',count:31,alertThreshold:100},custom:{colorId:'CUSTOM_A3',code:'A3',name:'自定义旧记录',hex:'#fff',count:42,alertThreshold:100,note:'keep'}});await wait();
       check(document.querySelector('[aria-label="A2 库存数量"]').value==='31','unbranded true colorId automatically compatible');
@@ -218,13 +218,13 @@ it.skipIf(!existsSync(chromePath))('drives real brand inventory UI, legacy migra
         check(panel.scrollWidth<=panel.clientWidth+1,'${label} inventory no horizontal overflow');
         check(dialog.getBoundingClientRect().width<=${width},'${label} modal fits viewport');
         check(document.querySelector('.profile-content').scrollHeight>document.querySelector('.profile-content').clientHeight,'${label} inventory internally scrolls');
-        check(document.querySelectorAll('.bead-stock__card').length<=36,'${label} bounded rendering');
-        check([...document.querySelectorAll('.bead-stock button')].filter(el=>el.getBoundingClientRect().height>0).every(el=>el.getBoundingClientRect().height>=44),'${label} touch targets');
+        check(document.querySelectorAll('.bead-stock__row').length<=36,'${label} bounded rendering');
+        const smallBtns=[...document.querySelectorAll('.bead-stock button')].filter(el=>{const h=el.getBoundingClientRect().height;return h>0&&h<(${width}<768?44:28)}).map(el=>el.textContent.trim().slice(0,10)+'='+el.getBoundingClientRect().height.toFixed(0));check(smallBtns.length===0,'${label} touch targets '+smallBtns.join(','));
       `);
       if (process.env.INVENTORY_TEST_SCREENSHOTS==='1') {
         const shot=await send('Page.captureScreenshot',{format:'png'},session);
         await writeFile(join(tmpdir(),`bead-inventory-${label}.png`),Buffer.from(shot.data,'base64'));
-        await evaluate("(()=>{const content=document.querySelector('.profile-content');content.scrollTop=document.querySelector('.bead-stock__grid').getBoundingClientRect().top-content.getBoundingClientRect().top+content.scrollTop})()",session);
+        await evaluate("(()=>{const content=document.querySelector('.profile-content');content.scrollTop=document.querySelector('.bead-stock__list').getBoundingClientRect().top-content.getBoundingClientRect().top+content.scrollTop})()",session);
         const cards=await send('Page.captureScreenshot',{format:'png'},session);
         await writeFile(join(tmpdir(),`bead-inventory-${label}-cards.png`),Buffer.from(cards.data,'base64'));
         await evaluate("document.querySelector('.profile-content').scrollTop=0",session);

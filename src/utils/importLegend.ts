@@ -3222,6 +3222,9 @@ const CARD_ROW_MIN_CONTENT_RATIO = 0.015;
 const CARD_CHIP_MIN_W = 110;
 /** 计数字形宽度上界（×digitW），超过视为粘连块走切片。 */
 const CARD_COUNT_W_RATIO = 1.45;
+/** 数量区连通块宽度上界（×digitW）：两个数字互触（"38" ≈ 2×digitW）也要
+ * 收进来交给 cardSplitWideGlyph 切开——按 1.45 拦会让 387 只剩 '7'。 */
+const CARD_COUNT_MAX_SPLIT_W = 2.8;
 /** 文本对比阈值（dist² = 100²）。实测色卡数字：间隙亮度 183-225（dist 30-70）、
  * 笔画核心 67-150（dist 103-190）——100 干净分离；CONTRAST(60) 会把间隙桥接成粘连块。 */
 const CARD_TEXT_CONTRAST = 100;
@@ -3334,7 +3337,12 @@ interface CardItem {
   dotRgb: [number, number, number] | null;
 }
 
-/** 色块判定：宽 ≥ 阈值、高 ≥ 0.5 行带、填充率 ≥ 0.7 的连通域。 */
+/** 色块判定：宽 ≥ 阈值、高 ≥ 0.5 行带、填充率 ≥ 0.7 的连通域。
+ *
+ * 位置正确性另在装配层处理（cardAssembleItem）：右侧数字簇也能满足尺寸/
+ * 填充判据（"429" 三字互触成 fill≈0.75 实心块），若在此处按 x 位置剔除会
+ * 连带清空节距锚（anchors 少一半 → pitch 估错 → 整卡错位，card1 实测
+ * 51→9）。色块检测保持原样，装配时再判"色块是否落在 slot 左部"。 */
 export function cardSwatchComp(token: CardToken, bandH: number): GlyphComp | null {
   for (const comp of token.comps) {
     const w = widthOf(comp);
@@ -3757,7 +3765,9 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
 
     for (const slot of slots) {
       const slotTokens = [...(slot.swatch ? [slot.swatch] : []), ...slot.ext];
-      const item = cardAssembleItem(slotTokens, familyA, band, color, bg, pitch, bandDigitW);
+      // 放宽条件：横排 + 每条带多条目（药丸版式）。竖排清单（card3 / yao 右侧
+      // 列）每条带只有 1 个 slot，色块右侧的 comp 是邻列内容，放宽即垃圾。
+      const item = cardAssembleItem(slotTokens, familyA, band, color, bg, pitch, bandDigitW, !vertical && slots.length >= 3);
       if (item) {
         // 码/数量字形规范化：mega 码块 k 等分（票面白印码三字互触）→ 粘连
         // 宽字形切分（"16"/"23"互触）→ 碎片剔除。
@@ -3776,10 +3786,18 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
   }
   }
   if (items.length < MIN_ENTRIES) { if (cardDebugSink) cardDebugSink(`cci: items=${items.length} < MIN (bands=${bands.length} bandData=${bandData.length})`); return null; }
-  const withCount = items.filter(i => i.countGlyphs.length > 0).length;
-  if (withCount < items.length * 0.5) { if (cardDebugSink) cardDebugSink(`cci: withCount=${withCount}/${items.length}`); return null; }
+  // 数量通道是否"读得出"：只看有没有 comp 不够——竖列版式里色块右侧的
+  // 邻列码字/边框也会被收成 comp，条目照样算"有数量"，垃圾结果因此能过
+  // 门槛去仲裁里抢走正确结果（repro B3 yao：25 条正确 → 39 条垃圾）。
+  // 改成要求至少一个字形落在数字宽度窗内。先算 digitW 再判。
   const digitW = countWidths.length ? Math.max(6, median(countWidths)) : 0;
   if (!digitW) { if (cardDebugSink) cardDebugSink('cci: digitW=0'); return null; }
+  const countLike = (g: GlyphComp) => {
+    const w = widthOf(g);
+    return w >= digitW * 0.45 && w <= digitW * CARD_COUNT_W_RATIO;
+  };
+  const withCount = items.filter(i => i.countGlyphs.some(countLike)).length;
+  if (withCount < items.length * 0.5) { if (cardDebugSink) cardDebugSink(`cci: withCount=${withCount}/${items.length}`); return null; }
   return { items, digitW, pitch, vertical };
 }
 
@@ -4321,10 +4339,35 @@ export function cardAssembleItem(
   bg: [number, number, number],
   pitch: number,
   digitW: number,
+  /** 横排药丸版式（card1 类）才启用的放宽：色块右侧数量区允许「首位与色块
+   * 右缘相切」与「数字互触宽块」。竖排清单（yao 右侧列 / card3）不开——
+   * 那里色块右侧的 comp 常是邻列码字/边框，放宽会让垃圾条目过门槛去
+   * 仲裁里抢走正确结果（repro B3 实测 25 → 39 条垃圾）。 */
+  relaxed = false,
 ): CardItem | null {
   if (!slotTokens.length) return null;
-  const swatchToken = slotTokens.find(t => t.swatchComp);
+  // 色块必须领先（2026-11-24 card1 实证）：token 内的数字簇（"429" 三字互触
+  // 成一个 fill≈0.75 宽 44 的实心块）也满足 cardSwatchComp 的尺寸/填充判据，
+  // 会被当成色块——码字改在数字块内部提（碎片）、数量区从数字块右侧扫（空）
+  // → 整条 countUnread 且先验塌成灰（#2 H16:429、#14 H20:126、#38 H20:6 等
+  // 8 条同一机制）。色块永远在 slot 左 40% 内；落在右部的"色块"按无色块票
+  // 处理，交给下面的重扫逻辑（那里会重新找出真正的票色块）。
+  // 注意只在装配层拦：在 cardSwatchComp 里按 x 剔除会清空节距锚（card1 51→9）。
+  const spanX0 = slotTokens[0].x0;
+  const spanX1 = slotTokens[slotTokens.length - 1].x1;
+  const swatchTokenFound = slotTokens.find(t => t.swatchComp) ?? null;
+  const swatchTooRight = relaxed && !!swatchTokenFound?.swatchComp
+    && spanX1 > spanX0
+    && swatchTokenFound.swatchComp.x0 > spanX0 + (spanX1 - spanX0 + 1) * 0.4;
+  const swatchToken = swatchTooRight ? null : swatchTokenFound;
+  if (swatchTooRight && typeof process !== 'undefined' && process.env?.CARD_DEBUG) {
+    console.error(`[sw-reject] span=${spanX0}-${spanX1} box=${swatchTokenFound!.swatchComp!.x0}-${swatchTokenFound!.swatchComp!.x1}`);
+  }
   const isDigitW = (w: number) => w >= digitW * 0.35 && w <= digitW * 1.4;
+  // 数量区字形宽度窗口：下界防碎片、上界放到 2.8×digitW 让互触数字（"54"/"39"
+  // 宽 43/27）留到下游 cardSplitWideGlyph 切开——按 1.28 拦会让 54 读成 0。
+  const isCountWidth = (w: number) => w >= digitW * 0.3
+    && w < digitW * (relaxed ? CARD_COUNT_MAX_SPLIT_W : CARD_COUNT_W_RATIO);
   if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) {
     const x0 = slotTokens[0].x0, x1 = slotTokens[slotTokens.length - 1].x1;
     if (x1 > 1700 && x1 < 2050 && band.y0 > 140) console.error(`[slot-dbg] x${x0}-${x1} y${band.y0}-${band.y1} famA=${familyA} tokens=${slotTokens.map(t => `x${t.x0}-${t.x1}${t.swatchComp ? 'S' : ''}(c${t.comps.length})`).join('|')}`);
@@ -4392,8 +4435,7 @@ export function cardAssembleItem(
           ).filter(c => c.x0 >= frame.x0 && c.x1 <= frame.x1 && widthOf(c) < widthOf(frame) * 0.92);
           if (inner.length) {
             const remaining = texts.filter(g => g !== frame);
-            const runDigit = (w: number) => w >= digitW * 0.3 && w <= digitW * 1.28;
-            return { codeGlyphs: inner, countGlyphs: remaining.filter(g => runDigit(widthOf(g))), dotRgb: fillColor };
+            return { codeGlyphs: inner, countGlyphs: remaining.filter(g => isCountWidth(widthOf(g))), dotRgb: fillColor };
           }
         }
         const split = cardSplitCodeCount(texts, digitW);
@@ -4429,8 +4471,7 @@ export function cardAssembleItem(
       const remaining = texts.filter(g => g !== block);
       const split = cardSplitCodeCount(remaining, digitW);
       if (split) return { codeGlyphs: [...inner, ...split.code], countGlyphs: split.count, dotRgb: swatchColor };
-      const runDigit = (w: number) => w >= digitW * 0.3 && w <= digitW * 1.28;
-      return { codeGlyphs: inner, countGlyphs: remaining.filter(g => runDigit(widthOf(g))), dotRgb: swatchColor };
+      return { codeGlyphs: inner, countGlyphs: remaining.filter(g => isCountWidth(widthOf(g))), dotRgb: swatchColor };
     }
     if (slotTokens.length >= 2) {
       // family B 竖排：token 边界即码|数量分界；尾部「粒」宽块丢弃。
@@ -4513,12 +4554,23 @@ export function cardAssembleItem(
       const raw = analyzeLine(color, swatchColor, { y0: box.y0 + 2, y1: box.y1 - 2, minX: box.x0 + 2, maxX: box.x1 - 1 });
       console.error(`[adb] box x${box.x0}-${box.x1} y${box.y0}-${box.y1} sw=${swatchColor.join(',')} raw=${raw.map(c => `x${c.x0}-${c.x1}w${widthOf(c)}a${c.area}`).join('|')} kept=${codeGlyphs.length}`);
     }
-    const countGlyphs = analyzeLineWithContrast(
+    const countRaw = analyzeLineWithContrast(
       color,
       bg,
       { y0: band.y0, y1: band.y1, minX: box.x1 + 2, maxX: slotTokens[slotTokens.length - 1].x1 + 1 },
       CARD_TEXT_CONTRAST,
-    ).filter(c => c.x0 > box.x1 && widthOf(c) < digitW * CARD_COUNT_W_RATIO);
+    );
+    // 首位数字常与色块右缘**相切**（card1 实测 "469" 的 '4' 起点 == box.x1，
+    // 被 `x0 > box.x1` 整条剔掉 → 469 读成 69、387 读成 7、119 读成 19）。
+    // 判据改为「右缘超出色块」；粘连数字块（"38" 宽 45 ≈ 2×digitW）也放进来，
+    // 由下游 cardSplitWideGlyph / WIDE k 等分切开——之前被宽度上限拦掉
+    // 同样只留末位。
+    const countGlyphs = relaxed
+      ? countRaw.filter(c => c.x1 > box.x1 + 1 && widthOf(c) < digitW * CARD_COUNT_MAX_SPLIT_W)
+      : countRaw.filter(c => c.x0 > box.x1 && widthOf(c) < digitW * CARD_COUNT_W_RATIO);
+    if (typeof process !== 'undefined' && process.env?.CARD_DEBUG && countRaw.length !== countGlyphs.length) {
+      console.error(`[adb-cnt] box=${box.x0}-${box.x1} raw=[${countRaw.map(c => `x${c.x0}-${c.x1}w${widthOf(c)}`).join('|')}] kept=[${countGlyphs.map(c => `x${c.x0}-${c.x1}w${widthOf(c)}`).join('|')}]`);
+    }
     if (!codeGlyphs.length && !countGlyphs.length) return null;
     return { codeGlyphs, countGlyphs, dotRgb: swatchColor };
   }
@@ -5360,7 +5412,14 @@ export function parseLegend(
   const readableRatio = entries.filter(entry => entry.count > 0 && !(entry.warn ?? '').includes('countUnread')).length / entries.length;
   if (resolvedRatio < 0.6 || readableRatio < 0.4) {
     const cardResult = parseCardLegend(source, prepared, paletteCodes, options.region, options.countSeedTemplates ?? null, options.codeSeedGlyphs ?? null, options.codeAnchorGlyphs ?? null);
-    if (cardResult && cardResult.ok && cardResultScore(cardResult.entries) > cardResultScore(entries)) {
+    // 碎片化守卫（2026-11-24 B3 实证）：色卡路径在"每行 1 条目的竖列"上会把
+    // 邻列内容也装配成条目（yao 右侧列 27 行 → 39 条，码/数量全是垃圾），
+    // 但条目数一多，"色号有值 +1、数量可读 +1"的评分就天然占优——只差 4 个
+    // 可读数量就能把正确的 25 条文本结果顶掉。条目数显著多于文本候选行数
+    // = 在切碎片，直接不采纳（正常药丸版式条目数与行数同量级）。
+    const lineCap = located.lines.length;
+    const fragmented = lineCap > 0 && cardResult !== null && cardResult.entries.length > lineCap * 1.25;
+    if (cardResult && cardResult.ok && !fragmented && cardResultScore(cardResult.entries) > cardResultScore(entries)) {
       return cardResult;
     }
   }

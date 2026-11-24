@@ -18,3 +18,8 @@ artifacts/
 # 本地 AI 记忆与实验产出（不进仓库）
 .ai-memory/
 scripts/lab/out/
+
+# 大模型权重与本地临时产物（不进仓库）
+.tmp/
+benchmark/models/
+benchmark/out/

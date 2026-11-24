@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, Edit3, Plus, RefreshCw, Search, Trash2 } from 'lucide-react';
 import type { AdminRequest } from './adminRequest';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading } from './AdminPrimitives';
@@ -14,10 +14,17 @@ type Editor = { kind: 'brand'; brand?: ManagedBrand } | { kind: 'color'; brand: 
 type Deletion = { brand: ManagedBrand; color?: ManagedBrandColor };
 interface PendingOperation { path: string; init: RequestInit; id: string }
 
+/** 色系 = 色号开头的连续字母（A1→A、BC12→BC）；非字母开头归入 #。 */
+const colorSeries = (code: string) => /^[A-Za-z]/.test(code) ? (code.match(/^[A-Za-z]+/)?.[0] ?? '').toUpperCase() : '#';
+/** 每页行数：列数 × 5 行，保证每一页都是满的矩形网格。 */
+const PAGE_ROWS = 5;
+const GRID_MIN_COL = 118, GRID_GAP = 8;
+
 export function AdminBrandsColors({ request, readOnly = false, operatorUid }: AdminBrandsColorsProps) {
   const [catalog, setCatalog] = useState<ManagedBrandCatalog | null>(null);
   const [selected, setSelected] = useState('MARD');
   const [brandSearch, setBrandSearch] = useState(''), [colorSearch, setColorSearch] = useState('');
+  const [series, setSeries] = useState('');
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true), [loadError, setLoadError] = useState('');
   const [writeError, setWriteError] = useState(''), [success, setSuccess] = useState('');
@@ -25,6 +32,8 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
   const [form, setForm] = useState({ code: '', name: '', hex: '#A3B18A', enabled: true, special: false });
   const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState<PendingOperation | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [gridEl, setGridEl] = useState<HTMLDivElement | null>(null);
+  const [gridCols, setGridCols] = useState(0);
   const writeLock = useRef(false), loadGeneration = useRef(0);
   const load = useCallback(async () => {
     const generation = ++loadGeneration.current;
@@ -44,9 +53,34 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
   const brand = catalog?.items.find(item => item.code === selected);
   const needle = brandSearch.trim().toLowerCase();
   const brands = catalog?.items.filter(item => !needle || `${item.code} ${item.name}`.toLowerCase().includes(needle)) ?? [];
-  const colors = brand ? filterBrandColors(brand, colorSearch) : [];
-  const pages = Math.max(1, Math.ceil(colors.length / 48));
+  // 色系筛选：从当前品牌全部颜色推导系列列表（A/B/C…），再叠加搜索框过滤
+  const seriesList = useMemo(() => {
+    if (!brand) return [] as Array<{ key: string; count: number }>;
+    const counts = new Map<string, number>();
+    for (const color of brand.colors) {
+      const key = colorSeries(color.code);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return [...counts.entries()].map(([key, count]) => ({ key, count })).sort((a, b) => a.key.localeCompare(b.key));
+  }, [brand]);
+  const colors = brand ? filterBrandColors(brand, colorSearch).filter(color => !series || colorSeries(color.code) === series) : [];
+  // 每页大小 = 实际列数 × 5 行，让每页铺满整个网格（列数随容器宽度自适应）
+  const pageSize = gridCols > 0 ? gridCols * PAGE_ROWS : 48;
+  const pages = Math.max(1, Math.ceil(colors.length / pageSize));
   const currentPage = Math.min(page, pages - 1);
+  // 测量色卡网格实际列数（auto-fill minmax(118px,1fr)），用于计算满页大小
+  useEffect(() => {
+    if (!gridEl) return;
+    const measure = () => {
+      const width = gridEl.clientWidth;
+      setGridCols(width >= GRID_MIN_COL ? Math.max(1, Math.floor((width + GRID_GAP) / (GRID_MIN_COL + GRID_GAP))) : 1);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(gridEl);
+    return () => observer.disconnect();
+  }, [gridEl]);
   const locked = readOnly || busy || Boolean(unknown) || loading || Boolean(loadError) || !catalog;
   const complete = async (operation: PendingOperation, receipt: unknown) => {
     if (!isBrandMutationReceipt(receipt, operation.id)) return false;
@@ -139,7 +173,7 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
       <aside className="admin-brand-sidebar" aria-label="品牌列表">
         <div className="admin-brand-sidebar-title"><h3>品牌 <span>{catalog.items.length}</span></h3><AdminButton iconOnly aria-label="新增品牌" title="新增品牌" disabled={locked} onClick={() => openEditor({ kind: 'brand' })}><Plus aria-hidden="true" /></AdminButton></div>
         <label className="admin-brand-search"><Search aria-hidden="true" /><span className="sr-only">搜索品牌</span><input value={brandSearch} onChange={event => setBrandSearch(event.target.value)} placeholder="搜索品牌 / code" /></label>
-        <nav className="admin-brand-list" aria-label="选择品牌">{brands.map(item => <button type="button" key={item.code} aria-current={item.code === selected ? 'true' : undefined} disabled={busy || Boolean(unknown)} onClick={() => { setSelected(item.code); setColorSearch(''); setPage(0); }}>
+        <nav className="admin-brand-list" aria-label="选择品牌">{brands.map(item => <button type="button" key={item.code} aria-current={item.code === selected ? 'true' : undefined} disabled={busy || Boolean(unknown)} onClick={() => { setSelected(item.code); setColorSearch(''); setSeries(''); setPage(0); }}>
           <span><strong>{item.name}</strong><small>{item.code}{!item.enabled ? ' · 已禁用' : ''}{item.protected ? ' · 默认' : ''}</small></span><span className="admin-brand-count">{item.colorCount}<small>色</small></span></button>)}</nav>
         {!brands.length && <p className="admin-brand-muted">没有匹配的品牌</p>}
       </aside>
@@ -149,14 +183,19 @@ export function AdminBrandsColors({ request, readOnly = false, operatorUid }: Ad
         {!brand.enabled && <p className="admin-brand-message">此品牌已停止用于前台新转换。历史图纸仍使用保存的颜色快照。</p>}
         {!brand.colorCount && <p className="admin-brand-message">新增第一个颜色后，已启用的品牌才会出现在前台品牌选项中。</p>}
         <div className="admin-brand-colors-toolbar"><label className="admin-brand-search"><Search aria-hidden="true" /><span className="sr-only">搜索当前品牌颜色</span><input value={colorSearch} onChange={event => { setColorSearch(event.target.value); setPage(0); }} placeholder="搜索色号、名称或 HEX" /></label><AdminButton variant="primary" disabled={locked || brand.colorCount >= 1023} onClick={() => openEditor({ kind: 'color', brand })}><Plus aria-hidden="true" />新增颜色</AdminButton></div>
-        <p className="admin-brand-muted" role="status">{colors.length} 个匹配颜色 · 每页 48 色</p>
-        {colors.length ? <div className="admin-brand-color-grid">{colors.slice(currentPage * 48, (currentPage + 1) * 48).map(color => <article className="admin-brand-color" key={color.id}>
+        <p className="admin-brand-muted" role="status">{colors.length} 个匹配颜色 · 每页 {pageSize} 色</p>
+        {seriesList.length > 1 && <div className="admin-brand-series" role="group" aria-label="按色系筛选">
+          <button type="button" aria-pressed={!series} onClick={() => { setSeries(''); setPage(0); }}>全部<small>{brand.colors.length}</small></button>
+          {seriesList.map(item => <button key={item.key} type="button" aria-pressed={series === item.key}
+            onClick={() => { setSeries(item.key === series ? '' : item.key); setPage(0); }}>{item.key}<small>{item.count}</small></button>)}
+        </div>}
+        {colors.length ? <div className="admin-brand-color-grid" ref={setGridEl}>{colors.slice(currentPage * pageSize, (currentPage + 1) * pageSize).map(color => <article className="admin-brand-color" key={color.id}>
           <div className="admin-brand-swatch" style={{ backgroundColor: color.hex }} role="img" aria-label={`颜色 ${color.code} ${color.hex}`} />
           <div className="admin-brand-color-copy"><strong>{color.code}</strong>{color.name.trim() !== color.code.trim() && <span title={color.name}>{color.name}</span>}<code>{color.hex}</code>{color.screenReferenceOnly && <small>特殊材质 · 屏幕参考</small>}</div>
           <div className="admin-brand-color-actions"><AdminButton iconOnly variant="ghost" aria-label={`编辑颜色 ${color.code}`} disabled={locked} onClick={() => openEditor({ kind: 'color', brand, color })}><Edit3 aria-hidden="true" /></AdminButton><AdminButton iconOnly variant="ghost" aria-label={`删除颜色 ${color.code}`} disabled={locked || (brand.protected && brand.colorCount <= 1)} title={brand.protected && brand.colorCount <= 1 ? '默认 MARD 不能删除最后一个颜色' : '删除颜色'} onClick={() => { setWriteError(''); setDeletion({ brand, color }); }}><Trash2 aria-hidden="true" /></AdminButton></div>
         </article>)}</div> : <AdminEmptyState title={colorSearch ? '没有匹配的颜色' : '这个品牌还没有颜色'} description={colorSearch ? '试试其他色号、名称或 HEX。' : '添加颜色后，前台即可使用这个品牌。'} />}
-        {pages > 1 && <AdminPagination label="品牌颜色分页" total={colors.length} limit={48} offset={currentPage * 48}
-          onPageChange={nextOffset => setPage(Math.floor(nextOffset / 48))} />}
+        {pages > 1 && <AdminPagination label="品牌颜色分页" total={colors.length} limit={pageSize} offset={currentPage * pageSize}
+          onPageChange={nextOffset => setPage(Math.floor(nextOffset / pageSize))} />}
       </>}</div>
     </div>}
     <AdminDrawer open={Boolean(editor)} title={editor?.kind === 'brand' ? (editor.brand ? '编辑品牌' : '新增品牌') : (editor?.color ? '编辑颜色' : '新增颜色')} onClose={() => { if (!busy && !unknown) { setEditor(null); setWriteError(''); } }} pending={busy} dismissible={!unknown} className="admin-brand-editor">

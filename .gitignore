@@ -23,3 +23,9 @@ scripts/lab/out/
 .tmp/
 benchmark/models/
 benchmark/out/
+
+# 诊断脚本临时输出（不进仓库）
+tmp-*.txt
+tmp-*.png
+tmp-*.mjs
+tmp-*.tsx

@@ -52,10 +52,9 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
   const resolvedBrandPalette = catalog.status === 'ready' ? catalog.palettes[brand] : undefined;
   const hasScreenReferenceColors = resolvedBrand === 'MARD_291' || activePalette.some(color => color.screenReferenceOnly);
 
-  const handleToggleColor = (id: string) => {
-    setActivePalette(
-      activePalette.map(c => (c.id === id ? { ...c, enabled: c.enabled === false } : c))
-    );
+  const handleSelectColor = (color: BeadColor) => {
+    onSelectColor(color);
+    onClose();
   };
 
   const handleEnableAll = (enable: boolean) => {
@@ -275,8 +274,8 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
           </div>
         )}
 
-        {/* Color Grid list */}
-        <div className="p-2.5 sm:p-4 flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 min-h-0">
+        {/* Color Grid list — content-start 防止筛选结果少时行被拉伸变形 */}
+        <div className="p-2.5 sm:p-4 flex-1 overflow-y-auto grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 min-h-0 content-start auto-rows-min">
           {filteredPalette.map(color => {
             const isEnabled = color.enabled !== false;
             const isCustom = color.id.startsWith('custom_');
@@ -284,20 +283,19 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
             return (
               <div
                 key={color.id}
-                onClick={() => handleToggleColor(color.id)}
+                onClick={() => handleSelectColor(color)}
                 className={`p-2 sm:p-2.5 rounded-xl border flex items-center gap-2 cursor-pointer transition-all ${
                   isEnabled
-                    ? 'bg-slate-800/80 hover:bg-slate-800 border-slate-700/80 text-slate-200 shadow-md'
+                    ? 'bg-slate-800/80 hover:bg-slate-800 hover:ring-1 hover:ring-amber-400/60 border-slate-700/80 text-slate-200 shadow-md'
                     : 'bg-slate-950/40 border-slate-900 text-slate-600 opacity-40 line-through'
                 }`}
+                title={`${color.code} ${color.name} · 点击选用此颜色`}
               >
                 {/* Color Swatch Box */}
                 <div
-                  className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg border border-black/30 shadow-inner flex items-center justify-center font-bold text-xs shrink-0"
+                  className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg border border-black/30 shadow-inner shrink-0"
                   style={{ backgroundColor: color.hex }}
-                >
-                  {isEnabled && <Check className={`w-3.5 h-3.5 drop-shadow ${color.hex === '#FFFFFF' || color.hex === '#FFFF00' ? 'text-black' : 'text-white'}`} />}
-                </div>
+                />
 
                 <div className="flex-1 min-w-0">
                   <div className="font-mono font-bold leading-tight text-[11px] sm:text-xs text-slate-100 truncate flex items-center gap-1">
@@ -309,32 +307,19 @@ export const PaletteManagerModal: React.FC<PaletteManagerModalProps> = ({
                   <div className="text-[9px] font-mono text-slate-500 truncate">{color.hex}</div>
                 </div>
 
-                <div className="flex flex-col gap-1 shrink-0">
+                {isCustom && (
                   <button
                     type="button"
                     onClick={e => {
                       e.stopPropagation();
-                      onSelectColor(color);
-                      onClose();
+                      handleDeleteCustomColor(color.id);
                     }}
-                    className="text-[9px] sm:text-[10px] bg-slate-700 hover:bg-amber-500 hover:text-slate-950 font-bold px-1.5 py-0.5 sm:px-2 sm:py-1 rounded-md text-slate-200 transition-colors"
+                    className="shrink-0 text-[9px] bg-rose-950/80 hover:bg-rose-600 text-rose-300 hover:text-white p-1 rounded transition-colors flex items-center justify-center"
+                    title="删除此自定义颜色"
                   >
-                    选中
+                    <Trash2 className="w-3 h-3" />
                   </button>
-                  {isCustom && (
-                    <button
-                      type="button"
-                      onClick={e => {
-                        e.stopPropagation();
-                        handleDeleteCustomColor(color.id);
-                      }}
-                      className="text-[9px] bg-rose-950/80 hover:bg-rose-600 text-rose-300 hover:text-white p-0.5 rounded transition-colors flex items-center justify-center"
-                      title="删除此自定义颜色"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
             );
           })}

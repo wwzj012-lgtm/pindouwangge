@@ -740,6 +740,9 @@ export function detectLegendChips(
   const { data, width } = source;
   const contrast2 = CONTRAST * CONTRAST;
   // 1) 逐行找长实色游程（只记录 ≥CHIP_MIN_RUN 的，天然滤掉文字/细水印线）。
+  //    超过 CHIP_MAX_W 的游程直接丢弃——那是行间分隔条/表线（狗狗图橙色
+  //    分隔条 1108px 宽），不是芯片；且它会以 100% 重叠吞并同带所有小
+  //    芯片游程，整带聚类报废。
   const rows: Array<{ y: number; runs: Array<[number, number]> }> = [];
   for (let y = y0; y <= y1; y += 1) {
     const runs: Array<[number, number]> = [];
@@ -753,7 +756,7 @@ export function detectLegendChips(
       }
       if (on && start < 0) start = x;
       if (!on && start >= 0) {
-        if (x - start >= minRun) runs.push([start, x - 1]);
+        if (x - start >= minRun && x - start <= CHIP_MAX_W) runs.push([start, x - 1]);
         start = -1;
       }
     }
@@ -963,11 +966,12 @@ function selectLegendLocation(
     }
   }
   // 小码块最后手段（2026-11-22 猴子图）：彩色码块 ~18px 宽、字印在块上，
-  // 常规 40px 实色游程检不到。只在常规候选（含边缘回退）连一个色点条目
-  // 都没有时才用 12px 小游程重试——不能参与常规仲裁（僵尸图实测会劫持
-  // 本来正确的行/卡路径，色号全面劣化）。
+  // 常规 40px 实色游程检不到。只在常规候选（含边缘回退）连最小可用条目数
+  // 都凑不齐时才用 12px 小游程重试——不能参与常规仲裁（僵尸图实测会劫持
+  // 本来正确的行/卡路径，色号全面劣化）。判定用条目数而非色点数：分隔条
+  // （狗狗图橙色横条）会凑出 1 条带假色点的垃圾，条目数门槛不被它骗过。
   const finalDotful = best ? best.rawEntries.reduce((sum, entry) => sum + (entry.dotRgb ? 1 : 0), 0) : 0;
-  if (finalDotful === 0) {
+  if (finalDotful === 0 || !best || best.rawEntries.length < MIN_ENTRIES) {
     for (const located of locateChipCandidates(source, calibration, framed, true)) {
       const parsed = collectChipEntries(source, located);
       lastLocationDebug.push({ region: 'chip-small', anchored: false, lines: 0, rawEntries: parsed.rawEntries.length });

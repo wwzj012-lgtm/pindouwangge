@@ -171,6 +171,19 @@ export interface ImportRecognitionAsyncOptions extends ImportRecognitionOptions 
 
 const DEFAULT_ALPHA_CUTOFF = 24;
 const LOW_CONFIDENCE = 0.6;
+/**
+ * consensus 改写（色号辅助族选举背书 vs 颜色判定冲突）的色距上限。
+ * 真被印刷偏差带偏的组改写色距是个位数（僵尸图 H9→H2 实测 3.5~6.0）；
+ * 混色族多数派对异码成员的伪证据改写色距 7~12（B25→M2 实测 9.9~11.4、
+ * C24→C3 7.2~9.5）。阈值 7 实测把两群干净分开。
+ */
+const CONSENSUS_OVERRIDE_MAX_DE = 7;
+/**
+ * 掩码外底色重估的色距上限（见 applySymbolAssist 注释）：refined 中位数
+ * 必须贴着一个真实色板色才可信；水印重度覆盖的格子中位数会落在色板
+ * 空洞里，宁可不改。
+ */
+const RECLASSIFY_MAX_DE = 12;
 const RATIO_EPSILON = 1e-9;
 const FAST_STRATA_PER_AXIS = 8;
 /** 无 warp 时的零偏移常量（避免每格新建对象）。 */
@@ -311,9 +324,40 @@ function applySymbolAssist(
   calibration: ImportGridCalibration,
   palette: BeadColor[],
   cells: ImportRecognitionCell[][],
-): { textCells: number; resolved: number; overridden: number; conflicts: number; blanks: number } {
+): { textCells: number; resolved: number; overridden: number; conflicts: number; blanks: number; recolors: number } {
   const sym = extractBeadSymbols(source, calibration, palette);
   const byCode = new Map(palette.map((c) => [c.code, c]));
+  // 掩码外底色重估：整格面积采样会被格内印字与水印缎带污染（白豆 H2
+  // 的深字把采样从 250 拖到 234 → 贴上 H9；水印把 H3 底色抬亮 → 贴上
+  // H11）。符号层逐格"掩码外中位数"排除了文字与水印像素，是更真实的
+  // 豆色估计——按最近色重分类。干净格两者给出同一码，无感；只有被拖
+  // 偏的格子会改写。
+  let recolored = 0;
+  if (sym.refinedBases) {
+    for (const [key, refined] of sym.refinedBases) {
+      const sep = key.indexOf(':');
+      const row = Number(key.slice(0, sep)), column = Number(key.slice(sep + 1));
+      const cell = cells[row]?.[column];
+      if (!cell || cell.status !== 'mapped') continue;
+      const lab = rgbToLab(...refined);
+      let best: { color: BeadColor; d: number } | null = null;
+      for (const color of palette) {
+        const d = deltaE2000(lab, rgbToLab(...color.rgb));
+        if (!best || d < best.d) best = { color, d };
+      }
+      if (!best || best.color.id === cell.colorId || best.d > RECLASSIFY_MAX_DE) continue;
+      if (process.env.REC_DEBUG) console.error(`[recolor] ${cell.colorId}->${best.color.code} dE=${best.d.toFixed(1)} at(${row},${column})`);
+      cells[row][column] = {
+        ...cell,
+        color: best.color,
+        colorId: best.color.id,
+        sampleRgb: refined,
+        distance: best.d,
+        quality: qualityFor(cell.confidence ?? 1, best.d),
+      };
+      recolored += 1;
+    }
+  }
   let overridden = 0;
   let conflicts = 0;
   for (const [key, symbol] of sym.codes) {
@@ -323,8 +367,41 @@ function applySymbolAssist(
     const color = byCode.get(symbol.code);
     if (!cell || !color || cell.status !== 'mapped') continue;
     if (cell.colorId !== color.id) {
-      // 颜色判定与 OCR 字形冲突：信颜色（整格面积投票），记一次冲突供界面提示。
-      conflicts += 1;
+      // 颜色判定与 OCR 字形冲突：默认信颜色（整格面积投票）——实测妲己图
+      // 52×52 全格真值，冲突格里 OCR 对率仅 ~30%，两路证据错误高度相关。
+      // 例外：consensus 读数（同底色色族的纯形状两两对决决定性背书，
+      // 见 importSymbolOCR 色族选举）可推翻颜色——印刷色整体偏离色板
+      // 参考色时（僵尸图白豆 H2 印刷白更近 H9），颜色判定整组带偏而
+      // 族级形状证据仍然干净，此时信 OCR。
+      if (!symbol.consensus) {
+        conflicts += 1;
+        continue;
+      }
+      // 档位守卫：consensus 改写的色距 >12 禁改（与实物照片改写守卫同
+      // 口径）。族选举的冠军可能来自混色族的多数派（B25/M2/M3 印刷色
+      // 相近合并一族），其对异码成员的改写是伪证据；真被印刷偏差带偏
+      // 的组（H2 印刷白→H9）改写色距只有 ~4.5，档位守卫精确分开两者。
+      const consensusDistance = cell.sampleRgb
+        ? deltaE2000(rgbToLab(...cell.sampleRgb), rgbToLab(...color.rgb))
+        : 0;
+      if (consensusDistance > CONSENSUS_OVERRIDE_MAX_DE) {
+        conflicts += 1;
+        continue;
+      }
+      if (process.env.REC_DEBUG) console.error(`[override] ${cell.colorId}->${color.code} dE=${consensusDistance.toFixed(1)} at(${row},${column})`);
+      const distance = cell.sampleRgb
+        ? deltaE2000(rgbToLab(...cell.sampleRgb), rgbToLab(...color.rgb))
+        : 0;
+      cells[row][column] = {
+        ...cell,
+        color,
+        colorId: color.id,
+        dominantRatio: 1,
+        runnerUpRatio: 0,
+        distance,
+        quality: qualityFor(1, distance),
+      };
+      overridden += 1;
       continue;
     }
     const distance = cell.sampleRgb
@@ -350,7 +427,7 @@ function applySymbolAssist(
     cells[row][column] = { ...cell, status: 'blank', color: null, colorId: null, sampleRgb: null };
     blanks += 1;
   }
-  return { textCells: sym.textCellCount, resolved: sym.resolvedCount, overridden, conflicts, blanks };
+  return { textCells: sym.textCellCount, resolved: sym.resolvedCount, overridden, conflicts, blanks, recolors: recolored };
 }
 
 interface SampleMatch {

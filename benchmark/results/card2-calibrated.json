@@ -1,0 +1,31 @@
+{
+ "date": "2026-11-24",
+ "card": "card2",
+ "note": "card2 人工校对定稿（round1+round2）：22 槽码+量全确认，#16/#21 水印全遮挡 LIM。基准修正 4 处：C20 数量 2(非21)、#22 色号 M3(非H3，票色仲裁 RGB(106,124,127)≈M3(105,125,128))、C16 数量 55(非56，超分OCR (55)@0.811)、H6 数量 158(非136，OCR (158)@0.843)。#23 M14/12 为新增条目。",
+ "slots": [
+  { "i": 0,  "final": { "code": "A1",  "count": 23 },  "human": true, "round": 1 },
+  { "i": 1,  "final": { "code": "A17", "count": 11 },  "human": false, "note": "管线正确（括号修复后），round2 未改" },
+  { "i": 2,  "final": { "code": "B11", "count": 9 },   "human": true, "round": 2 },
+  { "i": 3,  "final": { "code": "B14", "count": 32 },  "human": true, "round": 2 },
+  { "i": 4,  "final": { "code": "B25", "count": 59 },  "human": true, "round": 2 },
+  { "i": 5,  "final": { "code": "B26", "count": 12 },  "human": true, "round": 2 },
+  { "i": 6,  "final": { "code": "C10", "count": 70 },  "human": false, "note": "管线正确（括号修复后），round2 未改" },
+  { "i": 7,  "final": { "code": "C16", "count": 55 },  "human": true, "round": 2, "correction": "基准 56 系误读" },
+  { "i": 8,  "final": { "code": "C17", "count": 7 },   "human": false, "note": "管线正确（括号修复后），round2 未改" },
+  { "i": 9,  "final": { "code": "C19", "count": 26 },  "human": true, "round": 2 },
+  { "i": 10, "final": { "code": "C20", "count": 2 },   "human": true, "round": 1, "correction": "基准 21 系误读" },
+  { "i": 11, "final": { "code": "C22", "count": 1 },   "human": true, "round": 1 },
+  { "i": 12, "final": { "code": "C24", "count": 9 },   "human": true, "round": 2 },
+  { "i": 13, "final": { "code": "C26", "count": 1 },   "human": true, "round": 2 },
+  { "i": 14, "final": { "code": "F6",  "count": 8 },   "human": true, "round": 1 },
+  { "i": 15, "final": { "code": "H2",  "count": 106 }, "human": true, "round": 1 },
+  { "i": 16, "final": "LIM", "human": true, "round": 1, "note": "水印全遮挡（深灰票）" },
+  { "i": 17, "final": { "code": "H5",  "count": 36 },  "human": true, "round": 2 },
+  { "i": 18, "final": { "code": "H6",  "count": 158 }, "human": true, "round": 2, "correction": "基准 136 系误读，OCR (158)@0.843 印证" },
+  { "i": 19, "final": { "code": "H7",  "count": 433 }, "human": true, "round": 2 },
+  { "i": 20, "final": { "code": "M1",  "count": 16 },  "human": true, "round": 1 },
+  { "i": 21, "final": "LIM", "human": true, "round": 1, "note": "水印全遮挡（绿票）" },
+  { "i": 22, "final": { "code": "M3",  "count": 2 },   "human": true, "round": 1, "correction": "基准 H3 系误读，票色仲裁 M3" },
+  { "i": 23, "final": { "code": "M14", "count": 12 },  "human": true, "round": 1, "note": "新增条目" }
+ ]
+}

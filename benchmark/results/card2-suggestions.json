@@ -1,0 +1,1219 @@
+{
+ "0": {
+  "c": [
+   {
+    "text": "A1",
+    "score": 0.988,
+    "variant": "quart"
+   },
+   {
+    "text": "A1",
+    "score": 0.984,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(23)",
+    "score": 0.93,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(23)",
+    "score": 0.914,
+    "variant": "clahe"
+   },
+   {
+    "text": "(23)",
+    "score": 0.888,
+    "variant": "orig"
+   },
+   {
+    "text": "(23)",
+    "score": 0.876,
+    "variant": "quart"
+   },
+   {
+    "text": "(23)",
+    "score": 0.867,
+    "variant": "clahe-inv"
+   },
+   {
+    "text": "(29)",
+    "score": 0.85,
+    "variant": "half"
+   },
+   {
+    "text": "(29)",
+    "score": 0.833,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(29)",
+    "score": 0.833,
+    "variant": "inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "(23)",
+    "score": 0.999,
+    "variant": "sr-half"
+   },
+   {
+    "text": "(23)",
+    "score": 0.998,
+    "variant": "sr"
+   },
+   {
+    "text": "A1",
+    "score": 0.998,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(23)",
+    "score": 0.996,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "A1",
+    "score": 0.992,
+    "variant": "sr-half"
+   },
+   {
+    "text": "A1",
+    "score": 0.981,
+    "variant": "sr"
+   }
+  ],
+  "d": {
+   "text": "A1 23",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "1": {
+  "c": [
+   {
+    "text": "A17",
+    "score": 0.999,
+    "variant": "quart"
+   },
+   {
+    "text": "A17",
+    "score": 0.997,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "A17",
+    "score": 0.996,
+    "variant": "half-inv"
+   },
+   {
+    "text": "A17",
+    "score": 0.996,
+    "variant": "half"
+   },
+   {
+    "text": "()",
+    "score": 0.984,
+    "variant": "inv"
+   },
+   {
+    "text": "()",
+    "score": 0.982,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(11)",
+    "score": 0.97,
+    "variant": "clahe"
+   },
+   {
+    "text": "(11)",
+    "score": 0.952,
+    "variant": "clahe-inv"
+   },
+   {
+    "text": "A17",
+    "score": 0.946,
+    "variant": "clahe"
+   },
+   {
+    "text": "A17",
+    "score": 0.913,
+    "variant": "orig"
+   }
+  ],
+  "b": [
+   {
+    "text": "(11)",
+    "score": 0.995,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(11)",
+    "score": 0.995,
+    "variant": "sr-half"
+   },
+   {
+    "text": "A17",
+    "score": 0.99,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "A17",
+    "score": 0.986,
+    "variant": "sr-half"
+   },
+   {
+    "text": "A17",
+    "score": 0.985,
+    "variant": "sr"
+   },
+   {
+    "text": "(11)",
+    "score": 0.979,
+    "variant": "sr"
+   },
+   {
+    "text": "A17 (11)",
+    "score": 0.928,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "A37 (11)",
+    "score": 0.847,
+    "variant": "sr-inv"
+   }
+  ],
+  "d": {
+   "text": "A17 11",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "2": {
+  "c": [
+   {
+    "text": "811",
+    "score": 0.815,
+    "variant": "quart"
+   },
+   {
+    "text": "B11",
+    "score": 0.807,
+    "variant": "half"
+   },
+   {
+    "text": "011",
+    "score": 0.803,
+    "variant": "half-inv"
+   },
+   {
+    "text": "611",
+    "score": 0.627,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "811 (9)",
+    "score": 0.586,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "831 (6)",
+    "score": 0.544,
+    "variant": "sr-inv"
+   }
+  ],
+  "d": {
+   "text": "B11 9",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "3": {
+  "c": [
+   {
+    "text": "014",
+    "score": 0.969,
+    "variant": "quart"
+   },
+   {
+    "text": "(32)",
+    "score": 0.938,
+    "variant": "quart"
+   },
+   {
+    "text": "014",
+    "score": 0.933,
+    "variant": "half"
+   },
+   {
+    "text": "(32)",
+    "score": 0.887,
+    "variant": "half"
+   },
+   {
+    "text": "124 (32)",
+    "score": 0.835,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "4 (32)",
+    "score": 0.822,
+    "variant": "orig"
+   },
+   {
+    "text": "014",
+    "score": 0.772,
+    "variant": "orig"
+   }
+  ],
+  "b": [
+   {
+    "text": "(32)",
+    "score": 1.0,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(32)",
+    "score": 1.0,
+    "variant": "sr"
+   },
+   {
+    "text": "(32)",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "014",
+    "score": 0.896,
+    "variant": "sr"
+   },
+   {
+    "text": "824 (32)",
+    "score": 0.828,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "024 (32)",
+    "score": 0.808,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "014",
+    "score": 0.78,
+    "variant": "sr-half"
+   },
+   {
+    "text": "950",
+    "score": 0.709,
+    "variant": "sr-clahe"
+   }
+  ],
+  "d": {
+   "text": "B14 32",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "4": {
+  "c": [],
+  "b": [],
+  "d": {
+   "text": "B25 59",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "5": {
+  "c": [
+   {
+    "text": "026",
+    "score": 0.992,
+    "variant": "half"
+   },
+   {
+    "text": "026",
+    "score": 0.934,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(12)",
+    "score": 0.63,
+    "variant": "half-inv"
+   },
+   {
+    "text": "un)",
+    "score": 0.524,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "026 (12)",
+    "score": 0.895,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "026 (12)",
+    "score": 0.851,
+    "variant": "sr-inv"
+   }
+  ],
+  "d": {
+   "text": "B26 12",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "6": {
+  "c": [
+   {
+    "text": "C10 (70)",
+    "score": 0.797,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "C10 70",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "7": {
+  "c": [
+   {
+    "text": "C10",
+    "score": 0.925,
+    "variant": "half-inv"
+   },
+   {
+    "text": "C16",
+    "score": 0.876,
+    "variant": "half"
+   },
+   {
+    "text": "c16",
+    "score": 0.796,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "1",
+    "score": 0.7,
+    "variant": "half"
+   },
+   {
+    "text": "(66)",
+    "score": 0.515,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "(55)",
+    "score": 0.811,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "C16 (65)",
+    "score": 0.808,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(65)",
+    "score": 0.774,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "016 (65)",
+    "score": 0.761,
+    "variant": "sr-half"
+   },
+   {
+    "text": "016 165)",
+    "score": 0.682,
+    "variant": "sr"
+   }
+  ],
+  "d": {
+   "text": "C16 56",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "8": {
+  "c": [
+   {
+    "text": "on",
+    "score": 0.948,
+    "variant": "inv"
+   },
+   {
+    "text": "on",
+    "score": 0.887,
+    "variant": "half"
+   },
+   {
+    "text": "on",
+    "score": 0.883,
+    "variant": "orig"
+   },
+   {
+    "text": "(n)",
+    "score": 0.804,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "on)",
+    "score": 0.77,
+    "variant": "half-inv"
+   },
+   {
+    "text": "c17",
+    "score": 0.759,
+    "variant": "half"
+   },
+   {
+    "text": "€17",
+    "score": 0.739,
+    "variant": "half-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "C17 7",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "9": {
+  "c": [
+   {
+    "text": "(26)",
+    "score": 0.997,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(26)",
+    "score": 0.996,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "(26)",
+    "score": 0.998,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "C19 (26)",
+    "score": 0.914,
+    "variant": "sr-half"
+   },
+   {
+    "text": "C19 (26)",
+    "score": 0.882,
+    "variant": "sr"
+   },
+   {
+    "text": "19",
+    "score": 0.861,
+    "variant": "sr-clahe"
+   }
+  ],
+  "d": {
+   "text": "C19 26",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "10": {
+  "c": [
+   {
+    "text": "(2)",
+    "score": 0.888,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(2)",
+    "score": 0.787,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "20 (2)",
+    "score": 0.859,
+    "variant": "sr-half"
+   },
+   {
+    "text": "20 (2)",
+    "score": 0.776,
+    "variant": "sr"
+   }
+  ],
+  "d": {
+   "text": "C20 21",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "11": {
+  "c": [
+   {
+    "text": "C22",
+    "score": 0.97,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "C22",
+    "score": 0.952,
+    "variant": "quart"
+   },
+   {
+    "text": "(1)",
+    "score": 0.924,
+    "variant": "quart"
+   },
+   {
+    "text": "C22",
+    "score": 0.912,
+    "variant": "half-inv"
+   },
+   {
+    "text": "C22",
+    "score": 0.849,
+    "variant": "half"
+   },
+   {
+    "text": "()",
+    "score": 0.837,
+    "variant": "half"
+   },
+   {
+    "text": "c22",
+    "score": 0.797,
+    "variant": "orig"
+   },
+   {
+    "text": "à",
+    "score": 0.772,
+    "variant": "inv"
+   },
+   {
+    "text": "()",
+    "score": 0.735,
+    "variant": "half-inv"
+   },
+   {
+    "text": "()",
+    "score": 0.715,
+    "variant": "orig"
+   }
+  ],
+  "b": [
+   {
+    "text": "(1)",
+    "score": 0.9,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "C22",
+    "score": 0.9,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "C022 (1)",
+    "score": 0.782,
+    "variant": "sr-half-inv"
+   }
+  ],
+  "d": {
+   "text": "C22 1",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "12": {
+  "c": [
+   {
+    "text": "(9)",
+    "score": 0.997,
+    "variant": "quart"
+   },
+   {
+    "text": "(9)",
+    "score": 0.965,
+    "variant": "half"
+   },
+   {
+    "text": "(9)",
+    "score": 0.953,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(9)",
+    "score": 0.932,
+    "variant": "half-inv"
+   },
+   {
+    "text": "c24",
+    "score": 0.88,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "c24",
+    "score": 0.866,
+    "variant": "quart"
+   },
+   {
+    "text": "C24",
+    "score": 0.781,
+    "variant": "half-inv"
+   },
+   {
+    "text": "C24",
+    "score": 0.778,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "(9)",
+    "score": 0.997,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(9)",
+    "score": 0.98,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "C24",
+    "score": 0.949,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "C24(",
+    "score": 0.799,
+    "variant": "sr-inv"
+   }
+  ],
+  "d": {
+   "text": "C24 9",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "13": {
+  "c": [
+   {
+    "text": "()",
+    "score": 0.834,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(ω)",
+    "score": 0.753,
+    "variant": "inv"
+   },
+   {
+    "text": "c266",
+    "score": 0.664,
+    "variant": "half-inv"
+   },
+   {
+    "text": "226 (1))",
+    "score": 0.614,
+    "variant": "quart"
+   },
+   {
+    "text": "26 (1)",
+    "score": 0.581,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "C26 (1)",
+    "score": 0.652,
+    "variant": "sr-half"
+   },
+   {
+    "text": "C26 (1)",
+    "score": 0.647,
+    "variant": "sr"
+   }
+  ],
+  "d": {
+   "text": "C26 1",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "14": {
+  "c": [
+   {
+    "text": "(0)",
+    "score": 0.911,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(0)",
+    "score": 0.897,
+    "variant": "half"
+   },
+   {
+    "text": "16",
+    "score": 0.734,
+    "variant": "half-inv"
+   },
+   {
+    "text": "16",
+    "score": 0.621,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "(6 (8)",
+    "score": 0.782,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "(6 (8)",
+    "score": 0.636,
+    "variant": "sr-half-inv"
+   }
+  ],
+  "d": {
+   "text": "F6 8",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "15": {
+  "c": [
+   {
+    "text": "(106)",
+    "score": 0.999,
+    "variant": "inv"
+   },
+   {
+    "text": "(106)",
+    "score": 0.999,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(106)",
+    "score": 0.998,
+    "variant": "orig"
+   },
+   {
+    "text": "H2",
+    "score": 0.998,
+    "variant": "clahe"
+   },
+   {
+    "text": "(106)",
+    "score": 0.998,
+    "variant": "half"
+   },
+   {
+    "text": "(106)",
+    "score": 0.997,
+    "variant": "half-inv"
+   },
+   {
+    "text": "H2",
+    "score": 0.996,
+    "variant": "clahe-inv"
+   },
+   {
+    "text": "(106)",
+    "score": 0.995,
+    "variant": "quart"
+   },
+   {
+    "text": "(106)",
+    "score": 0.995,
+    "variant": "clahe"
+   },
+   {
+    "text": "H2",
+    "score": 0.991,
+    "variant": "orig"
+   }
+  ],
+  "b": [
+   {
+    "text": "(106)",
+    "score": 0.995,
+    "variant": "sr"
+   },
+   {
+    "text": "(106)",
+    "score": 0.984,
+    "variant": "sr-half"
+   },
+   {
+    "text": "(106)",
+    "score": 0.983,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "H2",
+    "score": 0.96,
+    "variant": "sr-half"
+   },
+   {
+    "text": "H2",
+    "score": 0.925,
+    "variant": "sr"
+   },
+   {
+    "text": "H2",
+    "score": 0.917,
+    "variant": "sr-clahe"
+   }
+  ],
+  "d": {
+   "text": "H2 106",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "16": {
+  "c": [
+   {
+    "text": "只（拼豆图）",
+    "score": 0.961,
+    "variant": "half"
+   }
+  ],
+  "b": []
+ },
+ "17": {
+  "c": [
+   {
+    "text": "(90)",
+    "score": 0.762,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "106)",
+    "score": 0.754,
+    "variant": "half"
+   },
+   {
+    "text": "H5",
+    "score": 0.64,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(90)",
+    "score": 0.603,
+    "variant": "half-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H5 36",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "18": {
+  "c": [
+   {
+    "text": "H6",
+    "score": 0.874,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "H6",
+    "score": 0.846,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(158)",
+    "score": 0.843,
+    "variant": "quart"
+   },
+   {
+    "text": "(150)",
+    "score": 0.771,
+    "variant": "half"
+   },
+   {
+    "text": "(138)",
+    "score": 0.687,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "150)",
+    "score": 0.617,
+    "variant": "half-inv"
+   },
+   {
+    "text": "E",
+    "score": 0.522,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H6 136",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "19": {
+  "c": [
+   {
+    "text": "(433)",
+    "score": 0.999,
+    "variant": "half-inv"
+   },
+   {
+    "text": "(433)",
+    "score": 0.997,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(433)",
+    "score": 0.983,
+    "variant": "inv"
+   },
+   {
+    "text": "(433)",
+    "score": 0.959,
+    "variant": "half"
+   },
+   {
+    "text": "(433)",
+    "score": 0.956,
+    "variant": "quart"
+   },
+   {
+    "text": "(433)",
+    "score": 0.941,
+    "variant": "clahe"
+   },
+   {
+    "text": "N7",
+    "score": 0.86,
+    "variant": "half-inv"
+   },
+   {
+    "text": "N7",
+    "score": 0.743,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "H7",
+    "score": 0.739,
+    "variant": "quart"
+   },
+   {
+    "text": "H7",
+    "score": 0.723,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "(433)",
+    "score": 1.0,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(433)",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "(433)",
+    "score": 0.999,
+    "variant": "sr"
+   },
+   {
+    "text": "(433)",
+    "score": 0.999,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "(433)",
+    "score": 0.999,
+    "variant": "sr-half"
+   },
+   {
+    "text": "27",
+    "score": 0.748,
+    "variant": "sr-half"
+   },
+   {
+    "text": "249",
+    "score": 0.648,
+    "variant": "sr"
+   }
+  ],
+  "d": {
+   "text": "H7 433",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "20": {
+  "c": [
+   {
+    "text": "(16)",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "(16)",
+    "score": 0.999,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "(16)",
+    "score": 0.999,
+    "variant": "half"
+   },
+   {
+    "text": "(16)",
+    "score": 0.997,
+    "variant": "half-inv"
+   },
+   {
+    "text": "只",
+    "score": 0.991,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "只",
+    "score": 0.944,
+    "variant": "quart"
+   },
+   {
+    "text": "只",
+    "score": 0.91,
+    "variant": "half-inv"
+   },
+   {
+    "text": "只",
+    "score": 0.853,
+    "variant": "half"
+   },
+   {
+    "text": "ML",
+    "score": 0.769,
+    "variant": "half"
+   },
+   {
+    "text": "M",
+    "score": 0.661,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "(16)",
+    "score": 0.999,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "(16)",
+    "score": 0.997,
+    "variant": "sr-half"
+   },
+   {
+    "text": "(16)",
+    "score": 0.996,
+    "variant": "sr-inv"
+   },
+   {
+    "text": "(16)",
+    "score": 0.993,
+    "variant": "sr"
+   },
+   {
+    "text": "只",
+    "score": 0.989,
+    "variant": "sr-half"
+   },
+   {
+    "text": "MA",
+    "score": 0.889,
+    "variant": "sr-half"
+   },
+   {
+    "text": "只",
+    "score": 0.874,
+    "variant": "sr"
+   },
+   {
+    "text": "M1",
+    "score": 0.781,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "M1",
+    "score": 0.769,
+    "variant": "sr"
+   },
+   {
+    "text": "M1",
+    "score": 0.722,
+    "variant": "sr-inv"
+   }
+  ],
+  "d": {
+   "text": "M1 16",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "21": {
+  "c": [
+   {
+    "text": "只（拼豆图）",
+    "score": 0.833,
+    "variant": "half"
+   },
+   {
+    "text": "景（拼豆图）",
+    "score": 0.823,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "景（拼豆图）",
+    "score": 0.797,
+    "variant": "quart"
+   },
+   {
+    "text": "景（拼豆图）",
+    "score": 0.789,
+    "variant": "half-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "只（拼豆图）",
+    "score": 0.71,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "泉（拼区图）",
+    "score": 0.6,
+    "variant": "sr"
+   }
+  ]
+ },
+ "22": {
+  "c": [],
+  "b": [],
+  "d": {
+   "text": "H3 2",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ },
+ "23": {
+  "c": [
+   {
+    "text": "限只(拼",
+    "score": 0.565,
+    "variant": "clahe"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "M14",
+   "note": "AI 目读（8x 行长图+单槽复核）"
+  }
+ }
+}

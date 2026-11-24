@@ -1,0 +1,1056 @@
+{
+ "0": {
+  "c": [
+   {
+    "text": "H21770",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "H2 1770",
+    "score": 0.924,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H2",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "1": {
+  "c": [
+   {
+    "text": "G9 469",
+    "score": 0.989,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "G9 469",
+    "score": 0.981,
+    "variant": "half"
+   },
+   {
+    "text": "G9 469",
+    "score": 0.981,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "G9 469",
+    "score": 0.958,
+    "variant": "sr-clahe"
+   }
+  ]
+ },
+ "2": {
+  "c": [
+   {
+    "text": "H1G 429",
+    "score": 0.793,
+    "variant": "quart"
+   },
+   {
+    "text": "HTE 429",
+    "score": 0.727,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H16",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "3": {
+  "c": [
+   {
+    "text": "A18 411",
+    "score": 0.993,
+    "variant": "half-inv"
+   },
+   {
+    "text": "A18 411",
+    "score": 0.991,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "A18 411",
+    "score": 0.989,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "A18",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "4": {
+  "c": [
+   {
+    "text": "F18 387",
+    "score": 0.993,
+    "variant": "half-inv"
+   },
+   {
+    "text": "F18 387",
+    "score": 0.993,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "F18 387",
+    "score": 0.993,
+    "variant": "half"
+   },
+   {
+    "text": "F18 387",
+    "score": 0.991,
+    "variant": "quart"
+   }
+  ],
+  "b": []
+ },
+ "6": {
+  "c": [
+   {
+    "text": "G6 255",
+    "score": 0.982,
+    "variant": "half-inv"
+   },
+   {
+    "text": "G6 255",
+    "score": 0.955,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "G6 255",
+    "score": 0.952,
+    "variant": "quart"
+   }
+  ],
+  "b": []
+ },
+ "7": {
+  "c": [
+   {
+    "text": "E16 243",
+    "score": 0.967,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "E16 243",
+    "score": 0.953,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "E16 243",
+    "score": 0.976,
+    "variant": "sr-clahe"
+   }
+  ]
+ },
+ "12": {
+  "c": [
+   {
+    "text": "132",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "F23",
+    "score": 0.998,
+    "variant": "quart"
+   },
+   {
+    "text": "F23 132",
+    "score": 0.997,
+    "variant": "half-inv"
+   },
+   {
+    "text": "F23 132",
+    "score": 0.996,
+    "variant": "half"
+   },
+   {
+    "text": "F23 132",
+    "score": 0.996,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": []
+ },
+ "13": {
+  "c": [
+   {
+    "text": "G2 127",
+    "score": 0.973,
+    "variant": "half-inv"
+   },
+   {
+    "text": "G2 127",
+    "score": 0.962,
+    "variant": "quart"
+   },
+   {
+    "text": "G2 127",
+    "score": 0.93,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "G2",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "14": {
+  "c": [
+   {
+    "text": "A9 126",
+    "score": 0.994,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "A9 126",
+    "score": 0.992,
+    "variant": "quart"
+   },
+   {
+    "text": "A9 126",
+    "score": 0.975,
+    "variant": "half-inv"
+   },
+   {
+    "text": "A9 126",
+    "score": 0.959,
+    "variant": "half"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "A9",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "15": {
+  "c": [
+   {
+    "text": "G5 119",
+    "score": 0.994,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "G5 119",
+    "score": 0.994,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "G5",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "17": {
+  "c": [
+   {
+    "text": "H7 54",
+    "score": 0.992,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "H7 54",
+    "score": 0.992,
+    "variant": "quart"
+   }
+  ],
+  "b": []
+ },
+ "18": {
+  "c": [
+   {
+    "text": "F16 45",
+    "score": 0.99,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "F16 45",
+    "score": 0.99,
+    "variant": "quart"
+   }
+  ],
+  "b": []
+ },
+ "19": {
+  "c": [
+   {
+    "text": "A12 44",
+    "score": 0.985,
+    "variant": "half"
+   },
+   {
+    "text": "A12 44",
+    "score": 0.98,
+    "variant": "quart"
+   },
+   {
+    "text": "A12 44",
+    "score": 0.935,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "A12 44",
+    "score": 0.938,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "A12 44",
+    "score": 0.862,
+    "variant": "sr-half"
+   }
+  ],
+  "d": {
+   "text": "A12",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "20": {
+  "c": [
+   {
+    "text": "39",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "39",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "G3",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "63 39",
+    "score": 0.807,
+    "variant": "half-inv"
+   },
+   {
+    "text": "G3 3",
+    "score": 0.781,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "39",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "39",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "G3",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "G3",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   }
+  ],
+  "d": {
+   "text": "G3",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "21": {
+  "c": [
+   {
+    "text": "F11 38",
+    "score": 0.957,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "F11 38",
+    "score": 0.913,
+    "variant": "quart"
+   },
+   {
+    "text": "F11 38",
+    "score": 0.896,
+    "variant": "half-inv"
+   },
+   {
+    "text": "FI38",
+    "score": 0.802,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "38",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "38",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "F11",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "F11",
+    "score": 1.0,
+    "variant": "sr-half"
+   }
+  ],
+  "d": {
+   "text": "F11",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "22": {
+  "c": [
+   {
+    "text": "F10 31",
+    "score": 0.996,
+    "variant": "half-inv"
+   },
+   {
+    "text": "F10 31",
+    "score": 0.991,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "F10 31",
+    "score": 0.933,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "31",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "31",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "F10",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "F10",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   }
+  ],
+  "d": {
+   "text": "F10",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "23": {
+  "c": [
+   {
+    "text": "GB 24",
+    "score": 0.971,
+    "variant": "half-inv"
+   },
+   {
+    "text": "GB 24",
+    "score": 0.961,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "GB 24",
+    "score": 0.955,
+    "variant": "quart"
+   },
+   {
+    "text": "GB 24",
+    "score": 0.91,
+    "variant": "half"
+   }
+  ],
+  "b": [
+   {
+    "text": "24",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "24",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "G8",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "G8",
+    "score": 1.0,
+    "variant": "sr-half"
+   }
+  ],
+  "d": {
+   "text": "G8",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "24": {
+  "c": [
+   {
+    "text": "23",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "23",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "G18 23",
+    "score": 0.999,
+    "variant": "half-inv"
+   },
+   {
+    "text": "G18",
+    "score": 0.998,
+    "variant": "quart"
+   },
+   {
+    "text": "G18 2",
+    "score": 0.857,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "23",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "23",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "G18",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "G18",
+    "score": 1.0,
+    "variant": "sr-half"
+   }
+  ],
+  "d": {
+   "text": "G18",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "30": {
+  "c": [
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "E14 13",
+    "score": 0.999,
+    "variant": "half-inv"
+   },
+   {
+    "text": "E141",
+    "score": 0.926,
+    "variant": "quart"
+   },
+   {
+    "text": "E14 1",
+    "score": 0.894,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "E14",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "E14",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   }
+  ]
+ },
+ "31": {
+  "c": [
+   {
+    "text": "F1 13",
+    "score": 0.971,
+    "variant": "half-inv"
+   },
+   {
+    "text": "F1 13",
+    "score": 0.96,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "F1 13",
+    "score": 0.952,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "13",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "F1",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "F1",
+    "score": 1.0,
+    "variant": "sr-half"
+   }
+  ]
+ },
+ "35": {
+  "c": [
+   {
+    "text": "9",
+    "score": 0.998,
+    "variant": "quart"
+   },
+   {
+    "text": "E20",
+    "score": 0.996,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "9",
+    "score": 0.996,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "E20",
+    "score": 0.996,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "9",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "9",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "E20",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "E20",
+    "score": 0.999,
+    "variant": "sr-half"
+   }
+  ],
+  "d": {
+   "text": "E20",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "36": {
+  "c": [
+   {
+    "text": "M13",
+    "score": 0.999,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "M13",
+    "score": 0.995,
+    "variant": "quart"
+   },
+   {
+    "text": "M13 8",
+    "score": 0.93,
+    "variant": "half-inv"
+   },
+   {
+    "text": "M13 8",
+    "score": 0.924,
+    "variant": "half"
+   },
+   {
+    "text": "8",
+    "score": 0.682,
+    "variant": "quart"
+   },
+   {
+    "text": "8",
+    "score": 0.676,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [
+   {
+    "text": "8",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "M13",
+    "score": 1.0,
+    "variant": "sr-half"
+   },
+   {
+    "text": "8",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   },
+   {
+    "text": "M13",
+    "score": 1.0,
+    "variant": "sr-half-inv"
+   }
+  ],
+  "d": {
+   "text": "M13",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "38": {
+  "c": [],
+  "b": [],
+  "d": {
+   "text": "M14",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "39": {
+  "c": [
+   {
+    "text": "5",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "5",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "A19",
+    "score": 0.999,
+    "variant": "quart"
+   },
+   {
+    "text": "A19 5",
+    "score": 0.99,
+    "variant": "half-inv"
+   },
+   {
+    "text": "A19",
+    "score": 0.92,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": []
+ },
+ "41": {
+  "c": [
+   {
+    "text": "4",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "4",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "D19",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "D19",
+    "score": 0.999,
+    "variant": "quart"
+   },
+   {
+    "text": "D19 4",
+    "score": 0.952,
+    "variant": "half"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "D19",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "42": {
+  "c": [
+   {
+    "text": "3",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "3",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "C12",
+    "score": 0.999,
+    "variant": "quart"
+   },
+   {
+    "text": "C12",
+    "score": 0.875,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": []
+ },
+ "43": {
+  "c": [
+   {
+    "text": "F19",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "F19",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "3",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "3",
+    "score": 1.0,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": []
+ },
+ "44": {
+  "c": [],
+  "b": []
+ },
+ "45": {
+  "c": [
+   {
+    "text": "H9",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "H9",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "3",
+    "score": 0.999,
+    "variant": "quart"
+   },
+   {
+    "text": "3",
+    "score": 0.999,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H9",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "46": {
+  "c": [
+   {
+    "text": "H22",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "H22",
+    "score": 0.999,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "3",
+    "score": 0.999,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "3",
+    "score": 0.998,
+    "variant": "quart"
+   }
+  ],
+  "b": [
+   {
+    "text": "3",
+    "score": 1.0,
+    "variant": "sr-clahe"
+   },
+   {
+    "text": "H22",
+    "score": 1.0,
+    "variant": "sr-clahe"
+   }
+  ]
+ },
+ "55": {
+  "c": [
+   {
+    "text": "1",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "1",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "1",
+    "score": 0.996,
+    "variant": "half"
+   },
+   {
+    "text": "E8",
+    "score": 0.994,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "E8",
+    "score": 0.992,
+    "variant": "quart"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "E8",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "57": {
+  "c": [
+   {
+    "text": "1",
+    "score": 1.0,
+    "variant": "quart-inv"
+   },
+   {
+    "text": "H8",
+    "score": 0.966,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H8",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "58": {
+  "c": [
+   {
+    "text": "1",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "H10",
+    "score": 1.0,
+    "variant": "quart"
+   },
+   {
+    "text": "1",
+    "score": 0.999,
+    "variant": "quart-inv"
+   }
+  ],
+  "b": [],
+  "d": {
+   "text": "H10",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ },
+ "59": {
+  "c": [],
+  "b": [],
+  "d": {
+   "text": "H11",
+   "note": "视觉大模型读码（与人工真值零分歧）"
+  }
+ }
+}

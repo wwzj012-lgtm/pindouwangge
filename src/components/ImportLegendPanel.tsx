@@ -3,12 +3,14 @@ import { AlertTriangle, Check, ChevronDown, Lock, LockOpen, Plus, ScanSearch, Se
 import type { BeadColor } from '../types';
 import {
   LEGEND_LOW_CONFIDENCE,
+  codeGlyphDump,
   parseLegend,
   suggestCodeFromRgb,
   strictCodeFromRgb,
   type LegendFrameRect,
   type LegendParseResult,
 } from '../utils/importLegend';
+import { describeAnchors, fingerprintFromGlyphs, learnCodeGlyphs, loadAnchors } from '../utils/anchorLibrary';
 import type { ImportGridCalibration, ImportImageDimensions } from '../utils/importGridCalibration';
 
 /**
@@ -40,6 +42,8 @@ export interface LegendLockRow {
   confidence?: number;
   /** 自动解析异常说明（供 UI 标黄解释）。 */
   warn?: string;
+  /** 解析条目原始索引（锚库学习定位字形用；手动行/去重后不保证连续）。 */
+  entryIndex?: number;
 }
 
 export interface LegendLockState {
@@ -125,7 +129,8 @@ export function parseEntriesToRows(
   palette?: ReadonlyArray<BeadColor>,
 ): LegendLockRow[] {
   const rows: LegendLockRow[] = [];
-  for (const entry of entries) {
+  for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+    const entry = entries[entryIndex];
     let code = entry.code;
     let warn = entry.warn;
     if (code.length === 0 && palette && palette.length) {
@@ -153,6 +158,7 @@ export function parseEntriesToRows(
       enabled: paletteCodes.has(code),
       confidence: entry.confidence,
       warn,
+      entryIndex,
     });
   }
   // 同码去重（2026-11-15 用户实测「27 色里竟然有重复的」）：错读码经
@@ -353,6 +359,11 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
   const [lastParse, setLastParse] = useState<LegendParseResult | null>(null);
   const [parseNote, setParseNote] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  // 锚库（校对闭环）：上次解析的字形快照（条目索引 → 码字字形）与版式
+  // 指纹。用户修正色号 = 人工校对确认 → 快照字形按真值入库；再次识别时
+  // 锚缺字补位（2026-11-24 card4：'M'/'5' 自举永远凑不齐，锚直接救回）。
+  const glyphSnapshotRef = useRef<Map<number, Array<{ bitmap: import('../utils/importLegend').Bitmap }>>>(new Map());
+  const fingerprintRef = useRef<string>('');
 
   const paletteByCode = useMemo(() => {
     const map = new Map<string, BeadColor>();
@@ -400,6 +411,9 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
       // 会形成正反馈——首漏的码被错配到收窄域内近码 → 去重后行集塌缩 →
       // 再解析进一步收窄 → 整图被压成几个颜色。白名单只管网格识别
       // （importRecognition），解析层靠 shouldAutoWhitelist 的命中率守卫。
+      // 锚库读取：上次解析的版式指纹匹配的锚做缺字补位（首张新卡无指纹
+      // 不生效；用户校对修正后重新识别即生效——校对闭环语义）。
+      const anchors = fingerprintRef.current ? loadAnchors(fingerprintRef.current) : new Map();
       const result = parseLegend(
         { data: pixels.data, ...dimensions },
         calibration,
@@ -409,10 +423,21 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           gridCols: calibration.columns,
           // 框选区域优先：只解析框内的内容，不再依赖网格底边/右边缘推断。
           region: legendRegion ?? undefined,
+          ...(anchors.size ? { codeAnchorGlyphs: anchors } : {}),
         },
       );
       setLastParse(result);
       if (result.ok) {
+        // 字形快照 + 版式指纹（锚库学习的采集源；codeGlyphDump 是本模块
+        // 导出的最后一次解析 dump，与 entries 同序）。
+        const snapshot = new Map<number, Array<{ bitmap: import('../utils/importLegend').Bitmap }>>();
+        for (const d of codeGlyphDump) {
+          const list = snapshot.get(d.entry) ?? [];
+          list.push({ bitmap: d.bitmap });
+          snapshot.set(d.entry, list);
+        }
+        glyphSnapshotRef.current = snapshot;
+        fingerprintRef.current = fingerprintFromGlyphs(codeGlyphDump.map(d => ({ bitmap: d.bitmap })));
         // 裁决口径（2026-11-14 用户实测修订）：解析结果可信（色板命中率高，
         // 或与图纸头部标注色数自洽）时自动启用白名单——否则用户设定了
         // 27 色照样识别出 70+ 杂色，功能形同虚设。命中率高说明色号大面积
@@ -423,9 +448,10 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
         const usable = rows.filter(row => row.enabled).length;
         const autoWhitelist = shouldAutoWhitelist(rows, result.checks.headerColorCount);
         const skippedNote = skipped > 0 ? `，${skipped} 条色号未读出且无法按色点建议已省略` : '';
+        const anchorNote = describeAnchors(fingerprintRef.current);
         setParseNote(autoWhitelist
-          ? `解析出 ${result.entries.length} 条（${usable} 条色号在色板内${skippedNote}）。已自动启用色板白名单：识别只从这 ${usable} 色里选色，压掉杂色。色号如有错请先逐行修正或关闭开关；粒数仍是参考值，锁定数量前请核对数字。`
-          : `解析出 ${result.entries.length} 条，但色板命中率低（${usable}/${rows.length}）${skippedNote}。白名单保持关闭（色号大面积错误时开白名单会把整图压成少数颜色），请核对色号后再手动打开。`);
+          ? `解析出 ${result.entries.length} 条（${usable} 条色号在色板内${skippedNote}）。已自动启用色板白名单：识别只从这 ${usable} 色里选色，压掉杂色。色号如有错请先逐行修正或关闭开关；粒数仍是参考值，锁定数量前请核对数字。${anchorNote ? ` ${anchorNote}——逐行修正色号会自动入锚库，重新识别即生效。` : ''}`
+          : `解析出 ${result.entries.length} 条，但色板命中率低（${usable}/${rows.length}）${skippedNote}。白名单保持关闭（色号大面积错误时开白名单会把整图压成少数颜色），请核对色号后再手动打开。${anchorNote ? ` ${anchorNote}——逐行修正色号会自动入锚库，重新识别即生效。` : ''}`);
         onChange({ rows, whitelist: autoWhitelist });
       } else {
         setParseNote((legendRegion ? FRAME_FAILURE_NOTES : FAILURE_NOTES)[result.failureReason ?? 'noLegendBand'] ?? '图例解析失败，请手动添加行。');
@@ -444,9 +470,17 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
 
   const changeRowCode = useCallback((index: number, code: string) => {
     // 启用态由色板成员派生：选了有效色号即参与白名单（需总开关打开才生效）。
+    const row = value.rows[index];
     const enabled = code.length > 0 && paletteByCode.has(code);
     updateRow(index, { code, enabled });
-  }, [updateRow, paletteByCode]);
+    // 锚库学习（2026-11-24 card4 校对闭环）：用户修正色号 = 人工校对确认。
+    // 只收「字形数 == 色号长度」的条目（切分错误的行逐位标注本身是错的，
+    // H13 的 '13' 粘连实证）；同 bitmap 去重、每字符 ≤8 变体。
+    if (row?.entryIndex !== undefined && code && code !== row.code) {
+      const glyphs = glyphSnapshotRef.current.get(row.entryIndex);
+      if (glyphs?.length) learnCodeGlyphs(code, glyphs, 'row-code-edit');
+    }
+  }, [updateRow, paletteByCode, value.rows]);
 
   const removeRow = useCallback((index: number) => {
     onChange({ rows: value.rows.filter((_, i) => i !== index), whitelist: value.whitelist });

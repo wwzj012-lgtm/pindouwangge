@@ -1,0 +1,1042 @@
+{
+ "date": "2026-11-24",
+ "card": "card1",
+ "source": "人工校对面板 v3 两轮回传合并（round1: 21漏项 2026-11-24 00:17；round2: 14数量存疑 00:39）",
+ "slots": [
+  {
+   "i": 0,
+   "truth": {
+    "code": "H2",
+    "count": 1770
+   },
+   "pipe": {
+    "code": "H6",
+    "count": 0,
+    "conf": null,
+    "warn": "priorOnly;countUnread;codeLenMismatch"
+   },
+   "final": {
+    "code": "H2",
+    "count": 1770
+   },
+   "ok": true
+  },
+  {
+   "i": 1,
+   "truth": {
+    "code": "G9",
+    "count": 469
+   },
+   "pipe": {
+    "code": "G9",
+    "count": 99,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": {
+    "code": "G9",
+    "count": 469
+   },
+   "ok": true
+  },
+  {
+   "i": 2,
+   "truth": {
+    "code": "H16",
+    "count": 429
+   },
+   "pipe": {
+    "code": "H20",
+    "count": 0,
+    "conf": 0.19,
+    "warn": "priorOnly;countUnread;codeLenMismatch;lowConfidence"
+   },
+   "final": {
+    "code": "H16",
+    "count": 429
+   },
+   "ok": true
+  },
+  {
+   "i": 3,
+   "truth": {
+    "code": "A18",
+    "count": 411
+   },
+   "pipe": {
+    "code": "A23",
+    "count": 411,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": {
+    "code": "A18",
+    "count": 411
+   },
+   "ok": true
+  },
+  {
+   "i": 4,
+   "truth": {
+    "code": "F18",
+    "count": 387
+   },
+   "pipe": {
+    "code": "F18",
+    "count": 7,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": {
+    "code": "F18",
+    "count": 387
+   },
+   "ok": true
+  },
+  {
+   "i": 5,
+   "truth": {
+    "code": "G20",
+    "count": 271
+   },
+   "pipe": {
+    "code": "G20",
+    "count": 271,
+    "conf": 0.82,
+    "warn": "priorLengthConflict;lowShape"
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 6,
+   "truth": {
+    "code": "G6",
+    "count": 255
+   },
+   "pipe": {
+    "code": "G6",
+    "count": 299,
+    "conf": 0.83,
+    "warn": ""
+   },
+   "final": {
+    "code": "G6",
+    "count": 255
+   },
+   "ok": true
+  },
+  {
+   "i": 7,
+   "truth": {
+    "code": "E16",
+    "count": 243
+   },
+   "pipe": {
+    "code": "E16",
+    "count": 242,
+    "conf": 0.78,
+    "warn": ""
+   },
+   "final": {
+    "code": "E16",
+    "count": 243
+   },
+   "ok": true
+  },
+  {
+   "i": 8,
+   "truth": {
+    "code": "F13",
+    "count": 197
+   },
+   "pipe": {
+    "code": "F13",
+    "count": 197,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 9,
+   "truth": {
+    "code": "G1",
+    "count": 194
+   },
+   "pipe": {
+    "code": "G1",
+    "count": 194,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 10,
+   "truth": {
+    "code": "A14",
+    "count": 177
+   },
+   "pipe": {
+    "code": "A14",
+    "count": 177,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 11,
+   "truth": {
+    "code": "F6",
+    "count": 141
+   },
+   "pipe": {
+    "code": "F6",
+    "count": 141,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 12,
+   "truth": {
+    "code": "F23",
+    "count": 132
+   },
+   "pipe": {
+    "code": "F23",
+    "count": 122,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": {
+    "code": "F23",
+    "count": 132
+   },
+   "ok": true
+  },
+  {
+   "i": 13,
+   "truth": {
+    "code": "G2",
+    "count": 127
+   },
+   "pipe": {
+    "code": "G5",
+    "count": 127,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": {
+    "code": "G2",
+    "count": 127
+   },
+   "ok": true
+  },
+  {
+   "i": 14,
+   "truth": {
+    "code": "A9",
+    "count": 126
+   },
+   "pipe": {
+    "code": "H20",
+    "count": 0,
+    "conf": 0.19,
+    "warn": "priorOnly;countUnread;codeLenMismatch;lowConfidence;duplicateCode"
+   },
+   "final": {
+    "code": "A9",
+    "count": 126
+   },
+   "ok": true
+  },
+  {
+   "i": 15,
+   "truth": {
+    "code": "G5",
+    "count": 119
+   },
+   "pipe": {
+    "code": "M13",
+    "count": 19,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": {
+    "code": "G5",
+    "count": 119
+   },
+   "ok": true
+  },
+  {
+   "i": 16,
+   "truth": {
+    "code": "G13",
+    "count": 97
+   },
+   "pipe": {
+    "code": "G13",
+    "count": 97,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 17,
+   "truth": {
+    "code": "H7",
+    "count": 54
+   },
+   "pipe": {
+    "code": "H7",
+    "count": 0,
+    "conf": 0.32,
+    "warn": "countUnread;lowConfidence"
+   },
+   "final": {
+    "code": "H7",
+    "count": 54
+   },
+   "ok": true
+  },
+  {
+   "i": 18,
+   "truth": {
+    "code": "F16",
+    "count": 45
+   },
+   "pipe": {
+    "code": "F16",
+    "count": 49,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": {
+    "code": "F16",
+    "count": 45
+   },
+   "ok": true
+  },
+  {
+   "i": 19,
+   "truth": {
+    "code": "A12",
+    "count": 44
+   },
+   "pipe": {
+    "code": "H6",
+    "count": 44,
+    "conf": null,
+    "warn": "priorOnly;codeLenMismatch;duplicateCode"
+   },
+   "final": {
+    "code": "A12",
+    "count": 44
+   },
+   "ok": true
+  },
+  {
+   "i": 20,
+   "truth": {
+    "code": "G3",
+    "count": 39
+   },
+   "pipe": {
+    "code": "H4",
+    "count": 0,
+    "conf": 0.18,
+    "warn": "priorOnly;countUnread;codeLenMismatch;lowConfidence"
+   },
+   "final": {
+    "code": "G3",
+    "count": 39
+   },
+   "ok": true
+  },
+  {
+   "i": 21,
+   "truth": {
+    "code": "F11",
+    "count": 38
+   },
+   "pipe": {
+    "code": "M3",
+    "count": 0,
+    "conf": 0.32,
+    "warn": "countUnread;lowConfidence"
+   },
+   "final": {
+    "code": "F11",
+    "count": 38
+   },
+   "ok": true
+  },
+  {
+   "i": 22,
+   "truth": {
+    "code": "F10",
+    "count": 31
+   },
+   "pipe": {
+    "code": "G14",
+    "count": 11,
+    "conf": 0.5,
+    "warn": "priorOnly;codeLenMismatch;lowConfidence"
+   },
+   "final": {
+    "code": "F10",
+    "count": 31
+   },
+   "ok": true
+  },
+  {
+   "i": 23,
+   "truth": {
+    "code": "G8",
+    "count": 24
+   },
+   "pipe": {
+    "code": "M12",
+    "count": 24,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": {
+    "code": "G8",
+    "count": 24
+   },
+   "ok": true
+  },
+  {
+   "i": 24,
+   "truth": {
+    "code": "G18",
+    "count": 23
+   },
+   "pipe": {
+    "code": "",
+    "count": 21,
+    "conf": 0.74,
+    "warn": ""
+   },
+   "final": {
+    "code": "G18",
+    "count": 23
+   },
+   "ok": true
+  },
+  {
+   "i": 25,
+   "truth": {
+    "code": "E11",
+    "count": 22
+   },
+   "pipe": {
+    "code": "E11",
+    "count": 22,
+    "conf": 0.82,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 26,
+   "truth": {
+    "code": "F17",
+    "count": 22
+   },
+   "pipe": {
+    "code": "F17",
+    "count": 22,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 27,
+   "truth": {
+    "code": "H6",
+    "count": 22
+   },
+   "pipe": {
+    "code": "H6",
+    "count": 22,
+    "conf": 0.56,
+    "warn": "priorLengthConflict;codeLenMismatch;lowConfidence;duplicateCode"
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 28,
+   "truth": {
+    "code": "F12",
+    "count": 21
+   },
+   "pipe": {
+    "code": "F12",
+    "count": 21,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 29,
+   "truth": {
+    "code": "G19",
+    "count": 14
+   },
+   "pipe": {
+    "code": "G19",
+    "count": 14,
+    "conf": 0.85,
+    "warn": "priorLengthConflict"
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 30,
+   "truth": {
+    "code": "E14",
+    "count": 13
+   },
+   "pipe": {
+    "code": "E14",
+    "count": 11,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": {
+    "code": "E14",
+    "count": 13
+   },
+   "ok": true
+  },
+  {
+   "i": 31,
+   "truth": {
+    "code": "F1",
+    "count": 13
+   },
+   "pipe": {
+    "code": "F1",
+    "count": 12,
+    "conf": 0.84,
+    "warn": ""
+   },
+   "final": {
+    "code": "F1",
+    "count": 13
+   },
+   "ok": true
+  },
+  {
+   "i": 32,
+   "truth": {
+    "code": "E15",
+    "count": 12
+   },
+   "pipe": {
+    "code": "E15",
+    "count": 12,
+    "conf": 0.81,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 33,
+   "truth": {
+    "code": "H17",
+    "count": 12
+   },
+   "pipe": {
+    "code": "H17",
+    "count": 12,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 34,
+   "truth": {
+    "code": "G16",
+    "count": 11
+   },
+   "pipe": {
+    "code": "G16",
+    "count": 11,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 35,
+   "truth": {
+    "code": "E20",
+    "count": 9
+   },
+   "pipe": {
+    "code": "M15",
+    "count": 0,
+    "conf": 0.32,
+    "warn": "countUnread;lowConfidence"
+   },
+   "final": {
+    "code": "E20",
+    "count": 9
+   },
+   "ok": true
+  },
+  {
+   "i": 36,
+   "truth": {
+    "code": "M13",
+    "count": 8
+   },
+   "pipe": {
+    "code": "H4",
+    "count": 0,
+    "conf": 0.32,
+    "warn": "countUnread;lowConfidence;duplicateCode"
+   },
+   "final": {
+    "code": "M13",
+    "count": 8
+   },
+   "ok": true
+  },
+  {
+   "i": 37,
+   "truth": {
+    "code": "H5",
+    "count": 7
+   },
+   "pipe": {
+    "code": "H5",
+    "count": 7,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 38,
+   "truth": {
+    "code": "M14",
+    "count": 6
+   },
+   "pipe": {
+    "code": "H20",
+    "count": 0,
+    "conf": 0.16,
+    "warn": "priorOnly;countUnread;codeLenMismatch;lowConfidence;duplicateCode"
+   },
+   "final": {
+    "code": "M14",
+    "count": 6
+   },
+   "ok": true
+  },
+  {
+   "i": 39,
+   "truth": {
+    "code": "A19",
+    "count": 5
+   },
+   "pipe": {
+    "code": "A19",
+    "count": 9,
+    "conf": 0.83,
+    "warn": ""
+   },
+   "final": {
+    "code": "A19",
+    "count": 5
+   },
+   "ok": true
+  },
+  {
+   "i": 40,
+   "truth": {
+    "code": "A7",
+    "count": 4
+   },
+   "pipe": {
+    "code": "A7",
+    "count": 4,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 41,
+   "truth": {
+    "code": "D19",
+    "count": 4
+   },
+   "pipe": {
+    "code": "",
+    "count": 4,
+    "conf": 0.69,
+    "warn": ""
+   },
+   "final": {
+    "code": "D19",
+    "count": 4
+   },
+   "ok": true
+  },
+  {
+   "i": 42,
+   "truth": {
+    "code": "C12",
+    "count": 3
+   },
+   "pipe": {
+    "code": "C12",
+    "count": 2,
+    "conf": 0.57,
+    "warn": "priorOnly;codeLenMismatch;lowConfidence"
+   },
+   "final": {
+    "code": "C12",
+    "count": 3
+   },
+   "ok": true
+  },
+  {
+   "i": 43,
+   "truth": {
+    "code": "F19",
+    "count": 3
+   },
+   "pipe": {
+    "code": "F19",
+    "count": 2,
+    "conf": 0.82,
+    "warn": ""
+   },
+   "final": {
+    "code": "F19",
+    "count": 3
+   },
+   "ok": true
+  },
+  {
+   "i": 44,
+   "truth": {
+    "code": "H4",
+    "count": 3
+   },
+   "pipe": {
+    "code": "H4",
+    "count": 2,
+    "conf": 0.83,
+    "warn": "duplicateCode"
+   },
+   "final": {
+    "code": "H4",
+    "count": 3
+   },
+   "ok": true
+  },
+  {
+   "i": 45,
+   "truth": {
+    "code": "H9",
+    "count": 3
+   },
+   "pipe": {
+    "code": "",
+    "count": 2,
+    "conf": 0.72,
+    "warn": ""
+   },
+   "final": {
+    "code": "H9",
+    "count": 3
+   },
+   "ok": true
+  },
+  {
+   "i": 46,
+   "truth": {
+    "code": "H22",
+    "count": 3
+   },
+   "pipe": {
+    "code": "H22",
+    "count": 2,
+    "conf": 0.69,
+    "warn": ""
+   },
+   "final": {
+    "code": "H22",
+    "count": 3
+   },
+   "ok": true
+  },
+  {
+   "i": 47,
+   "truth": {
+    "code": "C20",
+    "count": 2
+   },
+   "pipe": {
+    "code": "C20",
+    "count": 2,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 48,
+   "truth": {
+    "code": "C28",
+    "count": 2
+   },
+   "pipe": {
+    "code": "C28",
+    "count": 2,
+    "conf": 0.77,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 49,
+   "truth": {
+    "code": "D1",
+    "count": 2
+   },
+   "pipe": {
+    "code": "D1",
+    "count": 2,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 50,
+   "truth": {
+    "code": "D11",
+    "count": 2
+   },
+   "pipe": {
+    "code": "D11",
+    "count": 2,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 51,
+   "truth": {
+    "code": "D17",
+    "count": 2
+   },
+   "pipe": {
+    "code": "D17",
+    "count": 2,
+    "conf": 0.75,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 52,
+   "truth": {
+    "code": "G4",
+    "count": 2
+   },
+   "pipe": {
+    "code": "G4",
+    "count": 2,
+    "conf": 0.85,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 53,
+   "truth": {
+    "code": "C29",
+    "count": 1
+   },
+   "pipe": {
+    "code": "C29",
+    "count": 1,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 54,
+   "truth": {
+    "code": "E1",
+    "count": 1
+   },
+   "pipe": {
+    "code": "E1",
+    "count": 1,
+    "conf": 0.81,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 55,
+   "truth": {
+    "code": "E8",
+    "count": 1
+   },
+   "pipe": {
+    "code": "H4",
+    "count": 1,
+    "conf": 0.54,
+    "warn": "priorOnly;codeLenMismatch;lowConfidence;duplicateCode"
+   },
+   "final": {
+    "code": "E8",
+    "count": 1
+   },
+   "ok": true
+  },
+  {
+   "i": 56,
+   "truth": {
+    "code": "F22",
+    "count": 1
+   },
+   "pipe": {
+    "code": "F22",
+    "count": 1,
+    "conf": 0.87,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 57,
+   "truth": {
+    "code": "H8",
+    "count": 1
+   },
+   "pipe": {
+    "code": "H4",
+    "count": 1,
+    "conf": 0.73,
+    "warn": "shapeMismatchPrior;duplicateCode"
+   },
+   "final": {
+    "code": "H8",
+    "count": 1
+   },
+   "ok": true
+  },
+  {
+   "i": 58,
+   "truth": {
+    "code": "H10",
+    "count": 1
+   },
+   "pipe": {
+    "code": "H8",
+    "count": 1,
+    "conf": 0.82,
+    "warn": ""
+   },
+   "final": {
+    "code": "H10",
+    "count": 1
+   },
+   "ok": true
+  },
+  {
+   "i": 59,
+   "truth": {
+    "code": "H11",
+    "count": 1
+   },
+   "pipe": {
+    "code": "H3",
+    "count": 1,
+    "conf": 0.61,
+    "warn": "priorOnly;codeLenMismatch"
+   },
+   "final": {
+    "code": "H11",
+    "count": 1
+   },
+   "ok": true
+  },
+  {
+   "i": 60,
+   "truth": {
+    "code": "H19",
+    "count": 1
+   },
+   "pipe": {
+    "code": "H19",
+    "count": 1,
+    "conf": 0.83,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  },
+  {
+   "i": 61,
+   "truth": {
+    "code": "M10",
+    "count": 1
+   },
+   "pipe": {
+    "code": "M10",
+    "count": 1,
+    "conf": 0.86,
+    "warn": ""
+   },
+   "final": null,
+   "ok": false
+  }
+ ]
+}

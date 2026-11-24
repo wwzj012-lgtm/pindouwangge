@@ -1,0 +1,21 @@
+import { createServer } from 'vite';
+import sharp from 'sharp';
+const vite = await createServer({ root: process.cwd(), appType: 'custom', server: { middlewareMode: true }, logLevel: 'error', optimizeDeps: { noDiscovery: true }, configFile: 'vite.config.ts' });
+const { recognizeImportImage } = await vite.ssrLoadModule('/src/utils/importRecognition.ts');
+const { BRAND_PALETTES } = await vite.ssrLoadModule('/src/data/palettes.ts');
+const { data, info } = await sharp('C:/Users/Plout/Pictures/12.jpg').ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+const source = { data: new Uint8ClampedArray(data.buffer, data.byteOffset, data.length), width: info.width, height: info.height };
+const CELL = 8.8, OX = -0.375, OY = -0.125;
+const cal = { originX: OX * CELL, originY: OY * CELL, cellWidth: CELL, cellHeight: CELL, columns: Math.floor((source.width - OX*CELL)/CELL), rows: Math.floor((source.height - OY*CELL)/CELL) };
+const base = { mode: 'precision', beadPhoto: true, autoColorBalance: true, autoAlign: true, edgeInsetRatio: 0.1 };
+const run = (extra) => recognizeImportImage(source, cal, BRAND_PALETTES.MARD, 'precision', undefined, { ...base, ...extra });
+const n0 = run({ shadingReference: false, smooth: false, unifyTwins: false });
+const n1 = run({ shadingReference: false, smooth: true,  unifyTwins: false });
+const n0b = run({ shadingReference: false, smooth: false, unifyTwins: false });
+const diff = (A, B) => { let n = 0; for (let r = 0; r < cal.rows; r++) for (let c = 0; c < cal.columns; c++) if (A.cells[r][c].colorId !== B.cells[r][c].colorId) n++; return n; };
+console.log('纯采样 vs 纯采样重跑 diff:', diff(n0, n0b), '(应为0)');
+console.log('纯采样 vs smooth开 diff:', diff(n0, n1), `| n1 smoothing=${JSON.stringify(n1.smoothing)}`);
+// 看 n0 vs n1 的 gains/offset
+console.log('n0 gains:', JSON.stringify(n0.autoCorrection?.colorGains), 'offset:', JSON.stringify(n0.autoCorrection?.gridOffset));
+console.log('n1 gains:', JSON.stringify(n1.autoCorrection?.colorGains), 'offset:', JSON.stringify(n1.autoCorrection?.gridOffset));
+await vite.close();

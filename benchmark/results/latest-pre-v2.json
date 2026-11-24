@@ -1,0 +1,73 @@
+{
+  "rev": "4dd6d9a",
+  "ranAt": "2026-11-04T10:28:01.216Z",
+  "settings": {
+    "width": 100,
+    "height": 100,
+    "keepAspectRatio": true,
+    "brand": "MARD",
+    "dither": "none",
+    "colorLimit": 32,
+    "brightness": 0,
+    "contrast": 0,
+    "saturation": 0,
+    "transparentCutoff": 128,
+    "boardSize": 29,
+    "sharpening": 30,
+    "outlineBoost": false,
+    "chromaKeyColor": null,
+    "chromaKeyTolerance": 20,
+    "colorMatchAlgo": "ciede2000",
+    "backgroundRemovalEnabled": true,
+    "kmeansClustering": true,
+    "quantizationStrength": 28,
+    "pipelineOverride": "auto"
+  },
+  "samples": 2,
+  "cellMean": 6.155,
+  "cellP95": 14.601,
+  "viewMean": 3.068,
+  "viewP95": 9.957,
+  "pixelMean": 4.35,
+  "pixelP95": 14.882,
+  "results": [
+    {
+      "image": "pixel-sprite.jpg",
+      "pipeline": "cartoon",
+      "grid": "100x100",
+      "filledCells": 4764,
+      "convertMs": 6704,
+      "cellDeltaE": {
+        "mean": 4.917,
+        "p95": 16.905
+      },
+      "viewDeltaE": {
+        "mean": 2.439,
+        "p95": 8.925
+      },
+      "pixelDeltaE": {
+        "mean": 2.808,
+        "p95": 6.936
+      }
+    },
+    {
+      "image": "street-boy.jpg",
+      "pipeline": "photo",
+      "grid": "100x100",
+      "filledCells": 3961,
+      "convertMs": 8396,
+      "cellDeltaE": {
+        "mean": 7.392,
+        "p95": 12.297
+      },
+      "viewDeltaE": {
+        "mean": 3.697,
+        "p95": 10.989
+      },
+      "pixelDeltaE": {
+        "mean": 5.891,
+        "p95": 22.828
+      }
+    }
+  ]
+}

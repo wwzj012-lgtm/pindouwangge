@@ -72,6 +72,17 @@ const SYNTH_PRIMARY_MAX_DISTANCE = 0.45;
 const SYNTH_TRUSTED_MAX_MEDDIST = 0.45;
 /** 计数字体模板的匹配阈值（计数区自建字体，同字距离更紧）。 */
 const COUNT_MAX_DISTANCE = 0.32;
+/** 计数匹配的形状先验权重（见 GlyphShapePrior）。**实测证伪，权重归零保留**：
+ * 设想是「拉伸比对丢掉宽度/拓扑差异」→ 用 aspect/hole 罚项压住 '5'→'0'、
+ * '3'→'8' 这类系统性误读。实测（2026-11-24）：
+ *  - hole=0.12：card3 数量 45→31/48。根因=计数模板是**聚类平均位图**，
+ *    孔洞在平均过程中被抹平（'8' 模板只剩 1 孔），先验按模板孔洞罚等于
+ *    罚真字形。要让孔洞先验可用，得改模板合成（取簇中位实例而非均值）。
+ *  - aspect=0.18：card1 40→40（无净收益），card3 26→24（劣化）——模板
+ *    字宽本身是簇内混合宽度，先验方向不可靠。
+ * 参数保留：将来换成中位实例模板可直接启用，无需再动 matchGlyph 签名。 */
+const COUNT_ASPECT_PRIOR = 0;
+const COUNT_HOLE_PRIOR = 0;
 /** 计数字形聚类的同字符阈值（同字体同字符距离 ~0.1）。 */
 const COUNT_GROUP_JACCARD = 0.22;
 /** 同字符碎簇合并阈值（簇模板两两距离）。 */
@@ -81,6 +92,9 @@ export const countTemplateAssignment: Array<{ size: number; dims: string; digit:
 /** 最近一次 buildCountTemplates 选中的合成锚（多高度候选胜者）。recognizeEntry
  * 的联合匹配（matchCount）复用它——候选渲染高度由仲裁选出，调用方无需重复推断。 */
 export const lastSyntheticAnchors: { current: Map<string, Bitmap> | null } = { current: null };
+/** 最近一次计数模板（诊断/先验校验用）：形状先验要核对模板自身的孔洞数与
+ * 字宽，模板是聚类平均位图，孔洞可能被平均抹平——先验不能盲信模板。 */
+export const lastCountTemplates: { current: Map<string, Bitmap> | null } = { current: null };
 /** code|count 形状打平时改信先验所需的领先度下限。 */
 const SHAPE_AMBIGUOUS_MARGIN = 0.08;
 /** 少于这个条目数就不认为是图例条（单"条目"更可能是噪点或水印）。 */
@@ -89,6 +103,17 @@ const MIN_ENTRIES = 2;
 export const LEGEND_LOW_CONFIDENCE = 0.6;
 /** 粒数上限（图纸单色粒数不可能超过总格数 312×312）。 */
 const COUNT_MAX = 999;
+/** 位数放宽后的粒数上限（色卡 4 位：121×121 网格单色可达 14641，card3 实测
+ * 最高 2725）。只对显式放宽位数的路径生效——常规图纸图例维持 999。 */
+const COUNT_MAX_WIDE = 9999;
+/** 计数字形位数上限（图纸图例 3 位；色卡清单放宽到 4 位——121×121 网格的
+ * 单色可达 14641，card3 实测最高 2725）。色卡路径显式传入 4。 */
+const COUNT_MAX_DIGITS = 3;
+const CARD_COUNT_MAX_DIGITS = 4;
+/** 竖排清单「单位字」（粒/颗）与末位数字之间的间隙（CARD_UPSCALE 像素）：
+ * card3 实测数字间间隙 0-4、数字↔粒 8-12，取 6 为界。单位字被当数字参与
+ * 匹配会让位数超限 → 整条 countUnread（card3 数量全 0 的根因）。 */
+const CARD_UNIT_GAP = 6;
 /** 条目间隙阈值下限：条目间距（≥32px）必须显著大于字内间隙（≤12px）。 */
 const ENTRY_GAP_MIN = 16;
 /** 色点最小宽度下限（另与行内字形中位宽联动）。 */
@@ -806,6 +831,11 @@ function collectChipEntries(
   const boxes = [...(located.chipBoxes ?? [])].sort((a, b) => a.y0 - b.y0 || a.x0 - b.x0);
   const rawEntries: RawEntry[] = [];
   const digitWidths: number[] = [];
+  // 完整票面/碎片框判别：detectLegendChips 的聚类会同时产出"整票框"（≈50px）
+  // 与"票面右半碎片框"（≈25px，只罩住数量位）。只有整票框能当条目——碎片框
+  // 重复提取同一批数字会造出假条目（2026-11-24 实测 +5 条里有 3 条是碎片）。
+  const boxWidths = boxes.map(b => b.x1 - b.x0 + 1).sort((a, b) => a - b);
+  const medianBoxW = boxWidths.length ? boxWidths[Math.floor(boxWidths.length / 2)] : 0;
   for (const box of boxes) {
     const boxW = box.x1 - box.x0 + 1;
     // 列级码块/数量格切分：小码块图例（猴子图式）的框常连着药丸边框行与
@@ -831,14 +861,59 @@ function collectChipEntries(
       if (dr * dr + dg * dg + db * db > 800) chipEnd = x;
       else break;
     }
-    if (chipEnd < box.x0 + 3) continue; // 没有可辨的彩色码块
+    if (chipEnd < box.x0 + 3) {
+      // 白色/极浅色票面（2026-11-24 dog-girl 实测）：图纸里用量最大的白豆
+      // （H2 1770 粒）色块就是白纸色，票面找不到"彩色码块"→ 旧逻辑整条丢弃
+      // 8 条（H2/E16/E8/H10…）。这类票面码字是黑字直接印在白底左部、数量在
+      // 右部，不需要颜色分区：整票对背景提一次字形，全部交给下游
+      // splitEntry 按间隙切 code|count。dotRgb 取票面主色（白）——物理上就是
+      // 该条目的色块色，priorFromDot 对白系色号仍是有效弱先验。
+      // 碎片框（宽远小于中位）跳过：它们只罩住数量位，会把同一批数字再报一遍。
+      if (boxW < medianBoxW * 0.8) continue;
+      const wholeLine: LineScan = { y0: box.y0 + 3, y1: box.y1 - 3, minX: box.x0, maxX: box.x1 };
+      const all = analyzeLine(source, bg, wholeLine)
+        .filter(c => c.x0 >= box.x0 && c.x1 <= box.x1 && widthOf(c) < boxW * 0.9)
+        .sort((a, b) => a.x0 - b.x0);
+      // 码区必须有内容：码字印在票面左 40% 内。若字形全部挤在右半，说明
+      // 码字是浅色块上的白字（本窗口提不到）、只剩数量——这种"半条"带上
+      // dotRgb=白 会先验成 H2 造出重复假条目（实测同一图例多出 4 个 H2）。
+      const hasCodeSide = all.some(c => c.x0 <= box.x0 + Math.round(boxW * 0.4));
+      if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[chipd] x${box.x0}-${box.x1} y${box.y0}-${box.y1} PALETICKET n=${all.length} codeSide=${hasCodeSide} [${all.map(c => `x${c.x0}w${widthOf(c)}`).join('|')}]`);
+      if (!hasCodeSide || all.length < 2) continue;
+      rawEntries.push({ dotRgb: bg as [number, number, number], glyphs: all });
+      for (const g of all) digitWidths.push(widthOf(g));
+      continue;
+    }
     const chipColor = dominantBaseColor(data, width, box.x0, box.y0, chipEnd + 1, box.y1 + 1);
     // 码块内文字（对卡色做对比掩码，深卡白字同样弹出）。左界 +3 避开
     // 卡缘边框列——边框混进首字形会毒化码字匹配（僵尸图实测 A17→A8）。
     const line: LineScan = { y0: box.y0 + 3, y1: box.y1 - 3, minX: box.x0 + 3, maxX: chipEnd - 1 };
-    const comps = analyzeLine(source, chipColor, line)
-      .filter(c => widthOf(c) < (chipEnd - box.x0) * 0.7 && c.x0 >= box.x0 + 3 && c.x1 <= chipEnd)
+    let comps = analyzeLine(source, chipColor, line)
+      .filter(c => {
+        if (c.x0 < box.x0 + 3 || c.x1 > chipEnd) return false;
+        const w = widthOf(c);
+        if (w < (chipEnd - box.x0) * 0.7) return true;
+        // 超宽但笔画稀疏（fill 低）= 多字符连体（"F19" 白字在红块上连成
+        // ~21px 块，被纯宽度上限当整块色块滤掉——2026-11-24 dog-girl 实测）；
+        // 实心大块（fill 高）= 色块本身，仍过滤。
+        const fill = c.area / (w * (c.y1 - c.y0 + 1));
+        return fill < 0.55;
+      })
       .sort((a, b) => a.x0 - b.x0);
+    // 码区近空重试（2026-11-24 dog-girl：浅色票面如 C12 的码字是白字压浅底，
+    // 常规 CONTRAST 提不到，整条只剩数量 → 被"少于 2 字形"丢弃）。
+    if (comps.length < 1) {
+      const retried = analyzeLineWithContrast(source, chipColor, line, CARD_TEXT_CONTRAST, 0.95)
+        .filter(c => {
+          if (c.x0 < box.x0 + 3 || c.x1 > chipEnd) return false;
+          const w = widthOf(c);
+          if (w < (chipEnd - box.x0) * 0.7) return true;
+          return c.area / (w * (c.y1 - c.y0 + 1)) < 0.55;
+        })
+        .sort((a, b) => a.x0 - b.x0);
+      if (typeof process !== 'undefined' && process.env?.CARD_DEBUG && retried.length) console.error(`[chipd] x${box.x0}-${box.x1} retryCode got=${retried.length}`);
+      comps = retried;
+    }
     // 计数区：码块右侧到同行下一卡左缘（含白底数量格与框外尾随两种形态）。
     const next = boxes.find(b => b !== box && b.y0 < box.y1 && b.y1 > box.y0 && b.x0 > box.x1);
     const trailLimit = Math.min(next ? next.x0 - 2 : box.x1 + boxW * 2 + 6, box.x1 + boxW * 2 + 6);
@@ -852,7 +927,10 @@ function collectChipEntries(
       comps.sort((a, b) => a.x0 - b.x0);
     }
     // 码块内 1-2 字形（"H2"）也合法——不再要求 ≥3。
-    if (comps.length < 2) continue;
+    if (comps.length < 2) {
+      if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[chipd] x${box.x0}-${box.x1} y${box.y0}-${box.y1} DROP fewGlyphs chipEnd=${chipEnd} n=${comps.length} [${comps.map(c => `x${c.x0}w${widthOf(c)}`).join('|')}]`);
+      continue;
+    }
     rawEntries.push({ dotRgb: chipColor, glyphs: comps });
     for (const g of comps) digitWidths.push(widthOf(g));
   }
@@ -1831,14 +1909,39 @@ interface GlyphMatch {
   secondDistance: number;
 }
 
+/** 字形形状先验（计数区专用，默认全关）：Jaccard 前先把「同一个字形不可能
+ * 有的形状」罚掉，压住低分辨率下的系统性误读（card1/card3 实测：'5'→'0'、
+ * '3'→'8' 这类错值都是"拉伸比对丢掉了宽度/拓扑差异"造成的）。
+ *  - aspect：字宽相对差 |wg-wt|/max → 权重化罚项。bitmapJaccard 会把两个
+ *    字形拉伸到同宽再比，窄 '1'(12px) 拉到 16px 后与 '3' 几乎同形。
+ *  - hole：孔洞数不一致的硬罚。0/6/8/9 有孔、1/2/3/5/7 无孔，4 不稳定。
+ * 两者都以「距离增量」形式参与 argmin，权重 0 即完全等价于旧行为。 */
+export interface GlyphShapePrior {
+  aspect?: number;
+  hole?: number;
+}
+
 /** 单字形对模板集匹配：返回最优字符与次优距离。pad=true 用居中填充比对
  * （合成锚跨尺寸场景，防止拉伸变形），默认拉伸（同源真实字形场景）。 */
-export function matchGlyph(glyph: Bitmap, templates: Map<string, Bitmap>, pad = false): GlyphMatch | null {
+export function matchGlyph(
+  glyph: Bitmap,
+  templates: Map<string, Bitmap>,
+  pad = false,
+  prior?: GlyphShapePrior,
+): GlyphMatch | null {
   const dist = pad ? bitmapJaccardPad : bitmapJaccard;
+  const aspect = prior?.aspect ?? 0;
+  const hole = prior?.hole ?? 0;
+  const glyphHoles = hole > 0 ? bitmapHoles(glyph) : -1;
   let best: GlyphMatch | null = null;
   let second = Number.POSITIVE_INFINITY;
   for (const [char, template] of templates) {
-    const d = dist(glyph, template);
+    let d = dist(glyph, template);
+    if (aspect > 0) {
+      const span = Math.max(glyph.w, template.w);
+      if (span > 0) d += aspect * Math.min(1, Math.abs(glyph.w - template.w) / span);
+    }
+    if (glyphHoles >= 0 && bitmapHoles(template) !== glyphHoles) d += hole;
     if (!best || d < best.distance) {
       second = best ? best.distance : second;
       best = { char, distance: d, secondDistance: 0 };
@@ -2199,15 +2302,17 @@ function recognizeEntry(
   countW: number,
   synthTemplates?: Map<string, Bitmap> | null,
   prepared?: Array<{ color: BeadColor; lab: [number, number, number] }>,
+  maxDigits = COUNT_MAX_DIGITS,
 ): EntryParse {
   const warns: string[] = [];
   // 计数匹配（2026-11-15 浏览器实测）：真实字形模板捕获 JPEG 模糊，但
   // 模糊也会让 '1'（旗形头）贴上 '4' 模板——干净合成模板并入候选池取
   // 最小距离，两者互补（真实模板近时不受影响）。
   const matchCount = (bitmap: Bitmap): GlyphMatch | null => {
-    const m = countTemplates.size ? matchGlyph(bitmap, countTemplates) : null;
+    const m = countTemplates.size ? matchGlyph(bitmap, countTemplates, false, { aspect: COUNT_ASPECT_PRIOR, hole: COUNT_HOLE_PRIOR }) : null;
     if (synthTemplates && synthTemplates.size) {
-      const m2 = matchGlyph(bitmap, synthTemplates, true);
+      // 合成锚走 pad 比对（跨尺寸），字宽差无意义——只带孔洞先验。
+      const m2 = matchGlyph(bitmap, synthTemplates, true, { hole: COUNT_HOLE_PRIOR });
       if (m2 && (!m || m2.distance < m.distance)) return m2;
     }
     return m;
@@ -2347,9 +2452,9 @@ function recognizeEntry(
     let bestAvg = Number.POSITIVE_INFINITY;
     let bestPrefix = 0;
     // 尾块位数预算（2026-11-15 浏览器实测）：末位数字常与"粒"粘连，k 切片
-    // 会把粒也切成数字（粒形似'0'全匹配）→ 总位数超 3 判 countUnread
-    // （H1 953、E14 241 等 7 条全灭的根因）。尾块可贡献位数 = 3 - 已读位数。
-    const tailBudget = Math.max(0, 3 - digits.length);
+    // 会把粒也切成数字（粒形似'0'全匹配）→ 总位数超限判 countUnread
+    // （H1 953、E14 241 等 7 条全灭的根因）。尾块可贡献位数 = 上限 - 已读位数。
+    const tailBudget = Math.max(0, maxDigits - digits.length);
     if (countTemplates.size) {
       for (const k of ks) {
         const slices = splitBitmap(glyph.bitmap, k);
@@ -2399,9 +2504,9 @@ function recognizeEntry(
     countReadable = false;
     break;
   }
-  if (digits.length >= 1 && digits.length <= 3 && countReadable) {
+  if (digits.length >= 1 && digits.length <= maxDigits && countReadable) {
     const value = Number.parseInt(digits.join(''), 10);
-    if (Number.isFinite(value) && value >= 1 && value <= COUNT_MAX) count = value;
+    if (Number.isFinite(value) && value >= 1 && value <= (maxDigits > COUNT_MAX_DIGITS ? COUNT_MAX_WIDE : COUNT_MAX)) count = value;
     else warns.push('countOutOfRange');
   } else if (!count) {
     warns.push('countUnread');
@@ -3166,24 +3271,44 @@ export function buildCardBuffers(
   bg: [number, number, number],
   k: number,
   contrast: number = CONTRAST,
+  subpixel = false,
 ): { bin: ImportImagePixels; color: ImportImagePixels } {
-  const { data, width, height } = cropped;
-  const w = width * k, h = height * k;
+  const color = upscalePixelsBilinear(cropped, k);
+  const w = color.width, h = color.height;
   const contrast2 = contrast * contrast;
   const binData = new Uint8ClampedArray(w * h * 4);
-  for (let y = 0; y < h; y += 1) {
-    const sy = Math.min(height - 1, Math.floor(y / k));
-    for (let x = 0; x < w; x += 1) {
-      const sx = Math.min(width - 1, Math.floor(x / k));
-      const i = (sy * width + sx) * 4;
-      const dr = data[i] - bg[0], dg = data[i + 1] - bg[1], db = data[i + 2] - bg[2];
+  if (subpixel) {
+    // 亚像素二值化（2026-11-24 card3 实证，仅竖排小字启用）：先最近邻放大
+    // 再二值，每个原像素摊成 k×k 硬块，字形边缘只能落在整像素边界上——
+    // 4px 宽的计数字只剩四列台阶，'6'/'8'/'9' 无法区分。双线性 + 同阈值
+    // 等于把边缘定位精度从 1px 提到 1/k px（抗锯齿携带的亚像素边缘回来了），
+    // card3 数量 26→45/48。
+    // 默认关闭：横排色卡（card1）笔画本就粗，双线性把相邻数字糊连成宽块，
+    // 切片回收退化（实测 40→32/62）。
+    const { data } = color;
+    for (let i = 0; i < w * h; i += 1) {
+      const o = i * 4;
+      const dr = data[o] - bg[0], dg = data[o + 1] - bg[1], db = data[o + 2] - bg[2];
       const on = dr * dr + dg * dg + db * db > contrast2;
-      const o = (y * w + x) * 4;
       binData[o] = binData[o + 1] = binData[o + 2] = on ? 0 : 255;
       binData[o + 3] = 255;
     }
+  } else {
+    const { data, width, height } = cropped;
+    for (let y = 0; y < h; y += 1) {
+      const sy = Math.min(height - 1, Math.floor(y / k));
+      for (let x = 0; x < w; x += 1) {
+        const sx = Math.min(width - 1, Math.floor(x / k));
+        const i = (sy * width + sx) * 4;
+        const dr = data[i] - bg[0], dg = data[i + 1] - bg[1], db = data[i + 2] - bg[2];
+        const on = dr * dr + dg * dg + db * db > contrast2;
+        const o = (y * w + x) * 4;
+        binData[o] = binData[o + 1] = binData[o + 2] = on ? 0 : 255;
+        binData[o + 3] = 255;
+      }
+    }
   }
-  return { bin: { data: binData, width: w, height: h }, color: upscalePixelsBilinear(cropped, k) };
+  return { bin: { data: binData, width: w, height: h }, color };
 }
 
 export function cropPixels(source: ImportImagePixels, x0: number, y0: number, x1: number, y1: number): ImportImagePixels {
@@ -3456,7 +3581,7 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
     // 水印跨 token 连接字形 → comps 越界被 token 过滤滤空（card3 丢 20 条）。
     // 高对比重 bin（CARD_TEXT_CONTRAST）：水印淡紫 dist≈60-80 被甩掉，印字
     // 深藏青 dist≈300 保留。
-    const binHi = buildCardBuffers(cropped, bgNative, CARD_UPSCALE, CARD_TEXT_CONTRAST).bin;
+    const binHi = buildCardBuffers(cropped, bgNative, CARD_UPSCALE, CARD_TEXT_CONTRAST, true).bin;
     let binLoGray: ImportImagePixels | null = null;
     // 矮 band 延伸：淡色行（H2 等）行内容稀疏，行带检测在字形中途截断
     // （band 高 28 vs 中位 48，字形下半在带外 → comps=0 整行丢弃）。竖排
@@ -3516,7 +3641,7 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
       if (codeGlyphs.length >= 1) {
         const span = codeGlyphs[codeGlyphs.length - 1].x1 - codeGlyphs[0].x0 + 1;
         if (span < tokenSpan * 0.7) {
-          if (!binLoGray) binLoGray = buildCardBuffers(cropped, bgNative, CARD_UPSCALE, CARD_GRAY_CONTRAST).bin;
+          if (!binLoGray) binLoGray = buildCardBuffers(cropped, bgNative, CARD_UPSCALE, CARD_GRAY_CONTRAST, true).bin;
           const retryComps = analyzeLineWithContrast(binLoGray, bg, { y0: band.y0 - 1, y1: band.y1 + 1, minX: texts[0].x0 - 1, maxX: texts[0].x1 + 1 }, CARD_GRAY_CONTRAST, 0.95)
             .filter(c => c.x0 >= texts[0].x0 - 1 && c.x1 <= texts[0].x1 + 1);
           const retryGlyphs: GlyphComp[] = [];
@@ -3545,7 +3670,7 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
         .map(widthOf)
         .filter(w => w >= digitWv * 0.5 && w < digitWv * 1.4);
       const countWv = singleW.length ? median(singleW) : digitWv;
-      const countGlyphs = rawCounts.flatMap(g => {
+      const countGlyphsRaw = rawCounts.flatMap(g => {
         const parts = cardSplitWideGlyph(g, digitWv);
         const out: GlyphComp[] = [];
         for (const p of parts) {
@@ -3558,10 +3683,29 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
         }
         return out;
       });
+      // 单位字剥离（2026-11-24 card3 实证）：数量 token 内「2725粒」连成一串，
+      // 粒（米+立）被 k 切片当成数字 → 位数超限整条 countUnread（card3 48 条
+      // 数量全 0 的根因）。数字间间隙实测 0-4px、数字↔单位 8-12px：按最后一个
+      // ≥CARD_UNIT_GAP 的间隙切掉尾部单位组。守卫=尾部至少与数字同高（同等
+      // 字号汉字），淡碎片不剥；切完必须留得下 ≥1 个数字。
+      const countGlyphs = (() => {
+        if (countGlyphsRaw.length < 2) return countGlyphsRaw;
+        let cut = countGlyphsRaw.length;
+        for (let i = countGlyphsRaw.length - 1; i >= 1; i -= 1) {
+          if (countGlyphsRaw[i].x0 - countGlyphsRaw[i - 1].x1 - 1 >= CARD_UNIT_GAP) { cut = i; break; }
+        }
+        if (cut >= countGlyphsRaw.length) return countGlyphsRaw;
+        const bodyH = median(countGlyphsRaw.slice(0, cut).map(g => g.y1 - g.y0 + 1));
+        const unitH = Math.max(...countGlyphsRaw.slice(cut).map(g => g.y1 - g.y0 + 1));
+        if (unitH < bodyH * 0.9) return countGlyphsRaw;
+        if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[vdbg-unit] y=${band.y0}-${band.y1} dropped ${countGlyphsRaw.length - cut} unit glyphs`);
+        return countGlyphsRaw.slice(0, cut);
+      })();
       items.push({ codeGlyphs, countGlyphs, dotRgb: swatchColor });
       for (const g of countGlyphs) if (widthOf(g) <= 40) countWidths.push(widthOf(g));
     }
   } else {
+  let binSharp: ImportImagePixels | null = null;
   for (const bd of bandData) {
     const { band, tokens, anchors } = bd;
     if (!tokens.length) continue;
@@ -3621,6 +3765,10 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
           .flatMap(g => cardSplitMegaCode(g, bandDigitW))
           .flatMap(g => cardSplitWideGlyph(g, bandDigitW)), bandDigitW);
         item.countGlyphs = item.countGlyphs.flatMap(g => cardSplitWideGlyph(g, bandDigitW));
+        // 数量字形重采样（横排，见 sharpenCountBitmaps）：切分用厚 mask 做
+        // 几何（位置/宽度/间隙），识别用"只留强墨"的细 mask 做形状。
+        if (!binSharp) binSharp = buildCardBuffers(cropped, bgNative, CARD_UPSCALE, CARD_SWATCH_TEXT_CONTRAST, true).bin;
+        item.countGlyphs = sharpenCountBitmaps(item.countGlyphs, binSharp);
         items.push(item);
         for (const g of item.countGlyphs) if (widthOf(g) <= 40) countWidths.push(widthOf(g));
       }
@@ -3640,6 +3788,40 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
 export function cardDropSlivers(glyphs: GlyphComp[], digitW: number): GlyphComp[] {
   const kept = glyphs.filter(g => !(widthOf(g) < digitW * 0.55 && g.area < digitW * digitW * 0.3));
   return kept.length ? kept : glyphs;
+}
+
+/**
+ * 计数字形位图重采样（2026-11-24 card1 实证）：横排色卡的数字是粗体白底
+ * 深墨，小字号下最近邻 mask（CONTRAST=60）把笔画与字腔一起吃掉——'5'/'9'
+ * 与 '0'/'8' 退化成实心团，计数模板 '0' 是个几乎实心的圆（孔洞只剩 3 行），
+ * 于是所有 '5' 都被判成 '0'（card1 实测 255→200、197→107、45→40）。
+ * 用双线性放大 + 高对比阈值（CARD_SWATCH_TEXT_CONTRAST=150，只留强墨）
+ * 在原 bbox 内重采样：字腔张开、笔画变细，形状信息回来（实测阈值 150 下
+ * '5' 的顶横+左竖+碗形清晰可分；200 开始碎裂）。
+ * 只换位图不换 bbox——位置/宽度/间隙判据仍来自原 mask，切分几何零扰动。 */
+export function sharpenCountBitmaps(glyphs: GlyphComp[], bin: ImportImagePixels): GlyphComp[] {
+  return glyphs.map(glyph => {
+    const w = glyph.x1 - glyph.x0 + 1, h = glyph.y1 - glyph.y0 + 1;
+    if (w <= 0 || h <= 0) return glyph;
+    const data = new Uint8Array(w * h);
+    let ink = 0;
+    for (let y = 0; y < h; y += 1) {
+      const by = glyph.y0 + y;
+      if (by < 0 || by >= bin.height) continue;
+      for (let x = 0; x < w; x += 1) {
+        const bx = glyph.x0 + x;
+        if (bx < 0 || bx >= bin.width) continue;
+        if (bin.data[(by * bin.width + bx) * 4] === 0) { data[y * w + x] = 1; ink += 1; }
+      }
+    }
+    // 强墨像素太少（淡印数字只在高阈值下消失）：保留原位图，宁可用厚字形。
+    if (ink < w * h * 0.05) return glyph;
+    // 强墨几乎填满 bbox = 整块被判成墨，不是字形（白字印在色票上的 card2
+    // 类：按页底测距把整块色票算作墨）——保留原位图。真数字填充率实测
+    // 0.49-0.86，0.9 以上必是实心块。
+    if (ink > w * h * 0.9) return glyph;
+    return { ...glyph, bitmap: { data, w, h } };
+  });
 }
 
 /** mega 码块 k 等分（横排专用，card1 H22/D17/D19 实证）：票面白印码三字符
@@ -4398,7 +4580,37 @@ export function collectCardEntries(
     rawEntries.push({ dotRgb: item.dotRgb, glyphs: [...item.codeGlyphs, ...item.countGlyphs] });
     splits.push({ codeGlyphs: item.codeGlyphs, countGlyphs: item.countGlyphs, splitSuspicious: false });
   }
+  // 横排：数量区按词间距裁 run（card1 #0 H2 实证）。数量是连续数字串，绝不
+  // 跨词间距出现——色块内印码的残片（"H2" 的 '2'）会隔着票缘空白被并进
+  // 数量区，位宽再像数字也不是数量。按 ≥CARD_COUNT_RUN_GAP 切 run 取最长
+  // （并列取最右：横排数量恒在色块右侧）。竖排不走此路：那边数量在最左、
+  // 单位字在右，方向相反，由 CARD_UNIT_GAP 尾裁剪负责。
+  if (!collected.vertical) for (const split of splits) if (split) trimCountRuns(split);
   return { rawEntries, splits, digitW: collected.digitW, vertical: collected.vertical };
+}
+
+/** 数量区 run 裁剪：见 collectCardEntries 注释。间隙阈值取横排实测的词间距
+ * 下限（card1 票缘空白 16px），数字间间隙最大 6px。 */
+const CARD_COUNT_RUN_GAP = 10;
+
+function trimCountRuns(split: SplitResult): void {
+  const glyphs = split.countGlyphs;
+  if (glyphs.length < 3) return;
+  const runs: GlyphComp[][] = [];
+  let current: GlyphComp[] = [glyphs[0]];
+  for (let i = 1; i < glyphs.length; i += 1) {
+    if (glyphs[i].x0 - glyphs[i - 1].x1 - 1 >= CARD_COUNT_RUN_GAP) {
+      runs.push(current);
+      current = [glyphs[i]];
+    } else {
+      current.push(glyphs[i]);
+    }
+  }
+  runs.push(current);
+  if (runs.length < 2) return;
+  let best = runs.length - 1;
+  for (let i = runs.length - 2; i >= 0; i -= 1) if (runs[i].length > runs[best].length) best = i;
+  if (runs[best].length !== glyphs.length) split.countGlyphs = runs[best];
 }
 
 /** 色卡条目质量分：色板内码 +1、可读数量再 +1（compare 用）。 */
@@ -4676,7 +4888,7 @@ function parseCardLegend(
   // 准入对此无能为力。demoteSeeds/reportFlips 参数保留（默认不激活）。
   const refinedCodes = cardRefineCodes(rawEntries, splits, anchors, prepared, digitW);
   const checks = emptyChecks();
-  const { entries } = recognizeLegendEntries(rawEntries, splits, priors, refinedCodes, prepared, paletteCodes, digitW, countSeedTemplates ?? null, codeSeedGlyphs ?? null, codeAnchors ?? null);
+  const { entries } = recognizeLegendEntries(rawEntries, splits, priors, refinedCodes, prepared, paletteCodes, digitW, countSeedTemplates ?? null, codeSeedGlyphs ?? null, codeAnchors ?? null, CARD_COUNT_MAX_DIGITS);
   // 字形翻案轮（输出层）：必须放在 recognizeLegendEntries 之后直接改
   // entries.code——放 refined 层会被模板自举连锁放大（实测 37→34）。
   cardOverturnEntries(rawEntries, splits, anchors, entries, prepared, { vertical });
@@ -4910,6 +5122,7 @@ export function recognizeLegendEntries(
   countSeedTemplates?: Map<string, Bitmap | Bitmap[]> | null,
   codeSeeds?: Map<string, Bitmap[]> | null,
   codeAnchors?: Map<string, Bitmap[]> | null,
+  maxCountDigits = COUNT_MAX_DIGITS,
 ): { entries: LegendEntry[]; templates: Map<string, Bitmap>; bootstrapped: boolean } {
   countGlyphDump.length = 0;
   // 自举标注：求解出的 code 字形是天然标注样本（覆盖全部出现过的字符）。
@@ -4997,11 +5210,12 @@ export function recognizeLegendEntries(
         .filter((m): m is Map<string, Bitmap> => !!m)
     : [];
   const countTemplates = buildCountTemplates(rawEntries, splits, digitW, codeDigitTemplates, syntheticDigits, typeof document !== 'undefined', countSeedTemplates ?? null);
+  lastCountTemplates.current = countTemplates;
   const synthWinner = lastSyntheticAnchors.current;
 
   // 逐条目识别。
   const parsed = rawEntries.map((entry, index) =>
-    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW, synthWinner, prepared));
+    recognizeEntry(entry, splits[index], priors[index], resolvedCodes[index], templates, countTemplates, paletteCodes, digitW, countW, synthWinner, prepared, maxCountDigits));
   if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) {
     rawEntries.forEach((entry, i) => {
       const split = splits[i];

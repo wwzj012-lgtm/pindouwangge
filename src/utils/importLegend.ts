@@ -937,6 +937,12 @@ function locateEdgeCandidates(source: ImportImagePixels): LegendLocation[] {
  */
 const EDGE_GATE_MIN = 8;
 
+/** 小码块救援门槛：常规路径条目数低于此值即视为「凑不出像样结果」，跑 12px
+ * 小游程救援。垃圾装配（分隔条/水印/豆格碎屑）通常只出 1-3 条，真图例条
+ * 最小实测 11 条——取 6 作分界（2026-11-24 狗狗图左缘裁 4px 实证：
+ * 旧门槛 MIN_ENTRIES=2 被恰好 2 条垃圾挡住，整条图例报 templateStarved）。 */
+const RESCUE_SPARSE_ENTRIES = 6;
+
 function selectLegendLocation(
   source: ImportImagePixels,
   calibration: ImportGridCalibration,
@@ -966,12 +972,19 @@ function selectLegendLocation(
     }
   }
   // 小码块最后手段（2026-11-22 猴子图）：彩色码块 ~18px 宽、字印在块上，
-  // 常规 40px 实色游程检不到。只在常规候选（含边缘回退）连最小可用条目数
-  // 都凑不齐时才用 12px 小游程重试——不能参与常规仲裁（僵尸图实测会劫持
-  // 本来正确的行/卡路径，色号全面劣化）。判定用条目数而非色点数：分隔条
-  // （狗狗图橙色横条）会凑出 1 条带假色点的垃圾，条目数门槛不被它骗过。
+  // 常规 40px 实色游程检不到。只在常规候选（含边缘回退）凑不出像样条目数
+  // 时才用 12px 小游程重试——不能参与常规仲裁（僵尸图实测会劫持本来正确
+  // 的行/卡路径，色号全面劣化）。判定用条目数而非色点数：分隔条（狗狗图
+  // 橙色横条）会凑出带假色点的垃圾，条目数门槛不被它骗过。
+  //
+  // 门槛从 MIN_ENTRIES(2) 提到 RESCUE_SPARSE_ENTRIES(6)（2026-11-24 狗狗图
+  // 实测）：这类色卡芯片仅 ~51px 宽、白字压在芯片中部，实色游程被字打断，
+  // 40px 主路径检出 0 张，只有 12px 救援路径能出 68 张。框选时左缘内缩 4px
+  // 会让文字行路径恰好凑出 2 条垃圾——旧门槛「<2」判定不成立，救援被挡住，
+  // 整条图例报 templateStarved。真图例条最小实测 11 条（water-box），6 是
+  // 垃圾（1-3 条）与真图例之间的安全分界。
   const finalDotful = best ? best.rawEntries.reduce((sum, entry) => sum + (entry.dotRgb ? 1 : 0), 0) : 0;
-  if (finalDotful === 0 || !best || best.rawEntries.length < MIN_ENTRIES) {
+  if (finalDotful === 0 || !best || best.rawEntries.length < RESCUE_SPARSE_ENTRIES) {
     for (const located of locateChipCandidates(source, calibration, framed, true)) {
       const parsed = collectChipEntries(source, located);
       lastLocationDebug.push({ region: 'chip-small', anchored: false, lines: 0, rawEntries: parsed.rawEntries.length });

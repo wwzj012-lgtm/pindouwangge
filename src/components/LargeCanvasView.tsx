@@ -718,7 +718,18 @@ function downloadCanvas(canvas: HTMLCanvasElement, name: string): void {
   link.click();
 }
 
-function FrameBeanGrid({ frame, paletteMap, rect, beadShape, showCodeLabels }: { frame: LargeCanvasFrame; paletteMap: Map<string, { hex: string; code?: string }>; rect: LargeCanvasGridRect; beadShape: BeadShape; showCodeLabels: boolean }) {
+/** 色号文字墨色：按豆色感知亮度自动选黑/白（0.299/0.587/0.114 加权，阈值 150，
+ * 与识别向导 swatchInk 同口径）。之前两个渲染层都写死深色墨，H7/B22/D4 这类
+ * 深豆上色号直接隐身（2026-11-26 用户反馈）。 */
+export function codeInkFor(hex: string | undefined): string {
+  if (!hex || !hex.startsWith('#') || hex.length < 7) return 'rgba(15,23,42,0.8)';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return (r * 0.299 + g * 0.587 + b * 0.114) < 150 ? 'rgba(255,255,255,0.92)' : 'rgba(15,23,42,0.8)';
+}
+
+function FrameBeanGrid({ frame, paletteMap, rect, beadShape, cellSize, showCodeLabels }: { frame: LargeCanvasFrame; paletteMap: Map<string, { hex: string; code?: string }>; rect: LargeCanvasGridRect; beadShape: BeadShape; cellSize: number; showCodeLabels: boolean }) {
   const grid = frame.beanResult;
   if (!grid || grid.length !== rect.height || grid[0]?.length !== rect.width) return null;
   return (
@@ -727,7 +738,11 @@ function FrameBeanGrid({ frame, paletteMap, rect, beadShape, showCodeLabels }: {
         const color = colorId ? paletteMap.get(colorId) : undefined;
         const isRound = beadShape === 'circle_flat' || beadShape === 'fuse_3d';
         return (
-        <span key={`${y}-${x}`} className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden text-[5px] font-black leading-none text-slate-950/75" style={{
+        <span key={`${y}-${x}`} className="flex min-h-0 min-w-0 items-center justify-center overflow-hidden font-black leading-none" style={{
+          color: codeInkFor(color?.hex),
+          // 与 canvas 层同口径：格距 × 0.45，字重 900，5px 兜底
+          fontSize: `max(5px, ${(Math.max(4, cellSize * 0.45)).toFixed(2)}px)`,
+          fontFamily: 'sans-serif',
           backgroundColor: color?.hex ?? (colorId ? '#CBD5E1' : 'transparent'),
           borderRadius: isRound ? '999px' : beadShape === 'ironed' ? '2px' : '0',
           margin: isRound || beadShape === 'ironed' ? '1px' : 0,
@@ -786,7 +801,7 @@ function ManualBeanLayer({ cells, paletteMap, beadShape, cellSize, showCodeLabel
         context.fillRect(left, top, beadSize, beadSize);
       }
       if (showCodeLabels) {
-        context.fillStyle = 'rgba(15,23,42,0.75)';
+        context.fillStyle = codeInkFor(color?.hex);
         context.fillText(color?.code ?? colorId, x * cellSize + cellSize / 2, y * cellSize + cellSize / 2);
       }
     });
@@ -2142,7 +2157,7 @@ export const LargeCanvasView = React.forwardRef<LargeCanvasViewHandle, LargeCanv
               return (
                 <article key={frame.id} data-large-canvas-frame aria-label={frame.title} className={`absolute overflow-visible ${!drawMode && (isSelected || isHovered) ? 'z-30' : 'z-10'}`} style={{ left: renderRect.x * scaledCellSize, top: renderRect.y * scaledCellSize, width: renderRect.width * scaledCellSize, height: renderRect.height * scaledCellSize, touchAction: drawMode ? 'none' : 'auto' }} onPointerEnter={() => setHoveredId(frame.id)} onPointerLeave={() => { if (selectedId !== frame.id) setHoveredId(current => current === frame.id ? null : current); }} onPointerDown={event => drawMode ? startDrawing(event, frame) : startFrameMove(event, frame)} onPointerMove={event => drawMode ? continueDrawing(event) : updateInteraction(event)} onPointerUp={event => drawMode ? finishDrawing(event) : finishInteraction()} onPointerCancel={event => drawMode ? cancelDrawing(event) : setInteraction(null)} onLostPointerCapture={event => drawMode ? finishDrawing(event) : finishInteraction()} onClick={event => { event.stopPropagation(); setSelectedId(frame.id); }} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); loadFile(frame, event.dataTransfer.files[0]); }}>
                   <div className={`pointer-events-none absolute inset-0 ${valid ? (isSelected ? 'ring-2 ring-amber-400' : 'ring-1 ring-purple-500/70') : 'ring-2 ring-rose-500'}`} />
-                  <FrameBeanGrid frame={frame} paletteMap={paletteMap} rect={renderRect} beadShape={beadShape} showCodeLabels={showCodeLabels && (viewScale >= 0.8 || isSelected)} />
+                  <FrameBeanGrid frame={frame} paletteMap={paletteMap} rect={renderRect} beadShape={beadShape} cellSize={scaledCellSize} showCodeLabels={showCodeLabels && (viewScale >= 0.8 || isSelected)} />
                   {shapePreview?.frameId === frame.id && <div className="pointer-events-none absolute inset-0"><div className="absolute inset-0 grid" style={{ gridTemplateColumns: `repeat(${renderRect.width}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${renderRect.height}, minmax(0, 1fr))` }}>{shapePreview.points.map(point => <span key={`${point.x}-${point.y}`} className={`z-10 m-0.5 rounded-sm ${shapePreview.selection ? 'bg-rose-600/75' : 'bg-purple-700/75'}`} style={{ gridColumn: point.x - renderRect.x + 1, gridRow: point.y - renderRect.y + 1 }} />)}</div></div>}
                   {frame.loading && <div className="absolute inset-0 flex items-center justify-center bg-white/70"><Loader2 className="h-5 w-5 animate-spin text-purple-600" /></div>}
                   {frame.error && <div title={frame.error} className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-rose-600/90 px-1 py-0.5 text-[9px] font-bold text-white"><AlertTriangle className="h-3 w-3 shrink-0" /><span className="truncate">{frame.error}</span></div>}

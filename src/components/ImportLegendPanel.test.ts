@@ -258,9 +258,12 @@ describe('parseLegendImportText（外部 AI 文本粘贴导入）', () => {
     expect(r.skipped).toEqual(['随便一句话', 'M7']);
   });
 
-  it('同色号重复出现取最后一次；数量 clamp 到 0..999', () => {
+  it('同色号重复出现取最后一次；数量不设上限（大图单色可超 999）', () => {
     expect(parseLegendImportText('H2 10\nH2 20', codes).entries).toEqual([{ code: 'H2', count: 20 }]);
-    expect(parseLegendImportText('H2 5000', codes).entries).toEqual([{ code: 'H2', count: 999 }]);
+    expect(parseLegendImportText('H2 5000', codes).entries).toEqual([{ code: 'H2', count: 5000 }]);
+    expect(parseLegendImportText('H2 14641', codes).entries).toEqual([{ code: 'H2', count: 14641 }]);
+    // 负数走 JSON 路径验证（文本行里 "-" 是分隔符）
+    expect(parseLegendImportText('[["H2",-3]]', codes).entries).toEqual([{ code: 'H2', count: 0 }]);
   });
 
   it('空文本 → 空结果', () => {

@@ -1437,11 +1437,57 @@
 }
 
 /* ===== 图例锁定面板（ImportLegendPanel，.ir-lg-* 命名空间） ===== */
+/* 图例工具条（2026-11-26 重排）：单行紧凑分组——主动作实底、次动作 ghost
+   无描边，清空 icon-only。侧栏窄容器不再换行出两排描边大盒。 */
 .ir-legend-panel .ir-legend-actions {
   display:flex;
   flex-wrap:wrap;
-  gap:8px;
+  align-items:center;
+  gap:4px;
   margin:10px 0 4px
+}
+.ir-legend-actions .ir-button {
+  min-height:32px;
+  padding:4px 10px;
+  gap:6px;
+  border-radius:8px;
+  font-size:12.5px
+}
+/* 主动作：保留实底紫，稍收窄内距 */
+.ir-legend-actions .ir-button.ir-primary {
+  padding:4px 12px;
+  margin-right:4px
+}
+/* 次动作 ghost 化：去描边去底色，hover 才浮现，视觉重量让给主动作 */
+.ir-legend-actions .ir-button:not(.ir-primary) {
+  border-color:transparent;
+  background:transparent;
+  color:var(--ir-muted);
+  font-weight:550!important
+}
+.ir-legend-actions .ir-button:not(.ir-primary):hover:not(:disabled) {
+  background:var(--ir-soft);
+  color:var(--ir-ink)
+}
+/* 框选按下态 / 粘贴面板展开态：紫色强调（挂 --ir-purple 走亮暗分档） */
+.ir-legend-actions .ir-button[aria-pressed=true] {
+  background:color-mix(in srgb,var(--ir-purple) 12%,transparent);
+  color:var(--ir-purple)
+}
+/* 清空 icon-only 同 ghost 尺寸（基础样式是固定 42×42，需覆盖宽高） */
+.ir-legend-actions .ir-icon-button {
+  width:32px;
+  height:32px;
+  min-height:32px;
+  min-width:32px;
+  border-color:transparent;
+  background:transparent;
+  border-radius:8px
+}
+.ir-legend-actions .ir-icon-button:hover:not(:disabled) {
+  background:var(--ir-soft);
+  border-color:transparent;
+  color:var(--ir-ink)
 }
 /* 画布「框选图例」工具：按下态用紫色以区别识别区域（橙） */
 .ir-tool-legend[aria-pressed=true] {
@@ -1455,20 +1501,18 @@
 .ir-dot-violet {
   background:#8b5cf6
 }
+/* 框选提示：去描边盒，改轻量单行说明（不再与按钮抢视觉层级） */
 .ir-lg-region {
   display:flex;
   align-items:center;
-  gap:6px;
+  gap:5px;
   margin:6px 0 0;
-  padding:7px 10px;
-  border:1px solid color-mix(in srgb,#8b5cf6 35%,var(--ir-line));
-  border-radius:9px;
-  background:color-mix(in srgb,#8b5cf6 8%,var(--ir-soft));
+  padding:0 2px;
   font-size:11px;
   color:var(--ir-muted)
 }
 .ir-lg-region svg {
-  color:#7c3aed;
+  color:var(--ir-purple);
   flex:none
 }
 .ir-lg-region .ir-text-button {
@@ -1767,10 +1811,12 @@
   color:var(--ir-purple);
   border-color:var(--ir-purple)
 }
+/* 锁定态降噪（2026-11-26）：实底紫块 × 62 行太吵，改淡紫色调+紫图标，
+   状态仍一眼可辨，但整列不再压过内容。 */
 .ir-lg-lock.is-on {
-  background:var(--ir-purple);
-  border-color:var(--ir-purple);
-  color:#fff
+  background:color-mix(in srgb,var(--ir-purple) 14%,transparent);
+  border-color:color-mix(in srgb,var(--ir-purple) 45%,transparent);
+  color:var(--ir-purple)
 }
 .ir-lg-conf {
   font-size:10px;

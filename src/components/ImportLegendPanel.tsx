@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, ClipboardPaste, Lock, LockOpen, Plus, ScanSearch, Search, Trash2, SquareDashed } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Lock, LockOpen, ScanSearch, Search, Trash2, SquareDashed } from 'lucide-react';
 import type { BeadColor } from '../types';
 import {
   LEGEND_LOW_CONFIDENCE,
@@ -130,7 +130,9 @@ export function parseLegendImportText(
   const skipped: string[] = [];
   const push = (rawCode: string, rawCount: number) => {
     const code = rawCode.toUpperCase();
-    const count = Math.max(0, Math.min(999, Math.round(rawCount)));
+    // 数量不设上限（2026-11-26 用户要求）：大图单色粒数可远超 999，
+    // 121×121 网格单色可达 14641。只保留非负整数语义。
+    const count = Math.max(0, Math.round(rawCount));
     const existing = entries.findIndex(entry => entry.code === code);
     if (existing >= 0) entries[existing] = { code, count };
     else entries.push({ code, count });
@@ -161,11 +163,11 @@ export function parseLegendImportText(
       return;
     }
     const after = segment.slice(codeIndex + codeToken.length);
-    const afterMatch = /(?:[:：=x×*\-\s([（]\s*)(\d{1,4})/.exec(after);
+    const afterMatch = /(?:[:：=x×*\-\s([（]\s*)(\d{1,6})/.exec(after);
     let count: number | null = afterMatch ? Number(afterMatch[1]) : null;
     if (count === null) {
       const before = segment.slice(0, codeIndex);
-      const beforeMatch = /(\d{1,4})\s*[（(]?\s*$/.exec(before);
+      const beforeMatch = /(\d{1,6})\s*[（(]?\s*$/.exec(before);
       count = beforeMatch ? Number(beforeMatch[1]) : null;
     }
     if (count === null || Number.isNaN(count)) {
@@ -719,7 +721,7 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           disabled={busy || isParsing || !imageElement || !dimensions || !calibration}
           aria-describedby="ir-legend-help"
         >
-          <ScanSearch size={15} />{isParsing ? '解析中…' : '从图例自动识别'}
+          <ScanSearch size={15} />{isParsing ? '解析中…' : '自动识别'}
         </button>
         <button
           type="button"
@@ -727,15 +729,15 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           onClick={onFrameRequest}
           aria-pressed={legendRegion !== null}
           title="在左侧画布上拖动，框住整条图例（支持底部横条、右缘竖列、角上面板块）"
-        ><SquareDashed size={15} />框选图例区域</button>
+        >框选</button>
         <button
           type="button"
           className={`ir-button${pasteOpen ? ' ir-quiet' : ''}`}
           onClick={() => setPasteOpen(current => !current)}
           aria-expanded={pasteOpen}
           title="把外部 AI 识别出的「色号 数量」文本整批粘贴进来"
-        ><ClipboardPaste size={15} />粘贴导入</button>
-        <button type="button" className="ir-button" onClick={addRow} aria-label="手动添加图例行"><Plus size={15} />手动加行</button>
+        >粘贴</button>
+        <button type="button" className="ir-button" onClick={addRow} aria-label="手动添加图例行" title="手动添加图例行">加行</button>
         <button
           type="button"
           className="ir-icon-button"
@@ -841,14 +843,14 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
                       className="ir-lg-count"
                       type="number"
                       min={1}
-                      max={999}
                       placeholder={row.countReview ? '待核对' : undefined}
                       aria-label={row.countReview
                         ? `第 ${index + 1} 行目标粒数待人工核对（图例字太小或图太糊）`
                         : `第 ${index + 1} 行目标粒数`}
                       value={row.countReview && row.count === 0 ? '' : row.count}
                       onChange={event => {
-                        const next = Math.max(0, Math.min(999, Math.round(event.currentTarget.valueAsNumber) || 0));
+                        // 不设上限（同粘贴导入）；用户一旦输入即视为已核对。
+                        const next = Math.max(0, Math.round(event.currentTarget.valueAsNumber) || 0);
                         // 用户一旦输入，该行即视为已核对（清除待核对标记）。
                         updateRow(index, { count: next, countReview: undefined });
                       }}

@@ -818,6 +818,84 @@
   background:linear-gradient(100deg,#7c3aed,#a855f7);
   transition:width .2s ease-out
 }
+/* 小火箭发射进度条（2026-11-26 用户要求）：自绘指向右的迷你火箭骑在进度
+   前端，尾部橙焰闪烁 + 拖尾粒子往左漂；外层不裁剪让火箭出挑轨道末端，
+   轨道本体仍 hidden 保圆角。颜色挂 --ir-purple / --ir-surface，亮暗两档生效。 */
+.ir-progress-launch {
+  position:relative
+}
+.ir-progress-launch .ir-progress-track {
+  overflow:hidden
+}
+/* 渐变尾迹：透明 → 亮紫，右端贴住火箭尾部，随进度同步移动；轨道内被圆角裁剪 */
+.ir-progress-trail {
+  position:absolute;
+  top:0;
+  bottom:0;
+  width:72px;
+  border-radius:999px 0 0 999px;
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,#a855f7 48%,transparent) 55%,#c4b5fd);
+  transition:right .22s ease-out;
+  pointer-events:none
+}
+.ir-progress-rocket {
+  position:absolute;
+  top:50%;
+  left:0;
+  transform:translateY(-50%);
+  transition:left .22s ease-out;
+  pointer-events:none;
+  color:var(--ir-purple);
+  filter:drop-shadow(0 1px 2px color-mix(in srgb,var(--ir-purple) 35%,transparent))
+}
+.ir-progress-rocket svg {
+  display:block
+}
+/* 尾焰：贴在火箭尾部后方，橙红渐变，横向闪烁 */
+.ir-progress-flame {
+  position:absolute;
+  right:calc(100% - 6px);
+  top:50%;
+  width:11px;
+  height:7px;
+  margin-top:-3.5px;
+  border-radius:4px 1px 1px 4px;
+  background:linear-gradient(90deg,#ef4444,#f97316 55%,#fbbf24);
+  transform-origin:right center;
+  animation:ir-rocket-flame .14s ease-in-out infinite alternate;
+  opacity:.95
+}
+@keyframes ir-rocket-flame {
+  from { transform:scale(.72,1) }
+  to { transform:scale(1.1,1.05) }
+}
+/* 拖尾粒子：沿飞行反方向（左）漂出、缩小淡出，三粒错峰 */
+.ir-progress-spark {
+  position:absolute;
+  right:calc(100% - 5px);
+  top:50%;
+  margin-top:-1.75px;
+  width:3.5px;
+  height:3.5px;
+  border-radius:50%;
+  background:#f97316;
+  opacity:0;
+  animation:ir-rocket-spark .9s linear infinite
+}
+.ir-progress-spark:nth-of-type(2) { animation-delay:.3s; background:#fbbf24 }
+.ir-progress-spark:nth-of-type(3) { animation-delay:.6s; background:#ef4444 }
+@keyframes ir-rocket-spark {
+  0% { transform:translateX(0) scale(1); opacity:.85 }
+  100% { transform:translateX(-15px) scale(.3); opacity:0 }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ir-progress-flame,
+  .ir-progress-spark {
+    animation:none
+  }
+  .ir-progress-spark { opacity:0 }
+  .ir-progress-flame { transform:none }
+}
 .ir-status {
   font-size:11px;
   line-height:1.7;

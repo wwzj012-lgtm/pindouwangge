@@ -473,6 +473,29 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   // 不产生任何副作用，动作只在用户点头后才真正发生）。
   const [unsavedGuardAction, setUnsavedGuardAction] = useState<null | { description: string; confirmLabel?: string; action: () => void }>(null);
   const [imageLoadMessage, setImageLoadMessage] = useState<string | null>(null);
+
+  /**
+   * 结果提示自动消失（2026-11-25 用户反馈：底部提示一直挂着不消失）。
+   * 成功类 4s、需要用户处理的（失败/请登录/积分不足…）9s——此前完全没有
+   * 定时器，提示只能靠下一次操作覆盖，会一直遮住画布底部。
+   */
+  useEffect(() => {
+    if (!saveMessage) return undefined;
+    const needsAction = /失败|请先|请登录|不足|未开放|超限|失效|异常|未保存/.test(saveMessage);
+    const timer = window.setTimeout(() => {
+      setSaveMessage(current => (current === saveMessage ? null : current));
+    }, needsAction ? 9000 : 4000);
+    return () => window.clearTimeout(timer);
+  }, [saveMessage]);
+
+  /** 图片加载提示同理：错误信息留 10s 便于阅读，随后自动收起。 */
+  useEffect(() => {
+    if (!imageLoadMessage) return undefined;
+    const timer = window.setTimeout(() => {
+      setImageLoadMessage(current => (current === imageLoadMessage ? null : current));
+    }, 10000);
+    return () => window.clearTimeout(timer);
+  }, [imageLoadMessage]);
   const announcement = useAnnouncements();
   const [publicFeatureFlags, setPublicFeatureFlags] = useState<Record<PublicFeatureKey, boolean>>(() => ({ ...PUBLIC_FEATURE_DEFAULTS }));
   const [publicFeatureFlagsLoaded, setPublicFeatureFlagsLoaded] = useState(false);

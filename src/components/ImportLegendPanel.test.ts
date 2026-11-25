@@ -182,3 +182,27 @@ describe('source contract (面板默认装配不再锁数量)', () => {
     expect(source).toContain('全部解锁');
   });
 });
+
+describe('source contract (lastParse 允许为 null)', () => {
+  /**
+   * 2026-11-25 线上崩溃：第一次识别 → 返回 → 再进来时，value.rows 由父组件
+   * 恢复而 lastParse 是 null，`lastParse.sourceQuality` 直接抛
+   * TypeError: Cannot read properties of null，整个导入面板进错误边界。
+   * 契约：每一处 lastParse 字段访问，其前文必须有 `lastParse &&` 或
+   * `lastParse?.` 形式的守卫。
+   */
+  it('never dereferences lastParse fields without a null guard', () => {
+    const source = readFileSync(join(here, 'ImportLegendPanel.tsx'), 'utf8');
+    const offenders: string[] = [];
+    for (const match of source.matchAll(/lastParse\.([A-Za-z_$][\w$]*)/g)) {
+      const at = match.index ?? 0;
+      // 向前回溯 400 字符找守卫（JSX 条件可能跨多行，如 `{lastParse && ...}`）。
+      const context = source.slice(Math.max(0, at - 400), at);
+      const guarded = /lastParse\s*&&[\s\S]*$/.test(context) || /lastParse\?\.[\s\S]*$/.test(context);
+      if (!guarded) offenders.push(source.slice(at, at + 60).split('\n')[0]);
+    }
+    expect(offenders).toEqual([]);
+    // 源图质量提示必须走派生常量（null 安全）。
+    expect(source).toContain('lastParse?.sourceQuality');
+  });
+});

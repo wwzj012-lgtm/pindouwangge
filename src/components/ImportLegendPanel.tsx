@@ -390,6 +390,11 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
   const lockedCounts = value.rows.filter(row => row.enabled && row.countLocked && row.count > 0 && paletteByCode.has(row.code)).length;
   const anyCountLocked = lockedCounts > 0;
   const reviewRowCount = value.rows.filter(row => !!row.countReview).length;
+  // 源图质量提示只在"本次识别"有结果时才有依据：面板重挂载（返回上一步再
+  // 进来）时 value.rows 由父组件恢复、lastParse 却是 null——此前直接解引用
+  // 它的 sourceQuality 会在这种时候抛 TypeError 把整个面板炸掉
+  // （2026-11-25 线上实证：第一次识别→返回→再进来即白屏）。
+  const sourceQuality = lastParse?.sourceQuality ?? null;
   const duplicateCodes = useMemo(() => {
     const seen = new Set<string>();
     const dup = new Set<string>();
@@ -681,9 +686,9 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
               {overGrid && <p className="ir-help" data-tone="error">锁定粒数超过网格格数，数量平衡无法完全达成，请核对各行数值。</p>}
             </div>
           )}
-          {lastParse.sourceQuality?.blurry && (
+          {sourceQuality?.blurry && (
             <p className="ir-help" data-tone="error" role="note">
-              检测到图例文字偏小或被压缩（约 {lastParse.sourceQuality.nativeCharPx.toFixed(1)}px/字），识别精度会明显下降；
+              检测到图例文字偏小或被压缩（约 {sourceQuality.nativeCharPx.toFixed(1)}px/字），识别精度会明显下降；
               建议上传原图，或使用「框选图例区域」单独框出色卡图例区域（框选后按原图分辨率解析，不做缩放压缩）。
             </p>
           )}

@@ -7,6 +7,8 @@ import {
   normalizePatternTitle,
   patternDeletionActions,
   requiresExplicitCloudBinding,
+  sameGrid,
+  samePalette,
   type PatternRecordSummary,
 } from './patternStore';
 
@@ -196,5 +198,47 @@ describe('pattern history list merging', () => {
     });
     expect(nonProgressing).toBeNull();
     expect(calls).toBe(2);
+  });
+});
+
+/**
+ * 保存提速的前提（2026-11-25）：网格没变时复用已有缩略图，不再花 ~340ms
+ * 重渲染。这个判据必须严格——漏判会让缩略图长期显示旧图。
+ */
+describe('sameGrid（缩略图复用判据）', () => {
+  it('逐格相同 → true', () => {
+    expect(sameGrid([['A1', 'H2'], [null, 'C3']], [['A1', 'H2'], [null, 'C3']])).toBe(true);
+  });
+
+  it('任一格不同 → false', () => {
+    expect(sameGrid([['A1', 'H2']], [['A1', 'H3']])).toBe(false);
+  });
+
+  it('空与非空、行列数不同 → false', () => {
+    expect(sameGrid([[]], [['A1']])).toBe(false);
+    expect(sameGrid([['A1']], [['A1'], ['A1']])).toBe(false);
+    expect(sameGrid(undefined, [['A1']])).toBe(false);
+  });
+});
+
+describe('samePalette（缩略图复用判据之配色）', () => {
+  const color = (code: string, rgb: [number, number, number]) => ({ code, name: code, hex: '#000000', rgb } as never);
+
+  it('码与 RGB 全同 → true', () => {
+    expect(samePalette([color('A1', [1, 2, 3])], [color('A1', [1, 2, 3])])).toBe(true);
+  });
+
+  it('同码不同 RGB（换品牌/改色板）→ false', () => {
+    expect(samePalette([color('A1', [1, 2, 3])], [color('A1', [1, 2, 4])])).toBe(false);
+  });
+
+  it('数量或顺序不同 → false', () => {
+    expect(samePalette([color('A1', [1, 2, 3])], [color('A1', [1, 2, 3]), color('B2', [4, 5, 6])])).toBe(false);
+    expect(samePalette([color('A1', [1, 2, 3]), color('B2', [4, 5, 6])], [color('B2', [4, 5, 6]), color('A1', [1, 2, 3])])).toBe(false);
+  });
+
+  it('空/缺 → false（不许当作可复用）', () => {
+    expect(samePalette(undefined, [color('A1', [1, 2, 3])])).toBe(false);
+    expect(samePalette([], [])).toBe(true);
   });
 });

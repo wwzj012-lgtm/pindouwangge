@@ -1009,6 +1009,13 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
             </div>}
             {recognizeTab === 'result' && recognition && effectiveRecognition && <div className="ir-tab-panel" id="ir-panel-result" role="tabpanel" aria-labelledby="ir-tab-result">
               <section className="ir-section"><div className="ir-section-title"><h2>当前结果</h2><span className="ir-badge">人工修正 {manualCount} 格</span></div><div className="ir-stats" aria-label="当前结果统计"><div><strong>{effectiveRecognition.summary.mapped}</strong><span>总用豆数</span></div><div><strong>{effectiveRecognition.summary.blank}</strong><span>空白格</span></div><div><strong>{effectiveRecognition.summary.distinctColors}</strong><span>颜色数</span></div></div>{effectiveRecognition.summary.invalid > 0 && <p className="ir-status" data-tone="error">{effectiveRecognition.summary.invalid} 格无有效识别，请复核。</p>}
+                {/* 颜色上限的结果统计放在「当前结果」里：识别完成默认落在结果与保存
+                    页，只写在识别设置页用户永远看不到（2026-11-25 真实 UI 试跑发现）。 */}
+                {recognition?.colorLimit && (
+                  <p className="ir-help ir-autocorrect" role="status">
+                    <strong>最大颜色数：</strong>已限制为 {recognition.colorLimit.kept} 色（设定 {recognition.colorLimit.requested} 色），{recognition.colorLimit.remapped} 格归入了更接近的保留色号。
+                  </p>
+                )}
                 {effectiveRecognition.legendBalance && (effectiveRecognition.legendBalance.moved > 0 || !effectiveRecognition.legendBalance.satisfied) && (
                   <p className="ir-help ir-autocorrect" role="status">
                     <strong>数量平衡：</strong>已按图例配额移动 {effectiveRecognition.legendBalance.moved} 格。

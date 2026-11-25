@@ -18,6 +18,15 @@
   font-size:13px;
   color-scheme:light
 }
+/* 待人工核对的警示墨色（2026-11-25 ui-ux-pro-max 审查）：#a8712a 在
+ * 亮/暗两种底上都只有 ~4.2:1，不达 WCAG AA（正文 4.5:1）——分档变量：
+ * 亮底 #8a5a1d ≈5.9:1、暗底 #d9a45b ≈7.8:1。 */
+.ir-workbench {
+  --ir-review-ink:#8a5a1d
+}
+.dark .ir-workbench {
+  --ir-review-ink:#d9a45b
+}
 .dark .ir-workbench {
   --ir-bg:#131019;
   --ir-surface:#1d1825;
@@ -1725,19 +1734,19 @@
   width:76px
 }
 .ir-lg-count-wrap.is-review .ir-lg-count.ir-lg-count {
-  color:#a8712a;
+  color:var(--ir-review-ink);
   font-weight:600;
   font-size:11px
 }
 .ir-lg-count-wrap.is-review .ir-lg-count.ir-lg-count::placeholder {
-  color:#a8712a;
+  color:var(--ir-review-ink);
   opacity:.9;
   font-weight:600
 }
 .ir-lg-row-review-note {
   flex:none;
   font-size:10px;
-  color:#a8712a;
+  color:var(--ir-review-ink);
   white-space:nowrap
 }
 .ir-lg-lock {

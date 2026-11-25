@@ -894,7 +894,7 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
               <div className="ir-lg-sum-bar" role="img" aria-label={`锁定粒数占网格格数 ${(sumRatio * 100).toFixed(1)}%`}>
                 <span style={{ width: `${(sumRatio * 100).toFixed(1)}%` }} />
               </div>
-              {overGrid && <p className="ir-help" data-tone="error">锁定粒数超过网格格数，数量平衡无法完全达成，请核对各行数值。</p>}
+              {overGrid && <p className="ir-help" data-tone="error">锁定粒数超过网格格数，数量平衡无法完全达成。若图纸为全覆盖且数量可信，多半是网格少了一圈外环（商家图纸常把外环裁掉几像素、肉眼难辨）——回「修改网格」把行列数各加一、原点对齐图纸左上角，再重新识别。</p>}
             </div>
           )}
           {sourceQuality?.blurry && (

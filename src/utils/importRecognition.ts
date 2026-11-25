@@ -1377,7 +1377,9 @@ export async function recognizeImportImageAsync(
     const processing = processRecognitionCell(tuned, rowIndex, column);
     let step = processing.next();
     while (step.done === false) {
-      report(Math.min(99, (completed + step.value) / total * 100));
+      // 逐格阶段封顶 88%：循环结束后还有一段无产出回报的后处理（色号 OCR/
+      // 平滑/数量平衡），把 99% 留给它们会显得"卡在 99% 几秒后突然完成"。
+      report(Math.min(88, (completed + step.value) / total * 100));
       throwIfAborted(options.signal);
       await yieldToEventLoop();
       throwIfAborted(options.signal);
@@ -1388,19 +1390,27 @@ export async function recognizeImportImageAsync(
     completed += 1;
     if (column === tuned.calibration.columns - 1) cells.push(row);
     if (completed % batchSize === 0 || completed === total || performance.now() - sliceStarted >= MAX_SLICE_MS) {
-      report(Math.min(99, Math.floor(completed / total * 100)));
+      report(Math.min(88, Math.floor(completed / total * 100)));
       throwIfAborted(options.signal);
       await yieldToEventLoop();
       sliceStarted = performance.now();
     }
   }
   throwIfAborted(options.signal);
+  report(90);
+  await yieldToEventLoop();
   if (options.symbolAssist === true) {
     const symbolStats = applySymbolAssist(source, tuned.calibration, tuned.lockedPalette, cells);
     // 色号辅助读出的 OCR 码同样受最大颜色数约束（用户显式设置了上限时，
     // 约束对所有格子一致生效；未设置时这里不动任何格）。
+    throwIfAborted(options.signal);
+    report(94);
+    await yieldToEventLoop();
     const limited = applyMaxColorsLimit(cells, tuned, options.maxColors);
     const balanced = attachCountBalance(limited?.cells ?? cells, options, tuned.preparedPalette);
+    throwIfAborted(options.signal);
+    report(97);
+    await yieldToEventLoop();
     const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? cells, context.edgeInsetRatio, {
       colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
     });
@@ -1413,15 +1423,23 @@ export async function recognizeImportImageAsync(
   const wantsShading = options.shadingReference === true || (options.shadingReference === undefined && options.beadPhoto === true);
   const shading = wantsShading ? rescoreWithLocalShading(cells, tuned) : null;
   throwIfAborted(options.signal);
+  report(93);
+  await yieldToEventLoop();
   const smoothed = options.smooth === true ? smoothCells(shading?.cells ?? cells, tuned) : null;
   const unify = options.unifyTwins ?? (options.beadPhoto === true);
   const unified = unify ? unifyTwinColors(smoothed?.cells ?? shading?.cells ?? cells, tuned) : null;
   // fallback 链必须包含 shading（与同步入口同坑）：smooth 与 twin 都关闭时
   // refine 的输出只能靠这一链传递，漏掉会让"局部阴影再参考"静默失效。
   // 数量平衡挂在整个链条之后（与同步入口同一挂点语义）。
+  throwIfAborted(options.signal);
+  report(95);
+  await yieldToEventLoop();
   const finalCells = unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells;
   const limited = applyMaxColorsLimit(finalCells, tuned, options.maxColors);
   const balanced = attachCountBalance(limited?.cells ?? finalCells, options, tuned.preparedPalette);
+  throwIfAborted(options.signal);
+  report(97);
+  await yieldToEventLoop();
   const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? finalCells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });

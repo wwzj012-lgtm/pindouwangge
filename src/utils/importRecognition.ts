@@ -88,6 +88,8 @@ export interface ImportRecognitionResult {
    * moved=改写格数；satisfied=全部配额恰好达成；residual=未达成差额（负=仍缺）。
    */
   legendBalance?: { moved: number; satisfied: boolean; residual: Record<string, number> };
+  /** 最大颜色数限制的实际结果；未启用/未超限时不存在。 */
+  colorLimit?: { requested: number; kept: number; remapped: number };
   /** Fraction excluded on each cell edge during this run; zero retains whole-cell area. */
   edgeInsetRatio?: number;
   calibration: ImportGridCalibration;
@@ -155,6 +157,13 @@ export interface ImportRecognitionOptions {
    * 结果统计见 `legendBalance`。
    */
   countQuota?: Record<string, number>;
+  /**
+   * 最大颜色数：整张图最多允许使用的色号种数（0 = 不限，默认）。
+   * 识别/refine 链照常在全色板上跑，结束后若用色超限，按出现格数保留
+   * 前 N 支，其余格用各自的采样代表色在保留色板里重新选色；随后才执行
+   * 图例数量平衡（配额作用于最终用色集合）。结果统计见 `colorLimit`。
+   */
+  maxColors?: number;
 }
 
 /** 全局网格偏移，单位是"格"：{ x: -0.16, y: 0 } 表示整张图向左偏了 16% 格。 */
@@ -1283,11 +1292,15 @@ export function recognizeImportImage(
   const cells = runCells(tuned);
   if (options.symbolAssist === true) {
     const symbolStats = applySymbolAssist(source, tuned.calibration, tuned.lockedPalette, cells);
-    const balanced = attachCountBalance(cells, options, tuned.preparedPalette);
-    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? cells, context.edgeInsetRatio, {
+    // 色号辅助读出的 OCR 码同样受最大颜色数约束（用户显式设置了上限时，
+    // 约束对所有格子一致生效；未设置时这里不动任何格）。
+    const limited = applyMaxColorsLimit(cells, tuned, options.maxColors);
+    const balanced = attachCountBalance(limited?.cells ?? cells, options, tuned.preparedPalette);
+    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? cells, context.edgeInsetRatio, {
       colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
     });
     result.symbolAssist = symbolStats;
+    if (limited) result.colorLimit = { requested: limited.requested, kept: limited.kept, remapped: limited.remapped };
     if (balanced) result.legendBalance = balanceStat(balanced);
     return result;
   }
@@ -1301,13 +1314,15 @@ export function recognizeImportImage(
   // 而界面还照常报告 refined 计数（修过一次的老坑，别再踩）。
   // 数量平衡挂在整个链条之后：先取链结果，再产出新数组（不改链本身）。
   const finalCells = unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells;
-  const balanced = attachCountBalance(finalCells, options, tuned.preparedPalette);
-  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? finalCells, context.edgeInsetRatio, {
+  const limited = applyMaxColorsLimit(finalCells, tuned, options.maxColors);
+  const balanced = attachCountBalance(limited?.cells ?? finalCells, options, tuned.preparedPalette);
+  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? finalCells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
   if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
+  if (limited) result.colorLimit = { requested: limited.requested, kept: limited.kept, remapped: limited.remapped };
   if (balanced) result.legendBalance = balanceStat(balanced);
   return result;
 }
@@ -1382,11 +1397,15 @@ export async function recognizeImportImageAsync(
   throwIfAborted(options.signal);
   if (options.symbolAssist === true) {
     const symbolStats = applySymbolAssist(source, tuned.calibration, tuned.lockedPalette, cells);
-    const balanced = attachCountBalance(cells, options, tuned.preparedPalette);
-    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? cells, context.edgeInsetRatio, {
+    // 色号辅助读出的 OCR 码同样受最大颜色数约束（用户显式设置了上限时，
+    // 约束对所有格子一致生效；未设置时这里不动任何格）。
+    const limited = applyMaxColorsLimit(cells, tuned, options.maxColors);
+    const balanced = attachCountBalance(limited?.cells ?? cells, options, tuned.preparedPalette);
+    const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? cells, context.edgeInsetRatio, {
       colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
     });
     result.symbolAssist = symbolStats;
+    if (limited) result.colorLimit = { requested: limited.requested, kept: limited.kept, remapped: limited.remapped };
     if (balanced) result.legendBalance = balanceStat(balanced);
     report(100);
     return result;
@@ -1401,13 +1420,15 @@ export async function recognizeImportImageAsync(
   // refine 的输出只能靠这一链传递，漏掉会让"局部阴影再参考"静默失效。
   // 数量平衡挂在整个链条之后（与同步入口同一挂点语义）。
   const finalCells = unified?.cells ?? smoothed?.cells ?? shading?.cells ?? cells;
-  const balanced = attachCountBalance(finalCells, options, tuned.preparedPalette);
-  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? finalCells, context.edgeInsetRatio, {
+  const limited = applyMaxColorsLimit(finalCells, tuned, options.maxColors);
+  const balanced = attachCountBalance(limited?.cells ?? finalCells, options, tuned.preparedPalette);
+  const result = createRecognitionResult(mode, context.calibration, balanced?.cells ?? limited?.cells ?? finalCells, context.edgeInsetRatio, {
     colorGains: probe.gains, gridOffset: probe.offset, offsetGain: probe.offsetGain, sampledCells: probe.sampled,
   });
   if (shading) result.shadingRefine = { refined: shading.refined, references: shading.references };
   if (smoothed) result.smoothing = { changed: smoothed.changed, threshold: SMOOTH_MIN_CONFIDENCE };
   if (unified) result.twinUnification = { remapped: unified.remapped };
+  if (limited) result.colorLimit = { requested: limited.requested, kept: limited.kept, remapped: limited.remapped };
   if (balanced) result.legendBalance = balanceStat(balanced);
   report(100);
   return result;
@@ -1432,6 +1453,65 @@ function attachCountBalance(
 
 function balanceStat(balanced: NonNullable<ReturnType<typeof applyCountBalance>>): NonNullable<ImportRecognitionResult['legendBalance']> {
   return { moved: balanced.moved, satisfied: balanced.satisfied, residual: balanced.residual };
+}
+
+/**
+ * 最大颜色数限制（2026-11-25 用户需求：整张图只能用最多 N 种颜色）。
+ *
+ * 做法：识别/refine 链照常在全色板上完成后，统计每支色号的出现格数；
+ * 超限时保留出现最多的 N 支（并列按色号字典序，保证同一输入结果稳定），
+ * 其余格**用各自的 sampleRgb（面积加权代表色）在保留色板里重新选色**——
+ * 而不是"被删色号 → 最近保留色号"的色板级映射，前者保住了格子本身的
+ * 颜色信息（同一支被删色号在不同光照下读出的格子可能各自归到不同保留色）。
+ *
+ * 必须挂在图例数量平衡**之前**：配平的"超配让格"要作用于最终用色集合，
+ * 否则先配平再合并会把锁定的数量又改掉。
+ *
+ * 返回 null = 未启用或未超限，调用方沿用原 cells（结果逐位一致）。
+ */
+export function applyMaxColorsLimit(
+  cells: ImportRecognitionCell[][],
+  params: { preparedPalette: PreparedPaletteColor[]; beadPhoto?: boolean },
+  maxColors: number | undefined,
+): { cells: ImportRecognitionCell[][]; requested: number; kept: number; remapped: number } | null {
+  const limit = Math.floor(Number(maxColors ?? 0));
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const counts = new Map<string, number>();
+  for (const row of cells) {
+    for (const cell of row) {
+      if (cell.colorId) counts.set(cell.colorId, (counts.get(cell.colorId) ?? 0) + 1);
+    }
+  }
+  if (counts.size <= limit) return null;
+  // cell.colorId 是色板的 color.id（不是 code）——保留集/过滤必须同键，
+  // 否则保留子集永远为空、整个限制静默失效（2026-11-25 实测踩坑）。
+  const keptIds = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+    .slice(0, limit)
+    .map(([id]) => id);
+  const keptSet = new Set(keptIds);
+  // 与 paletteLock 同一机制：重选只能落在保留子集内。
+  const keptPalette = params.preparedPalette.filter(prepared => keptSet.has(prepared.color.id));
+  if (keptPalette.length === 0) return null;
+  const lightnessWeight = params.beadPhoto ? BEAD_LIGHTNESS_WEIGHT : 1;
+  let remapped = 0;
+  const output = cells.map(row => row.map(cell => {
+    if (!cell.colorId || keptSet.has(cell.colorId) || !cell.sampleRgb) return cell;
+    const match = classifySample(cell.sampleRgb, keptPalette, lightnessWeight);
+    if (match.prepared.color.id === cell.colorId) return cell;
+    remapped += 1;
+    return {
+      ...cell,
+      color: match.prepared.color,
+      colorId: match.prepared.color.id,
+      // 距离改为"采样色 → 新色号"的真实距离；次优色属于旧的全色板语义，
+      // 重选后不再可信，清空（UI 的复核提示不会引用失效的次优色）。
+      distance: match.distance,
+      runnerUpColorId: null,
+      runnerUpSeparation: null,
+    };
+  }));
+  return { cells: output, requested: limit, kept: keptPalette.length, remapped };
 }
 
 /** 品牌探测最多采样的格子数（大网格按步长抽稀）。 */

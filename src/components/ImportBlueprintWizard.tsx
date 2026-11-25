@@ -130,6 +130,8 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
   // 三项都默认关闭：网格对准、图是数字原图时，任何"额外校正"都只会把颜色推偏。
   const [beadPhoto, setBeadPhoto] = useState(false);
   const [smoothNoise, setSmoothNoise] = useState(false);
+  /** 最大颜色数（0 = 不限）：整张图最多允许使用的色号种数。 */
+  const [maxColors, setMaxColors] = useState(0);
   const [symbolAssist, setSymbolAssist] = useState(false);
   // 图例锁定：解析图纸下方图例得到的「色板白名单 + 数量配额」。null/空行 =
   // 未启用，识别请求与未开启时完全一致。
@@ -459,7 +461,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         undefined,
         { signal: controller.signal, onProgress: value => {
           if (mountedRef.current && openRef.current && recognitionControllerRef.current === controller && !controller.signal.aborted) setRecognitionProgress(Math.floor(value));
-        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise, symbolAssist, ...legendOptions },
+        }, batchSize: 256, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smooth: smoothNoise, symbolAssist, maxColors, ...legendOptions },
       );
       if (!mountedRef.current || !openRef.current || recognitionControllerRef.current !== controller || controller.signal.aborted) return;
       setRecognition(result);
@@ -481,7 +483,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         setIsRecognizing(false);
       }
     }
-  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, symbolAssist, legendOptions, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
+  }, [localPalette, edgeInsetRatio, beadPhoto, autoColorBalance, autoAlign, smoothNoise, symbolAssist, maxColors, legendOptions, imageDimensions, imageElement, recognitionMode, snapshot, resetBackground, invalidateConfirmation]);
 
   const backgroundCorrections = useMemo(() => recognitionBackgroundCorrections(backgroundHistory), [backgroundHistory]);
   const effectiveCorrections = useMemo(() => ({ ...corrections, ...backgroundCorrections }), [corrections, backgroundCorrections]);
@@ -855,7 +857,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
         </section>
         <aside className="ir-sidebar" aria-label={step === 'calibrate' ? '校准设置' : '识别与复核设置'}>
           {step === 'calibrate' && <section className="ir-section ir-calibration-panel"><div className="ir-section-title"><span className="ir-step-kicker">第 1 步 · 校准</span><span className="ir-badge">约 10 秒</span></div><h2 className="ir-panel-title">让网格贴合图纸方格</h2><p className="ir-help">先对齐位置和格子大小，再框选需要识别的区域。预览会实时显示识别到的行列数。</p><div className="ir-legend-row"><span><i className="ir-dot ir-dot-red" />拖红点：移动网格</span><span><i className="ir-dot ir-dot-blue" />拖蓝点：调整格距</span></div><p className="ir-help ir-wheel-note">滚轮缩放预览 · 网格最小 5 px</p></section>}
-          {step === 'calibrate' && <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>}
+          {step === 'calibrate' && <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p><label className="ir-label">最大颜色数<select aria-label="最大颜色数" value={maxColors} onChange={event => { const next = Number(event.target.value); if (next !== maxColors) { invalidateRecognition(); setMaxColors(next); setStatus({ tone: 'neutral', message: next === 0 ? '最大颜色数已改为不限，请重新识别。' : `最大颜色数已改为 ${next} 色，请重新识别。` }); } }}><option value={0}>不限 · 使用色板全部颜色</option><option value={8}>最多 8 色</option><option value={12}>最多 12 色</option><option value={16}>最多 16 色</option><option value={24}>最多 24 色</option><option value={32}>最多 32 色</option><option value={48}>最多 48 色</option><option value={64}>最多 64 色</option></select></label><p className="ir-help">限制整张图最多使用的色号种数：识别完成后保留出现最多的 N 支，其余格按各自颜色归入最接近的保留色。适合控制成本、减少相近色号造成的"花"。</p></section>}
           {step !== 'calibrate' && <div className="ir-tabs" role="tablist" aria-label="识别面板分区">
             <button type="button" role="tab" id="ir-tab-setup" aria-selected={recognizeTab === 'setup'} aria-controls="ir-panel-setup" onClick={() => setRecognizeTab('setup')}>识别设置</button>
             <button type="button" role="tab" id="ir-tab-review" aria-selected={recognizeTab === 'review'} aria-controls="ir-panel-review" disabled={!recognition} onClick={() => setRecognizeTab('review')}>修正{recognition && pendingCells.length > 0 && <span className="ir-tab-count">{pendingCells.length > 99 ? '99+' : pendingCells.length}</span>}</button>
@@ -878,7 +880,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
             <p className="ir-help">聚焦画布后，方向键移动 1 px，Shift + 方向键移动 10 px，Alt + 方向键微调 0.1 px。最小格距为原图 5 px。</p>
           </section> : <>
             {recognizeTab === 'setup' && <div className="ir-tab-panel" id="ir-panel-setup" role="tabpanel" aria-labelledby="ir-tab-setup">
-            <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p></section>
+            <section className="ir-section ir-palette-panel"><div className="ir-section-title"><h2>本次识别色板</h2><span className="ir-badge">{localPalette.filter(color => color.enabled !== false).length} 色</span></div><label className="ir-label">品牌 / 色卡<select aria-label="本次识别色板品牌" value={paletteChoice} onChange={event => changePalette(event.target.value as PaletteChoice)}><option value="ACTIVE">{passedPaletteLabel}</option>{BUILT_IN_BRANDS.map(brand => <option key={brand} value={brand}>{BRAND_NAMES[brand]}</option>)}</select></label><p className="ir-help">仅作用于本次识别。切换色板后需重新识别。</p><label className="ir-label">最大颜色数<select aria-label="最大颜色数" value={maxColors} onChange={event => { const next = Number(event.target.value); if (next !== maxColors) { invalidateRecognition(); setMaxColors(next); setStatus({ tone: 'neutral', message: next === 0 ? '最大颜色数已改为不限，请重新识别。' : `最大颜色数已改为 ${next} 色，请重新识别。` }); } }}><option value={0}>不限 · 使用色板全部颜色</option><option value={8}>最多 8 色</option><option value={12}>最多 12 色</option><option value={16}>最多 16 色</option><option value={24}>最多 24 色</option><option value={32}>最多 32 色</option><option value={48}>最多 48 色</option><option value={64}>最多 64 色</option></select></label><p className="ir-help">限制整张图最多使用的色号种数：识别完成后保留出现最多的 N 支，其余格按各自颜色归入最接近的保留色。适合控制成本、减少相近色号造成的"花"。</p></section>
             <section className="ir-section"><div className="ir-section-title"><h2>识别设置</h2><span className="ir-review-count">{snapshot?.calibration.columns} 列 × {snapshot?.calibration.rows} 行</span></div>
               <div className="ir-mode-buttons" role="group" aria-label="识别模式">{(['fast', 'precision'] as const).map(mode => <button type="button" key={mode} aria-pressed={recognitionMode === mode} onClick={() => { if (mode !== recognitionMode) { invalidateRecognition(); setRecognitionMode(mode); setStatus({ tone: 'neutral', message: '识别模式已更新，请重新识别。' }); } }}><strong>{mode === 'fast' ? '快速识别' : '高精度识别'}</strong><small>{mode === 'fast' ? '均匀采样 · 估算占比' : '像素面积 · 主色占比'}</small></button>)}</div>
               <label className="ir-inset">忽略边线<select aria-label="忽略边线" value={edgeInsetRatio} onChange={event => { invalidateRecognition(); setEdgeInsetRatio(Number(event.target.value)); setStatus({ tone: 'neutral', message: '忽略边线设置已更新，请重新识别。' }); }}><option value={0}>关闭 · 整格</option><option value={.05}>每边 5%</option><option value={.1}>每边 10%</option><option value={.15}>每边 15%</option></select></label>
@@ -900,6 +902,11 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
                 <p className="ir-help ir-autocorrect" role="status">
                   <strong>本次自动校正：</strong>{describeAutoCorrection(recognition)}
                   <span>（抽样 {recognition.autoCorrection?.sampledCells ?? 0} 格估计；关闭校正可在识别设置里取消勾选）</span>
+                </p>
+              )}
+              {recognition?.colorLimit && (
+                <p className="ir-help ir-autocorrect" role="status">
+                  <strong>最大颜色数：</strong>已限制为 {recognition.colorLimit.kept} 色（设定 {recognition.colorLimit.requested} 色），{recognition.colorLimit.remapped} 格归入了更接近的保留色号。
                 </p>
               )}
               {recognition?.symbolAssist && (

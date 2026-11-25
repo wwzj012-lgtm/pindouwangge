@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, Lock, LockOpen, Plus, ScanSearch, Search, Trash2, SquareDashed } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, ClipboardPaste, Lock, LockOpen, Plus, ScanSearch, Search, Trash2, SquareDashed } from 'lucide-react';
 import type { BeadColor } from '../types';
 import {
   LEGEND_LOW_CONFIDENCE,
@@ -97,6 +97,119 @@ const FRAME_FAILURE_NOTES: Record<string, string> = {
 };
 
 /** 单行解析警告的人话翻译（多个用 ; 连接）。 */
+/**
+ * 文本粘贴导入的解析（2026-11-25 用户新增）：识别可能不准，用户可以让
+ * 外部 AI 看图例图并输出「色号 数量」列表，复制后整批导入，免去逐行对照。
+ *
+ * 支持的形态（按行解析，一行内还可以用 、，, ;； 分隔多条）：
+ *   H2 86 / H2：86 / H2: 86 / H2 - 86 / H2 x 86 / G10 288 粒 / H2（86）
+ *   1. H2 86        ← 序号前缀自动剥掉（"第1行 H2 86" 也行）
+ *   [["H2",86],["M7",89]] / [{"code":"H2","count":86}]   ← JSON 整体解析
+ * 色号识别优先取色板内命中的 token（大小写不敏感）；数量优先取色号
+ * 之后的第一个 1-4 位数字，没有再往前找。同色号重复出现取最后一次。
+ */
+export interface LegendImportEntry {
+  code: string;
+  count: number;
+}
+
+export interface LegendImportParse {
+  entries: LegendImportEntry[];
+  /** 无法解析的原文片段（无色号或无数量），数量大时提示用户检查。 */
+  skipped: string[];
+}
+
+const LEGEND_CODE_TOKEN = /[A-Za-z]{1,3}\d{1,4}/g;
+const LEGEND_SEGMENT_SPLIT = /[、，,;；]+/;
+
+export function parseLegendImportText(
+  text: string,
+  paletteCodes: ReadonlySet<string>,
+): LegendImportParse {
+  const entries: LegendImportEntry[] = [];
+  const skipped: string[] = [];
+  const push = (rawCode: string, rawCount: number) => {
+    const code = rawCode.toUpperCase();
+    const count = Math.max(0, Math.min(999, Math.round(rawCount)));
+    const existing = entries.findIndex(entry => entry.code === code);
+    if (existing >= 0) entries[existing] = { code, count };
+    else entries.push({ code, count });
+  };
+  const parseSegment = (raw: string) => {
+    const segment = raw.trim()
+      .replace(/^[-•*·]\s*/, '')
+      .replace(/^\d{1,3}[.、)）]\s*/, '')
+      .replace(/^第\s*\d{1,3}\s*[行条][.、:：)）]?\s*/, '');
+    if (!segment) return;
+    const tokens = [...segment.matchAll(LEGEND_CODE_TOKEN)].map(match => match[0]);
+    let codeToken = '';
+    let codeIndex = -1;
+    for (const token of tokens) {
+      const upper = token.toUpperCase();
+      if (paletteCodes.has(upper)) {
+        codeToken = upper;
+        codeIndex = segment.indexOf(token);
+        break;
+      }
+    }
+    if (!codeToken && tokens.length) {
+      codeToken = tokens[0].toUpperCase();
+      codeIndex = segment.indexOf(tokens[0]);
+    }
+    if (!codeToken) {
+      skipped.push(raw.trim());
+      return;
+    }
+    const after = segment.slice(codeIndex + codeToken.length);
+    const afterMatch = /(?:[:：=x×*\-\s([（]\s*)(\d{1,4})/.exec(after);
+    let count: number | null = afterMatch ? Number(afterMatch[1]) : null;
+    if (count === null) {
+      const before = segment.slice(0, codeIndex);
+      const beforeMatch = /(\d{1,4})\s*[（(]?\s*$/.exec(before);
+      count = beforeMatch ? Number(beforeMatch[1]) : null;
+    }
+    if (count === null || Number.isNaN(count)) {
+      skipped.push(raw.trim());
+      return;
+    }
+    push(codeToken, count);
+  };
+
+  const trimmed = text.trim();
+  if (!trimmed) return { entries, skipped };
+  if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+    try {
+      const data: unknown = JSON.parse(trimmed);
+      const list = Array.isArray(data)
+        ? data
+        : Array.isArray((data as { entries?: unknown[] }).entries)
+          ? (data as { entries: unknown[] }).entries
+          : [data];
+      for (const item of list) {
+        if (Array.isArray(item) && typeof item[0] === 'string' && Number.isFinite(Number(item[1]))) {
+          push(item[0], Number(item[1]));
+        } else if (item && typeof item === 'object') {
+          const record = item as Record<string, unknown>;
+          const code = record.code ?? record['色号'];
+          const count = record.count ?? record['数量'] ?? record['粒数'];
+          if (typeof code === 'string' && Number.isFinite(Number(count))) push(code, Number(count));
+          else skipped.push(JSON.stringify(item));
+        } else {
+          skipped.push(String(item));
+        }
+      }
+      return { entries, skipped };
+    } catch {
+      // 不是合法 JSON：按普通行文本继续解析。
+    }
+  }
+  for (const line of trimmed.split(/\n+/)) {
+    const segments = LEGEND_SEGMENT_SPLIT.test(line) ? line.split(LEGEND_SEGMENT_SPLIT) : [line];
+    for (const segment of segments) parseSegment(segment);
+  }
+  return { entries, skipped };
+}
+
 function describeWarn(warn: string | undefined): string {
   if (!warn) return '';
   const map: Record<string, string> = {
@@ -371,6 +484,10 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
   const [lastParse, setLastParse] = useState<LegendParseResult | null>(null);
   const [parseNote, setParseNote] = useState<string | null>(null);
   const [isParsing, setIsParsing] = useState(false);
+  // 粘贴导入（2026-11-25）：外部 AI 识别图例 → 复制文本 → 整批导入。
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteMode, setPasteMode] = useState<'replace' | 'merge'>('replace');
   // 锚库（校对闭环）：上次解析的字形快照（条目索引 → 码字字形）与版式
   // 指纹。用户修正色号 = 人工校对确认 → 快照字形按真值入库；再次识别时
   // 锚缺字补位（2026-11-24 card4：'M'/'5' 自举永远凑不齐，锚直接救回）。
@@ -481,6 +598,48 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
     }
   }, [imageElement, dimensions, calibration, palette, paletteByCode, onChange, legendRegion]);
 
+  const paletteCodesSet = useMemo(() => new Set(paletteByCode.keys()), [paletteByCode]);
+  const pastePreview = useMemo(
+    () => parseLegendImportText(pasteText, paletteCodesSet),
+    [pasteText, paletteCodesSet],
+  );
+
+  const applyPasteImport = useCallback(() => {
+    const parsed = pastePreview;
+    if (!parsed.entries.length) {
+      setParseNote('没有可导入的条目：每行至少要有「色号 + 数量」，例如 H2 86。');
+      return;
+    }
+    if (pasteMode === 'replace') {
+      const entries = parsed.entries.map(entry => ({ code: entry.code, count: entry.count, confidence: 1 }));
+      const rows = parseEntriesToRows(entries, paletteCodesSet, palette);
+      const usable = rows.filter(row => row.enabled).length;
+      const autoWhitelist = shouldAutoWhitelist(rows, undefined);
+      onChange({ rows, whitelist: autoWhitelist });
+      setParseNote(`已从文本导入 ${rows.length} 行（色板内 ${usable} 色${parsed.skipped.length ? `，${parsed.skipped.length} 段无法解析已跳过` : ''}）${autoWhitelist ? '，已自动启用色板白名单' : ''}。粒数以你粘贴的文本为准，可直接锁定数量。`);
+    } else {
+      const byCode = new Map(parsed.entries.map(entry => [entry.code, entry.count] as const));
+      let updated = 0;
+      const rows = value.rows.map(row => {
+        const next = byCode.get(row.code);
+        if (next === undefined) return row;
+        updated += 1;
+        return { ...row, count: next, countReview: undefined };
+      });
+      const existing = new Set(value.rows.map(row => row.code));
+      const additions = parsed.entries.filter(entry => !existing.has(entry.code));
+      const addRows = parseEntriesToRows(
+        additions.map(entry => ({ code: entry.code, count: entry.count, confidence: 1 })),
+        paletteCodesSet,
+        palette,
+      );
+      onChange({ rows: [...rows, ...addRows], whitelist: value.whitelist });
+      setParseNote(`已按色号匹配更新 ${updated} 行数量${addRows.length ? `，新增 ${addRows.length} 行` : ''}${parsed.skipped.length ? `，${parsed.skipped.length} 段无法解析已跳过` : ''}。`);
+    }
+    setPasteText('');
+    setPasteOpen(false);
+  }, [pastePreview, pasteMode, paletteCodesSet, palette, value.rows, value.whitelist, onChange]);
+
   const updateRow = useCallback((index: number, patch: Partial<LegendLockRow>) => {
     const rows = value.rows.map((row, i) => (i === index ? { ...row, ...patch } : row));
     onChange({ rows, whitelist: value.whitelist });
@@ -541,7 +700,11 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           {value.rows.length ? `${lockedColors} 色白名单${whitelistOn ? ' · 开' : ' · 关'}` : '未启用'}
         </span>
       </div>
-      <p className="ir-help">图纸印有「色点 + 色号 + NNN粒」图例时，解析每色目标粒数供识别参考：解析结果可信（色号与色板匹配度高）会自动启用「色板白名单」压掉杂色，粒数仍需核对后再锁定数量。图例不在常规位置（底部横条/右缘竖列/角上面板块）时，先在左侧画布「框选图例区域」再识别。</p>
+      <details className="ir-lg-more">
+        <summary>图例锁定怎么用？</summary>
+        <p className="ir-help">图纸印有「色点 + 色号 + NNN粒」图例时，解析每色目标粒数供识别参考：解析结果可信（色号与色板匹配度高）会自动启用「色板白名单」压掉杂色，粒数仍需核对后再锁定数量。图例不在常规位置（底部横条/右缘竖列/角上面板块）时，先在左侧画布「框选图例区域」再识别。</p>
+        <p className="ir-help">自动识别不准？可以把图例图交给外部 AI（如对话助手）读出「色号 数量」列表，复制后点「粘贴导入」一次填完——不用逐行对照修改。</p>
+      </details>
       {legendRegion && (
         <p className="ir-help ir-lg-region" role="status">
           <SquareDashed size={13} />已框选图例区域 {Math.abs(legendRegion.x1 - legendRegion.x0)} × {Math.abs(legendRegion.y1 - legendRegion.y0)} px，识别只解析框内内容。
@@ -565,19 +728,64 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           aria-pressed={legendRegion !== null}
           title="在左侧画布上拖动，框住整条图例（支持底部横条、右缘竖列、角上面板块）"
         ><SquareDashed size={15} />框选图例区域</button>
+        <button
+          type="button"
+          className={`ir-button${pasteOpen ? ' ir-quiet' : ''}`}
+          onClick={() => setPasteOpen(current => !current)}
+          aria-expanded={pasteOpen}
+          title="把外部 AI 识别出的「色号 数量」文本整批粘贴进来"
+        ><ClipboardPaste size={15} />粘贴导入</button>
         <button type="button" className="ir-button" onClick={addRow} aria-label="手动添加图例行"><Plus size={15} />手动加行</button>
         <button
           type="button"
-          className="ir-button ir-quiet"
+          className="ir-icon-button"
           onClick={clearRows}
           disabled={!value.rows.length}
           aria-label="清空图例行"
-        >清空</button>
+          title="清空全部图例行"
+        ><Trash2 size={15} /></button>
       </div>
+      {pasteOpen && (
+        <div className="ir-lg-paste" role="group" aria-label="从文本粘贴导入">
+          <textarea
+            className="ir-lg-paste-text"
+            aria-label="粘贴图例文本"
+            rows={5}
+            value={pasteText}
+            onChange={event => setPasteText(event.target.value)}
+            placeholder={'每行一条「色号 数量」，例如：\nH2 86\nM7：89 粒\nG10 288\n也支持 JSON：[["H2",86],["M7",89]]\n一行多条用逗号/顿号分隔也可以'}
+          />
+          <div className="ir-lg-paste-actions">
+            <select
+              className="ir-lg-paste-mode"
+              aria-label="导入方式"
+              value={pasteMode}
+              onChange={event => setPasteMode(event.target.value as 'replace' | 'merge')}
+            >
+              <option value="replace">替换全部行</option>
+              <option value="merge">只更新匹配行的数量</option>
+            </select>
+            <button
+              type="button"
+              className="ir-button ir-primary"
+              onClick={applyPasteImport}
+              disabled={!pastePreview.entries.length}
+            >导入 {pastePreview.entries.length} 行</button>
+            <span className="ir-lg-paste-preview" role="status">
+              {pasteText.trim()
+                ? `可导入 ${pastePreview.entries.length} 行${pastePreview.skipped.length ? ` · ${pastePreview.skipped.length} 段无法解析` : ''}`
+                : '等待粘贴…'}
+            </span>
+          </div>
+        </div>
+      )}
       {parseNote && <p className="ir-help ir-lg-note" role="status">{parseNote}</p>}
       {value.rows.length > 0 && (
         <>
-          <label className={`ir-lg-whitelist${whitelistOn ? ' is-on' : ''}`}>
+          <label
+            className={`ir-lg-whitelist${whitelistOn ? ' is-on' : ''}`}
+            title="只从下面这些色号里选色。解析结果与色板匹配度高时会自动打开；色号有错时整张图会被压成少数几种颜色，请先逐行核对修正。"
+          >
             <input
               type="checkbox"
               checked={whitelistOn}
@@ -585,7 +793,6 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
             />
             <span>
               <strong>识别时启用色板白名单（{lockedColors} 色）</strong>
-              <small>只从上面这些色号里选色。解析结果与色板匹配度高时会自动打开；色号有错时整张图会被压成少数几种颜色，请先逐行核对修正。</small>
             </span>
           </label>
           <div className="ir-lg-toolbar">
@@ -648,8 +855,10 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
                     />
                     <span aria-hidden="true">粒</span>
                   </span>
-                  {row.confidence !== undefined && (
-                    <span className={`ir-lg-conf${lowConfidence ? ' is-low' : ''}`} aria-label={`第 ${index + 1} 行解析置信度 ${Math.round(row.confidence * 100)}%`}>
+                  {/* 置信度 % 只在值得看时占宽度（低置信/有警告），其余收进行 title——
+                      59 行的列表每行省 4 字符宽度，行更紧凑。 */}
+                  {row.confidence !== undefined && (lowConfidence || warnText) && (
+                    <span className={`ir-lg-conf${lowConfidence ? ' is-low' : ''}`} aria-label={`第 ${index + 1} 行解析置信度 ${Math.round(row.confidence * 100)}%`} title={`解析置信度 ${Math.round(row.confidence * 100)}%`}>
                       {Math.round(row.confidence * 100)}%
                     </span>
                   )}
@@ -695,7 +904,7 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
           {reviewRowCount > 0 && (
             <p className="ir-help" data-tone="error" role="note">
               {reviewRowCount} 行数量无法可靠识别（图例字太小或图片被压缩/缩放糊化），已置为待核对、不计入 Σ 与数量锁定。
-              请对照原图逐行填写；也可以改用原图，或用「框选图例区域」只框色卡图例再识别。
+              请对照原图逐行填写、把外部 AI 读出的「色号 数量」用「粘贴导入→只更新匹配行的数量」一次填入，或改用原图 /「框选图例区域」重新识别。
             </p>
           )}
           <p className="ir-help ir-legend-hint" role="note">粒数自动识别准确率有限，锁定前请核对数字；白名单关闭时数量锁定不生效。若图纸有纸底空格，建议同时勾选「图纸色号辅助」。</p>

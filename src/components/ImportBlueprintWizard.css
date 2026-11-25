@@ -1542,8 +1542,8 @@
 .ir-lg-row {
   display:flex;
   align-items:center;
-  gap:6px;
-  padding:4px 8px;
+  gap:5px;
+  padding:3px 7px;
   border:1px solid var(--ir-line);
   border-radius:9px;
   background:var(--ir-surface);
@@ -1697,9 +1697,9 @@
 .ir-lg-count-wrap {
   display:inline-flex;
   align-items:baseline;
-  gap:3px;
+  gap:2px;
   flex:none;
-  width:62px;
+  width:56px;
   justify-content:center
 }
 /* 双类名提高特异性：全局 .ir-workbench input（0,1,1）会压过单类选择器，
@@ -1814,6 +1814,63 @@
   color:#e0705c
 }
 /* 色板白名单总开关：整块可点的声明式开关，视觉上与行列表分开。 */
+/* 长说明折叠（2026-11-25 布局重排）：说明文字不再常驻占三行，收进 details。 */
+.ir-lg-more {
+  margin-top:8px
+}
+.ir-lg-more summary {
+  cursor:pointer;
+  font-size:11px;
+  font-weight:600;
+  color:var(--ir-muted);
+  user-select:none
+}
+.ir-lg-more summary:hover {
+  color:var(--ir-purple)
+}
+.ir-lg-more[open] summary {
+  margin-bottom:4px
+}
+/* 粘贴导入（2026-11-25）：外部 AI 识别结果整批导入。 */
+.ir-lg-paste {
+  margin-top:8px;
+  padding:8px;
+  border:1px solid var(--ir-line);
+  border-radius:10px;
+  background:var(--ir-soft)
+}
+.ir-lg-paste-text {
+  width:100%;
+  box-sizing:border-box;
+  min-height:88px;
+  padding:7px 9px;
+  border:1px solid var(--ir-line);
+  border-radius:8px;
+  background:var(--ir-surface);
+  color:var(--ir-ink);
+  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  resize:vertical
+}
+.ir-lg-paste-actions {
+  display:flex;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:7px
+}
+.ir-lg-paste-mode {
+  min-height:28px;
+  padding:0 6px;
+  border:1px solid var(--ir-line);
+  border-radius:8px;
+  background:var(--ir-surface);
+  color:var(--ir-ink);
+  font-size:12px
+}
+.ir-lg-paste-preview {
+  font-size:11px;
+  color:var(--ir-muted)
+}
 .ir-lg-whitelist {
   display:flex;
   align-items:flex-start;

@@ -6,6 +6,7 @@ import type { BeadColor } from '../types';
 import type { LegendEntry } from '../utils/importLegend';
 import {
   lockAllDisabled,
+  parseLegendImportText,
   lockableCountSum,
   parseEntriesToRows,
   parseSkippedCount,
@@ -204,5 +205,65 @@ describe('source contract (lastParse 允许为 null)', () => {
     expect(offenders).toEqual([]);
     // 源图质量提示必须走派生常量（null 安全）。
     expect(source).toContain('lastParse?.sourceQuality');
+  });
+});
+
+describe('parseLegendImportText（外部 AI 文本粘贴导入）', () => {
+  const codes = new Set(['H2', 'M7', 'G10', 'C29', 'D11', 'E11']);
+
+  it('行式「色号 数量」：空格/冒号/横线/×/粒 都能解析', () => {
+    const r = parseLegendImportText('H2 86\nM7：89\nG10 - 288\nC29 × 12\nD11 5 粒', codes);
+    expect(r.entries).toEqual([
+      { code: 'H2', count: 86 },
+      { code: 'M7', count: 89 },
+      { code: 'G10', count: 288 },
+      { code: 'C29', count: 12 },
+      { code: 'D11', count: 5 },
+    ]);
+    expect(r.skipped).toEqual([]);
+  });
+
+  it('一行多条（逗号/顿号分隔）与序号前缀', () => {
+    const r = parseLegendImportText('1. H2 86、M7 89\n2) G10 288', codes);
+    expect(r.entries).toEqual([
+      { code: 'H2', count: 86 },
+      { code: 'M7', count: 89 },
+      { code: 'G10', count: 288 },
+    ]);
+  });
+
+  it('「第N行」前缀里的数字不会被当成数量', () => {
+    const r = parseLegendImportText('第1行 H2 86\n第12条 M7 89', codes);
+    expect(r.entries).toEqual([{ code: 'H2', count: 86 }, { code: 'M7', count: 89 }]);
+  });
+
+  it('JSON 数组与对象列表', () => {
+    expect(parseLegendImportText('[["H2",86],["M7",89]]', codes).entries)
+      .toEqual([{ code: 'H2', count: 86 }, { code: 'M7', count: 89 }]);
+    expect(parseLegendImportText('[{"code":"H2","count":86},{"code":"M7","count":89}]', codes).entries)
+      .toEqual([{ code: 'H2', count: 86 }, { code: 'M7', count: 89 }]);
+    expect(parseLegendImportText('[{"code":"H2","数量":86}]', codes).entries)
+      .toEqual([{ code: 'H2', count: 86 }]);
+  });
+
+  it('色板内优先：E11 不会被就近误拆成 E1 + 1', () => {
+    const r = parseLegendImportText('E11 66', codes);
+    expect(r.entries).toEqual([{ code: 'E11', count: 66 }]);
+    expect(r.skipped).toEqual([]);
+  });
+
+  it('无色号或无数量的片段计入 skipped，不中断其余行', () => {
+    const r = parseLegendImportText('H2 86\n随便一句话\nM7\nE11 66', codes);
+    expect(r.entries).toEqual([{ code: 'H2', count: 86 }, { code: 'E11', count: 66 }]);
+    expect(r.skipped).toEqual(['随便一句话', 'M7']);
+  });
+
+  it('同色号重复出现取最后一次；数量 clamp 到 0..999', () => {
+    expect(parseLegendImportText('H2 10\nH2 20', codes).entries).toEqual([{ code: 'H2', count: 20 }]);
+    expect(parseLegendImportText('H2 5000', codes).entries).toEqual([{ code: 'H2', count: 999 }]);
+  });
+
+  it('空文本 → 空结果', () => {
+    expect(parseLegendImportText('   \n', codes)).toEqual({ entries: [], skipped: [] });
   });
 });

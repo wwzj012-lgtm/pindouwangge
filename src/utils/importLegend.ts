@@ -95,6 +95,12 @@ export const lastSyntheticAnchors: { current: Map<string, Bitmap> | null } = { c
 /** 最近一次计数模板（诊断/先验校验用）：形状先验要核对模板自身的孔洞数与
  * 字宽，模板是聚类平均位图，孔洞可能被平均抹平——先验不能盲信模板。 */
 export const lastCountTemplates: { current: Map<string, Bitmap> | null } = { current: null };
+/** 诊断：竖排数量装配轨迹（原始 comp 区间 → 谷底切后区间），dbg 脚本用。
+ * 目的是看清「数字↔单位字」的间隙是在切片前存在、切片后被抹平。 */
+export const lastCountTrace: Array<{
+  band: [number, number]; digitW: number; countW: number;
+  raw: Array<[number, number]>; sliced: Array<[number, number]>; final: number;
+}> = [];
 /** code|count 形状打平时改信先验所需的领先度下限。 */
 const SHAPE_AMBIGUOUS_MARGIN = 0.08;
 /** 少于这个条目数就不认为是图例条（单"条目"更可能是噪点或水印）。 */
@@ -155,6 +161,9 @@ export interface LegendEntry {
   warn?: string;
   /** 条目色点的印刷色（可能缺）。色号未读出时供 UI 按色板最近色给建议。 */
   dotRgb?: [number, number, number];
+  /** 数量置信判定（路线2）：review=true 时 count 只是猜测值，UI 应显示
+   *  「待人工核对」并禁止把该值当结果输出。 */
+  countReview?: CountConfidenceVerdict;
 }
 
 export interface LegendChecks {
@@ -176,6 +185,19 @@ export interface LegendParseResult {
   /** ok=false 时为 []，UI 降级手动输入。 */
   entries: LegendEntry[];
   checks: LegendChecks;
+  /**
+   * 源图质量（路线1 上行防护）：图例文字的清晰度与预估字宽。UI 用它提示
+   * 「字号过小/图片被压缩，建议换原图或框选图例」，并在数量标了待核对的
+   * 情况下解释原因。
+   */
+  sourceQuality?: {
+    /** 内容行拉普拉斯方差（越大越清晰）；0 = 未测。 */
+    sharpness: number;
+    /** 预估单字原生像素宽（0 = 未测）。 */
+    nativeCharPx: number;
+    /** 低于门限：识别精度会明显下降。 */
+    blurry: boolean;
+  };
 }
 
 export interface LegendParseOptions {
@@ -242,6 +264,12 @@ interface GlyphComp {
 interface RawEntry {
   dotRgb: [number, number, number] | null;
   glyphs: GlyphComp[];
+  /** 数量区被半透明水印斜纹覆盖的像素占比（0..1，几何层用原彩缓冲实测）。 */
+  countWatermark?: number;
+  /** 数量区边缘锐度（0..1，越大越糊）。 */
+  countSoftness?: number;
+  /** 源图清晰度（内容行拉普拉斯方差）。 */
+  sourceSharpness?: number;
 }
 
 const clampInt = (value: number, min: number, max: number) => Math.max(min, Math.min(max, Math.round(value)));
@@ -443,6 +471,31 @@ const bitmapJaccardPad = (a: Bitmap, b: Bitmap): number => {
 };
 
 /** 位图等分切片：把粘连的 k 个字符按宽度等分（用于粘连数字回收）。 */
+/** 位图形态学腐蚀/膨胀（1 轮 8 邻域）。用于「微扰一致性」判定：处在分辨
+ *  极限的字形（4×7 原生像素级）在 ±1px 扰动下会翻字符，清晰字形不会。 */
+function morphBitmap(bm: Bitmap, mode: 'erode' | 'dilate'): Bitmap {
+  const { w, h, data } = bm;
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      let on = 0;
+      let total = 0;
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy;
+          const inside = nx >= 0 && ny >= 0 && nx < w && ny < h;
+          total += 1;
+          if (inside ? data[ny * w + nx] : 0) on += 1;
+        }
+      }
+      out[y * w + x] = mode === 'erode'
+        ? (on === total ? 1 : 0)
+        : (on > 0 ? 1 : 0);
+    }
+  }
+  return { data: out, w, h };
+}
+
 export function splitBitmap(b: Bitmap, k: number): Bitmap[] {
   const out: Bitmap[] = [];
   for (let i = 0; i < k; i += 1) {
@@ -1033,7 +1086,7 @@ function selectLegendLocation(
   let best: { located: LegendLocation; rawEntries: RawEntry[]; digitW: number } | null = null;
   lastLocationDebug.length = 0;
   for (const located of locateLegendCandidates(source, calibration, framed)) {
-    const parsed = located.chips ? collectChipEntries(source, located) : collectRawEntries(source, located);
+    const parsed = tagSourceSharpness(source, located.chips ? collectChipEntries(source, located) : collectRawEntries(source, located));
     lastLocationDebug.push({ region: located.region, anchored: located.anchored, lines: located.lines.length, rawEntries: parsed.rawEntries.length });
     if (!best || score(parsed) > score(best)) {
       best = { located, ...parsed };
@@ -1042,7 +1095,7 @@ function selectLegendLocation(
   const bestDotful = best ? best.rawEntries.reduce((sum, entry) => sum + (entry.dotRgb ? 1 : 0), 0) : 0;
   if (!framed && bestDotful < EDGE_GATE_MIN) {
     for (const located of locateEdgeCandidates(source)) {
-      const parsed = collectRawEntries(source, located);
+      const parsed = tagSourceSharpness(source, collectRawEntries(source, located));
       lastLocationDebug.push({ region: located.region === 'bottom' ? 'edge-bottom' : 'edge-right', anchored: located.anchored, lines: located.lines.length, rawEntries: parsed.rawEntries.length });
       if (!best || score(parsed) > score(best)) {
         best = { located, ...parsed };
@@ -2086,6 +2139,21 @@ function reduceCodeToStructuralCluster(split: SplitResult, digitW: number): void
   split.codeGlyphs = chosen;
 }
 
+/** 诊断：最近一次 resolveCodes 的候选集与定解结果（dbg 脚本用）。
+ * 用来看「真值码是否进了候选集」「落在 ΔE 第几名」「被谁挤掉」。
+ * 注意：一次解析里 resolveCodes 会被调用多轮（主求解 / 锚库 / refine），
+ * 各轮候选窗不同（wideColorWindow 只主求解带），因此按调用快照记录。 */
+export const lastCodeSolve: {
+  call: number;
+  calls: Array<{
+    wide: boolean;
+    cand: string[][];
+    candDeltaE: number[][];
+    resolved: Array<string | null>;
+    unique: boolean[];
+  }>;
+} = { call: 0, calls: [] };
+
 /** 全局一致性求解出的条目 code（null = 求解失败，走模板/先验兜底）。 */
 interface ResolvedCode {
   code: string;
@@ -2279,6 +2347,16 @@ export function resolveCodes(
     resolved[i] = { code: ranked[0].code, deltaE: rawEntries[i].dotRgb ? ranked[0].deltaE : null, unique: false };
     taken.add(ranked[0].code);
   }
+  lastCodeSolve.call += 1;
+  if (lastCodeSolve.calls.length < 8) {
+    lastCodeSolve.calls.push({
+      wide: !!options?.wideColorWindow,
+      cand: candidates.map(c => [...c]),
+      candDeltaE: candidates.map((c, i) => c.map(code => dotDeltaE(i, code))),
+      resolved: resolved.map(r => (r ? r.code : null)),
+      unique: resolved.map(r => !!r?.unique),
+    });
+  }
   return resolved;
 }
 
@@ -2287,6 +2365,105 @@ interface EntryParse {
   count: number;
   confidence: number;
   warns: string[];
+  /** 数量置信判定（路线2，2026-11-25）：review=true 表示数字不可信，
+   *  产品层应展示「待人工核对」而不是把猜测值当结果。 */
+  countReview?: CountConfidenceVerdict;
+}
+
+/** 数量不可信的原因（UI 人话翻译见 ImportLegendPanel）。 */
+export type CountReviewReason = 'blurrySource' | 'unstableDigit' | 'tinyGlyph' | 'mergedGlyph' | 'watermark' | 'glyphUnclear';
+
+export interface CountConfidenceVerdict {
+  review: boolean;
+  reasons: CountReviewReason[];
+  /** 单字原生像素宽（= digitW / 放大倍数）；0 = 未知。 */
+  nativeCharPx: number;
+  /** 数量区被半透明水印斜纹覆盖的像素占比 0..1。 */
+  watermarkRatio: number;
+  /** 最宽数量字形 / digitW：≥1.8 说明多字焊连。 */
+  maxGlyphRatio: number;
+  /** 数字模板平均距离（Jaccard 型），空池时为 0。 */
+  meanDistance: number;
+  /** ±1px 微扰（腐蚀/膨胀）后翻字符的位数——处在分辨极限的直接证据。 */
+  unstableDigits: number;
+  /** 数量区边缘锐度（0..1，越大越糊）。 */
+  edgeSoftness: number;
+  /** 源图清晰度（内容行拉普拉斯方差）。 */
+  sourceSharpness: number;
+}
+
+/** 单字原生宽 ≤ 此值直接锁「待核对」（card2 4.25px 实证）。 */
+const COUNT_TINY_NATIVE_PX = 5;
+/** 粘连/字形距离两条规则的适用门：只在极小字形或水印污染时启用——
+ *  card1 的 62/62 数量里也有 2 倍宽的粘连块（"38"/"39"），字高 7px 且
+ *  切分正确，按粘连无条件标待核对会白白废掉一条已稳定的链路。 */
+const COUNT_TINY_CONTEXT_PX = 6;
+const COUNT_MERGED_W_RATIO = 1.8;
+/** 水印斜纹覆盖占比门（card2 实测 15-32%，干净行 <5%）。 */
+const COUNT_WATERMARK_RATIO = 0.12;
+/** 数字模板平均距离门（越高越不像任何数字）。 */
+const COUNT_GLYPH_DIST_MAX = 0.4;
+/** 源图清晰度下限（内容行拉普拉斯方差）。标定四卡：card3 15171、card1 8389
+ *  （两者数量全对）vs card4 4798（4/22）、card2 1339（2/14）——阈值取
+ *  {card4, card1} 之间。低于此值 = 源图被重采样糊化，数量不可信。 */
+const COUNT_SOURCE_SHARPNESS_MIN = 6000;
+
+/**
+ * 数量置信判定（2026-11-25 路线2）：**纯输出层包装，不改识别阈值/形态学**。
+ *
+ * 背景（已证伪的路线见 docs/handoff）：card2 这类缩略图里字形只有 4×7 原生
+ * 像素，水印斜纹与印字同方向、同宽度量级、同对比度区间——像素级分离不存在
+ * 廉价解。既然读不准，就不要把 44（真值 11）、443（真值 26）这种**自信的
+ * 错值**当结果输出，标记为待人工核对。
+ *
+ * 规则（任一命中即 review）：
+ *  1. tinyGlyph      单字原生宽 ≤5px（信息量本身不够）
+ *  2. watermark      水印斜纹覆盖数量区 ≥12%
+ *  3. mergedGlyph    最宽字形 ≥1.8×digitW（多字焊连），仅在极小/水印语境
+ *  4. glyphUnclear   数字模板平均距离 >0.4，仅在极小/水印语境
+ */
+export function judgeCountConfidence(input: {
+  digitW: number;
+  upscale?: number;
+  glyphWidths: number[];
+  digitDistances?: number[];
+  watermarkRatio?: number;
+  unstableDigits?: number;
+  edgeSoftness?: number;
+  sourceSharpness?: number;
+}): CountConfidenceVerdict {
+  const upscale = input.upscale && input.upscale > 0 ? input.upscale : CARD_UPSCALE;
+  const nativeCharPx = input.digitW > 0 ? input.digitW / upscale : 0;
+  const watermarkRatio = Math.max(0, Math.min(1, input.watermarkRatio ?? 0));
+  const maxGlyphRatio = input.digitW > 0 && input.glyphWidths.length
+    ? Math.max(...input.glyphWidths) / input.digitW
+    : 0;
+  const dists = input.digitDistances ?? [];
+  const meanDistance = dists.length ? dists.reduce((sum, d) => sum + d, 0) / dists.length : 0;
+  const unstableDigits = Math.max(0, Math.round(input.unstableDigits ?? 0));
+  const edgeSoftness = Math.max(0, Math.min(1, input.edgeSoftness ?? 0));
+  const sourceSharpness = Math.max(0, input.sourceSharpness ?? 0);
+  const reasons: CountReviewReason[] = [];
+  // 主判据＝源图清晰度：唯一与准确率排序一致的指标（标定见常量注释）。
+  // 逐条目指标全部证伪——原生字宽（card1 4.75px vs card2 4.25px 分不开）、
+  // 水印占比（card3 高达 0.31 却全对）、粘连宽度（card3 到 3.06 也全对）、
+  // 模板距离、±1px 微扰翻字（三卡都对扰动敏感）、填充率、放大后锐度
+  // （4× 放大本身把过渡带抹平）。既然逐条目无从判断，就诚实地说整句话：
+  // 「这张图的字太糊，数量请核对」。
+  if (sourceSharpness > 0 && sourceSharpness < COUNT_SOURCE_SHARPNESS_MIN) reasons.push('blurrySource');
+  if (unstableDigits > 0) reasons.push('unstableDigit');
+  // 以下四项只作为诊断上下文记录（不单独触发）：实测不具区分度，留作
+  // 排查时的证据强度参考。
+  if (nativeCharPx > 0 && nativeCharPx <= COUNT_TINY_NATIVE_PX) reasons.push('tinyGlyph');
+  if (watermarkRatio >= COUNT_WATERMARK_RATIO) reasons.push('watermark');
+  const tinyContext = (nativeCharPx > 0 && nativeCharPx <= COUNT_TINY_CONTEXT_PX)
+    || watermarkRatio >= COUNT_WATERMARK_RATIO;
+  if (tinyContext && maxGlyphRatio >= COUNT_MERGED_W_RATIO) reasons.push('mergedGlyph');
+  if (tinyContext && meanDistance > COUNT_GLYPH_DIST_MAX) reasons.push('glyphUnclear');
+  // unstableDigit / tinyGlyph / watermark / mergedGlyph / glyphUnclear 只作
+  // 诊断上下文（实测均无区分度，见上），不作触发条件。
+  const review = reasons.includes('blurrySource');
+  return { review, reasons, nativeCharPx, watermarkRatio, maxGlyphRatio, meanDistance, unstableDigits, edgeSoftness, sourceSharpness };
 }
 
 /** 单条目识别：code（一致性求解 → 模板 → 先验兜底）+ count（数字模板 + 切片回收）。 */
@@ -2329,6 +2506,14 @@ function recognizeEntry(
   //  行的字形数本身不可信（JPEG 断裂），可靠票色的码长证据优先。
   let code = '';
   let codeConfidence: number | null = null;
+  // 字形假设的色证门：join 出的码与票面印刷色的 ΔE 超门即判近形误读。
+  // 两处用到（求解后翻案 / 纯字形路径），故提到这里。
+  const shapeColorOk = (cand: string): boolean => {
+    if (!resolved || !entry.dotRgb || !prepared) return true;
+    const p = prepared.find(pp => pp.color.code === cand);
+    if (!p) return true;
+    return deltaE2000(rgbToLab(...entry.dotRgb), p.lab) <= CARD_SHAPE_COLOR_GATE;
+  };
   if (resolved && prepared && prior && paletteCodes.has(prior.code)
     && prior.code.length !== split.codeGlyphs.length
     && resolved.code.length === split.codeGlyphs.length
@@ -2346,15 +2531,22 @@ function recognizeEntry(
   }
   if (!code && resolved) {
     // 字形证据仲裁（2026-11-24 card4 E16 实证，格式无关）：solver 的
-    // 约束传播会被洗淡字形的误并组带偏（E16 的 E 被并进 H 组 → E16
-    // 候选被淘汰 → 按点色 argmin 定了 H17），而模板逐字形匹配全部第一
-    // 正确（E0.19/1/6 0.12）。joined 在色板内且全部字形可读时，逐字形
-    // 证据优先于 solver——唯一解（unique）保守跳过不覆盖。
-    if (templates.size && !resolved.unique) {
+    // 约束传播会被洗淡字形的误并组带偏（E16 的 E 被并进 H 组 → E16 候选
+    // 被淘汰 → 按点色 argmin 定了 H17），而模板逐字形匹配全部第一正确
+    // （E0.19/1/6 0.12）。joined 在色板内、全部字形可读、且色证不荒谬时，
+    // 逐字形证据优先于 solver（**含 unique 解**：unique 是"候选集只剩一个"
+    // 的传播结果，不是判读正确性证明——card1 #1 G4U→G9、#30 E11U→E14 都是
+    // unique 却读错，色证门 25 已把"只靠字形乱猜"的路径挡在外面）。
+    if (templates.size) {
+      // 推翻 unique 解的字形门更紧（2026-11-24 card3 F24/F14 实证：竖排淡印
+      // 票的 F 被读成 E（E0.23）就把 unique 的正确解 F24 顶掉，且 E24 色证
+      // 也过得了 25 的色门）——要求每个字形距离 ≤0.17（肉眼级清晰），
+      // card1 的真翻案样本实测 0.09-0.14 全在门内。
+      const distCap = resolved.unique ? CARD_SHAPE_OVERRIDE_MAX_DIST : GLYPH_MAX_DISTANCE;
       const matches = split.codeGlyphs.map(glyph => matchGlyph(glyph.bitmap, templates));
-      if (matches.every(m => m && m.distance <= GLYPH_MAX_DISTANCE)) {
+      if (matches.every(m => m && m.distance <= distCap)) {
         const joined = matches.map(m => m!.char).join('');
-        if (joined !== resolved.code && paletteCodes.has(joined)) {
+        if (joined !== resolved.code && paletteCodes.has(joined) && shapeColorOk(joined)) {
           code = joined;
           codeConfidence = 0.6;
           warns.push('shapeOverResolved');
@@ -2369,6 +2561,8 @@ function recognizeEntry(
     base = resolved.unique ? Math.min(0.97, base + 0.04) : base - 0.05;
     codeConfidence = Math.max(0.3, Math.min(0.97, base));
   } else {
+    // 纯字形路径（solver 无解 或 已被 prior 长度冲突接管）。
+    // 色证门见 shapeColorOk：join 色证荒谬且 solver 有解时退回 solver 答案。
     let codeShape: number | null = null;
     let codeMargin: number | null = null;
     if (templates.size) {
@@ -2389,11 +2583,17 @@ function recognizeEntry(
         codeMargin = Math.max(0, Math.min(1, median(margins) * 2));
         const joined = chars.join('');
         if (readable && paletteCodes.has(joined)) {
-          code = joined;
-          if (prior && prior.code !== joined && prior.code.length === chars.length && (codeMargin ?? 0) < SHAPE_AMBIGUOUS_MARGIN) {
-            // 形状证据打平：色点是整块印刷色，区分度比小字字形高两个数量级。
-            code = prior.code;
-            warns.push('shapeTiePrior');
+          if (!shapeColorOk(joined)) {
+            // 字形码色证荒谬：保留 solver 答案（若 solver 无解则退回先验）。
+            if (resolved) code = resolved.code;
+            warns.push('shapeColorReject');
+          } else {
+            code = joined;
+            if (prior && prior.code !== joined && prior.code.length === chars.length && (codeMargin ?? 0) < SHAPE_AMBIGUOUS_MARGIN) {
+              // 形状证据打平：色点是整块印刷色，区分度比小字字形高两个数量级。
+              code = prior.code;
+              warns.push('shapeTiePrior');
+            }
           }
         } else if (prior && paletteCodes.has(prior.code) && prior.code.length === matches.length) {
           code = prior.code;
@@ -2426,6 +2626,16 @@ function recognizeEntry(
   const digits: string[] = [];
   const digitDistances: number[] = [];
   let countReadable = true;
+  let unstableDigits = 0;
+  // 微扰一致性：同一字形腐蚀/膨胀 1px 后重读，字符变了说明它卡在分辨极限。
+  const stableDigit = (bm: Bitmap, char: string): boolean => {
+    for (const mode of ['erode', 'dilate'] as const) {
+      const m = matchCount(morphBitmap(bm, mode));
+      if (!m) return false;
+      if (m.char.split('#')[0] !== char) return false;
+    }
+    return true;
+  };
   for (let i = 0; i < split.countGlyphs.length; i += 1) {
     const glyph = split.countGlyphs[i];
     const isLast = i === split.countGlyphs.length - 1;
@@ -2435,8 +2645,10 @@ function recognizeEntry(
     const match = w <= digitW * 1.4 ? matchCount(glyph.bitmap) : null;
     if (match && match.distance <= GLYPH_MAX_DISTANCE) {
       if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[cnt-dbg] x${glyph.x0} w${w} '${match.char}' d${match.distance.toFixed(3)}`);
-      digits.push(match.char.split('#')[0]);
+      const ch = match.char.split('#')[0];
+      digits.push(ch);
       digitDistances.push(match.distance);
+      if (!stableDigit(glyph.bitmap, ch)) unstableDigits += 1;
       continue;
     }
     // 宽块：多枚字符粘连。k 取 round(w/countW) 及其邻域，逐 k 试切：
@@ -2485,8 +2697,10 @@ function recognizeEntry(
       const matches = slices.map(slice => matchCount(slice));
       if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[cnt-dbg] x${glyph.x0} w${w} WIDE k${bestK} prefix${bestPrefix} -> '${matches.slice(0, bestPrefix).map(m => m!.char).join('')}'`);
       for (let s = 0; s < bestPrefix; s += 1) {
-        digits.push(matches[s]!.char.split('#')[0]);
+        const ch = matches[s]!.char.split('#')[0];
+        digits.push(ch);
         digitDistances.push(matches[s]!.distance);
+        if (!stableDigit(slices[s], ch)) unstableDigits += 1;
       }
       if (isLast) break;
       if (bestPrefix === bestK) continue;
@@ -2513,6 +2727,24 @@ function recognizeEntry(
   }
   const countShape = digitDistances.length ? 1 - digitDistances.reduce((s, d) => s + d, 0) / digitDistances.length : 0;
 
+  // ---- 数量置信判定（路线2）：读得出也要判"值不值信"。读不出（count=0）
+  //  已由 countUnread 表达，这里只管「读到但不可靠」——绝不能把 44（真值
+  //  11）这种自信错值当结果输出。 ----
+  const countReview = judgeCountConfidence({
+    digitW,
+    glyphWidths: split.countGlyphs.map(widthOf),
+    digitDistances,
+    watermarkRatio: entry.countWatermark,
+    unstableDigits,
+    edgeSoftness: entry.countSoftness,
+    sourceSharpness: entry.sourceSharpness,
+  });
+  if (countReview.review && count > 0) {
+    const key = `countReview:${countReview.reasons.join('+')}`;
+    if (!warns.includes('countLowConfidence')) warns.push('countLowConfidence');
+    if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[cnt-review] ${key} native=${countReview.nativeCharPx.toFixed(2)}px wm=${(countReview.watermarkRatio * 100).toFixed(0)}% maxW=${countReview.maxGlyphRatio.toFixed(2)} d=${countReview.meanDistance.toFixed(2)}`);
+  }
+
   // ---- 置信度：code 证据 + 粒数证据的加权。 ----
   let confidence = codeConfidence ?? 0;
   confidence = 0.75 * confidence + 0.25 * countShape;
@@ -2526,7 +2758,7 @@ function recognizeEntry(
     warns.push('codeNotInPalette');
   }
   if (confidence < LEGEND_LOW_CONFIDENCE && !warns.includes('lowConfidence')) warns.push('lowConfidence');
-  return { code, count, confidence: Math.max(0, Math.min(1, confidence)), warns };
+  return { code, count, confidence: Math.max(0, Math.min(1, confidence)), warns, countReview };
 }
 
 /**
@@ -2788,6 +3020,21 @@ function collectFramedEntries(
   const digitWidths: number[] = [];
   for (const entry of kept) for (const glyph of entry.glyphs) digitWidths.push(widthOf(glyph));
   return { rawEntries: kept, digitW: Math.max(3, median(digitWidths)) };
+}
+
+/** 给采集结果补「源图清晰度」（路线2）：在**条目并集 bbox** 上量，而不是
+ *  整幅图——整幅图里的网格/图案硬边会把清晰度抬得很高，图例字糊也照不
+ *  出来。三条采集路径（常规 / 框选 / 码块）统一在调度处打标。 */
+function tagSourceSharpness<T extends { rawEntries: RawEntry[] }>(source: ImportImagePixels, parsed: T): T {
+  const glyphs = parsed.rawEntries.flatMap(entry => entry.glyphs);
+  if (!glyphs.length) return parsed;
+  const gx0 = Math.max(0, Math.min(...glyphs.map(g => g.x0)));
+  const gy0 = Math.max(0, Math.min(...glyphs.map(g => g.y0)));
+  const gx1 = Math.min(source.width - 1, Math.max(...glyphs.map(g => g.x1)));
+  const gy1 = Math.min(source.height - 1, Math.max(...glyphs.map(g => g.y1)));
+  const sharp = measureSourceSharpness(cropPixels(source, gx0, gy0, gx1, gy1));
+  for (const entry of parsed.rawEntries) if (entry.sourceSharpness === undefined) entry.sourceSharpness = sharp;
+  return parsed;
 }
 
 /**
@@ -3335,6 +3582,12 @@ interface CardItem {
   codeGlyphs: GlyphComp[];
   countGlyphs: GlyphComp[];
   dotRgb: [number, number, number] | null;
+  /** 数量区水印覆盖占比（0..1）：见 countWatermarkRatio。 */
+  countWatermark?: number;
+  /** 数量区边缘锐度（0..1，越大越糊）：见 countEdgeSoftness。 */
+  countSoftness?: number;
+  /** 源图清晰度（内容行拉普拉斯方差）：见 measureSourceSharpness。 */
+  sourceSharpness?: number;
 }
 
 /** 色块判定：宽 ≥ 阈值、高 ≥ 0.5 行带、填充率 ≥ 0.7 的连通域。
@@ -3429,6 +3682,143 @@ export function cardPageBg(cropped: ImportImagePixels): [number, number, number]
   const lum = (c: [number, number, number]) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
   if (top && bottom) return lum(top) >= lum(bottom) ? top : bottom;
   return top ?? bottom ?? [255, 255, 255];
+}
+
+/** 数量区水印覆盖占比：数量字形并集 bbox 内，「远离墨芯的中间调」像素占比。
+ *
+ *  口径很关键（2026-11-25 实测两次才定）：直接统计「距底色 25..70」会把
+ *  **抗锯齿过渡带**也算进去——card1 的 62/62 全对行同样落在 15-38%，
+ *  指标失去区分度。抗锯齿永远紧贴墨芯（1px 环），而水印斜纹是**离字形
+ *  很远的长条**。所以只统计「25..70 且 8 邻域内没有 >120 的强墨像素」的
+ *  像素——干净排字行 <3%，水印行仍 12-30%。 */
+export function countWatermarkRatio(color: ImportImagePixels, glyphs: GlyphComp[]): number | undefined {
+  if (!glyphs.length) return undefined;
+  const x0 = Math.max(0, Math.min(...glyphs.map(g => g.x0)));
+  const x1 = Math.min(color.width - 1, Math.max(...glyphs.map(g => g.x1)));
+  const y0 = Math.max(0, Math.min(...glyphs.map(g => g.y0)));
+  const y1 = Math.min(color.height - 1, Math.max(...glyphs.map(g => g.y1)));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return undefined;
+  const base = dominantBaseColor(color.data, color.width, x0, y0, x1 + 1, y1 + 1);
+  const w = x1 - x0 + 1;
+  const h = y1 - y0 + 1;
+  const strong = new Uint8Array(w * h);
+  const mid = new Uint8Array(w * h);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const i = ((y + y0) * color.width + (x + x0)) * 4;
+      const dr = color.data[i] - base[0], dg = color.data[i + 1] - base[1], db = color.data[i + 2] - base[2];
+      const d = Math.sqrt(dr * dr + dg * dg + db * db);
+      if (d > 120) strong[y * w + x] = 1;
+      else if (d >= 25 && d <= 70) mid[y * w + x] = 1;
+    }
+  }
+  let water = 0;
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      if (!mid[y * w + x]) continue;
+      let nearInk = 0;
+      for (let dy = -1; dy <= 1 && !nearInk; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          if (strong[ny * w + nx]) { nearInk = 1; break; }
+        }
+      }
+      if (!nearInk) water += 1;
+    }
+  }
+  return water / (w * h);
+}
+
+/** 数量区边缘锐度（1=全糊，0=锐利）：源图被重采样/压缩后，字形边缘的
+ *  过渡带变宽——分辨极限下"糊"才是判读失败的真因，而"字小"本身不是
+ *  （card1 原生 4.75px 数量 62/62 全对，card2 4.25px 只有 2/14）。
+ *  口径：bbox 内距底色 p95 视作满墨，统计「30%~70% 满墨」的过渡带像素
+ *  占「≥30% 满墨」像素的比例。清晰排字 ~0.2-0.35，重采样糊图 ~0.5+。 */
+export function countEdgeSoftness(color: ImportImagePixels, glyphs: GlyphComp[]): number | undefined {
+  if (!glyphs.length) return undefined;
+  const x0 = Math.max(0, Math.min(...glyphs.map(g => g.x0)));
+  const x1 = Math.min(color.width - 1, Math.max(...glyphs.map(g => g.x1)));
+  const y0 = Math.max(0, Math.min(...glyphs.map(g => g.y0)));
+  const y1 = Math.min(color.height - 1, Math.max(...glyphs.map(g => g.y1)));
+  if (x1 - x0 < 2 || y1 - y0 < 2) return undefined;
+  const base = dominantBaseColor(color.data, color.width, x0, y0, x1 + 1, y1 + 1);
+  const dists: number[] = [];
+  for (let y = y0; y <= y1; y += 1) {
+    for (let x = x0; x <= x1; x += 1) {
+      const i = (y * color.width + x) * 4;
+      const dr = color.data[i] - base[0], dg = color.data[i + 1] - base[1], db = color.data[i + 2] - base[2];
+      dists.push(Math.sqrt(dr * dr + dg * dg + db * db));
+    }
+  }
+  if (!dists.length) return undefined;
+  const sorted = dists.slice().sort((a, b) => a - b);
+  const full = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
+  if (full < 40) return undefined;
+  const lo = full * 0.3, hi = full * 0.7;
+  let ink = 0, soft = 0;
+  for (const d of dists) {
+    if (d >= lo) ink += 1;
+    if (d >= lo && d <= hi) soft += 1;
+  }
+  return ink > 0 ? soft / ink : undefined;
+}
+
+/** 源图清晰度（内容行拉普拉斯方差，越大越清晰）。
+ *
+ *  为什么是「整图」而不是「逐条目」：2026-11-25 连续实测七种逐条目指标
+ *  （原生字宽 / 水印覆盖率 / 粘连宽度 / 模板距离 / ±1px 微扰翻字 / 填充率 /
+ *  放大后边缘锐度）**全部无法区分对错**——card1 与 card2 的原生字宽同为
+ *  4.25-4.75px，card3 水印占比高到 0.31 却 48/48 全对。真正决定读得准不准
+ *  的是源图有没有被重采样糊化，这是整图属性：
+ *    card3 15171（数量 48/48）、card1 8389（62/62）、card4 4798（4/22）、
+ *    card2 1339（2/14）——排序与准确率完全一致。
+ *  只在「内容行」（行标准差 > 1.2×中位）上算，避免大片留白稀释。 */
+export function measureSourceSharpness(source: ImportImagePixels): number {
+  const { data, width, height } = source;
+  if (width < 8 || height < 8) return 0;
+  const grey = new Float32Array(width * height);
+  const rowStd = new Float32Array(height);
+  for (let y = 0; y < height; y += 1) {
+    let sum = 0;
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4;
+      const v = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+      grey[y * width + x] = v;
+      sum += v;
+    }
+    const mean = sum / width;
+    let varSum = 0;
+    for (let x = 0; x < width; x += 1) {
+      const d = grey[y * width + x] - mean;
+      varSum += d * d;
+    }
+    rowStd[y] = Math.sqrt(varSum / width);
+  }
+  const sorted = Array.from(rowStd).sort((a, b) => a - b);
+  const med = sorted[Math.floor(height * 0.5)] ?? 0;
+  const keep = new Uint8Array(height);
+  let contentRows = 0;
+  for (let y = 0; y < height; y += 1) {
+    if (rowStd[y] > med * 1.2) { keep[y] = 1; contentRows += 1; }
+  }
+  // 行内统计几乎一致的图（满幅纹理/整行文字）会被"内容行"判据全部筛掉：
+  // 此时退回全行统计，不要直接返回 0（0 在判定里等于"未测"）。
+  if (contentRows < 3) keep.fill(1);
+  let sum = 0, sum2 = 0, n = 0;
+  for (let y = 1; y < height - 1; y += 1) {
+    if (!keep[y]) continue;
+    for (let x = 1; x < width - 1; x += 1) {
+      const i = y * width + x;
+      const lap = 4 * grey[i] - grey[i - 1] - grey[i + 1] - grey[i - width] - grey[i + width];
+      sum += lap;
+      sum2 += lap * lap;
+      n += 1;
+    }
+  }
+  if (!n) return 0;
+  const mean = sum / n;
+  return Math.max(0, sum2 / n - mean * mean);
 }
 
 export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[]; digitW: number; pitch: number; vertical: boolean } | null {
@@ -3578,6 +3968,7 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
 
   const items: CardItem[] = [];
   const countWidths: number[] = [];
+  lastCountTrace.length = 0;
   // ---- 竖排清单版式（card3 类）：每行带恰一个条目（2~5 token）、无水平
   // 节距。token 布局 [码文本][数量(粒)][色块]：码文本印在白页底上最干净，
   // 直接当码字形；色块只贡献先验色（dotRgb），不参与装配（避免单 token
@@ -3671,31 +4062,28 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
       }
       if (typeof process !== 'undefined' && process.env?.CARD_DEBUG) console.error(`[vdbg] y=${band.y0}-${band.y1} texts=${texts.length} comps0=${texts[0].comps.length} digitW=${digitWv} code=${codeGlyphs.length}`);
       if (!codeGlyphs.length) continue;
-      // 数量：粗体数字互触成宽块。先谷底切（cardSplitWideGlyph），仍宽的块
-      // 按 countW（单字宽中位）估 k 等分切——"2725"整块 → 4 数字。
+      // 数量：粗体数字互触成宽块。只做「空列谷底切」（cardSplitWideGlyph，
+      // 有墨谷为证）；**宽块保持整块交给识别层的多 k 试切**——2026-11-24 定案：
+      // 几何层按 countW 估 k 等分是错的。card3 计数实际字距 17-18px，而
+      // countW 来自本带 comps 中位，往往是窄 '1'（13）或直接回落 digitW
+      // （13）：round(52/13)=4 把「156」切成 4 片，「308」切成 4 片，
+      // 「66」切成 3 片——切缝落在笔画中间，识别层再强也吐不出原字
+      // （H1 1156→0、E11 308→3488、E1 66→685 三错全此根因）。
+      // recognizeEntry 的宽块回收用模板距离挑 k（k=centerK±1 逐试），
+      // 比字宽估计可靠得多：几何层不预切后 card3 计数 45→48/48，
+      // card1/2 与全部回归用例逐字节不变。
       const rawCounts = texts.slice(1).flatMap(t => t.comps);
       const singleW = rawCounts
         .map(widthOf)
         .filter(w => w >= digitWv * 0.5 && w < digitWv * 1.4);
       const countWv = singleW.length ? median(singleW) : digitWv;
-      const countGlyphsRaw = rawCounts.flatMap(g => {
-        const parts = cardSplitWideGlyph(g, digitWv);
-        const out: GlyphComp[] = [];
-        for (const p of parts) {
-          const w = widthOf(p);
-          if (w < digitWv * 1.4) { out.push(p); continue; }
-          const k = Math.max(2, Math.min(6, Math.round(w / Math.max(4, countWv))));
-          const pieces = sliceGlyphBitmap(p, k);
-          if (pieces.length === k && pieces.every(pc => widthOf(pc) >= countWv * 0.5 && widthOf(pc) <= countWv * 1.5)) out.push(...pieces);
-          // 切不出合理片：整块丢弃（无法解释的宽块不进数量）。
-        }
-        return out;
-      });
+      const countGlyphsRaw = rawCounts.flatMap(g => cardSplitWideGlyph(g, digitWv));
       // 单位字剥离（2026-11-24 card3 实证）：数量 token 内「2725粒」连成一串，
-      // 粒（米+立）被 k 切片当成数字 → 位数超限整条 countUnread（card3 48 条
-      // 数量全 0 的根因）。数字间间隙实测 0-4px、数字↔单位 8-12px：按最后一个
-      // ≥CARD_UNIT_GAP 的间隙切掉尾部单位组。守卫=尾部至少与数字同高（同等
-      // 字号汉字），淡碎片不剥；切完必须留得下 ≥1 个数字。
+      // 粒（米+立）会被当成数字（谷底切出 2 片或整块按数字匹配）→ 位数超限整条
+      // countUnread（card3 48 条数量全 0 的根因）。数字间间隙实测 0-4px、
+      // 数字↔单位 8-12px：按最后一个 ≥CARD_UNIT_GAP 的间隙切掉尾部单位组。
+      // 守卫=尾部至少与数字同高（同等字号汉字），淡碎片不剥；切完必须留得下
+      // ≥1 个数字。
       const countGlyphs = (() => {
         if (countGlyphsRaw.length < 2) return countGlyphsRaw;
         let cut = countGlyphsRaw.length;
@@ -3710,6 +4098,12 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
         return countGlyphsRaw.slice(0, cut);
       })();
       items.push({ codeGlyphs, countGlyphs, dotRgb: swatchColor });
+      lastCountTrace.push({
+        band: [band.y0, band.y1], digitW: digitWv, countW: countWv,
+        raw: rawCounts.map(g => [Math.round(g.x0), Math.round(g.x1)] as [number, number]),
+        sliced: countGlyphsRaw.map(g => [Math.round(g.x0), Math.round(g.x1)] as [number, number]),
+        final: countGlyphs.length,
+      });
       for (const g of countGlyphs) if (widthOf(g) <= 40) countWidths.push(widthOf(g));
     }
   } else {
@@ -3798,6 +4192,16 @@ export function collectCardItems(cropped: ImportImagePixels): { items: CardItem[
   };
   const withCount = items.filter(i => i.countGlyphs.some(countLike)).length;
   if (withCount < items.length * 0.5) { if (cardDebugSink) cardDebugSink(`cci: withCount=${withCount}/${items.length}`); return null; }
+  // 数量区水印覆盖度（路线2 的数据源）：在全彩缓冲上实测每条数量区里
+  // 「半透明斜纹档」（与局部底色的距离 25-70）的像素占比。card2 实测干净
+  // 行 <5%、水印行 15-32%——这个量级差可以当置信判据，但**不能**当分离
+  // 依据（斜纹与印字同向同宽，四路线已证伪）。
+  const sharpness = measureSourceSharpness(cropped);
+  for (const item of items) {
+    item.countWatermark = countWatermarkRatio(color, item.countGlyphs);
+    item.countSoftness = countEdgeSoftness(color, item.countGlyphs);
+    item.sourceSharpness = sharpness;
+  }
   return { items, digitW, pitch, vertical };
 }
 
@@ -4629,7 +5033,13 @@ export function collectCardEntries(
   const rawEntries: RawEntry[] = [];
   const splits: Array<SplitResult | null> = [];
   for (const item of collected.items) {
-    rawEntries.push({ dotRgb: item.dotRgb, glyphs: [...item.codeGlyphs, ...item.countGlyphs] });
+    rawEntries.push({
+      dotRgb: item.dotRgb,
+      glyphs: [...item.codeGlyphs, ...item.countGlyphs],
+      countWatermark: item.countWatermark,
+      countSoftness: item.countSoftness,
+      sourceSharpness: item.sourceSharpness,
+    });
     splits.push({ codeGlyphs: item.codeGlyphs, countGlyphs: item.countGlyphs, splitSuspicious: false });
   }
   // 横排：数量区按词间距裁 run（card1 #0 H2 实证）。数量是连续数字串，绝不
@@ -4686,6 +5096,16 @@ const CARD_OVERTURN_CUR_MAX_NODOT = 0.12;
 /** prior 长度冲突守卫 slack：resolved 码的票色距离比可靠 prior 差超过此值
  * 时信 prior（C18 假码实证：C18 ΔE 11.0 vs H6 4.2）。 */
 const CARD_PRIOR_CONFLICT_SLACK = 5;
+/** 字形 join 假设的色证门：join 出的码与票面印刷色的 ΔE 超过此值即判为
+ * 近形误读，不采信（card1 #2 实证：H18 ΔE=66 vs H16 10.9；而正常翻案样本
+ * #5 G20 8.9、#27 H6 4.2、#29 G19 18.1 全部在门内）。门宽放在
+ * PRIOR_MAX_DELTA_E(12) 的约 2 倍——「印刷票色≠豆色」的合理偏色要放行，
+ * 荒谬偏色要挡住。 */
+const CARD_SHAPE_COLOR_GATE = 25;
+/** 推翻 unique 求解解所需的逐字形距离上限（更紧）：unique 解本身有传播
+ * 证据，只有字形读断"肉眼级清晰"时才值得改（card1 真翻案 0.09-0.14，
+ * card3 假翻案 0.19-0.23）。 */
+const CARD_SHAPE_OVERRIDE_MAX_DIST = 0.17;
 /** 无码死区翻案 margin（竖排严格值）。 */
 const CARD_NOLOAD_MARGIN = 0.06;
 /** 无码死区翻案 margin（横排宽松值）：0.010 = E15@#32 实测领先 M15 的
@@ -4949,7 +5369,17 @@ function parseCardLegend(
   checks.codesInPalette = entries.every(entry => entry.code.length > 0 && paletteCodes.has(entry.code));
   checks.codesUnique = new Set(entries.map(entry => entry.code)).size === entries.length;
   checks.sumCount = entries.reduce((sum, entry) => sum + (entry.count > 0 ? entry.count : 0), 0);
-  return { ok: true, entries, checks };
+  const sharpnessCard = measureSourceSharpness(source);
+  return {
+    ok: true,
+    entries,
+    checks,
+    sourceQuality: {
+      sharpness: sharpnessCard,
+      nativeCharPx: digitW / CARD_UPSCALE,
+      blurry: sharpnessCard > 0 && sharpnessCard < COUNT_SOURCE_SHARPNESS_MIN,
+    },
+  };
 }
 
 /** 独立入口：纯色卡清单识别（UI「色卡识别」/脚本直接调用）。 */
@@ -5275,6 +5705,8 @@ export function recognizeLegendEntries(
         + ` glyphs=[${entry.glyphs.map(g => `w${widthOf(g)}`).join(' ')}]`
         + ` prior=${priors[i]?.code ?? '-'}@${priors[i] ? priors[i].deltaE.toFixed(1) : '-'}`
         + ` split=${split ? `code${split.codeGlyphs.length}/cnt${split.countGlyphs.length}${split.splitSuspicious ? '(sus)' : ''}` : 'null'}`
+        + ` solver=${resolvedCodes[i] ? `${resolvedCodes[i]!.code}${resolvedCodes[i]!.unique ? 'U' : ''}` : 'null'}`
+        + ` solveCall=${lastCodeSolve.call}/${lastCodeSolve.calls.length}`
         + ` -> ${parsed[i].code || '?'}/${parsed[i].count}${parsed[i].warns.length ? '!' + parsed[i].warns.join(',') : ''}`;
       console.error(`[ent-dbg] #${i} ${dbg}`);
       if (i === 0) {
@@ -5307,6 +5739,7 @@ export function recognizeLegendEntries(
     const dotRgb = rawEntries[index]?.dotRgb;
     if (dotRgb) entry.dotRgb = dotRgb;
     if (warn.length) entry.warn = warn.join(';');
+    if (item.countReview?.review) entry.countReview = item.countReview;
     return entry;
   });
   return { entries, templates, bootstrapped: true };
@@ -5423,5 +5856,15 @@ export function parseLegend(
       return cardResult;
     }
   }
-  return { ok: true, entries, checks };
+  const sharpnessLine = rawEntries[0]?.sourceSharpness ?? 0;
+  return {
+    ok: true,
+    entries,
+    checks,
+    sourceQuality: {
+      sharpness: sharpnessLine,
+      nativeCharPx: digitW,
+      blurry: sharpnessLine > 0 && sharpnessLine < COUNT_SOURCE_SHARPNESS_MIN,
+    },
+  };
 }

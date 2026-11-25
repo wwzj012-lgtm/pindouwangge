@@ -7,6 +7,7 @@ import {
   parseLegend,
   suggestCodeFromRgb,
   strictCodeFromRgb,
+  type CountConfidenceVerdict,
   type LegendFrameRect,
   type LegendParseResult,
 } from '../utils/importLegend';
@@ -44,6 +45,12 @@ export interface LegendLockRow {
   warn?: string;
   /** 解析条目原始索引（锚库学习定位字形用；手动行/去重后不保证连续）。 */
   entryIndex?: number;
+  /**
+   * 数量待人工核对（2026-11-25 路线2）：源图字太小/被重采样糊化时，识别
+   * 出的数字不可信。存在此字段时 count 一律按 0 处理，UI 显示「待核对」
+   * 占位，用户输入后自动清除（countReview 置 undefined）。
+   */
+  countReview?: CountConfidenceVerdict;
 }
 
 export interface LegendLockState {
@@ -96,6 +103,7 @@ function describeWarn(warn: string | undefined): string {
     lowConfidence: '置信度低，请核对',
     splitSuspicious: '色号/数量切分存疑',
     countUnread: '粒数未读出',
+    countLowConfidence: '图例字太小或图太糊，数量不可信，请核对',
     countOutOfRange: '粒数超出范围',
     countTailDropped: '粒数尾部被截断',
     duplicateCode: '色号重复',
@@ -151,14 +159,18 @@ export function parseEntriesToRows(
         warn = [warn, 'codeFromSwatch'].filter(Boolean).join(';');
       }
     }
+    const countReview = entry.countReview?.review ? entry.countReview : undefined;
     rows.push({
       code,
-      count: entry.count,
+      // 待核对行不把猜测值当结果输出（2026-11-25 用户裁决：44/443 这类
+      // 自信错值比"读不出"更有害）——值置 0，UI 显示「待核对」占位。
+      count: countReview ? 0 : entry.count,
       countLocked: false,
       enabled: paletteCodes.has(code),
       confidence: entry.confidence,
       warn,
       entryIndex,
+      countReview,
     });
   }
   // 同码去重（2026-11-15 用户实测「27 色里竟然有重复的」）：错读码经
@@ -377,6 +389,7 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
   const lockedColors = value.rows.filter(row => row.enabled && row.code && paletteByCode.has(row.code)).length;
   const lockedCounts = value.rows.filter(row => row.enabled && row.countLocked && row.count > 0 && paletteByCode.has(row.code)).length;
   const anyCountLocked = lockedCounts > 0;
+  const reviewRowCount = value.rows.filter(row => !!row.countReview).length;
   const duplicateCodes = useMemo(() => {
     const seen = new Set<string>();
     const dup = new Set<string>();
@@ -611,17 +624,21 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
                     onChange={nextCode => changeRowCode(index, nextCode)}
                     ariaLabel={`第 ${index + 1} 行色号`}
                   />
-                  <span className="ir-lg-count-wrap">
+                  <span className={`ir-lg-count-wrap${row.countReview ? ' is-review' : ''}`}>
                     <input
                       className="ir-lg-count"
                       type="number"
                       min={1}
                       max={999}
-                      aria-label={`第 ${index + 1} 行目标粒数`}
-                      value={row.count}
+                      placeholder={row.countReview ? '待核对' : undefined}
+                      aria-label={row.countReview
+                        ? `第 ${index + 1} 行目标粒数待人工核对（图例字太小或图太糊）`
+                        : `第 ${index + 1} 行目标粒数`}
+                      value={row.countReview && row.count === 0 ? '' : row.count}
                       onChange={event => {
                         const next = Math.max(0, Math.min(999, Math.round(event.currentTarget.valueAsNumber) || 0));
-                        updateRow(index, { count: next });
+                        // 用户一旦输入，该行即视为已核对（清除待核对标记）。
+                        updateRow(index, { count: next, countReview: undefined });
                       }}
                     />
                     <span aria-hidden="true">粒</span>
@@ -663,6 +680,18 @@ export function ImportLegendPanel({ imageElement, dimensions, calibration, palet
               </div>
               {overGrid && <p className="ir-help" data-tone="error">锁定粒数超过网格格数，数量平衡无法完全达成，请核对各行数值。</p>}
             </div>
+          )}
+          {lastParse.sourceQuality?.blurry && (
+            <p className="ir-help" data-tone="error" role="note">
+              检测到图例文字偏小或被压缩（约 {lastParse.sourceQuality.nativeCharPx.toFixed(1)}px/字），识别精度会明显下降；
+              建议上传原图，或使用「框选图例区域」单独框出色卡图例区域（框选后按原图分辨率解析，不做缩放压缩）。
+            </p>
+          )}
+          {reviewRowCount > 0 && (
+            <p className="ir-help" data-tone="error" role="note">
+              {reviewRowCount} 行数量无法可靠识别（图例字太小或图片被压缩/缩放糊化），已置为待核对、不计入 Σ 与数量锁定。
+              请对照原图逐行填写；也可以改用原图，或用「框选图例区域」只框色卡图例再识别。
+            </p>
           )}
           <p className="ir-help ir-legend-hint" role="note">粒数自动识别准确率有限，锁定前请核对数字；白名单关闭时数量锁定不生效。若图纸有纸底空格，建议同时勾选「图纸色号辅助」。</p>
         </>

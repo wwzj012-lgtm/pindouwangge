@@ -1719,6 +1719,27 @@
   font-size:10px;
   color:var(--ir-muted)
 }
+/* 数量待人工核对（2026-11-25 路线2）：源图字太小或被重采样糊化时，识别
+ * 出的数字不可信——输入框留空显示「待核对」占位，不把猜测值当结果。 */
+.ir-lg-count-wrap.is-review {
+  width:76px
+}
+.ir-lg-count-wrap.is-review .ir-lg-count.ir-lg-count {
+  color:#a8712a;
+  font-weight:600;
+  font-size:11px
+}
+.ir-lg-count-wrap.is-review .ir-lg-count.ir-lg-count::placeholder {
+  color:#a8712a;
+  opacity:.9;
+  font-weight:600
+}
+.ir-lg-row-review-note {
+  flex:none;
+  font-size:10px;
+  color:#a8712a;
+  white-space:nowrap
+}
 .ir-lg-lock {
   display:inline-flex;
   align-items:center;

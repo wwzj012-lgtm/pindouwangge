@@ -41,7 +41,7 @@ for (const card of cards) {
       ok: r.ok,
       failureReason: r.failureReason ?? null,
       ms,
-      entries: r.entries.map(e => ({ code: e.code || null, count: e.count, warn: e.warn ?? null })),
+      entries: r.entries.map(e => ({ code: e.code || null, count: e.count, warn: e.warn ?? null, review: !!e.countReview?.review, reasons: e.countReview?.reasons ?? null, sharpness: e.countReview?.sourceSharpness ?? null })),
       gates: dbg?.gates ?? null,
     };
   }, { card });
@@ -62,6 +62,17 @@ for (const card of cards) {
   console.log(`\n=== ${card}（浏览器 ${result.ms}ms ok=${result.ok}） ===`);
   console.log(`色号 ${codeHit}/${truthMap.size} 漏[${miss.join(',') || '无'}] 多报${extra.length}[${extra.slice(0, 12).join(',')}]`);
   console.log(`数量对 ${countHit}/${codeHit} 错[${wrong.slice(0, 8).join(' ')}${wrong.length > 8 ? ' …' : ''}]`);
+  // 两套口径（2026-11-25）：算法分照旧（上面一行），产品口径把「待人工核对」
+  // 的行单独计——它们不算可信成功，也不算失败（值已置空，不会误导用户）。
+  let trustedOk = 0, trustedBad = 0, reviewN = 0, reviewBad = 0;
+  for (const e of result.entries) {
+    const t = e.code ? truthMap.get(e.code) : undefined;
+    if (e.review) { reviewN += 1; if (t !== undefined && t !== e.count) reviewBad += 1; continue; }
+    if (t === undefined) continue;
+    if (t === e.count) trustedOk += 1; else trustedBad += 1;
+  }
+  const sharp = result.entries.find(e => e.sharpness !== null)?.sharpness;
+  console.log(`可信口径：可信数量 ${trustedOk + trustedBad} 条（对 ${trustedOk}、错 ${trustedBad}）｜待人工核对 ${reviewN} 条（其中原本答错 ${reviewBad}）｜源图清晰度 ${sharp === undefined ? 'n/a' : Math.round(sharp)}`);
 }
 
 await browser.close();

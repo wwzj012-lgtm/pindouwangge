@@ -12,6 +12,7 @@
 
 import { BeadColor } from '../types';
 import { rgbToLab, deltaE2000 } from './colorUtils';
+import { parseHexRgb } from './beadInk';
 import { simplifyColorRegions } from './smartReduceRegions';
 
 export type ReductionIntensity = 'light' | 'medium' | 'strong';
@@ -1020,11 +1021,11 @@ function createPixelMetaGrid(
     if (color) {
       [r, g, b] = color.rgb;
     } else {
-      const hex = cid.replace('#', '');
-      if (hex.length === 6) {
-        r = parseInt(hex.substring(0, 2), 16) || 255;
-        g = parseInt(hex.substring(2, 4), 16) || 255;
-        b = parseInt(hex.substring(4, 6), 16) || 255;
+      const rgb = parseHexRgb(cid);
+      if (rgb) {
+        r = rgb.r;
+        g = rgb.g;
+        b = rgb.b;
       }
     }
 

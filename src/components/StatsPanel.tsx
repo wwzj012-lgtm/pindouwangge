@@ -15,6 +15,7 @@ import {
 import { BeadColor, ColorStat } from '../types';
 import { useLanguage } from '../context/LanguageContext';
 import { createPanelScale } from './ui/panelScale';
+import { beadLuma } from '../utils/beadInk';
 
 export type StrayBeadConsolidationStrength = 'light' | 'standard' | 'strong';
 
@@ -564,9 +565,6 @@ export const StatsPanel: React.FC<StatsPanelProps> = ({
 };
 
 function isLightColor(hex: string): boolean {
-  const clean = hex.replace('#', '');
-  const r = parseInt(clean.substring(0, 2), 16) || 255;
-  const g = parseInt(clean.substring(2, 4), 16) || 255;
-  const b = parseInt(clean.substring(4, 6), 16) || 255;
-  return (r * 299 + g * 587 + b * 114) / 1000 > 140;
+  // 统一走 beadInk 通用亮度判定（原 140 阈值并入 150 口径）
+  return beadLuma(hex) > 150;
 }

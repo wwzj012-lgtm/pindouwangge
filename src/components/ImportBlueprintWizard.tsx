@@ -54,6 +54,7 @@ import {
 import { describeGains } from '../utils/importColorBalance';
 import { estimateBeadPitch, refineGridAlignment } from '../utils/importGridPitch';
 import { estimateGridWarp } from '../utils/importGridWarp';
+import { beadInkFor } from '../utils/beadInk';
 
 const MAX_IMAGE_BYTES = 15 * 1024 * 1024;
 
@@ -828,7 +829,7 @@ export function ImportBlueprintWizard({ isOpen, onClose, activePalette, canSave,
 
   const currentInset = recognition?.edgeInsetRatio ?? edgeInsetRatio;
   const swatchRgb = selectedEffective?.color?.rgb;
-  const swatchInk = swatchRgb && swatchRgb[0] * .299 + swatchRgb[1] * .587 + swatchRgb[2] * .114 < 150 ? '#ffffff' : '#271d32';
+  const swatchInk = beadInkFor(selectedEffective?.color?.hex, { darkInk: '#ffffff', lightInk: '#271d32' });
 
   return <div ref={dialogRef} className="ir-workbench" role="dialog" aria-modal="true" aria-labelledby="import-blueprint-title" onKeyDown={(event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') { event.preventDefault(); requestClose(); return; }

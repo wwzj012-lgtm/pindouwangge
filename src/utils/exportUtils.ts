@@ -1,4 +1,5 @@
 import { BeadColor, BeadShape } from '../types';
+import { beadInkFor } from './beadInk';
 
 export type WatermarkType = 'double_diagonal' | 'corners' | 'bottom' | 'none';
 export type WatermarkPosition = WatermarkType | 'grid_and_legend' | 'legend_only' | 'grid_center';
@@ -275,30 +276,9 @@ export function drawBeadOnCanvas(
 
   // Symbol or short color code text inside cell (ultra-clean, sharp & thin font)
   if (symbolStr && size >= 6) {
-    const hex = colorHex.replace('#', '');
-    const r = parseInt(hex.substring(0, 2), 16) || 255;
-    const g = parseInt(hex.substring(2, 4), 16) || 255;
-    const b = parseInt(hex.substring(4, 6), 16) || 255;
-    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-    const maxC = Math.max(r, g, b);
-    const minC = Math.min(r, g, b);
-    const maxSaturation = maxC > 0 ? (maxC - minC) / maxC : 0;
-
-    // Contrast & Color Logic (as specified):
-    // 1. Dark blocks: pure white text with 0.9 opacity
-    // 2. Light/bright blocks: soft dark #222222 (not harsh black)
-    // 3. High-saturation vivid blocks: white text with 0.85 opacity
-    let textColor = 'rgba(255, 255, 255, 0.9)';
-    if (brightness > 155 && maxSaturation < 0.6) {
-      textColor = 'rgba(34, 34, 34, 0.92)';
-    } else if (maxSaturation >= 0.6 && brightness > 100) {
-      textColor = 'rgba(255, 255, 255, 0.85)';
-    } else if (brightness <= 155) {
-      textColor = 'rgba(255, 255, 255, 0.9)';
-    }
-
+    // 墨色统一走 beadInk（通用模块）：深豆白墨浅豆深墨，禁止各处手写判定
     ctx.save();
-    ctx.fillStyle = textColor;
+    ctx.fillStyle = beadInkFor(colorHex);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
@@ -749,13 +729,8 @@ export function generatePatternCanvas(options: ExportOptions): HTMLCanvasElement
     else if (symbolDisplayType !== 'none' && showSymbols) swatchLabel = bead.symbol || bead.code;
 
     if (swatchLabel && symbolDisplayType !== 'none') {
-      const hex = bead.hex.replace('#', '');
-      const r = parseInt(hex.substring(0, 2), 16) || 255;
-      const g = parseInt(hex.substring(2, 4), 16) || 255;
-      const b = parseInt(hex.substring(4, 6), 16) || 255;
-      const brightness = (r * 299 + g * 587 + b * 114) / 1000;
-
-      ctx.fillStyle = brightness > 140 ? '#000000' : '#FFFFFF';
+      // 图例色块文字墨色统一走 beadInk（导出打印需纯色，覆盖亮暗墨色）
+      ctx.fillStyle = beadInkFor(bead.hex, { darkInk: '#FFFFFF', lightInk: '#000000' });
       const swatchFontScale = swatchLabel.length > 2 ? 0.75 : 1.0;
       ctx.font = `bold ${Math.round(10 * scale * swatchFontScale)}px sans-serif`;
       ctx.textAlign = 'center';

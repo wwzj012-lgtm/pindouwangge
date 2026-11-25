@@ -4,6 +4,7 @@ import type { ImportGridCalibration } from '../utils/importGridCalibration';
 import type { ImportRecognitionResult } from '../utils/importRecognition';
 import { recognitionCellKey } from '../utils/importRecognitionReview';
 import { clampCanvasViewport } from '../utils/canvasViewport';
+import { beadInkFor } from '../utils/beadInk';
 
 type CellPosition = { row: number; column: number };
 type Comparison = 'result' | 'original' | 'overlay';
@@ -154,8 +155,7 @@ export function ImportRecognitionCanvas({ image, result, selected, pending, only
           }
         }
         if (showCodes && cell?.color && (!onlyReview || pending.has(key))) {
-          const [r, g, b] = cell.color.rgb;
-          context.fillStyle = r * 0.299 + g * 0.587 + b * 0.114 > 150 ? '#21152f' : '#ffffff';
+          context.fillStyle = beadInkFor(cell.color.hex, { darkInk: '#ffffff', lightInk: '#21152f' });
           context.strokeStyle = context.fillStyle === '#ffffff' ? 'rgba(0,0,0,.6)' : 'rgba(255,255,255,.65)';
           context.font = `600 ${Math.min(14, screenCellHeight * 0.3) / view.zoom}px ui-monospace, monospace`;
           context.textAlign = 'center';

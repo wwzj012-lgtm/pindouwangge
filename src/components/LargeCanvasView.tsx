@@ -39,6 +39,7 @@ import {
 } from '../utils/largeCanvas';
 import type { BeadShape, CanvasBackdrop, ColorMatchAlgo, DitherMode } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { beadInkFor } from '../utils/beadInk';
 
 export interface LargeCanvasFrame {
   id: string;
@@ -722,11 +723,7 @@ function downloadCanvas(canvas: HTMLCanvasElement, name: string): void {
  * 与识别向导 swatchInk 同口径）。之前两个渲染层都写死深色墨，H7/B22/D4 这类
  * 深豆上色号直接隐身（2026-11-26 用户反馈）。 */
 export function codeInkFor(hex: string | undefined): string {
-  if (!hex || !hex.startsWith('#') || hex.length < 7) return 'rgba(15,23,42,0.8)';
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return (r * 0.299 + g * 0.587 + b * 0.114) < 150 ? 'rgba(255,255,255,0.92)' : 'rgba(15,23,42,0.8)';
+  return beadInkFor(hex);
 }
 
 function FrameBeanGrid({ frame, paletteMap, rect, beadShape, cellSize, showCodeLabels }: { frame: LargeCanvasFrame; paletteMap: Map<string, { hex: string; code?: string }>; rect: LargeCanvasGridRect; beadShape: BeadShape; cellSize: number; showCodeLabels: boolean }) {

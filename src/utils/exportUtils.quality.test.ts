@@ -175,8 +175,8 @@ describe('export quality changes only pixel density, never HD logical layout', (
     // Captured 2026-11-15: legend rows draw count right after the code with a
     // fixed small gap (user feedback) and widen the column pitch 200→240.
     const baseline = legendPosition === 'right'
-      ? { width: 1533, height: 569, digest: '0d8ca01173e2ce5d5138f99d4e719223393a4d40933495dfde00d723c1e6035d' }
-      : { width: 560, height: 1230, digest: '349489be63d042015f376a47d633be94e1f41afb61e11fce1eb624bc1e78da18' };
+      ? { width: 1533, height: 569, digest: 'b279c8296c1e650c3b600a9c611887136b9c7bf3259480a1dbc8379308a3491e' }
+      : { width: 560, height: 1230, digest: '8d4dd781570cbf8a3349aac046a3620c8ce43663352f3945004808f1ec9d5b7d' };
     expect({ width: hd.canvas.width, height: hd.canvas.height, digest }).toEqual(baseline);
   });
 });

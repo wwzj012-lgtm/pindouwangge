@@ -1,23 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Sparkles,
   Image as ImageIcon,
   Palette,
   Compass,
   ArrowRight,
-  Zap,
+  ScanSearch,
   ChevronRight,
   Grid2X2,
   Code2,
   Wand2,
   CheckCircle2,
-  FilePlus2,
   Heart,
   Bookmark,
   RefreshCw,
   Users,
 } from 'lucide-react';
-import { consumeSelectedImageFile } from '../utils/imageFileSelection';
 import { listCommunityPosts, type CommunityPost } from '../utils/communityApi';
 
 export interface HeroExample {
@@ -48,7 +46,6 @@ export function createHeroExampleActivation(
 
 interface HomeViewProps {
   onNavigateTab: (tab: 'home' | 'community' | 'studio' | 'largeCanvas') => void;
-  onStartPhotoToBead: (file: File) => void;
   onLoadHeroExample: (example: HeroExample) => void;
   onOpenImportBlueprint: () => void;
   /**
@@ -66,12 +63,10 @@ function formatCommunityCount(count: number): string {
 
 export const HomeView: React.FC<HomeViewProps> = ({
   onNavigateTab,
-  onStartPhotoToBead,
   onLoadHeroExample,
   onOpenImportBlueprint,
   showCommunityFeed = true,
 }) => {
-  const photoInputRef = useRef<HTMLInputElement>(null);
   const [vibeIndex, setVibeIndex] = useState(0);
   const [isVibeLoading, setIsVibeLoading] = useState(false);
   const [communityPosts, setCommunityPosts] = useState<CommunityPost[]>([]);
@@ -108,7 +103,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
     return [...authors.values()];
   }, [communityPosts]);
 
-  const choosePhoto = () => photoInputRef.current?.click();
   const vibe = VIBE_PROMPTS[vibeIndex];
   const inspire = () => {
     if (isVibeLoading) return;
@@ -121,16 +115,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#F5F0FD] min-h-0 text-purple-950 select-none mobile-nav-clearance lg:pb-16">
-      <input
-        ref={photoInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={event => {
-          const file = consumeSelectedImageFile(event.target);
-          if (file) onStartPhotoToBead(file);
-        }}
-      />
       <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-3 sm:pt-5 space-y-5">
         
         {/* 1. HERO BANNER CARD */}
@@ -161,17 +145,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
               {/* Action Buttons.
 
-                  Colour: one accent, three steps. The panel behind is a purple
+                  Colour: one accent, two steps. The panel behind is a purple
                   gradient, so every fill is either pure white, translucent white
-                  glass, or nothing. Amber is spent once — on the lightning icon —
-                  instead of tinting a whole button, which is what made the row
-                  read as four unrelated widgets before.
-                  Step order: primary white > bright glass > quiet glass (×2).
+                  glass, or nothing. Amber is spent once — on the glowing scan
+                  lens of the flagship button — instead of tinting a whole
+                  button.
+                  Step order: primary white (画板) > bright glass (旗舰识别)
+                  > quiet glass (社区).
 
-                  Layout: equal 2×2 cells on phones. From lg up the hero column
-                  narrows (the example grid takes the right side), so four pills
-                  would wrap into a lopsided 3+1; they go back to a 2×2 block
-                  there and only rejoin into one row at xl. */}
+                  Layout: two equal cells per row on phones. From lg up the hero
+                  column narrows (the example grid takes the right side), so the
+                  three pills go back to a 2-cell block there and only rejoin
+                  into one row at xl. */}
               <div className="grid w-full grid-cols-2 gap-2 pt-1 sm:flex sm:w-auto sm:flex-wrap sm:items-center sm:gap-3 sm:pt-2 lg:grid lg:w-full lg:grid-cols-2 lg:gap-2.5 xl:flex xl:w-auto">
                 {/* Step 1 — primary. Solid white, inset bottom shade for weight.
                     A transparent border keeps it exactly as tall as the glass
@@ -184,15 +169,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   <span>进入画板创作</span>
                 </button>
 
-                {/* Step 2 — the product's headline feature. Brighter glass with a lit top
-                    edge so it sits clearly above the two quiet links, and the
-                    only warm note in the row (glowing lightning). */}
+                {/* Step 2 — the product's flagship feature: a business blueprint
+                    or any photo goes in, an editable bead grid with per-color
+                    counts and codes comes out. It takes the bright-glass slot
+                    (lit top edge, glowing amber lens) that used to belong to the
+                    retired one-tap photo converter. */}
                 <button
-                  onClick={choosePhoto}
+                  onClick={onOpenImportBlueprint}
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/[0.24] px-3 py-2.5 text-sm font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] backdrop-blur-md transition-all duration-200 hover:border-white/60 hover:bg-white/[0.32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-6 sm:py-3.5 sm:text-base"
                 >
-                  <Zap className="w-[18px] h-[18px] shrink-0 fill-amber-300 text-amber-300 drop-shadow-[0_0_7px_rgba(252,211,77,0.55)] sm:w-5 sm:h-5" />
-                  <span>照片一键转拼豆</span>
+                  <ScanSearch className="w-[18px] h-[18px] shrink-0 fill-amber-300 text-amber-300 drop-shadow-[0_0_7px_rgba(252,211,77,0.55)] sm:w-5 sm:h-5" />
+                  <span>智能图纸识别</span>
                 </button>
 
                 {/* Step 3 — quiet glass, identical on phone and desktop. The old
@@ -204,14 +191,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 >
                   <span>探索社区作品</span>
                   <ChevronRight className="w-4 h-4 shrink-0 sm:w-5 sm:h-5" />
-                </button>
-
-                <button
-                  onClick={onOpenImportBlueprint}
-                  className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3 py-2.5 text-sm font-bold text-purple-100 transition-all duration-200 hover:border-white/30 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-4 sm:py-3.5 sm:text-base"
-                >
-                  <FilePlus2 className="w-[18px] h-[18px] shrink-0 text-purple-200 transition-colors group-hover:text-white sm:w-5 sm:h-5" />
-                  <span>颜色识别</span>
                 </button>
               </div>
 
@@ -274,25 +253,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <span className="text-xs font-bold text-purple-600">高效创建与导入图纸</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Card 1: 智能照片转拼豆 */}
-            <div
-              onClick={choosePhoto}
-              className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group"
-            >
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                  <ImageIcon className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-extrabold text-purple-950">智能转拼豆</h3>
-                  <p className="text-xs text-purple-600 font-medium">照片一键识别量化</p>
-                </div>
-              </div>
-              <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
-            </div>
-
-            {/* Card 2: 新建空白画板 */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Card 1: 进入画板 */}
             <div
               onClick={() => onNavigateTab('studio')}
               className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group"
@@ -309,19 +271,22 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
             </div>
 
-            {/* Card 3: 导入图纸 */}
+            {/* Card 2: 智能图纸识别（旗舰功能，右上角「主打」徽标） */}
             <button
               type="button"
               onClick={onOpenImportBlueprint}
-              className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group text-left"
+              className="relative bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group text-left"
             >
+              <span className="absolute right-3 top-3 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] leading-none font-black text-amber-700">
+                主打
+              </span>
               <div className="flex items-center gap-3.5">
                 <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                  <FilePlus2 className="w-5 h-5" />
+                  <ScanSearch className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-extrabold text-purple-950">颜色识别</h3>
-                  <p className="text-xs text-purple-600 font-medium">手动对齐网格，识别每格主色与色号</p>
+                  <h3 className="text-sm font-extrabold text-purple-950">智能图纸识别</h3>
+                  <p className="text-xs text-purple-600 font-medium">图纸照片自动转可编辑拼豆图纸，色号粒数自动统计</p>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
@@ -344,7 +309,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
             </div>
 
-            {/* Card 5: 大画板 */}
+            {/* Card 4: 大画板 */}
             <div
               onClick={() => onNavigateTab('largeCanvas')}
               className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group"

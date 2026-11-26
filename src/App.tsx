@@ -2263,7 +2263,6 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       {currentTab === 'home' && (
         <HomeView
           onNavigateTab={guardedSetCurrentTab}
-          onStartPhotoToBead={handleImageUpload}
           onLoadHeroExample={(example: HeroExample) => handleLoadSample(example.url, example.name)}
           onOpenImportBlueprint={() => setIsImportBlueprintOpen(true)}
           showCommunityFeed={isDesktop}

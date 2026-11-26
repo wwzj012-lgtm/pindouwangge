@@ -1,4 +1,4 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   Sparkles,
   Image as ImageIcon,
@@ -33,7 +33,6 @@ import {
   Grid,
   User,
 } from 'lucide-react';
-import { consumeSelectedImageFile } from '../utils/imageFileSelection';
 
 export interface HeroExample {
   id: 'batiao-cat' | 'boss-xiaoxin' | 'spiderman' | 'chibi-character';
@@ -66,7 +65,6 @@ export function createHeroExampleActivation(
 
 export interface LandingViewProps {
   onNavigateTab?: (tab: 'home' | 'community' | 'studio' | 'largeCanvas') => void;
-  onStartPhotoToBead?: (file: File) => void;
   onLoadHeroExample?: (example: HeroExample) => void;
   onImportPattern?: () => void;
   onEnterWorkspace?: () => void;
@@ -290,7 +288,6 @@ const playAIScanSound = () => {
 
 export const LandingView: React.FC<LandingViewProps> = ({
   onNavigateTab,
-  onStartPhotoToBead,
   onLoadHeroExample,
   onImportPattern,
   onEnterWorkspace,
@@ -309,12 +306,8 @@ export const LandingView: React.FC<LandingViewProps> = ({
   });
   const enterWorkspace = onEnterWorkspace ?? (() => navigateTab('studio'));
   const exploreCommunity = onExploreCommunity ?? (() => navigateTab('community'));
-  const startPhotoToBead = onStartPhotoToBead ?? (() => undefined);
   const loadHeroExample = onLoadHeroExample ?? (() => undefined);
   const importPattern = onImportPattern ?? (() => undefined);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const choosePhoto = () => photoInputRef.current?.click();
-
   // Interactive Live Canvas States
   const [activePresetKey, setActivePresetKey] = useState<PresetKey>('cat');
   const [beadStyle, setBeadStyle] = useState<'ring' | 'melted'>('ring');
@@ -484,17 +477,6 @@ export const LandingView: React.FC<LandingViewProps> = ({
       <div className="absolute top-10 left-1/4 w-[500px] h-[500px] bg-purple-300/25 rounded-full blur-[120px] pointer-events-none -z-10" />
       <div className="absolute top-1/3 right-10 w-[450px] h-[450px] bg-pink-300/20 rounded-full blur-[130px] pointer-events-none -z-10" />
       <div className="absolute bottom-1/4 left-10 w-[600px] h-[600px] bg-indigo-200/20 rounded-full blur-[140px] pointer-events-none -z-10" />
-
-      <input
-        ref={photoInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={event => {
-          const file = consumeSelectedImageFile(event.target);
-          if (file) startPhotoToBead(file);
-        }}
-      />
 
       {/* Standalone Product Homepage Header Navbar */}
       <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-xl border-b border-purple-100/90 shadow-2xs">

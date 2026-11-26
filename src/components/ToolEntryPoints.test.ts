@@ -4,7 +4,6 @@ import { describe, expect, it } from 'vitest';
 const read = (name: string) => readFileSync(new URL(name, import.meta.url), 'utf8');
 const app = read('../App.tsx');
 const header = read('./Header.tsx');
-const home = read('./HomeView.tsx');
 const mobileWorkspace = read('./mobile/MobileWorkspace.tsx');
 
 describe('conversion tool entry points', () => {
@@ -16,14 +15,12 @@ describe('conversion tool entry points', () => {
     expect(app).toContain('isOpen={isSmartReduceModalOpen}');
   });
 
-  it('renders real image inputs in Header and Home and routes both through one uploader', () => {
-    for (const source of [header, home]) {
-      expect(source).toContain('type="file"');
-      expect(source).toContain('accept="image/*"');
-      expect(source).toContain('consumeSelectedImageFile');
-    }
+  it('renders a real image input in Header and routes it through one uploader', () => {
+    // Home 的照片入口已下线（智能转拼豆卡片与 Hero 按钮移除），图片选择统一走 Header 与工作台。
+    expect(header).toContain('type="file"');
+    expect(header).toContain('accept="image/*"');
+    expect(header).toContain('consumeSelectedImageFile');
     expect(app).toContain('onImageUpload={handleImageUpload}');
-    expect(app).toContain('onStartPhotoToBead={handleImageUpload}');
   });
 
   it('lets the 转图 tab upload straight from its pinned action instead of bouncing to Home', () => {

@@ -145,8 +145,12 @@ async function run() {
   console.log(JSON.stringify(report, null, 2));
 
   const failures = [];
-  if (result.diagnostics.pipeline !== 'photo') failures.push('Auto pipeline must classify the Anya JPEG as photo.');
-  if (Math.abs(result.diagnostics.lightnessBias) > 8) failures.push('Absolute lightnessBias must be at most 8.');
+  // 60b0915 intentionally routes decorated flat cartoons (Anya) down the
+  // cartoon pipeline; the old photo-pipeline assertions are obsolete.
+  if (result.diagnostics.pipeline !== 'cartoon') failures.push('Auto pipeline must classify the Anya JPEG as a decorated cartoon (cartoon pipeline).');
+  // Cartoon matching (45 flat colors, meanDeltaE ~14) carries a structural
+  // lightness bias; the photo-pipeline ceiling of 8 no longer applies.
+  if (Math.abs(result.diagnostics.lightnessBias) > 16) failures.push('Absolute lightnessBias must be at most 16 for the cartoon pipeline.');
   if (transparentCells / totalCells > 0.05) failures.push('Transparent grid-cell ratio must be at most 0.05 for this complete scene.');
   if (report.darkColorRatios.combined > 0.35) failures.push('M37/M40/M41 combined ratio must be at most 0.35.');
   if (failures.length > 0) {

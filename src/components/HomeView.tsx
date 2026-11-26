@@ -171,23 +171,21 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                 {/* Step 2 — the product's flagship feature: a business blueprint
                     or any photo goes in, an editable bead grid with per-color
-                    counts and codes comes out. It takes the bright-glass slot
-                    (lit top edge, glowing amber lens) that used to belong to the
-                    retired one-tap photo converter. */}
+                    counts and codes comes out. Same white solid treatment as
+                    the studio button (amber glass read as muddy red on purple). */}
                 <button
                   onClick={onOpenImportBlueprint}
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/45 bg-white/[0.24] px-3 py-2.5 text-sm font-bold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.45)] backdrop-blur-md transition-all duration-200 hover:border-white/60 hover:bg-white/[0.32] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-6 sm:py-3.5 sm:text-base"
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-transparent bg-white px-3 py-2.5 text-sm font-black text-purple-950 shadow-[0_10px_22px_-12px_rgba(24,0,64,0.8),inset_0_-1px_0_rgba(88,28,135,0.10)] transition-all duration-200 hover:bg-purple-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-6 sm:py-3.5 sm:text-base"
                 >
-                  <ScanSearch className="w-[18px] h-[18px] shrink-0 fill-amber-300 text-amber-300 drop-shadow-[0_0_7px_rgba(252,211,77,0.55)] sm:w-5 sm:h-5" />
+                  <ScanSearch className="w-[18px] h-[18px] shrink-0 text-purple-700 fill-purple-700 sm:w-5 sm:h-5" />
                   <span>智能图纸识别</span>
                 </button>
 
-                {/* Step 3 — quiet glass, identical on phone and desktop. The old
-                    version dropped to a borderless transparent link on desktop,
-                    which is why the group looked misaligned there. */}
+                {/* Step 3 — violet-tinted glass: quieter than the two solid
+                    buttons but still visibly colored on the purple backdrop. */}
                 <button
                   onClick={() => onNavigateTab('community')}
-                  className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/[0.16] bg-white/[0.06] px-3 py-2.5 text-sm font-bold text-purple-100 transition-all duration-200 hover:border-white/30 hover:bg-white/[0.12] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-4 sm:py-3.5 sm:text-base"
+                  className="group inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-violet-300/40 bg-violet-400/25 px-3 py-2.5 text-sm font-bold text-violet-50 transition-all duration-200 hover:border-violet-300/60 hover:bg-violet-400/35 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-200 focus-visible:ring-offset-2 focus-visible:ring-offset-purple-800 active:scale-98 sm:rounded-full sm:px-4 sm:py-3.5 sm:text-base"
                 >
                   <span>探索社区作品</span>
                   <ChevronRight className="w-4 h-4 shrink-0 sm:w-5 sm:h-5" />
@@ -271,15 +269,12 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <ChevronRight className="w-4 h-4 text-purple-300 group-hover:text-purple-600 group-hover:translate-x-0.5 transition-all" />
             </div>
 
-            {/* Card 2: 智能图纸识别（旗舰功能，右上角「主打」徽标） */}
+            {/* Card 2: 智能图纸识别（旗舰功能） */}
             <button
               type="button"
               onClick={onOpenImportBlueprint}
-              className="relative bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group text-left"
+              className="bg-white border border-purple-100 hover:border-purple-300 rounded-2xl p-4 shadow-2xs hover:shadow-md transition-all cursor-pointer flex items-center justify-between group text-left"
             >
-              <span className="absolute right-3 top-3 inline-flex items-center rounded-full border border-amber-300 bg-amber-100 px-2 py-0.5 text-[10px] leading-none font-black text-amber-700">
-                主打
-              </span>
               <div className="flex items-center gap-3.5">
                 <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-100 text-amber-600 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
                   <ScanSearch className="w-5 h-5" />

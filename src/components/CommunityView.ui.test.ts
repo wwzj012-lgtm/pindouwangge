@@ -254,7 +254,7 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
   it('uses one primary card CTA, one favorite and one like; image/title use the same opener', () => {
     const onOpen = vi.fn(), onReaction = vi.fn(), base = post('1', ['人物', '游戏']);
     const value = { ...base, author: { ...base.author, photoUrl: '/avatar.png' } };
-    const tree = CommunityPostCard({ post: value, pending: false, onOpen, onReaction });
+    const tree = CommunityPostCard({ post: value, pendingReaction: null, onOpen, onReaction });
     const buttons = nodes(tree).filter(node => node.type === 'button');
     const images = nodes(tree).filter(node => node.type === 'img');
     expect(buttons).toHaveLength(5);
@@ -276,9 +276,18 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
   it('shows no invented tag for legacy posts and preserves every selected real tag', () => {
     expect(communityPostTags({})).toEqual([]);
     expect(communityPostTags({ tags: [' 人物 ', '人物', null, '', '游戏'] })).toEqual(['人物', '游戏']);
-    const tree = CommunityPostCard({ post: post('legacy'), pending: true, onOpen: vi.fn(), onReaction: vi.fn() });
+    const tree = CommunityPostCard({ post: post('legacy'), pendingReaction: 'like', onOpen: vi.fn(), onReaction: vi.fn() });
     expect(text(tree)).not.toContain('#');
-    expect(nodes(tree).filter(node => node.props['aria-pressed'] !== undefined).every(node => node.props.disabled)).toBe(true);
+    // 乐观更新契约：只有 in-flight 的那个反应按钮被锁，其余照常可点
+    const reactions = nodes(tree).filter(node => node.props['aria-pressed'] !== undefined);
+    expect(reactions.find(node => String(node.props['aria-label']).startsWith('点赞：'))!.props.disabled).toBe(true);
+    expect(reactions.find(node => String(node.props['aria-label']).startsWith('收藏：'))!.props.disabled).toBe(false);
+    const favoritePending = CommunityPostCard({ post: post('legacy'), pendingReaction: 'favorite', onOpen: vi.fn(), onReaction: vi.fn() });
+    const reactions2 = nodes(favoritePending).filter(node => node.props['aria-pressed'] !== undefined);
+    expect(reactions2.find(node => String(node.props['aria-label']).startsWith('点赞：'))!.props.disabled).toBe(false);
+    expect(reactions2.find(node => String(node.props['aria-label']).startsWith('收藏：'))!.props.disabled).toBe(true);
+    const idle = CommunityPostCard({ post: post('legacy'), pendingReaction: null, onOpen: vi.fn(), onReaction: vi.fn() });
+    expect(nodes(idle).filter(node => node.props['aria-pressed'] !== undefined).every(node => !node.props.disabled)).toBe(true);
   });
 
   it('loads detail through the sole card entry and retains real tags when remixing a full project', async () => {

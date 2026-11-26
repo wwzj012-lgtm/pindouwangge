@@ -117,11 +117,14 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const { posts: patternsState, nextCursor, isLoading, isLoadingMore, error: feedError, refresh: refreshPatterns, loadMore, updatePost } = useCommunityFeed(currentUser?.uid ?? null);
   const [sortBy, setSortBy] = useState<SortMode>('hot');
   const [isOpeningPattern, setIsOpeningPattern] = useState(false);
-  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  // 点赞/收藏乐观更新（2026-11-26 用户反馈）：状态先落本地、网络写入后台静默
+  // 完成、失败才回滚。只锁被点的那一个按钮（pendingReactions 是 per-key 集合），
+  // 不再全局禁用所有卡片——旧实现 pendingAction !== null 会把整页按钮灰掉。
+  const [pendingReactions, setPendingReactions] = useState<ReadonlySet<string>>(new Set());
   const [requestError, setRequestError] = useState<string | null>(null);
   const detailDialogRef = useRef<HTMLDialogElement>(null);
   const reactionEpochRef = useRef(0);
-  const reactionPendingRef = useRef(false);
+  const reactionInflightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     // A former owner's legacy private fallback must not stay visible after logout.
@@ -131,9 +134,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
     setSelectedProject(null);
     setOwnerOriginal(null);
     setOriginalPreview(null);
-    setPendingAction(null);
+    setPendingReactions(new Set());
     setRequestError(null);
-    reactionPendingRef.current = false;
+    reactionInflightRef.current = new Set();
     reactionEpochRef.current++;
     return () => { detailRequestRef.current++; reactionEpochRef.current++; };
   }, [currentUser?.uid]);
@@ -348,31 +351,33 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
 
   const handleReaction = async (event: React.MouseEvent, pattern: CommunityPost, reaction: 'like' | 'favorite') => {
     event.stopPropagation();
-    if (reactionPendingRef.current) return;
+    const key = `${reaction}:${pattern.id}`;
+    if (reactionInflightRef.current.has(key)) return; // 同一按钮防连点，其它按钮不受影响
     if (requireRegisteredCommunityAccount('登录后即可参与社区互动')) return;
     const active = reaction === 'like' ? !pattern.liked : !pattern.favorited;
-    const action = `${reaction}:${pattern.id}`;
     const epoch = reactionEpochRef.current;
-    reactionPendingRef.current = true;
-    setPendingAction(action);
-    setRequestError(null);
+    // 乐观更新：先在本地落状态（心形立即点亮 + 数字跳动），请求后台静默完成。
+    const apply = (on: boolean) => updatePattern(pattern.id, current => reaction === 'like'
+      ? { ...current, liked: on, likeCount: Math.max(0, current.likeCount + (on ? 1 : -1)) }
+      : { ...current, favorited: on, favoriteCount: Math.max(0, current.favoriteCount + (on ? 1 : -1)) });
+    apply(active);
+    reactionInflightRef.current.add(key);
+    setPendingReactions(new Set(reactionInflightRef.current));
     try {
       const result = await reactToCommunityPost(pattern.id, reaction, active);
-      if (epoch !== reactionEpochRef.current) return;
+      if (epoch !== reactionEpochRef.current) return; // 列表已重载/卸载，无需回滚
       if (!result.ok) {
+        apply(!active); // 失败回滚
         if (!handleGuestCommunityResponse(result.error)) setRequestError(result.error ?? '操作未完成，请重试');
-      } else {
-        updatePattern(pattern.id, current => reaction === 'like'
-          ? { ...current, liked: active, likeCount: Math.max(0, current.likeCount + (active ? 1 : -1)) }
-          : { ...current, favorited: active, favoriteCount: Math.max(0, current.favoriteCount + (active ? 1 : -1)) });
       }
     } catch {
-      if (epoch === reactionEpochRef.current) setRequestError('操作未完成，请检查网络后重试');
-    } finally {
       if (epoch === reactionEpochRef.current) {
-        reactionPendingRef.current = false;
-        setPendingAction(null);
+        apply(!active);
+        setRequestError('操作未完成，请检查网络后重试');
       }
+    } finally {
+      reactionInflightRef.current.delete(key);
+      setPendingReactions(new Set(reactionInflightRef.current));
     }
   };
 
@@ -677,7 +682,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               三列时卡片只留封面 + 标题 + 作者/点赞，完整信息在详情里。 */}
           <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-4 my-4">
             {filteredPatterns.map(pattern => (
-              <CommunityPostCard key={pattern.id} post={pattern} pending={pendingAction !== null}
+              <CommunityPostCard key={pattern.id} post={pattern}
+                pendingReaction={pendingReactions.has(`like:${pattern.id}`) ? 'like' : pendingReactions.has(`favorite:${pattern.id}`) ? 'favorite' : null}
                 onOpen={pattern => void openPattern(pattern)} onReaction={(event, post, reaction) => void handleReaction(event, post, reaction)} />
             ))}
           </div>
@@ -768,7 +774,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   <button
                     type="button"
                     onClick={event => void handleReaction(event, selectedPattern, 'like')}
-                    disabled={pendingAction === `like:${selectedPattern.id}`}
+                    disabled={pendingReactions.has(`like:${selectedPattern.id}`)}
                     aria-pressed={selectedPattern.liked}
                     aria-label={`${selectedPattern.liked ? '取消点赞' : '点赞'}：${selectedPattern.title}（${selectedPattern.likeCount}）`}
                     className={`flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border px-1.5 py-2 transition-all duration-200 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 ${selectedPattern.liked ? 'border-rose-200 bg-rose-50' : 'border-purple-200/80 bg-purple-50 hover:border-purple-300 hover:bg-purple-100'}`}
@@ -782,7 +788,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   <button
                     type="button"
                     onClick={event => void handleReaction(event, selectedPattern, 'favorite')}
-                    disabled={pendingAction === `favorite:${selectedPattern.id}`}
+                    disabled={pendingReactions.has(`favorite:${selectedPattern.id}`)}
                     aria-pressed={selectedPattern.favorited}
                     aria-label={`${selectedPattern.favorited ? '取消收藏' : '收藏'}：${selectedPattern.title}（${selectedPattern.favoriteCount}）`}
                     className={`flex min-h-12 cursor-pointer flex-col items-center justify-center gap-1 rounded-xl border px-1.5 py-2 transition-all duration-200 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60 ${selectedPattern.favorited ? 'border-indigo-200 bg-indigo-50' : 'border-purple-200/80 bg-purple-50 hover:border-purple-300 hover:bg-purple-100'}`}

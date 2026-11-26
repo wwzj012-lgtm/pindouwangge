@@ -1,5 +1,5 @@
 import React from 'react';
-import { ArrowRight, Bookmark, Heart } from 'lucide-react';
+import { ArrowRight, Bookmark, Heart, Loader2 } from 'lucide-react';
 import type { CommunityPost } from '../utils/communityApi';
 
 /** Only show the author's real tags; missing metadata is not a category. */
@@ -11,12 +11,15 @@ export function communityPostTags(post: { tags?: unknown }): string[] {
 
 export interface CommunityPostCardProps {
   post: CommunityPost;
-  pending: boolean;
+  /** 只有被点击的那个反应在途——只锁它自己并转圈，其它按钮照常可点（乐观更新）。 */
+  pendingReaction: 'like' | 'favorite' | null;
   onOpen: (post: CommunityPost) => void;
   onReaction: (event: React.MouseEvent, post: CommunityPost, reaction: 'like' | 'favorite') => void;
 }
 
-export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pending, onOpen, onReaction }) => {
+export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pendingReaction, onOpen, onReaction }) => {
+  const likePending = pendingReaction === 'like';
+  const favoritePending = pendingReaction === 'favorite';
   const tags = communityPostTags(post);
   const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'medium' }).format(new Date(post.publishedAt));
   const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-600 focus-visible:ring-offset-2';
@@ -51,15 +54,15 @@ export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pend
 
         <div className="mt-auto hidden pt-2 sm:block">
           <div className="flex flex-wrap items-center gap-1 border-t border-purple-100 pt-2">
-            <button type="button" onClick={event => onReaction(event, post, 'like')} disabled={pending} aria-pressed={post.liked}
+            <button type="button" onClick={event => onReaction(event, post, 'like')} disabled={likePending} aria-busy={likePending} aria-pressed={post.liked}
               aria-label={`${post.liked ? '取消点赞' : '点赞'}：${post.title}（${post.likeCount}）`}
-              className={`inline-flex min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold disabled:opacity-50 ${post.liked ? 'bg-rose-50 text-rose-700' : 'text-purple-800 hover:bg-purple-50'} ${focus}`}>
-              <Heart size={16} aria-hidden="true" className={post.liked ? 'fill-current' : ''} /><span>{post.liked ? '已赞' : '点赞'} {post.likeCount}</span>
+              className={`inline-flex min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold disabled:opacity-60 ${post.liked ? 'bg-rose-50 text-rose-700' : 'text-purple-800 hover:bg-purple-50'} ${focus}`}>
+              {likePending ? <Loader2 size={16} aria-hidden="true" className="animate-spin" /> : <Heart size={16} aria-hidden="true" className={post.liked ? 'fill-current' : ''} />}<span>{post.liked ? '已赞' : '点赞'} {post.likeCount}</span>
             </button>
-            <button type="button" onClick={event => onReaction(event, post, 'favorite')} disabled={pending} aria-pressed={post.favorited}
+            <button type="button" onClick={event => onReaction(event, post, 'favorite')} disabled={favoritePending} aria-busy={favoritePending} aria-pressed={post.favorited}
               aria-label={`${post.favorited ? '取消收藏' : '收藏'}：${post.title}（${post.favoriteCount}）`}
-              className={`inline-flex min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold disabled:opacity-50 ${post.favorited ? 'bg-indigo-50 text-indigo-800' : 'text-purple-800 hover:bg-purple-50'} ${focus}`}>
-              <Bookmark size={16} aria-hidden="true" className={post.favorited ? 'fill-current' : ''} /><span>{post.favorited ? '已收藏' : '收藏'} {post.favoriteCount}</span>
+              className={`inline-flex min-h-11 sm:min-h-9 min-w-11 sm:min-w-9 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-bold disabled:opacity-60 ${post.favorited ? 'bg-indigo-50 text-indigo-800' : 'text-purple-800 hover:bg-purple-50'} ${focus}`}>
+              {favoritePending ? <Loader2 size={16} aria-hidden="true" className="animate-spin" /> : <Bookmark size={16} aria-hidden="true" className={post.favorited ? 'fill-current' : ''} />}<span>{post.favorited ? '已收藏' : '收藏'} {post.favoriteCount}</span>
             </button>
           </div>
           <button type="button" onClick={() => onOpen(post)} className={`mt-2 inline-flex min-h-11 sm:min-h-9 w-full items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 py-1.5 text-xs sm:text-sm font-bold text-white transition-colors hover:bg-purple-700 ${focus}`}>

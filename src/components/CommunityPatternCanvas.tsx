@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import type { StoredPatternProject } from '../utils/patternGridCodec';
+import { practiceSectionLabel } from '../utils/practiceProgress';
 import './CommunityPatternCanvas.css';
 
 type Selection = { x: number; y: number; width: number; height: number };
@@ -11,6 +12,20 @@ type Gesture =
   | { kind: 'select'; anchor: Point }
   | { kind: 'pinch'; center: Point; distance: number };
 
+/** Viewport rect the workspace wants the canvas to frame (section focus, next bead, ...). */
+export interface CommunityPatternFocusRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Incrementing counter: a new value re-applies the focus even for the same rect. */
+  nonce: number;
+  /** Preferred zoom for the focus; defaults to "fit the rect". Clamped to the view range. */
+  zoom?: number;
+  /** Dim everything outside the rect. Defaults to true; a single-bead focus opts out. */
+  dim?: boolean;
+}
+
 export interface CommunityPatternCanvasProps {
   project: StoredPatternProject;
   highlightColorId?: string | null;
@@ -18,16 +33,66 @@ export interface CommunityPatternCanvasProps {
   onSelectionChange?: (selection: { x: number; y: number; width: number; height: number }) => void;
   maxSelectionSide?: number;
   selecting?: boolean;
+  /** Section size in cells. 0 (or negative) disables sections, dashed guides and badges. */
+  sectionSize?: number;
+  /** Cells already placed, indexed by `y * width + x`. */
+  doneCells?: ReadonlySet<number> | null;
+  /** Click/tap a filled cell to toggle "placed". Omit to disable the interaction. */
+  onToggleCell?: ((index: number) => void) | null;
+  /** Undo the last placed bead (Ctrl/Cmd+Z while the canvas is focused). */
+  onUndoCell?: (() => void) | null;
+  focusRect?: CommunityPatternFocusRect | null;
+  /** Dim everything outside `focusRect`. Defaults to true when a focus is active. */
+  dimOutside?: boolean;
+  /** Cell to flash briefly (purple ring) so the user can find it. */
+  flashCell?: { x: number; y: number; nonce: number } | null;
+  /** Cells outside this rect are dimmed while `focusRect` is active. */
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const MAX_ZOOM = 64;
 const PADDING = 20;
+const RULER_SIZE = 18;
+/** Below this cell size the per-cell "done" veil is invisible; skipping it keeps huge grids smooth. */
+const DONE_MIN_CELL_PX = 1.5;
+/** Hard cap on the per-frame cell loop: 900² fully zoomed out stays interactive. */
+const DONE_MAX_VISIBLE_CELLS = 400_000;
+const FLASH_DURATION_MS = 1200;
+
+/** Ruler label spacing (in cells) for the current zoom. */
+function rulerStep(zoom: number): number {
+  if (zoom >= 22) return 1;
+  if (zoom >= 8) return 5;
+  if (zoom >= 3) return 10;
+  return 20;
+}
+
+function roundedRectPath(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  radius: number,
+) {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  context.moveTo(x + r, y);
+  context.lineTo(x + width - r, y);
+  context.arcTo(x + width, y, x + width, y + r, r);
+  context.lineTo(x + width, y + height - r);
+  context.arcTo(x + width, y + height, x + width - r, y + height, r);
+  context.lineTo(x + r, y + height);
+  context.arcTo(x, y + height, x, y + height - r, r);
+  context.lineTo(x, y + r);
+  context.arcTo(x, y, x + r, y, r);
+}
 
 /** Display only: grid IDs, null cells and the author's palette stay untouched. */
 export function CommunityPatternCanvas({
   project, highlightColorId = null, selection = null, onSelectionChange,
-  maxSelectionSide, selecting = false,
+  maxSelectionSide, selecting = false, sectionSize = 0, doneCells = null,
+  onToggleCell = null, onUndoCell = null, focusRect = null, dimOutside = true,
+  flashCell = null,
 }: CommunityPatternCanvasProps) {
   const { width, height, grid, palette } = project;
   const helpId = useId();
@@ -36,11 +101,16 @@ export function CommunityPatternCanvas({
   const pointers = useRef(new Map<number, Point>());
   const gesture = useRef<Gesture | null>(null);
   const viewRef = useRef<View>({ x: 0, y: 0, zoom: 1 });
+  const press = useRef<{ pointerId: number; point: Point; cell: Point | null; moved: boolean } | null>(null);
+  const appliedFocus = useRef(0);
+  const hadFocus = useRef(false);
   const [view, setView] = useState(viewRef.current);
   const [size, setSize] = useState({ width: 1, height: 1 });
   const [hover, setHover] = useState<Point | null>(null);
   const [draft, setDraft] = useState<Selection | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [showRulers, setShowRulers] = useState(true);
+  const [flashActive, setFlashActive] = useState(false);
   const colors = useMemo(() => new Map(palette.map(color => [color.id, color])), [palette]);
   const selectionLimit = Number.isFinite(maxSelectionSide)
     ? Math.max(1, Math.floor(maxSelectionSide!)) : Math.max(width, height);
@@ -49,6 +119,7 @@ export function CommunityPatternCanvas({
     Math.max(1, size.height - PADDING * 2) / height,
   )));
   const minZoom = Math.max(0.001, fitZoom / 4);
+  const sectionStep = sectionSize > 0 ? Math.floor(sectionSize) : 0;
 
   // One source pixel per cell, never a zoom-sized backing bitmap or cell DOM.
   const pixels = useMemo(() => {
@@ -105,6 +176,17 @@ export function CommunityPatternCanvas({
     return source;
   }, [highlightColorId, pixels, colors, grid, width, height]);
 
+  /** Total beads of the pattern: cheap display summary for the status bar. */
+  const totalBeads = useMemo(() => {
+    let total = 0;
+    for (let y = 0; y < height; y++) {
+      const row = grid[y];
+      for (let x = 0; x < width; x++) if (row[x] !== null) total += 1;
+    }
+    return total;
+  }, [grid, width, height]);
+  const placedBeads = doneCells ? Math.min(doneCells.size, totalBeads) : 0;
+
   const boundView = useCallback((next: View): View => {
     const zoom = clamp(next.zoom, minZoom, MAX_ZOOM);
     const boundAxis = (position: number, paper: number, viewport: number) => {
@@ -126,6 +208,7 @@ export function CommunityPatternCanvas({
 
   const stopGesture = useCallback(() => {
     gesture.current = null;
+    press.current = null;
     const captured = [...pointers.current.keys()];
     pointers.current.clear();
     for (const id of captured) {
@@ -180,6 +263,49 @@ export function CommunityPatternCanvas({
     canvas.addEventListener('wheel', wheel, { passive: false });
     return () => canvas.removeEventListener('wheel', wheel);
   }, [zoomAt, size.height]);
+
+  // Section focus: frame the requested rect once per nonce, after the viewport is measured.
+  useEffect(() => {
+    if (!focusRect) {
+      if (!hadFocus.current) return;
+      hadFocus.current = false;
+      appliedFocus.current = 0;
+      fit();
+      return;
+    }
+    if (size.width <= 1 || size.height <= 1) return;
+    if (appliedFocus.current === focusRect.nonce) return;
+    appliedFocus.current = focusRect.nonce;
+    hadFocus.current = true;
+    const requested = typeof focusRect.zoom === 'number' && focusRect.zoom > 0
+      ? focusRect.zoom
+      : Math.min(
+        Math.max(1, size.width - PADDING * 2) / Math.max(1, focusRect.width),
+        Math.max(1, size.height - PADDING * 2) / Math.max(1, focusRect.height),
+      );
+    const zoom = clamp(requested, minZoom, MAX_ZOOM);
+    updateView({
+      zoom,
+      x: size.width / 2 - (focusRect.x + focusRect.width / 2) * zoom,
+      y: size.height / 2 - (focusRect.y + focusRect.height / 2) * zoom,
+    });
+  }, [focusRect, size, minZoom, updateView, fit]);
+
+  // A new flash target restarts the highlight timer, so repeated "next bead" clicks stay visible.
+  // Reduced-motion users get the instant jump without the blinking ring.
+  useEffect(() => {
+    if (!flashCell) return;
+    const reduceMotion = typeof window !== 'undefined'
+      && typeof window.matchMedia === 'function'
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion) {
+      setFlashActive(false);
+      return;
+    }
+    setFlashActive(true);
+    const timer = window.setTimeout(() => setFlashActive(false), FLASH_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [flashCell]);
 
   const activeSelection = draft ?? selection;
   useEffect(() => {
@@ -253,6 +379,171 @@ export function CommunityPatternCanvas({
       context.strokeStyle = '#9e8bb1';
       context.lineWidth = 1.5;
       context.strokeRect(x, y, width * zoom, height * zoom);
+
+      // ---- Placed cells: one batched veil path + one batched checkmark path. No DOM, no cache rebuild.
+      if (doneCells && doneCells.size > 0 && zoom >= DONE_MIN_CELL_PX
+        && (right - left) * (bottom - top) <= DONE_MAX_VISIBLE_CELLS) {
+        context.beginPath();
+        for (let row = top; row < bottom; row++) {
+          const rowBase = row * width;
+          const cellY = y + row * zoom;
+          for (let col = left; col < right; col++) {
+            if (!doneCells.has(rowBase + col)) continue;
+            context.rect(x + col * zoom, cellY, zoom, zoom);
+          }
+        }
+        context.fillStyle = 'rgba(255, 255, 255, 0.62)';
+        context.fill();
+        if (zoom >= 10) {
+          context.beginPath();
+          for (let row = top; row < bottom; row++) {
+            const rowBase = row * width;
+            const cellY = y + row * zoom;
+            for (let col = left; col < right; col++) {
+              if (!doneCells.has(rowBase + col)) continue;
+              const cellX = x + col * zoom;
+              context.moveTo(cellX + zoom * 0.28, cellY + zoom * 0.54);
+              context.lineTo(cellX + zoom * 0.44, cellY + zoom * 0.7);
+              context.lineTo(cellX + zoom * 0.74, cellY + zoom * 0.34);
+            }
+          }
+          context.strokeStyle = '#16a34a';
+          context.lineWidth = Math.max(1, Math.min(2.6, zoom * 0.1));
+          context.lineCap = 'round';
+          context.lineJoin = 'round';
+          context.stroke();
+          context.lineCap = 'butt';
+          context.lineJoin = 'miter';
+        }
+      }
+
+      // ---- Section guides (dashed) + A1/B3 badges, in screen space at fixed 10px type.
+      if (sectionStep > 0) {
+        const stepPx = sectionStep * zoom;
+        const columnLimit = Math.min(right, width);
+        const rowLimit = Math.min(bottom, height);
+        context.save();
+        context.strokeStyle = 'rgba(109, 40, 217, 0.45)';
+        context.lineWidth = 1;
+        context.setLineDash([4, 3]);
+        context.beginPath();
+        // Inner boundaries only: the outer frame is already stroked above.
+        for (let col = Math.ceil(left / sectionStep) * sectionStep; col <= columnLimit; col += sectionStep) {
+          if (col <= 0 || col >= width) continue;
+          context.moveTo(x + col * zoom, y + top * zoom);
+          context.lineTo(x + col * zoom, y + bottom * zoom);
+        }
+        for (let row = Math.ceil(top / sectionStep) * sectionStep; row <= rowLimit; row += sectionStep) {
+          if (row <= 0 || row >= height) continue;
+          context.moveTo(x + left * zoom, y + row * zoom);
+          context.lineTo(x + right * zoom, y + row * zoom);
+        }
+        context.stroke();
+        context.restore();
+        // Below ~4px per cell the badges smear into noise, so they start at zoom 4.
+        if (zoom >= 4) {
+          const firstCol = Math.floor(left / sectionStep);
+          const lastCol = Math.max(firstCol, Math.ceil(right / sectionStep) - 1);
+          const firstRow = Math.floor(top / sectionStep);
+          const lastRow = Math.max(firstRow, Math.ceil(bottom / sectionStep) - 1);
+          const minX = showRulers ? RULER_SIZE : 0;
+          const minY = showRulers ? RULER_SIZE : 0;
+          context.textAlign = 'center';
+          context.textBaseline = 'middle';
+          for (let row = firstRow; row <= lastRow; row++) {
+            for (let col = firstCol; col <= lastCol; col++) {
+              const badgeX = Math.max(minX, x + col * stepPx) + 3;
+              const badgeY = Math.max(minY, y + row * stepPx) + 3;
+              if (badgeX > size.width - 26 || badgeY > size.height - 18) continue;
+              const label = practiceSectionLabel(col, row);
+              context.font = '600 10px system-ui, sans-serif';
+              // 10px type with 1px / 4px padding inside a 4px-rounded 85%-white chip.
+              const badgeWidth = Math.min(34, context.measureText(label).width + 9);
+              context.beginPath();
+              roundedRectPath(context, badgeX, badgeY, badgeWidth, 14, 4);
+              context.fillStyle = 'rgba(255, 255, 255, 0.85)';
+              context.fill();
+              context.strokeStyle = 'rgba(109, 40, 217, 0.3)';
+              context.lineWidth = 1;
+              context.stroke();
+              context.fillStyle = '#5b21b6';
+              context.fillText(label, badgeX + badgeWidth / 2, badgeY + 7.5);
+            }
+          }
+        }
+      }
+
+      // ---- Focus veil: everything outside the focused section fades, inside stays readable.
+      if (focusRect && dimOutside && (focusRect.dim ?? true)) {
+        const focusX = x + focusRect.x * zoom;
+        const focusY = y + focusRect.y * zoom;
+        const focusWidth = focusRect.width * zoom;
+        const focusHeight = focusRect.height * zoom;
+        context.save();
+        context.beginPath();
+        context.rect(0, 0, size.width, size.height);
+        context.rect(focusX, focusY, focusWidth, focusHeight);
+        context.fillStyle = 'rgba(255, 255, 255, 0.55)';
+        context.fill('evenodd');
+        context.restore();
+      }
+
+      // ---- Flash ring for "locate next bead" (self-expiring, never a DOM node).
+      if (flashActive && flashCell) {
+        const cellX = x + flashCell.x * zoom;
+        const cellY = y + flashCell.y * zoom;
+        context.strokeStyle = '#7c3aed';
+        context.lineWidth = 2.5;
+        context.strokeRect(cellX - 2, cellY - 2, zoom + 4, zoom + 4);
+      }
+
+      // ---- Rulers: pinned to the viewport edges, drawn last so nothing covers them.
+      if (showRulers) {
+        const step = rulerStep(zoom);
+        const firstCol = Math.max(0, Math.ceil(left / step) * step);
+        const firstRow = Math.max(0, Math.ceil(top / step) * step);
+        context.fillStyle = 'rgba(255, 255, 255, 0.86)';
+        context.fillRect(0, 0, size.width, RULER_SIZE);
+        context.fillRect(0, 0, RULER_SIZE, size.height);
+        context.strokeStyle = 'rgba(109, 40, 217, 0.18)';
+        context.lineWidth = 1;
+        context.beginPath();
+        context.moveTo(0, RULER_SIZE - 0.5);
+        context.lineTo(size.width, RULER_SIZE - 0.5);
+        context.moveTo(RULER_SIZE - 0.5, 0);
+        context.lineTo(RULER_SIZE - 0.5, size.height);
+        context.stroke();
+        // 10px monospace keeps digits tabular (fixed advance) so numbers never jitter.
+        const fontSize = 10;
+        const rulerFont = (weight: number) => `${weight} ${fontSize}px ui-monospace, SFMono-Regular, Consolas, monospace`;
+        context.textBaseline = 'middle';
+        context.font = rulerFont(500);
+        for (let col = firstCol; col <= Math.min(right, width - 1); col += step) {
+          const px = x + col * zoom;
+          if (px < RULER_SIZE + 1 || px > size.width - 2) continue;
+          const label = col + 1;
+          // Decade starts read purple; the origin and every 5th mark read bold.
+          const decade = label === 1 || label % 10 === 0;
+          const bold = decade || label % 5 === 0;
+          context.fillStyle = decade ? '#6d28d9' : '#4c1d95';
+          context.font = rulerFont(bold ? 700 : 500);
+          context.textAlign = 'left';
+          context.fillText(String(label), px + 2, RULER_SIZE / 2);
+        }
+        for (let row = firstRow; row <= Math.min(bottom, height - 1); row += step) {
+          const py = y + row * zoom;
+          if (py < RULER_SIZE + 1 || py > size.height - 2) continue;
+          const label = row + 1;
+          const decade = label === 1 || label % 10 === 0;
+          const bold = decade || label % 5 === 0;
+          context.fillStyle = decade ? '#6d28d9' : '#4c1d95';
+          context.font = rulerFont(bold ? 700 : 500);
+          context.textAlign = 'left';
+          context.fillText(String(label), 2, py + fontSize / 2 + 1);
+        }
+        context.textAlign = 'center';
+      }
+
       if (activeSelection) {
         const startX = clamp(activeSelection.x, 0, width);
         const startY = clamp(activeSelection.y, 0, height);
@@ -268,7 +559,10 @@ export function CommunityPatternCanvas({
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [view, size, pixels, highlightedPixels, grid, colors, width, height, highlightColorId, activeSelection]);
+  }, [
+    view, size, pixels, highlightedPixels, grid, colors, width, height, highlightColorId,
+    activeSelection, doneCells, sectionStep, showRulers, focusRect, dimOutside, flashActive, flashCell,
+  ]);
 
   const localPoint = (event: ReactPointerEvent<HTMLCanvasElement>): Point => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -282,6 +576,8 @@ export function CommunityPatternCanvas({
     const cell = cellAt(point);
     return { x: clamp(cell.x, 0, width - 1), y: clamp(cell.y, 0, height - 1) };
   };
+  const cellInside = (cell: Point): boolean =>
+    cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height;
   const emitSelection = (anchor: Point, point: Point) => {
     const cell = boundedCell(point);
     const endX = clamp(cell.x, anchor.x - selectionLimit + 1, anchor.x + selectionLimit - 1);
@@ -304,6 +600,7 @@ export function CommunityPatternCanvas({
     setDragging(true);
     if (pointers.current.size === 2) {
       gesture.current = pinch();
+      press.current = null;
       setDraft(null);
       setHover(null);
     } else if (selecting && !event.shiftKey && event.button !== 2) {
@@ -315,18 +612,33 @@ export function CommunityPatternCanvas({
       gesture.current = { kind: 'select', anchor: cell };
       // The first finger of a pinch must not emit a one-cell crop.
       if (event.pointerType !== 'touch') emitSelection(cell, point);
-    } else gesture.current = { kind: 'pan', last: point };
+    } else {
+      gesture.current = { kind: 'pan', last: point };
+      // Press-to-toggle candidate: only a <4px release counts as a "placed bead" tap.
+      // The rulers are a screen-space overlay pinned over real cells, so a press under
+      // them must never mark a bead the user cannot see.
+      const overRuler = showRulers && (point.x < RULER_SIZE || point.y < RULER_SIZE);
+      if (onToggleCell && event.button === 0 && !overRuler) {
+        const cell = cellAt(point);
+        press.current = { pointerId: event.pointerId, point, cell: cellInside(cell) ? cell : null, moved: false };
+      }
+    }
   };
   const pointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const point = localPoint(event);
     if (!pointers.current.has(event.pointerId)) {
       if (pointers.current.size) return;
       const cell = cellAt(point);
-      const next = cell.x >= 0 && cell.y >= 0 && cell.x < width && cell.y < height ? cell : null;
+      const next = cellInside(cell) ? cell : null;
       setHover(current => current?.x === next?.x && current?.y === next?.y ? current : next);
       return;
     }
     pointers.current.set(event.pointerId, point);
+    const pending = press.current;
+    if (pending && pending.pointerId === event.pointerId && !pending.moved
+      && Math.hypot(point.x - pending.point.x, point.y - pending.point.y) >= 4) {
+      pending.moved = true;
+    }
     const active = gesture.current;
     if (active?.kind === 'pinch' && pointers.current.size === 2) {
       const next = pinch();
@@ -347,6 +659,14 @@ export function CommunityPatternCanvas({
     if (gesture.current?.kind === 'select' && event.type === 'pointerup') {
       emitSelection(gesture.current.anchor, localPoint(event));
     }
+    // Tap to toggle "placed": practice mode only, single pointer, no drag, filled cell.
+    const pending = press.current;
+    if (pending && pending.pointerId === event.pointerId && event.type === 'pointerup'
+      && !pending.moved && pointers.current.size === 1 && pending.cell && onToggleCell) {
+      const { x: cellX, y: cellY } = pending.cell;
+      if (grid[cellY]?.[cellX] != null) onToggleCell(cellY * width + cellX);
+    }
+    press.current = null;
     pointers.current.delete(event.pointerId);
     gesture.current = pointers.current.size ? { kind: 'pan', last: [...pointers.current.values()][0] } : null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -355,6 +675,19 @@ export function CommunityPatternCanvas({
 
   const hoverId = hover ? grid[hover.y]?.[hover.x] ?? null : null;
   const hoverColor = hoverId === null ? null : colors.get(hoverId);
+  const interactive = Boolean(onToggleCell) && !selecting;
+  const hoverPlaced = hover && doneCells ? doneCells.has(hover.y * width + hover.x) : false;
+  const hoverSection = hover && sectionStep > 0 && interactive
+    ? practiceSectionLabel(Math.floor(hover.x / sectionStep), Math.floor(hover.y / sectionStep))
+    : null;
+  const percent = totalBeads > 0 ? Math.round(placedBeads / totalBeads * 100) : 0;
+  const hoverText = hover
+    ? '列 ' + (hover.x + 1) + ' · 行 ' + (hover.y + 1) + ' · ' + (hoverColor ? hoverColor.code + ' (' + hoverColor.id + ')' : '空格')
+      + (hoverSection ? ' · 所在区块 ' + hoverSection : '')
+      + (interactive ? (hoverPlaced ? ' · 已拼' : ' · 未拼') : '')
+    : (doneCells && totalBeads > 0
+      ? '总进度 ' + placedBeads.toLocaleString() + ' / ' + totalBeads.toLocaleString() + '（' + percent + '%）'
+      : '指向网格查看坐标与原色号');
   return (
     <section className="community-pattern-canvas" aria-label="社区只读图纸">
       <div className="community-pattern-canvas__toolbar">
@@ -364,6 +697,7 @@ export function CommunityPatternCanvas({
           <output className="community-pattern-canvas__zoom" aria-label="视图缩放">{Math.round(view.zoom / fitZoom * 100)}%</output>
           <button type="button" aria-label="放大图纸" disabled={view.zoom >= MAX_ZOOM} onClick={() => zoomAt(1.3)}>＋</button>
           <button type="button" aria-label="适应图纸" onClick={fit}>适应</button>
+          <button type="button" aria-label={showRulers ? '隐藏行列坐标标尺' : '显示行列坐标标尺'} aria-pressed={showRulers} data-active={showRulers || undefined} onClick={() => setShowRulers(value => !value)}>坐标</button>
         </div>
       </div>
       <div ref={viewportRef} className="community-pattern-canvas__viewport">
@@ -372,7 +706,8 @@ export function CommunityPatternCanvas({
           className="community-pattern-canvas__surface"
           data-selecting={selecting || undefined}
           data-dragging={dragging || undefined}
-          aria-label="只读网格图纸，可拖拽移动、缩放和框选副本区域"
+          data-practice={interactive || undefined}
+          aria-label={interactive ? '只读网格图纸，点击豆格记录已拼，可拖拽移动、缩放' : '只读网格图纸，可拖拽移动、缩放和框选副本区域'}
           aria-describedby={helpId}
           tabIndex={0}
           onPointerDown={pointerDown}
@@ -383,6 +718,12 @@ export function CommunityPatternCanvas({
           onPointerLeave={() => setHover(null)}
           onContextMenu={event => event.preventDefault()}
           onKeyDown={event => {
+            if (onUndoCell && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey
+              && (event.key === 'z' || event.key === 'Z')) {
+              event.preventDefault();
+              onUndoCell();
+              return;
+            }
             if (event.key === '+' || event.key === '=') { event.preventDefault(); zoomAt(1.3); }
             else if (event.key === '-') { event.preventDefault(); zoomAt(1 / 1.3); }
             else if (event.key === '0') { event.preventDefault(); fit(); }
@@ -394,12 +735,13 @@ export function CommunityPatternCanvas({
         >浏览器需支持 Canvas 才能查看原始图纸。</canvas>
       </div>
       <div className="community-pattern-canvas__status">
-        <span>{hover ? '列 ' + (hover.x + 1) + ' · 行 ' + (hover.y + 1) + ' · ' + (hoverColor ? hoverColor.code + ' (' + hoverColor.id + ')' : '空格') : '指向网格查看坐标与原色号'}</span>
+        <span>{hoverText}</span>
         {activeSelection && <span>选区 {activeSelection.width} × {activeSelection.height} 格</span>}
       </div>
       <p id={helpId} className="community-pattern-canvas__help">
         拖拽移动 · 滚轮缩放 · 双指缩放
         {selecting ? '。单指拖拽框选副本（每边最多 ' + selectionLimit + ' 格）；Shift 或鼠标右键拖拽移动。' : '。放大至每格 22px 可查看原色号。'}
+        {interactive ? '点击豆格记录「已拼」，空格子不计数。' : ''}
         框选仅用于独立副本，不修改原图。
       </p>
     </section>

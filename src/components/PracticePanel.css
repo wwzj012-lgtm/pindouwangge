@@ -98,6 +98,50 @@
 .practice-panel__manual-copy textarea { display: block; width: 100%; height: 80px; margin-top: 6px; padding: 8px; background: var(--practice-card); border: 1px solid var(--practice-line); color: var(--practice-text); border-radius: 8px; resize: vertical; }
 .practice-panel__sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
+/* ---- Placed-bead progress + block navigation (all values follow the existing card rhythm) ---- */
+.practice-panel__progress { padding: 12px; border: 1px solid #e9defa; border-radius: 14px; background: linear-gradient(120deg,#f8f3ff,#fdfbff); }
+.practice-panel__progress-track { position: relative; display: block; height: 6px; margin: 2px 0 8px; border-radius: 99px; background: #e8ddfa; overflow: hidden; }
+.practice-panel__progress-fill { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg,#a78bfa,#6d28d9); transition: width 200ms ease; }
+.practice-panel__progress-summary { color: var(--practice-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.practice-panel__progress-summary strong { color: var(--practice-text); font-size: 14px; font-weight: 700; }
+.practice-panel__progress-split { margin-top: 2px !important; color: var(--practice-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+.practice-panel__progress-focus { display: inline-block; margin-top: 7px !important; padding: 3px 9px; border-radius: 8px; background: #efe7fb; color: #5b21b6; font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.practice-panel__progress-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.practice-panel__chip { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 32px; padding: 5px 10px; border: 1px solid #e4dcec; border-radius: 9px; background: #fff; color: #6a5580; font-size: 11px; font-weight: 650; white-space: nowrap; transition: background 150ms ease, border-color 150ms ease, color 150ms ease; }
+.practice-panel__chip:hover:not(:disabled) { background: #f4eefc; border-color: #cbb4ea; color: #6d28d9; }
+.practice-panel__chip[aria-pressed="true"] { background: #f3ecfd; border-color: #b79ae0; color: #6d28d9; }
+.practice-panel__chip.is-danger { color: #a8451c; border-color: #f0ddd2; }
+.practice-panel__chip.is-danger:hover:not(:disabled) { background: #fdf3ee; border-color: #e2b9a4; color: #93340f; }
+.practice-panel__sections { padding: 12px; border: 1px solid var(--practice-line); border-radius: 12px; background: #fcfbfe; }
+/* Segmented single-choice control: three equal columns, aria-pressed carries the selection. */
+.practice-panel__segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 10px; background: #f4effa; }
+.practice-panel__segmented button { min-height: 32px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--practice-muted); font-size: 11px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.practice-panel__segmented button:hover { background: #fff; color: #6d28d9; }
+.practice-panel__segmented button[aria-pressed="true"] { background: #fff; border-color: #ddd0f2; color: #6d28d9; box-shadow: 0 1px 3px #7c3aed1f; }
+.practice-panel__section-actions { display: flex; gap: 6px; margin: 9px 0; }
+/* Columns mirror the real block layout (var injected by the component), never more than 7. */
+.practice-panel__minimap { display: grid; grid-template-columns: repeat(var(--minimap-cols, 7), minmax(0, 1fr)); gap: 5px; max-height: 186px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; scrollbar-width: thin; }
+.practice-panel__minimap-cell { display: grid; grid-template-rows: auto auto 3px; justify-items: center; gap: 1px; min-height: 40px; padding: 4px 2px; border: 1px solid var(--practice-line); border-radius: 8px; background: #fff; color: var(--practice-text); container-type: inline-size; transition: background 150ms ease, border-color 150ms ease; }
+.practice-panel__minimap-cell:hover:not(.is-empty) { border-color: #c4b5e1; background: #f9f5ff; }
+.practice-panel__minimap-cell[aria-pressed="true"] { border-color: #a78bdb; background: #f5efff; box-shadow: inset 0 0 0 1px #a78bdb; }
+.practice-panel__minimap-cell.is-empty { background: #f7f5fa; color: var(--practice-muted); cursor: help; }
+.practice-panel__minimap-label { font-size: 10px; font-weight: 700; letter-spacing: .01em; font-variant-numeric: tabular-nums; }
+/* Completed blocks: green-800 keeps ≥4.5:1 even on the pressed purple tint. */
+.practice-panel__minimap-cell.is-complete .practice-panel__minimap-label { color: #166534; }
+.practice-panel__minimap-value { font-size: 9px; font-style: normal; color: #6b5c7a; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Narrow cells: shrink the percentage instead of wrapping "100%" onto two lines. */
+@container (max-width: 34px) {
+  .practice-panel__minimap-value { font-size: 8.5px; }
+}
+.practice-panel__minimap-bar { display: block; width: 100%; height: 3px; border-radius: 99px; background: #ece4f7; overflow: hidden; }
+.practice-panel__minimap-bar b { display: block; height: 100%; border-radius: 99px; background: linear-gradient(90deg,#a78bfa,#7c3aed); }
+.practice-panel__minimap-cell.is-complete .practice-panel__minimap-bar b { background: #15803d; }
+.practice-panel__hint { margin-top: 8px !important; color: #5b21b6; font-size: 10px; }
+.practice-panel__section-select { display: grid; gap: 4px; margin-top: 8px; color: var(--practice-muted); font-size: 11px; }
+.practice-panel__section-select select { min-height: 38px; padding: 0 8px; border: 1px solid var(--practice-line); border-radius: 9px; background: #faf9fc; color: var(--practice-text); font-size: 11px; }
+.practice-panel__section-select select:hover { border-color: #c4b5e1; }
+.practice-panel__section-select small { font-size: 10px; line-height: 1.6; }
+
 @media (max-width: 767px) {
   .practice-panel__eyebrow { display: none; }
   .practice-panel__header { padding-block: 4px; }
@@ -107,6 +151,7 @@
 @media (prefers-reduced-motion: reduce) {
   .practice-panel { animation: none; }
   .practice-panel button { transition: none; }
+  .practice-panel__progress-fill, .practice-panel__minimap-bar b { transition: none; }
 }
 
 @keyframes practice-panel-enter {
@@ -133,6 +178,26 @@
 .practice-reset-dialog__actions button:last-child:hover { background: #6d28d9; }
 .practice-reset-dialog__actions button:focus-visible { outline: 2px solid #a78bda; outline-offset: 3px; }
 .practice-panel h2 svg { color: var(--practice-accent); }
+/* Progress reset reuses the exact timer-reset dialog skin (same modal rhythm, light theme). */
+.practice-progress-dialog {
+  position: fixed; inset: 0; margin: auto; padding: 26px; box-sizing: border-box;
+  width: min(360px, calc(100vw - 40px)); max-height: calc(100dvh - 40px);
+  border: 1px solid #eee7f5; border-radius: 20px; background: #fff; color: #33224b;
+  box-shadow: 0 24px 80px #24103226; font-family: inherit;
+}
+.practice-progress-dialog::backdrop { background: #24163152; backdrop-filter: blur(3px); }
+.practice-progress-dialog .practice-reset-dialog__icon { color: #a8451c; background: #fdf1ea; }
+.practice-progress-dialog h2 { margin: 0 0 10px; font-size: 18px; font-weight: 700; letter-spacing: -.4px; }
+.practice-progress-dialog p { margin: 0; color: #81738e; font-size: 12px; line-height: 1.9; }
+.practice-progress-dialog p strong { color: #61457d; font-variant-numeric: tabular-nums; }
+.practice-progress-dialog .practice-reset-dialog__actions { display: flex; gap: 10px; margin-top: 24px; }
+.practice-progress-dialog .practice-reset-dialog__actions button { flex: 1; min-height: 42px; border: 1px solid #e8e1f0; border-radius: 11px; background: #fff; color: #756184; font-size: 12px; font-weight: 650; cursor: pointer; }
+/* Destructive confirm: red family, distinct from the primary purple. */
+.practice-progress-dialog .practice-reset-dialog__actions button:last-child { border-color: #dc2626; background: #dc2626; color: #fff; }
+.practice-progress-dialog .practice-reset-dialog__actions button:hover { background: #f7f3fb; }
+.practice-progress-dialog .practice-reset-dialog__actions button:last-child:hover { border-color: #b91c1c; background: #b91c1c; }
+.practice-progress-dialog .practice-reset-dialog__actions button:last-child:focus-visible { outline: 2px solid #dc2626; outline-offset: 3px; }
+.practice-progress-dialog .practice-reset-dialog__actions button:focus-visible { outline: 2px solid #a78bda; outline-offset: 3px; }
 .practice-panel__subtitle { margin-top: 4px!important; color: var(--practice-muted); font-size: 11px; }
 .practice-panel__overview > div { display: flex; align-items: baseline; gap: 8px; }
 .practice-panel__overview > div + div { padding-left: 15px; border-left: 1px solid var(--practice-line); }
@@ -172,4 +237,8 @@
  .practice-panel__welcome p { margin-top:6px;font-size:11px; }
  .practice-panel__welcome > button { margin-top:12px; }
  .practice-panel__welcome-features { display:none; }
+ .practice-panel__progress, .practice-panel__sections { padding:10px; }
+ .practice-panel__progress-actions .practice-panel__chip { flex: 1 1 auto; }
+ .practice-panel__chip, .practice-panel__segmented button, .practice-panel__minimap-cell { min-height: 44px; }
+ .practice-panel__minimap { max-height: 150px; }
 }

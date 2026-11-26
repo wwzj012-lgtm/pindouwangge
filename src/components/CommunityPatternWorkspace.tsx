@@ -1,11 +1,16 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Crop, Crown, Download, Hand, LockKeyhole, Pencil, Timer, X } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern, cropCommunityPattern, type CommunityCropRect } from '../utils/communityPatternAccess';
-import { CommunityPatternCanvas } from './CommunityPatternCanvas';
-import { PracticePanel } from './PracticePanel';
+import { CommunityPatternCanvas, type CommunityPatternFocusRect } from './CommunityPatternCanvas';
+import { PracticePanel, type PracticePanelProgress } from './PracticePanel';
 import { ExportModal } from './ExportModal';
+import {
+  DEFAULT_PRACTICE_SECTION_SIZE, countPlacedBeads, findNextIncompleteSection, findNextUnplacedCell,
+  listPracticeSections, loadPracticeProgress, practiceProgressAvailable, practiceSectionForCell,
+  savePracticeProgress, togglePracticeCell, type PracticeSectionSize,
+} from '../utils/practiceProgress';
 import './CommunityPatternWorkspace.css';
 
 interface CommunityPatternWorkspaceProps {
@@ -18,6 +23,11 @@ interface CommunityPatternWorkspaceProps {
   onUpgrade: () => void;
   onOpenInventory: () => void;
 }
+
+/** Undo only needs this session's additions; older entries are dropped to keep memory flat. */
+const UNDO_LIMIT = 500;
+/** Save progress after the user stops tapping, never on every single click. */
+const SAVE_DEBOUNCE_MS = 400;
 
 export function CommunityPatternWorkspace({ project, postId, title, initialMode = 'practice', onClose, onEdit, onUpgrade, onOpenInventory }: CommunityPatternWorkspaceProps) {
   const { currentUser, isVip, isPro } = useAuth();
@@ -39,6 +49,151 @@ export function CommunityPatternWorkspace({ project, postId, title, initialMode 
     for (const row of project.grid) for (const cell of row) if (cell !== null) { count++; colors.add(cell); }
     return { beads: count, colors: colors.size };
   }, [project.grid]);
+
+  // ---- Practice progress (placed beads) + section navigation -------------------------------
+  const workKey = 'community:' + postId;
+  const cellCount = project.width * project.height;
+  const [doneCells, setDoneCells] = useState<ReadonlySet<number>>(() => loadPracticeProgress(workKey, cellCount - 1));
+  const [undoCount, setUndoCount] = useState(0);
+  const [sectionSize, setSectionSize] = useState<PracticeSectionSize>(DEFAULT_PRACTICE_SECTION_SIZE);
+  const [focusedSection, setFocusedSection] = useState<string | null>(null);
+  const [focusRect, setFocusRect] = useState<CommunityPatternFocusRect | null>(null);
+  const [flashCell, setFlashCell] = useState<{ x: number; y: number; nonce: number } | null>(null);
+  const nonceRef = useRef(0);
+  const doneRef = useRef<ReadonlySet<number>>(doneCells);
+  doneRef.current = doneCells;
+  const undoStack = useRef<number[]>([]);
+  const dirtyRef = useRef(false);
+  const saveTimer = useRef<number | null>(null);
+  const persistenceAvailable = useMemo(() => practiceProgressAvailable(), []);
+
+  const scheduleSave = useCallback(() => {
+    dirtyRef.current = true;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      if (dirtyRef.current) savePracticeProgress(workKey, doneRef.current);
+    }, SAVE_DEBOUNCE_MS);
+  }, [workKey]);
+
+  // Flush on hide/unmount so closing the dialog never loses the last taps.
+  useEffect(() => {
+    const flush = () => {
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (dirtyRef.current) savePracticeProgress(workKey, doneRef.current);
+    };
+    window.addEventListener('pagehide', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      flush();
+    };
+  }, [workKey]);
+
+  // A different post (or a different grid size) starts from that work's own saved progress.
+  // Indices that no longer point at a bead (re-published grid, swapped pattern) are dropped
+  // here so the canvas veil and the panel counters share one definition of "placed".
+  useEffect(() => {
+    const loaded = loadPracticeProgress(workKey, cellCount - 1);
+    const valid = new Set([...loaded].filter(index => {
+      const x = index % project.width;
+      const y = Math.floor(index / project.width);
+      return project.grid[y]?.[x] != null;
+    }));
+    doneRef.current = valid;
+    undoStack.current = [];
+    dirtyRef.current = false;
+    setDoneCells(valid);
+    setUndoCount(0);
+    setFocusedSection(null);
+    setFocusRect(null);
+    setFlashCell(null);
+  }, [workKey, cellCount, project.width, project.grid]);
+
+  const sections = useMemo(
+    () => listPracticeSections(project.grid, doneCells, sectionSize),
+    [project.grid, doneCells, sectionSize],
+  );
+  const placedCount = useMemo(() => countPlacedBeads(project.grid, doneCells), [project.grid, doneCells]);
+  const nextCell = useMemo(
+    () => findNextUnplacedCell(project.grid, doneCells, highlightColor),
+    [project.grid, doneCells, highlightColor],
+  );
+
+  const toggleCell = useCallback((index: number) => {
+    const x = index % project.width;
+    const y = Math.floor(index / project.width);
+    if (project.grid[y]?.[x] == null) return;
+    if (!doneRef.current.has(index)) {
+      undoStack.current = [...undoStack.current.slice(-(UNDO_LIMIT - 1)), index];
+      setUndoCount(undoStack.current.length);
+    }
+    setDoneCells(current => togglePracticeCell(current, index));
+    scheduleSave();
+  }, [project.grid, project.width, scheduleSave]);
+
+  const undoLastCell = useCallback(() => {
+    const stack = undoStack.current;
+    while (stack.length) {
+      const index = stack.pop() as number;
+      if (!doneRef.current.has(index)) continue;
+      setDoneCells(current => togglePracticeCell(current, index));
+      setUndoCount(stack.length);
+      scheduleSave();
+      return;
+    }
+    setUndoCount(0);
+  }, [scheduleSave]);
+
+  const resetProgress = useCallback(() => {
+    undoStack.current = [];
+    setUndoCount(0);
+    setDoneCells(new Set<number>());
+    scheduleSave();
+  }, [scheduleSave]);
+
+  const focusSection = useCallback((label: string | null) => {
+    if (!label) {
+      setFocusedSection(null);
+      setFocusRect(null);
+      return;
+    }
+    const section = sections.find(item => item.label === label);
+    if (!section || section.beads === 0) return;
+    nonceRef.current += 1;
+    setFocusedSection(label);
+    setFocusRect({ x: section.x, y: section.y, width: section.width, height: section.height, nonce: nonceRef.current });
+  }, [sections]);
+
+  const nextIncompleteSection = useCallback(() => {
+    const next = findNextIncompleteSection(sections, focusedSection);
+    if (next) focusSection(next.label);
+  }, [sections, focusedSection, focusSection]);
+
+  const locateNextBead = useCallback(() => {
+    if (!nextCell) return;
+    // One nonce per user action: the focus and flash effects compare their own prop,
+    // so sharing the value stays correct and keeps the two "targets" in lockstep.
+    nonceRef.current += 1;
+    const nonce = nonceRef.current;
+    // A 12 × 12 window around the bead reads better than a single cell at max zoom.
+    // No white veil here: a single bead is not a "section focus".
+    setFocusRect({
+      x: nextCell.x - 5.5, y: nextCell.y - 5.5, width: 12, height: 12,
+      zoom: 18, nonce, dim: false,
+    });
+    setFlashCell({ x: nextCell.x, y: nextCell.y, nonce });
+    const section = practiceSectionForCell(nextCell.x, nextCell.y, sectionSize);
+    setFocusedSection(section.label);
+  }, [nextCell, sectionSize]);
+
+  const changeSectionSize = useCallback((size: PracticeSectionSize) => {
+    setSectionSize(size);
+    setFocusedSection(null);
+    setFocusRect(null);
+  }, []);
 
   useEffect(() => {
     const dialog = dialogRef.current;
@@ -87,6 +242,24 @@ export function CommunityPatternWorkspace({ project, postId, title, initialMode 
     }
   };
 
+  const progressBinding: PracticePanelProgress = {
+    total: stats.beads,
+    placed: placedCount,
+    sections,
+    sectionSize,
+    focusedSection,
+    hasNext: nextCell !== null,
+    canUndo: undoCount > 0,
+    persistenceAvailable,
+    onToggleSectionSize: changeSectionSize,
+    onFocusSection: focusSection,
+    onNextSection: nextIncompleteSection,
+    onUndo: undoLastCell,
+    onLocateNext: locateNextBead,
+    onReset: resetProgress,
+  };
+  const practiceMode = mode === 'practice';
+
   return <dialog ref={dialogRef} className="community-workspace" aria-labelledby={titleId} onCancel={event => {
     event.preventDefault();
     if (exportOpen) setExportOpen(false); else onClose();
@@ -113,8 +286,14 @@ export function CommunityPatternWorkspace({ project, postId, title, initialMode 
             <button type="button" aria-pressed={selecting} onClick={() => setSelecting(true)}><Crop size={15} />框选区域</button>
             <button type="button" aria-pressed={!selecting} onClick={() => setSelecting(false)}><Hand size={15} />移动视图</button>
           </div>}
-          <CommunityPatternCanvas project={project} highlightColorId={mode === 'practice' ? highlightColor : null}
+          <CommunityPatternCanvas project={project} highlightColorId={practiceMode ? highlightColor : null}
             selection={mode === 'crop' ? crop : null} selecting={mode === 'crop' && selecting} maxSelectionSide={limit}
+            sectionSize={sectionSize}
+            doneCells={practiceMode ? doneCells : null}
+            onToggleCell={practiceMode ? toggleCell : null}
+            onUndoCell={practiceMode ? undoLastCell : null}
+            focusRect={practiceMode ? focusRect : null}
+            flashCell={practiceMode ? flashCell : null}
             onSelectionChange={selection => { setCrop(selection); setError(null); }} />
         </section>
         <aside className="community-workspace__sidebar">
@@ -122,10 +301,11 @@ export function CommunityPatternWorkspace({ project, postId, title, initialMode 
             <button type="button" role="tab" aria-selected={mode === 'practice'} id={titleId + '-practice-tab'} aria-controls={titleId + '-panel'} onClick={() => switchMode('practice')}><Timer size={16} />拼豆实操</button>
             <button type="button" role="tab" aria-selected={mode === 'crop'} id={titleId + '-crop-tab'} aria-controls={titleId + '-panel'} onClick={() => switchMode('crop')}><Crop size={16} />区域副本</button>
           </div>
-          <div role="tabpanel" id={titleId + '-panel'} aria-labelledby={titleId + (mode === 'practice' ? '-practice-tab' : '-crop-tab')} className="community-workspace__panel">
-            {mode === 'practice' ? <PracticePanel grid={project.grid} paletteMap={paletteMap} workKey={'community:' + postId}
+          <div role="tabpanel" id={titleId + '-panel'} aria-labelledby={titleId + (practiceMode ? '-practice-tab' : '-crop-tab')} className="community-workspace__panel">
+            {practiceMode ? <PracticePanel grid={project.grid} paletteMap={paletteMap} workKey={workKey}
               userId={currentUser?.uid ?? null} detailsUnlocked={true} activeColorId={highlightColor}
-              onHighlightColor={setHighlightColor} onClose={onClose} onOpenInventory={onOpenInventory} />
+              onHighlightColor={setHighlightColor} onClose={onClose} onOpenInventory={onOpenInventory}
+              progress={progressBinding} />
               : <div className="community-workspace__crop-panel">
                 <h3>选一块，继续创作</h3>
                 <p>在图纸上拖出选区，或输入准确坐标。只复制选中的豆格，不缩小、不重新配色。</p>

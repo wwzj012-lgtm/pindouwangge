@@ -43,6 +43,8 @@
 }
 
 .community-pattern-canvas__controls button:hover:not(:disabled) { background: #f0e7fd; border-color: #c6a7eb; }
+.community-pattern-canvas__controls button[aria-pressed="true"] { background: #efe4fd; border-color: #b79ae0; color: #5b21b6; }
+.community-pattern-canvas__controls button:active:not(:disabled) { transform: translateY(1px); }
 .community-pattern-canvas__controls button:disabled { opacity: 0.4; cursor: default; }
 .community-pattern-canvas__controls button:focus-visible,
 .community-pattern-canvas__surface:focus-visible { outline: 2px solid var(--community-pattern-accent); outline-offset: -3px; }
@@ -68,6 +70,7 @@
 }
 .community-pattern-canvas__surface[data-selecting] { cursor: crosshair; }
 .community-pattern-canvas__surface[data-dragging]:not([data-selecting]) { cursor: grabbing; }
+.community-pattern-canvas__surface[data-practice]:not([data-dragging]) { cursor: pointer; }
 
 .community-pattern-canvas__status {
   display: flex;

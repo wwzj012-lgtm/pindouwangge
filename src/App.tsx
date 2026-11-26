@@ -739,6 +739,14 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   useEffect(() => {
     const userId = currentUser?.uid;
     if (!hasFormalLogin || !userId || legacyMigrationAttemptedUsersRef.current.has(userId)) return;
+    // 服务端已永久下线 legacy-import（410 Gone）的用户：跨刷新跳过，不再白跑
+    // 一次候选收集 + 必然失败的请求（2026-11-26 线上观察到 410 噪音）。
+    try {
+      if (window.localStorage.getItem(`beadgrid_legacy_import_retired_${userId}`) === '1') {
+        legacyMigrationAttemptedUsersRef.current.add(userId);
+        return;
+      }
+    } catch { /* storage 不可用时保持原行为 */ }
     // Mark the session attempt before touching storage/network. A transient
     // failure leaves every record unchanged and does not nag or loop.
     legacyMigrationAttemptedUsersRef.current.add(userId);
@@ -773,6 +781,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       if (cancelled || candidates.length === 0) return;
       const response = await apiImportLegacyPatterns(candidates);
       if (cancelled || !response.ok || !response.data) {
+        // 410/404 = 端点已永久下线：标记后跨刷新不再尝试（迁移是历史包袱，
+        // 服务端明确宣告退役，继续请求只会产生网络噪音）。
+        if (!cancelled && (response.status === 410 || response.status === 404)) {
+          try { window.localStorage.setItem(`beadgrid_legacy_import_retired_${userId}`, '1'); } catch { /* ignore */ }
+          return;
+        }
         // Legacy migration is best-effort. A 409 is not a successful import:
         // keep the records untouched, but explain only the known idempotency
         // / already-registered cases instead of silently masking a quota or

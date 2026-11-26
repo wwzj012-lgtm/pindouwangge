@@ -319,17 +319,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await apiCheckinCredits();
       if (!isCurrentSession(scope)) return { success: false, message: '登录状态已变化，请重试' };
-      if (!response.ok || !response.data) {
+      if (!response.ok) {
         if (response.status === 401) return { success: false, message: '请先登录账号' };
         return { success: false, message: response.error ?? '签到失败，请稍后重试' };
       }
-      const payload = response.data as unknown as Record<string, unknown>;
+      // 2026-11-26 修复首签必失败：worker 对当日首次签到返回 201 Created，
+      // 信封 success=true 即服务端已受理；响应 data 里没有内层 success 字段
+      // （字段名是 alreadyClaimed/streakDay，与旧判定的 alreadyCheckedIn/
+      // streakDays 也不一致），旧逻辑 payload.success===true 把首签全部误报
+      // 为「签到失败」。现在信封 ok 即成功，重复签到以 alreadyClaimed 识别。
+      const payload = (response.data ?? {}) as unknown as Record<string, unknown>;
+      const alreadyCheckedIn = payload.alreadyClaimed === true || payload.alreadyCheckedIn === true;
       const result = {
-        success: payload.success === true,
+        success: !alreadyCheckedIn,
         message: typeof payload.message === 'string' ? payload.message : undefined,
-        alreadyCheckedIn: payload.alreadyCheckedIn === true,
+        alreadyCheckedIn,
         grantedUnits: typeof payload.grantedUnits === 'number' ? payload.grantedUnits : undefined,
-        streakDays: typeof payload.streakDays === 'number' ? payload.streakDays : undefined,
+        streakDays: typeof payload.streakDay === 'number'
+          ? payload.streakDay
+          : typeof payload.streakDays === 'number' ? payload.streakDays : undefined,
       };
       if (result.success || result.alreadyCheckedIn) {
         await refreshCreditSummaryFromServer(scope);

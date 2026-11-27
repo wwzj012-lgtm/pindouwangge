@@ -57,7 +57,7 @@ import { ImportBlueprintWizard } from './components/ImportBlueprintWizard';
 import { recognitionDraftToProject, saveConfirmedRecognition, type ConfirmedRecognitionDraft } from './utils/confirmedRecognition';
 import { MIN_CANVAS_ZOOM } from './utils/canvasViewport';
 import { alignGridToSize, clearConnectedColorRegion, flipGrid, normalizeSymmetryAxes, reflectGridPoints, type SymmetryAxes } from './utils/gridEditing';
-import { PracticePanel } from './components/PracticePanel';
+import { PracticeWorkspace, type PracticeSelectionMeta } from './components/PracticeWorkspace';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import type { LargeCanvasCreditUsage, LargeCanvasFrame, LargeCanvasViewHandle } from './components/LargeCanvasView';
 import { getLargeCanvasModeSettings, type LargeCanvasConversionMode } from './utils/largeCanvas';
@@ -69,7 +69,7 @@ import {
   saveExportedPatternRecord,
   type EditablePatternProject,
 } from './utils/patternHistory';
-import { validateStoredProject } from './utils/patternGridCodec';
+import { validateStoredProject, GRID_CODEC_VERSION, type StoredPatternProject } from './utils/patternGridCodec';
 import { communityDraft } from './utils/communityPatternSnapshot';
 import { canEditCommunityPattern } from './utils/communityPatternAccess';
 import { normalizeRestoredPatternSettings, patternEditingSnapshot, savedPatternStudioUrl } from './utils/savedPatternNavigation';
@@ -81,6 +81,15 @@ import { checkUploadPixels, checkUploadSize, describeUploadRejection } from './u
 const LARGE_CANVAS_PREPROCESS_CANCELLED = '图片预处理已取消';
 
 type PatternCompletionStatus = 'DRAFT' | 'QUOTING' | 'AWAITING_CONFIRMATION' | 'COMPLETING' | 'COMPLETED' | 'LEGACY';
+
+/** A pattern chosen inside the practice dialog's empty state (library or community). */
+interface PracticeSelection {
+  project: StoredPatternProject;
+  source: 'library' | 'community';
+  workKey: string;
+  title: string;
+  postId?: string;
+}
 
 interface PatternCompletionInput {
   workKey: string;
@@ -655,8 +664,12 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   const [symmetryMode, setSymmetryMode] = useState<SymmetryMode>('none');
   const [customSymmetryAxes, setCustomSymmetryAxes] = useState<SymmetryAxes | null>(null);
   const symmetryAxes = normalizeSymmetryAxes(customSymmetryAxes, settings.width, settings.height);
-  const [isPracticeMode, setIsPracticeMode] = useState(false);
-  const [practiceColorId, setPracticeColorId] = useState<string | null>(null);
+  // Practice is one modal workspace for every entry point (board / library / community).
+  // `isPracticeOpen` only tracks "the dialog is open"; `isPracticeMode` on editorActions
+  // keeps the name used by the toolbar/mobile button state.
+  const [isPracticeOpen, setIsPracticeOpen] = useState(false);
+  const [practiceBoardProject, setPracticeBoardProject] = useState<StoredPatternProject | null>(null);
+  const [practiceSelection, setPracticeSelection] = useState<PracticeSelection | null>(null);
 
   const handleToggleHighlightColorId = useCallback((colorId: string) => {
     setHighlightColorIds(prev =>
@@ -833,8 +846,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
     setPaidNonEmptyBeads(null);
     setIsImageDerivedPattern(false);
     setCustomSymmetryAxes(null);
-    setIsPracticeMode(false);
-    setPracticeColorId(null);
+    setIsPracticeOpen(false);
+    setPracticeBoardProject(null);
+    setPracticeSelection(null);
   }, [invalidateCompletionConfirmation]);
 
   const requireFormalLogin = useCallback((message: string): boolean => {
@@ -1316,8 +1330,8 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   const backgroundCleanup = useBackgroundCleanup({
     grid,
-    context: [settings, activePalette, sourceImage, activePatternId, currentTab, isPracticeMode, isStudioModalOpen, isImportBlueprintOpen],
-    enabled: !isPracticeMode && !isConverting && !isStudioModalOpen && !isImportBlueprintOpen,
+    context: [settings, activePalette, sourceImage, activePatternId, currentTab, isPracticeOpen, isStudioModalOpen, isImportBlueprintOpen],
+    enabled: !isPracticeOpen && !isConverting && !isStudioModalOpen && !isImportBlueprintOpen,
     onBeforeOpen: finishHistoryTransaction,
     onApply: applyGridChange,
   });
@@ -1686,7 +1700,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Interactive Painting on Cell Click/Drag / Flood Fill / Shapes
   const handleCellClick = (x: number, y: number) => {
-    if (isPracticeMode || backgroundCleanup.preview) return;
+    if (backgroundCleanup.preview) return;
     if (x < 0 || x >= settings.width || y < 0 || y >= settings.height) return;
     const currentGrid = gridRef.current;
 
@@ -1739,7 +1753,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Shape creation handler from GridCanvas (Line / Rectangle / Circle)
   const handleApplyShape = (points: { x: number; y: number }[]) => {
-    if (isPracticeMode || backgroundCleanup.preview || !selectedColor || points.length === 0) return;
+    if (backgroundCleanup.preview || !selectedColor || points.length === 0) return;
     const colorId = selectedColor.id;
     const newGrid = gridRef.current.map(row => [...row]);
 
@@ -1757,7 +1771,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
   // Lasso erase handler from GridCanvas: clear every bead inside the freehand region.
   const handleLassoClear = (points: { x: number; y: number }[]) => {
-    if (isPracticeMode || backgroundCleanup.preview || points.length === 0) return;
+    if (backgroundCleanup.preview || points.length === 0) return;
     const newGrid = gridRef.current.map(row => [...row]);
     let cleared = 0;
     for (const pt of points) {
@@ -2102,6 +2116,9 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (isImportBlueprintOpen) return;
+      // While the practice dialog is modal, its canvas owns Ctrl+Z (placed beads) and
+      // tool shortcuts — the board behind it must not react.
+      if (isPracticeOpen) return;
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
@@ -2131,7 +2148,7 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, isImportBlueprintOpen]);
+  }, [handleUndo, handleRedo, isImportBlueprintOpen, isPracticeOpen]);
 
   const handleImportPattern = useCallback(() => {
     if (!requireFormalLogin(isEn ? 'Sign in before opening your library.' : '请先登录，再打开我的图库。')) return;
@@ -2168,24 +2185,64 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
   };
 
 
-  const practicePanel = isPracticeMode ? <PracticePanel
-    grid={grid} paletteMap={paletteMap} workKey={stableWorkKey} userId={currentUser?.uid ?? null}
-    detailsUnlocked={isPatternUnlocked} activeColorId={practiceColorId}
-    onHighlightColor={setPracticeColorId} onClose={() => {setIsPracticeMode(false);setPracticeColorId(null);}}
-    onOpenInventory={() => {if(requireFormalLogin(isEn ? 'Sign in to manage inventory.' : '请先登录后管理豆仓。')) {setProfileInitialTab('inventory');setIsUserProfileModalOpen(true);}}}
-  /> : undefined;
+  /** Snapshot of the current board as a practiseable project (no deep copy: the grid is
+   *  immutable in this component and the dialog makes the board uneditable while open). */
+  const buildBoardPracticeProject = (): StoredPatternProject => ({
+    version: GRID_CODEC_VERSION,
+    name: projectName.trim() ? projectName.trim() : '我的画板',
+    width: settings.width,
+    height: settings.height,
+    boardSize: settings.boardSize,
+    brand,
+    settings: { ...settings },
+    grid,
+    palette: activePalette,
+    createdAt: Date.now(),
+  });
+
+  const closePractice = useCallback(() => {
+    setIsPracticeOpen(false);
+    setPracticeBoardProject(null);
+    setPracticeSelection(null);
+  }, []);
+
+  /** Opens the shared practice dialog for whatever is currently on the board. */
+  const openPractice = useCallback(() => {
+    setPracticeSelection(null);
+    setPracticeBoardProject(gridNonEmptyBeads > 0 ? buildBoardPracticeProject() : null);
+    setIsPracticeOpen(true);
+  }, [gridNonEmptyBeads, grid, settings, brand, activePalette, projectName]);
+
+  /** The panel's "管理豆仓" needs the account modals, which cannot live above a modal
+   *  dialog — close the workspace first, exactly like the community entry point. */
+  const openInventoryFromPractice = useCallback(() => {
+    closePractice();
+    if (requireFormalLogin(isEn ? 'Sign in to manage inventory.' : '请先登录后管理豆仓。')) {
+      setProfileInitialTab('inventory');
+      setIsUserProfileModalOpen(true);
+    }
+  }, [closePractice, isEn, requireFormalLogin]);
+
+  /** Region copy / full edit from a community pattern opened via the picker. */
+  const editPracticeSelection = (project: StoredPatternProject): boolean => {
+    const title = practiceSelection?.title ?? project.name;
+    // The practice dialog is a real modal: close it before any account/confirm dialog.
+    closePractice();
+    return guardUnsavedChanges(`载入社区作品「${title}」将替换当前画板上未保存的修改。`, () => {
+      handleRestorePattern(communityDraft({ ...project, name: title }, createDraftId()));
+    });
+  };
+
   const editorActions = {
     axes: symmetryAxes, width: settings.width, height: settings.height,
     onAxesChange: setCustomSymmetryAxes,
     onMirrorFlip: (direction: 'horizontal' | 'vertical') => {
-      if (isPracticeMode) return;
       applyGridChange(flipGrid(gridRef.current, direction));
     },
-    isPracticeMode,
-    onTogglePractice: () => {setIsPracticeMode(value => !value);setPracticeColorId(null);},
-    practicePanel,
+    isPracticeMode: isPracticeOpen,
+    onTogglePractice: () => { if (isPracticeOpen) closePractice(); else openPractice(); },
   };
-  const canvasHighlightColorIds = isPracticeMode ? (practiceColorId && isPatternUnlocked ? [practiceColorId] : []) : highlightColorIds;
+  const canvasHighlightColorIds = highlightColorIds;
   const completionSummary = (
     <CompletionSummary
       isEn={isEn}
@@ -2543,6 +2600,31 @@ function StudioApp({ initialTab = 'home' }: StudioAppProps) {
       )}
 
       {/* Modals */}
+      {isPracticeOpen && <PracticeWorkspace
+        project={practiceSelection?.project ?? practiceBoardProject}
+        title={practiceSelection?.title ?? practiceBoardProject?.name ?? '我的画板'}
+        source={practiceSelection?.source ?? 'board'}
+        workKey={practiceSelection?.workKey ?? ('board:' + stableWorkKey)}
+        timerKey={practiceSelection ? practiceSelection.workKey : stableWorkKey}
+        postId={practiceSelection?.postId}
+        userId={currentUser?.uid ?? null}
+        onClose={closePractice}
+        onOpenInventory={openInventoryFromPractice}
+        onRequireLogin={() => {
+          // Account dialogs cannot open above a modal <dialog>: close, then sign in.
+          closePractice();
+          setSaveMessage(isEn
+            ? 'Sign in first, then tap Practice again to start from your library.'
+            : '登录后再点一次「拼豆实操」，就能从图库挑一张图纸了。');
+          setIsAuthModalOpen(true);
+        }}
+        onSelectProject={(project: StoredPatternProject, meta: PracticeSelectionMeta) => setPracticeSelection({
+          project, source: meta.source, workKey: meta.workKey, title: meta.title, postId: meta.postId,
+        })}
+        onEdit={editPracticeSelection}
+        onUpgrade={() => { closePractice(); setIsVipModalOpen(true); }}
+      />}
+
       <PaletteManagerModal
         isOpen={isPaletteModalOpen}
         onClose={() => setIsPaletteModalOpen(false)}

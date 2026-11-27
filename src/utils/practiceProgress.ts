@@ -36,6 +36,12 @@ type ProgressStorage = Pick<Storage, 'getItem' | 'setItem'>;
 export const PRACTICE_SECTION_SIZES = [10, 20, 25] as const;
 export type PracticeSectionSize = (typeof PRACTICE_SECTION_SIZES)[number];
 export const DEFAULT_PRACTICE_SECTION_SIZE: PracticeSectionSize = 20;
+/**
+ * Below this bead count the section map is pure noise: a tiny pattern fits in one
+ * glance, so the block minimap, the block card, and the canvas section guides are
+ * all suppressed. 50 beads is roughly one 10 × 10 board of work.
+ */
+export const PRACTICE_MIN_BEADS_FOR_SECTIONS = 50;
 
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 

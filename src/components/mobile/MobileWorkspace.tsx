@@ -271,25 +271,25 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           <GridCanvas
             cleanupPreview={backgroundCleanup?.preview}
             symmetryAxes={editorActions?.axes}
-            onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
+            onSymmetryAxesChange={editorActions?.onAxesChange}
             interactionProfile="touch"
             grid={grid}
             paletteMap={paletteMap}
             width={settings.width}
             height={settings.height}
             boardSize={settings.boardSize}
-            activeTool={editorActions?.isPracticeMode ? 'hand' : activeTool}
+            activeTool={activeTool}
             setActiveTool={setActiveTool}
             selectedColor={selectedColor}
             highlightColorIds={highlightColorIds}
             highlightColorId={highlightColorIds.length === 1 ? highlightColorIds[0] : null}
-            completedColorIds={editorActions?.isPracticeMode ? [] : completedColorIds}
+            completedColorIds={completedColorIds}
             beadShape={beadShape}
             showSymbols={showSymbols}
             showGridLines={showGridLines}
             showCoordinates={showCoordinates}
             canvasBackdrop={canvasBackdrop}
-            symmetryMode={editorActions?.isPracticeMode ? 'none' : symmetryMode}
+            symmetryMode={symmetryMode}
             sourceImage={sourceImage}
             keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
@@ -402,7 +402,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
           never floating — the old pill sat on top of the grid's top-left corner
           and reaching board 5 meant four taps. Here every board is one tap away
           and the whole strip lives in the thumb zone. */}
-      {currentTab === 'canvas' && !editorActions?.isPracticeMode && boardNav.totalBoards > 1 && (
+      {currentTab === 'canvas' && boardNav.totalBoards > 1 && (
         <div className="shrink-0 border-t border-purple-100 bg-white">
           <div className="flex items-center gap-1.5 px-2 py-1.5">
             <button
@@ -450,10 +450,9 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
       )}
 
       {/* Unified Mobile Bottom Workstation (所有按钮集中在底部) */}
-      {editorActions?.isPracticeMode && <div className="max-h-[40dvh] shrink-0 overflow-y-auto border-t border-emerald-200 bg-white">{editorActions.practicePanel}</div>}
       <div className="pb-safe shrink-0 relative z-20 flex flex-col border-t border-purple-100 bg-white select-none">
         {/* Collapsible Used-Color Tray (已用色号快捷托盘，默认收起) */}
-        {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
+        {currentTab === 'canvas' && (
           <div
             className={`absolute bottom-full left-0 right-0 overflow-hidden border-b border-purple-100/90 bg-purple-50/97 backdrop-blur-md shadow-lg transition-[max-height] duration-200 ease-out ${
               isColorTrayOpen ? 'max-h-[60px]' : 'max-h-0'
@@ -503,7 +502,7 @@ export const MobileWorkspace: React.FC<MobileWorkspaceProps> = ({
         {/* Row 1: Tool dock. One segmented switch for the four drawing tools
             instead of four separate outlined boxes — fewer borders, and the
             current tool reads as a selected segment rather than a button. */}
-        {currentTab === 'canvas' && !editorActions?.isPracticeMode && (
+        {currentTab === 'canvas' && (
           <div className="flex h-[56px] items-center gap-1.5 px-2">
             {/* Current Color Chip - toggles the used-color tray */}
             <button

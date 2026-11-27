@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import type { SymmetryAxes } from '../utils/gridEditing';
 import type { SymmetryMode } from '../types';
 
@@ -8,9 +7,9 @@ export interface WorkspaceEditingActions {
   height: number;
   onAxesChange: (axes: SymmetryAxes | null) => void;
   onMirrorFlip: (direction: 'horizontal' | 'vertical') => void;
+  /** True while the practice dialog is open; drives the toolbar/mobile button state. */
   isPracticeMode: boolean;
   onTogglePractice: () => void;
-  practicePanel?: ReactNode;
 }
 
 export function SymmetryAxisControls({ actions, mode, isEn = false }: {

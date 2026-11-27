@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import {
-  ArrowRight, Check, Copy, Crosshair, Grid2X2, LockKeyhole, Package, Pause, Play,
+  ArrowRight, Check, ChevronDown, Copy, Crosshair, Grid2X2, LockKeyhole, Package, Pause, Play,
   RotateCcw, Search, Timer, Trash2, Undo2, X,
 } from 'lucide-react';
 import type { BeadColor } from '../types';
@@ -114,6 +114,8 @@ export function PracticePanel({
     remaining: sum.remaining + row.remaining,
     shortage: sum.shortage + row.shortage,
   }), { stock: 0, remaining: 0, shortage: 0 }), [plan]);
+  /** Colors that need restocking: drives the collapsed summary and the shortage filter label. */
+  const shortageColors = useMemo(() => plan.rows.filter(row => row.shortage > 0).length, [plan]);
 
   const focusedSection = progress ? findSectionByLabel(progress.sections, progress.focusedSection) : null;
   const progressTotal = progress?.total ?? 0;
@@ -274,9 +276,9 @@ export function PracticePanel({
 
         {plan.total === 0 ? <section className="practice-panel__welcome" aria-label="空画板引导">
           <div className="practice-panel__illustration" aria-hidden="true"><Grid2X2 size={40}/><i/><i/><i/></div>
-          <h3>从一张图纸开始</h3>
-          <p>先在画板中绘制，或导入图纸。<br/>准备好后，就可以开始你的拼豆时光。</p>
-          <button type="button" className="practice-panel__primary" onClick={close}>返回画板</button>
+          <h3>这张图纸还没有豆子</h3>
+          <p>换一张有内容的图纸开始拼豆。</p>
+          <button type="button" className="practice-panel__primary" onClick={close}>返回</button>
           <div className="practice-panel__welcome-features"><span><Timer size={15}/>专注计时</span><span><Search size={15}/>同色定位</span><span><Package size={15}/>备豆检查</span></div>
         </section> : !detailsUnlocked ? (
           <section className="practice-panel__locked" aria-label="需要解锁">
@@ -326,7 +328,9 @@ export function PracticePanel({
               {!progress.persistenceAvailable && <p className="practice-panel__warning" role="status">本地存储不可用，拼豆进度仅在本次打开期间保留。</p>}
             </section>}
 
-            {progress && <section className="practice-panel__sections" aria-label="区块推进">
+            {/* No sections for small patterns: the workspace passes an empty list there,
+                which keeps this card (and its all-"—" minimap) out of the way entirely. */}
+            {progress && progress.sections.length > 0 && <section className="practice-panel__sections" aria-label="区块推进">
               <div className="practice-panel__section-heading">
                 <h3>区块推进 <small>{progress.sections.length} 区块</small></h3>
                 <span className="practice-panel__note">点击区块聚焦</span>
@@ -363,48 +367,67 @@ export function PracticePanel({
               {!clock.canPersist() && <p role="status">本地存储不可用，计时仅在本次打开期间保留。</p>}
             </section>
 
-            <section aria-label="库存估算">
-              <div className="practice-panel__section-heading"><h3>备豆检查</h3><button type="button" className="practice-panel__text-button" onClick={onOpenInventory}><Package size={15} aria-hidden="true" /> 管理豆仓</button></div>
-              <dl className="practice-panel__stock-totals">
-                <div><dt>匹配库存</dt><dd>{totals.stock.toLocaleString()}</dd></div>
-                <div><dt>预计剩余</dt><dd>{totals.remaining.toLocaleString()}</dd></div>
-                <div className={totals.shortage > 0 ? 'is-short' : ''}><dt>还缺豆数</dt><dd>{totals.shortage.toLocaleString()}</dd></div>
-              </dl>
-              <p className={totals.shortage > 0 ? 'practice-panel__warning' : 'practice-panel__note'} role="status">
-                {plan.total === 0 ? '请先在画板中添加拼豆。' : totals.shortage > 0
-                  ? `库存不足：${plan.rows.filter(row => row.shortage > 0).length} 种颜色需要补货，共缺 ${totals.shortage} 粒。`
-                  : '当前库存足够完成这张图纸。'}
-              </p>
-              <details className="practice-panel__inventory-note"><summary>库存如何计算</summary><p className="practice-panel__note">本机豆仓实时估算，不自动扣库存。未录入按 0 计算。</p></details>
-              {plan.rows.some(row => row.inventoryConflict) && <p className="practice-panel__warning" role="status">发现同品牌同色号重复记录：按较小库存估算且只分配一次，请核对豆仓。</p>}
-            </section>
+            {/* Folded by default: the timer/progress cards stay in view, the tool-heavy
+                lists unfold on demand. Everything keeps working while collapsed (native
+                <details> keeps its content in the DOM and in the tab order). */}
+            <details className="practice-panel__fold">
+              <summary className="practice-panel__fold-summary">
+                <span className="practice-panel__fold-title">备豆检查</span>
+                <span className={shortageColors > 0 ? 'practice-panel__fold-meta is-short' : 'practice-panel__fold-meta'}>
+                  {plan.total === 0 ? '暂无需求' : shortageColors > 0 ? `缺 ${shortageColors} 色` : '库存充足'}
+                </span>
+                <ChevronDown size={15} className="practice-panel__fold-chevron" aria-hidden="true" />
+              </summary>
+              <div className="practice-panel__fold-body" role="group" aria-label="库存估算">
+                <div className="practice-panel__section-heading"><span className="practice-panel__note">本机豆仓实时估算，不自动扣库存</span><button type="button" className="practice-panel__text-button" onClick={onOpenInventory}><Package size={15} aria-hidden="true" /> 管理豆仓</button></div>
+                <dl className="practice-panel__stock-totals">
+                  <div><dt>匹配库存</dt><dd>{totals.stock.toLocaleString()}</dd></div>
+                  <div><dt>预计剩余</dt><dd>{totals.remaining.toLocaleString()}</dd></div>
+                  <div className={totals.shortage > 0 ? 'is-short' : ''}><dt>还缺豆数</dt><dd>{totals.shortage.toLocaleString()}</dd></div>
+                </dl>
+                <p className={totals.shortage > 0 ? 'practice-panel__warning' : 'practice-panel__note'} role="status">
+                  {plan.total === 0 ? '请先在画板中添加拼豆。' : totals.shortage > 0
+                    ? `库存不足：${shortageColors} 种颜色需要补货，共缺 ${totals.shortage} 粒。`
+                    : '当前库存足够完成这张图纸。'}
+                </p>
+                <details className="practice-panel__inventory-note"><summary>库存如何计算</summary><p className="practice-panel__note">本机豆仓实时估算，不自动扣库存。未录入按 0 计算。</p></details>
+                {plan.rows.some(row => row.inventoryConflict) && <p className="practice-panel__warning" role="status">发现同品牌同色号重复记录：按较小库存估算且只分配一次，请核对豆仓。</p>}
+              </div>
+            </details>
 
-            <section className="practice-panel__requirements" aria-label="用色需求">
-              <div className="practice-panel__section-heading"><h3>用色清单 <small>{plan.colorCount} 色</small></h3><span className="practice-panel__note">缺色优先 · 点击定位</span></div>
-              <label htmlFor={searchId} className="practice-panel__search"><Search size={16} aria-hidden="true" /><span className="practice-panel__sr-only">搜索色号、品牌或颜色名</span><input id={searchId} type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索色号、品牌或颜色名" /></label>
-              <label className="practice-panel__filter"><input type="checkbox" checked={shortagesOnly} onChange={event => setShortagesOnly(event.target.checked)} />只看缺色<span>{plan.rows.filter(row => row.shortage > 0).length} 色待补</span></label>
+            <details className="practice-panel__fold practice-panel__requirements">
+              <summary className="practice-panel__fold-summary">
+                <span className="practice-panel__fold-title">用色清单</span>
+                <span className="practice-panel__fold-meta">{plan.colorCount} 色</span>
+                <ChevronDown size={15} className="practice-panel__fold-chevron" aria-hidden="true" />
+              </summary>
+              <div className="practice-panel__fold-body" role="group" aria-label="用色需求">
+                <div className="practice-panel__section-heading"><span className="practice-panel__note">缺色优先 · 点击定位</span></div>
+                <label htmlFor={searchId} className="practice-panel__search"><Search size={16} aria-hidden="true" /><span className="practice-panel__sr-only">搜索色号、品牌或颜色名</span><input id={searchId} type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索色号、品牌或颜色名" /></label>
+                <label className="practice-panel__filter"><input type="checkbox" checked={shortagesOnly} onChange={event => setShortagesOnly(event.target.checked)} />只看缺色<span>{shortageColors} 色待补</span></label>
 
-              <ul className="practice-panel__color-list">
-                {rows.map(row => (
-                  <li key={row.id}>
-                    <button type="button" className={`practice-panel__color${activeColorId === row.id ? ' is-active' : ''}`} aria-pressed={activeColorId === row.id} onClick={() => onHighlightColor(activeColorId === row.id ? null : row.id)}>
-                      <div className="practice-panel__color-heading">
-                        <span className="practice-panel__swatch" aria-hidden="true" style={{ backgroundColor: row.color?.hex ?? 'transparent' }}>{!row.color && '?'}</span>
-                        <span className="practice-panel__color-name"><strong>{row.color?.code ?? row.id}</strong><small>{row.color ? `${row.color.brand} · ${row.color.name}` : '色板中未找到此颜色'}</small></span>
-                        <span className={`practice-panel__badge${row.shortage > 0 ? ' is-short' : ''}`}>{row.shortage > 0 ? `缺 ${row.shortage}` : '充足'}</span>
-                      </div>
-                      <dl className="practice-panel__color-counts">
-                        <div><dt>需求</dt><dd>{row.required}</dd></div>
-                        <div><dt>库存{!row.recorded && <small> · 未录入</small>}</dt><dd>{row.stock}</dd></div>
-                        <div><dt>预计剩余</dt><dd>{row.remaining}</dd></div>
-                        <div className={row.shortage > 0 ? 'is-short' : ''}><dt>缺口</dt><dd>{row.shortage}</dd></div>
-                      </dl>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {!rows.length && <p className="practice-panel__empty">{plan.total === 0 ? '图纸还没有拼豆。' : '没有符合条件的颜色。'}</p>}
-            </section>
+                <ul className="practice-panel__color-list">
+                  {rows.map(row => (
+                    <li key={row.id}>
+                      <button type="button" className={`practice-panel__color${activeColorId === row.id ? ' is-active' : ''}`} aria-pressed={activeColorId === row.id} onClick={() => onHighlightColor(activeColorId === row.id ? null : row.id)}>
+                        <div className="practice-panel__color-heading">
+                          <span className="practice-panel__swatch" aria-hidden="true" style={{ backgroundColor: row.color?.hex ?? 'transparent' }}>{!row.color && '?'}</span>
+                          <span className="practice-panel__color-name"><strong>{row.color?.code ?? row.id}</strong><small>{row.color ? `${row.color.brand} · ${row.color.name}` : '色板中未找到此颜色'}</small></span>
+                          <span className={`practice-panel__badge${row.shortage > 0 ? ' is-short' : ''}`}>{row.shortage > 0 ? `缺 ${row.shortage}` : '充足'}</span>
+                        </div>
+                        <dl className="practice-panel__color-counts">
+                          <div><dt>需求</dt><dd>{row.required}</dd></div>
+                          <div><dt>库存{!row.recorded && <small> · 未录入</small>}</dt><dd>{row.stock}</dd></div>
+                          <div><dt>预计剩余</dt><dd>{row.remaining}</dd></div>
+                          <div className={row.shortage > 0 ? 'is-short' : ''}><dt>缺口</dt><dd>{row.shortage}</dd></div>
+                        </dl>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {!rows.length && <p className="practice-panel__empty">{plan.total === 0 ? '图纸还没有拼豆。' : '没有符合条件的颜色。'}</p>}
+              </div>
+            </details>
           </>
         )}
       </div>
@@ -443,7 +466,7 @@ export function PracticePanel({
         <div className="practice-reset-dialog__icon"><Trash2 size={22}/></div>
         <h2 id={progressTitleId}>重置拼豆进度？</h2>
         <p id={progressTitleId + '-description'}>已拼的 <strong>{progressPlaced.toLocaleString()}</strong> 颗豆子会全部取消，进度归零。<br/>图纸、耗时记录和豆仓库存都会保留。</p>
-        <div className="practice-reset-dialog__actions">
+        <div className="practice-progress-dialog__actions">
           <button type="button" autoFocus onClick={dismissProgressReset}>保留进度</button>
           <button type="button" onClick={() => { progress.onReset(); dismissProgressReset(); }}>重置进度</button>
         </div>

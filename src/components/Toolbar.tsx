@@ -339,6 +339,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>}
         </div>}
         {editorActions && <button type="button" aria-pressed={editorActions.isPracticeMode} onClick={editorActions.onTogglePractice}
+          title={isEn ? 'Open the practice workspace' : '打开拼豆实操（标尺 · 区块 · 进度）'}
           className={`${buttonBase} shrink-0 ${editorActions.isPracticeMode ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-emerald-200 bg-emerald-50 text-emerald-800'}`}>
           <Timer size={14} />{isEn ? 'Practice' : '拼豆实操'}
         </button>}

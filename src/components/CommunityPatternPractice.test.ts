@@ -117,9 +117,11 @@ it.skipIf(!existsSync(runtime) || !existsSync(chrome))('draws rulers, section ba
     expect(toggles).toEqual([20 * 40 + 21]);
     await expect.poll(() => page.locator('.community-pattern-canvas__status').textContent()).toContain('已拼');
     await expect.poll(() => page.locator('.community-pattern-canvas__status').textContent()).toContain('所在区块');
-    // Without a hovered cell the same slot shows the overall progress summary.
+    // Without a hovered cell the same slot is a plain pointer hint: overall progress
+    // lives in the practice panel only, so it is never duplicated down here.
     await page.mouse.move(5, 5);
-    await expect.poll(() => page.locator('.community-pattern-canvas__status').textContent()).toContain('总进度');
+    await expect.poll(() => page.locator('.community-pattern-canvas__status').textContent()).toContain('指向网格查看坐标');
+    expect(await page.locator('.community-pattern-canvas__status').textContent()).not.toContain('总进度');
 
     // Empty cells are never marked, and a drag pans instead of toggling.
     const empty = await cellPoint(20, 20);

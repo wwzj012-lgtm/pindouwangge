@@ -47,6 +47,11 @@ export interface CommunityPatternCanvasProps {
   /** Cell to flash briefly (purple ring) so the user can find it. */
   flashCell?: { x: number; y: number; nonce: number } | null;
   /** Cells outside this rect are dimmed while `focusRect` is active. */
+  /**
+   * Community patterns are read-only and crop-able. The user's own board/library is
+   * neither: it is an "实操视图" that simply doesn't modify the original.
+   */
+  readOnlyView?: boolean;
 }
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
@@ -92,7 +97,7 @@ export function CommunityPatternCanvas({
   project, highlightColorId = null, selection = null, onSelectionChange,
   maxSelectionSide, selecting = false, sectionSize = 0, doneCells = null,
   onToggleCell = null, onUndoCell = null, focusRect = null, dimOutside = true,
-  flashCell = null,
+  flashCell = null, readOnlyView = true,
 }: CommunityPatternCanvasProps) {
   const { width, height, grid, palette } = project;
   const helpId = useId();
@@ -175,17 +180,6 @@ export function CommunityPatternCanvas({
     context.fillRect(0, 0, width, height);
     return source;
   }, [highlightColorId, pixels, colors, grid, width, height]);
-
-  /** Total beads of the pattern: cheap display summary for the status bar. */
-  const totalBeads = useMemo(() => {
-    let total = 0;
-    for (let y = 0; y < height; y++) {
-      const row = grid[y];
-      for (let x = 0; x < width; x++) if (row[x] !== null) total += 1;
-    }
-    return total;
-  }, [grid, width, height]);
-  const placedBeads = doneCells ? Math.min(doneCells.size, totalBeads) : 0;
 
   const boundView = useCallback((next: View): View => {
     const zoom = clamp(next.zoom, minZoom, MAX_ZOOM);
@@ -680,18 +674,17 @@ export function CommunityPatternCanvas({
   const hoverSection = hover && sectionStep > 0 && interactive
     ? practiceSectionLabel(Math.floor(hover.x / sectionStep), Math.floor(hover.y / sectionStep))
     : null;
-  const percent = totalBeads > 0 ? Math.round(placedBeads / totalBeads * 100) : 0;
+  // Progress lives in the practice panel only; this slot stays a pointer readout.
   const hoverText = hover
     ? '列 ' + (hover.x + 1) + ' · 行 ' + (hover.y + 1) + ' · ' + (hoverColor ? hoverColor.code + ' (' + hoverColor.id + ')' : '空格')
       + (hoverSection ? ' · 所在区块 ' + hoverSection : '')
       + (interactive ? (hoverPlaced ? ' · 已拼' : ' · 未拼') : '')
-    : (doneCells && totalBeads > 0
-      ? '总进度 ' + placedBeads.toLocaleString() + ' / ' + totalBeads.toLocaleString() + '（' + percent + '%）'
-      : '指向网格查看坐标与原色号');
+    : '指向网格查看坐标与原色号';
   return (
-    <section className="community-pattern-canvas" aria-label="社区只读图纸">
+    <section className="community-pattern-canvas" aria-label={readOnlyView ? '社区只读图纸' : '图纸实操视图'}
+      data-sections={sectionStep > 0 ? sectionStep : undefined}>
       <div className="community-pattern-canvas__toolbar">
-        <span className="community-pattern-canvas__dimensions">{width} × {height} 格 · 只读</span>
+        <span className="community-pattern-canvas__dimensions">{width} × {height} 格 · {readOnlyView ? '只读' : '实操视图'}</span>
         <div className="community-pattern-canvas__controls" role="group" aria-label="图纸视图">
           <button type="button" aria-label="缩小图纸" disabled={view.zoom <= minZoom} onClick={() => zoomAt(1 / 1.3)}>−</button>
           <output className="community-pattern-canvas__zoom" aria-label="视图缩放">{Math.round(view.zoom / fitZoom * 100)}%</output>
@@ -707,7 +700,8 @@ export function CommunityPatternCanvas({
           data-selecting={selecting || undefined}
           data-dragging={dragging || undefined}
           data-practice={interactive || undefined}
-          aria-label={interactive ? '只读网格图纸，点击豆格记录已拼，可拖拽移动、缩放' : '只读网格图纸，可拖拽移动、缩放和框选副本区域'}
+          aria-label={(readOnlyView ? '只读网格图纸，' : '网格图纸，')
+            + (interactive ? '点击豆格记录已拼，可拖拽移动、缩放' : '可拖拽移动、缩放和框选副本区域')}
           aria-describedby={helpId}
           tabIndex={0}
           onPointerDown={pointerDown}
@@ -742,7 +736,7 @@ export function CommunityPatternCanvas({
         拖拽移动 · 滚轮缩放 · 双指缩放
         {selecting ? '。单指拖拽框选副本（每边最多 ' + selectionLimit + ' 格）；Shift 或鼠标右键拖拽移动。' : '。放大至每格 22px 可查看原色号。'}
         {interactive ? '点击豆格记录「已拼」，空格子不计数。' : ''}
-        框选仅用于独立副本，不修改原图。
+        {readOnlyView ? '框选仅用于独立副本，不修改原图。' : '只记录已拼进度，不修改原图纸。'}
       </p>
     </section>
   );

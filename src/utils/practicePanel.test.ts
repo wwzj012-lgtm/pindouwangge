@@ -16,8 +16,11 @@ const props: PracticePanelProps = {
 describe('practice panel detail gate', () => {
   it('shows one useful empty state instead of zero-value stats and disabled tools', () => {
     const html = renderToStaticMarkup(createElement(PracticePanel, { ...props, grid: [], detailsUnlocked: true }));
-    expect(html).toContain('从一张图纸开始');
-    expect(html).toContain('返回画板');
+    // A pattern with no beads must never send the user off to draw one.
+    expect(html).toContain('这张图纸还没有豆子');
+    expect(html).toContain('换一张有内容的图纸开始拼豆');
+    expect(html).toContain('>返回</button>');
+    expect(html).not.toContain('先在画板中绘制');
     expect(html).not.toContain('匹配库存');
     expect(html).not.toContain('type="search"');
     expect(html).not.toContain('复制补货清单');

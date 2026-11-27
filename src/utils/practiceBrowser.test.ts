@@ -162,7 +162,10 @@ it.skipIf(!existsSync(chromePath))('drives real practice UI, live inventory, tim
         check(getComputedStyle(p).position==='relative','${label} relative positioning');
         check(r.height<=${containerHeight}+1&&r.width<=${containerWidth}+1,'${label} parent containment');
         check(p.scrollWidth<=p.clientWidth+1,'${label} no horizontal overflow');
-        const body=document.querySelector('.practice-panel__body');check(body.scrollHeight>body.clientHeight,'${label} internal scrolling');
+        const body=document.querySelector('.practice-panel__body');check(body.scrollWidth<=body.clientWidth+1,'${label} body no horizontal overflow');
+        // Folded cards no longer guarantee vertical overflow; the contract is that any
+        // vertical overflow is carried by this scroll container, never by the page.
+        check(body.scrollHeight<=body.clientHeight+1||getComputedStyle(body).overflowY==='auto','${label} body stays a scroll container');
       `);
       if (process.env.PRACTICE_TEST_SCREENSHOTS === '1') {
         const shot = await send('Page.captureScreenshot', { format: 'png' }, session);

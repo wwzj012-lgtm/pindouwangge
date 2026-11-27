@@ -57,7 +57,7 @@ describe('App upload commits only a validated, current image', () => {
       activePatternId: null, draftSourceKey: 'new-draft', currentSavingTarget: 15,
       completionStatus: 'DRAFT', completionQuote: null, completionPreviewQuote: null,
       serverPaidCoverage: null, paidNonEmptyBeads: null, isImageDerivedPattern: false,
-      customSymmetryAxes: null, isPracticeMode: false, practiceColorId: null,
+      customSymmetryAxes: null, isPracticeOpen: false, practiceBoardProject: null,
       subjectCropSource: null, projectName: 'new', currentTab: 'studio', isStudioModalOpen: true,
       settings: { backgroundRemovalEnabled: false, chromaKeyColor: null }, imageLoadMessage: null,
     });

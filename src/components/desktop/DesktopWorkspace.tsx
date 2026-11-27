@@ -228,25 +228,25 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
           <GridCanvas
             cleanupPreview={backgroundCleanup?.preview}
             symmetryAxes={editorActions?.axes}
-            onSymmetryAxesChange={editorActions?.isPracticeMode ? undefined : editorActions?.onAxesChange}
+            onSymmetryAxesChange={editorActions?.onAxesChange}
             interactionProfile="desktop"
             grid={grid}
             paletteMap={paletteMap}
             width={settings.width}
             height={settings.height}
             boardSize={settings.boardSize}
-            activeTool={editorActions?.isPracticeMode ? 'hand' : activeTool}
+            activeTool={activeTool}
             setActiveTool={setActiveTool}
             selectedColor={selectedColor}
             highlightColorIds={highlightColorIds}
             highlightColorId={highlightColorIds.length === 1 ? highlightColorIds[0] : null}
-            completedColorIds={editorActions?.isPracticeMode ? [] : completedColorIds}
+            completedColorIds={completedColorIds}
             beadShape={beadShape}
             showSymbols={showSymbols}
             showGridLines={showGridLines}
             showCoordinates={showCoordinates}
             canvasBackdrop={canvasBackdrop}
-            symmetryMode={editorActions?.isPracticeMode ? 'none' : symmetryMode}
+            symmetryMode={symmetryMode}
             sourceImage={sourceImage}
             keepImageAspectRatio={settings.keepAspectRatio}
             showOverlay={showOverlay}
@@ -284,8 +284,7 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
         </main>
 
         {/* Right Sidebar: Color Palette & Quantity Statistics */}
-        <aside className="h-full z-20 shrink-0 border-l border-purple-200/80 bg-white/90 shadow-sm flex flex-col" style={editorActions?.isPracticeMode ? {width:328} : undefined}>
-          {editorActions?.isPracticeMode ? editorActions.practicePanel : <>
+        <aside className="h-full z-20 shrink-0 border-l border-purple-200/80 bg-white/90 shadow-sm flex flex-col">
           {completionSummary}
           <StatsPanel
             grid={grid}
@@ -307,7 +306,6 @@ export const DesktopWorkspace: React.FC<DesktopWorkspaceProps> = ({
             erasedColorCoords={erasedColorCoords}
             onConsolidateStrayBeads={onConsolidateStrayBeads}
           />
-          </>}
         </aside>
       </div>
     </div>

@@ -4,13 +4,13 @@
 .admin-welfare p { margin:8px 0; line-height:1.6; overflow-wrap:anywhere; }
 
 /* 顶部机制说明：三步流程条 */
-.admin-welfare-hero { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px; background:var(--admin-surface,#fff); }
+.admin-welfare-hero { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; background:var(--admin-surface,#fff); }
 .admin-welfare-hero > p { color:var(--admin-muted,#66736a); }
 .admin-welfare-flow { list-style:none; margin:16px 0 0; padding:0; display:grid;
   grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; }
-.admin-welfare-flow li { display:grid; gap:6px; padding:14px; border-radius:10px;
+.admin-welfare-flow li { display:grid; gap:6px; padding:14px; border-radius:8px;
   background:var(--admin-background,#f2f6f3); border:1px solid var(--admin-border,#d7e0d9); }
-.admin-welfare-flow-icon { width:40px; height:40px; border-radius:10px; display:grid; place-items:center;
+.admin-welfare-flow-icon { width:40px; height:40px; border-radius:8px; display:grid; place-items:center;
   background:var(--admin-primary,#33754e); color:#fff; font-weight:600; font-size:15px; }
 .admin-welfare-flow strong { font-size:14px; }
 .admin-welfare-flow small { color:var(--admin-muted,#66736a); line-height:1.5; }
@@ -24,7 +24,7 @@
   background:#fdf1f1; color:var(--admin-danger,#a02c2c); }
 
 /* 卡片 */
-.admin-welfare-card { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px;
+.admin-welfare-card { padding:20px; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px;
   min-width:0; background:var(--admin-surface,#fff); }
 .admin-welfare-card h3 { margin:0 0 14px; display:flex; align-items:center; gap:8px; }
 .admin-welfare-count { font-size:12px; font-weight:400; color:var(--admin-muted,#66736a);
@@ -46,7 +46,7 @@
 /* 规则卡片列表 */
 .admin-welfare-rules { list-style:none; margin:0; padding:0; display:grid; gap:12px; }
 .admin-welfare-rule { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:16px; align-items:center;
-  padding:14px 16px; border:1px solid var(--admin-border,#d7e0d9); border-radius:10px;
+  padding:14px 16px; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px;
   background:var(--admin-background,#f2f6f3); }
 .admin-welfare-rule-off { opacity:.68; }
 .admin-welfare-rule-title { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
@@ -82,6 +82,6 @@
 /* 规则操作区与确认框 */
 .admin-welfare-rule-actions { display:grid; gap:8px; justify-items:stretch; }
 .admin-welfare-confirm { position:sticky; top:12px; padding:16px 20px; border:1px solid #b58e37;
-  background:var(--admin-warning-surface,#fff9eb); border-radius:10px; z-index:2; }
+  background:var(--admin-warning-surface,#fff9eb); border-radius:8px; z-index:2; }
 .admin-welfare-confirm p { margin:0 0 12px; }
 .admin-welfare-confirm-actions { display:flex; gap:10px; }

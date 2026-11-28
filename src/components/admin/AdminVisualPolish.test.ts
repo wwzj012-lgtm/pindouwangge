@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -27,13 +28,46 @@ describe('admin design tokens (light single theme)', () => {
   it('declares the single-source palette on :root .admin-root', () => {
     for (const token of [
       '--admin-bg:#f8fafc', '--admin-surface:#ffffff', '--admin-subtle:#f1f5f9',
-      '--admin-ink:#0f172a', '--admin-muted:#64748b', '--admin-faint:#94a3b8',
+      '--admin-ink:#0f172a', '--admin-muted:#64748b',
+      // PRD §5 对比度修正：faint 2.56:1 → 5.98:1
+      '--admin-faint:#5b6472',
       '--admin-primary:#4f46e5', '--admin-primary-hover:#4338ca', '--admin-primary-soft:#eef2ff',
-      '--admin-danger:#dc2626', '--admin-danger-soft:#fef2f2',
+      // danger 4.83:1 → 6.47:1 / success 3.30:1 → 5.02:1
+      '--admin-danger:#b91c1c', '--admin-danger-soft:#fef2f2',
       '--admin-warning:#b45309', '--admin-warning-soft:#fffbeb',
-      '--admin-success:#16a34a', '--admin-success-soft:#f0fdf4',
+      '--admin-success:#15803d', '--admin-success-soft:#f0fdf4',
+      '--admin-text-secondary:#475569',
       '--admin-border:#e2e8f0', '--admin-shadow:0 1px 2px rgb(15 23 42 / .06)', '--admin-radius:8px',
     ]) expect(css).toContain(token);
+  });
+  it('declares the five chart series variables (light) plus grid/axis glue', () => {
+    for (const token of [
+      '--admin-series-1:#4f46e5', '--admin-series-2:#0d9488', '--admin-series-3:#b45309',
+      '--admin-series-4:#7c3aed', '--admin-series-5:#be123c',
+      '--admin-grid:#e2e8f0', '--admin-axis-text:#64748b',
+    ]) expect(css).toContain(token);
+  });
+  it('defines dark tokens behind a data attribute that is never switched on', () => {
+    // P2 预留：只定义不接线（组件零改动即可切暗色），当前不设置该属性。
+    expect(css).toContain(".admin-root[data-admin-theme='dark']");
+    expect(css).toContain('--admin-series-1:#818cf8');
+    expect(css).toContain('--admin-bg:#0f172a');
+  });
+  it('keeps every admin font size at or above the 11px auxiliary tier (all admin stylesheets)', () => {
+    // PRD §5 字号阶梯最低档是 11px（辅助/时间戳）；10px 及以下一律整改。
+    // 扫全部 admin CSS（QA 曾在 AdminBrandsColors.css 抓到 5 处 10px 漏网）。
+    const dir = fileURLToPath(new URL('./', import.meta.url));
+    const sheets = readdirSync(dir).filter(name => name.endsWith('.css'));
+    expect(sheets.length).toBeGreaterThan(3);
+    for (const name of sheets) {
+      const text = readFileSync(join(dir, name), 'utf8');
+      expect(text, name).not.toMatch(/font-size:(?:[0-9]|10)px/);
+    }
+  });
+  it('declares the radius scale as 8px / 999px only', () => {
+    // 权限树、登录卡等历史 10px/16px 圆角统一收敛到 8px（PRD §5 否决项）。
+    expect(css).not.toMatch(/border-radius:(9|1[0-9]|2[0-9])px/);
+    expect(css).toContain('border-radius:999px');
   });
   it('no longer uses the old dark palette values', () => {
     expect(css).not.toContain('#111820');
@@ -59,22 +93,26 @@ describe('three-tier button system (32px, no outlined secondary)', () => {
   });
 });
 
-describe('register trend horizontal mini bars (7-day registration trend fix)', () => {
-  it('lays the register bars out as a horizontal non-wrapping flex row under a compact title', () => {
-    const rule = css.match(/\.admin-register-bars \{[^}]*\}/)?.[0] ?? '';
-    expect(rule).toContain('display:flex');
-    expect(rule).toContain('flex-wrap:nowrap');
+describe('chart panels inherit the token layer (no hardcoded colors)', () => {
+  it('styles the trend/quality panels and legend from variables only', () => {
+    const panel = css.match(/\.admin-root \.admin-dash-panel \{[^}]*\}/)?.[0] ?? '';
+    expect(panel).toContain('border-radius:var(--admin-radius)');
+    expect(panel).toContain('box-shadow:var(--admin-shadow)');
+    const legend = css.match(/\.admin-root \.admin-chart-legend-item \{[^}]*\}/)?.[0] ?? '';
+    expect(legend).toContain('color:var(--admin-muted)');
+    // 漏斗的三段色也必须走序列变量，禁止硬编码。
+    expect(css).toMatch(/\.admin-root \.admin-dash-funnel-track i\[data-tone='teal'\] \{ background:var\(--admin-series-2\)/);
+    expect(css).toMatch(/\.admin-root \.admin-dash-funnel-track i\[data-tone='violet'\] \{ background:var\(--admin-series-4\)/);
   });
-  it('renders each bar as track + single-line date under the bar', () => {
-    const barRule = css.match(/\.admin-register-bar \{[^}]*\}/)?.[0] ?? '';
-    expect(barRule).toContain('flex-direction:column');
-    const trackRule = css.match(/\.admin-register-track \{[^}]*\}/)?.[0] ?? '';
-    expect(trackRule).toContain('align-items:flex-end');
+  it('keeps chart source free of hex color literals', () => {
+    const chartsSrc = readFileSync(fileURLToPath(new URL('./dashboard/AdminDashboardCharts.tsx', import.meta.url)), 'utf8');
+    expect(chartsSrc).not.toMatch(/#[0-9a-fA-F]{3,6}/);
   });
-  it('collapses an all-zero trend to a single gray line instead of an empty 64px track band', () => {
-    const rule = css.match(/\.admin-register-empty \{[^}]*\}/)?.[0] ?? '';
+  it('collapses an all-zero metric block to a single 12px gray line', () => {
+    const rule = css.match(/\.admin-root \.admin-dash-empty \{[^}]*\}/)?.[0] ?? '';
     expect(rule).toContain('color:var(--admin-muted)');
-    expect(rule).toMatch(/line-height:2[0-9]px/);
+    expect(rule).toContain('font-size:12px');
+    expect(rule).toMatch(/line-height:1.5/);
   });
 });
 

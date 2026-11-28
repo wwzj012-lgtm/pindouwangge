@@ -9,7 +9,7 @@
 .admin-credits-filters label:first-child { flex:0 1 320px; }
 .admin-credits input,.admin-credits select,.admin-credits textarea { width:100%; min-width:0; box-sizing:border-box; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; padding:6px 10px; background:var(--admin-surface,#fff); color:inherit; font:inherit; min-height:32px; }
 .admin-credits input:focus-visible,.admin-credits select:focus-visible,.admin-credits textarea:focus-visible { outline:2px solid var(--admin-primary,#33754e); outline-offset:2px; }
-.admin-credits-card { padding:12px 14px; border:1px solid var(--admin-border,#d7e0d9); border-radius:12px; min-width:0; background:var(--admin-surface,#fff); }
+.admin-credits-card { padding:12px 14px; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; min-width:0; background:var(--admin-surface,#fff); }
 .admin-credits-hint { color:var(--admin-muted,#6b7b72); line-height:1.6; }
 .admin-credits-table { max-width:100%; overflow-x:auto; }
 .admin-credits table { width:100%; border-collapse:collapse; font-size:13px; text-align:left; }
@@ -40,7 +40,7 @@
 .admin-credits-balances dt { font-size:12px; }
 .admin-credits-balances dd { margin:4px 0 0; font-size:20px; font-variant-numeric:tabular-nums; }
 .admin-credits-heading { display:flex; align-items:start; justify-content:space-between; gap:10px; }
-.admin-credits-recovery { padding:12px; border:1px solid #b58e37; background:var(--admin-warning-surface,#fff9eb); border-radius:10px; }
+.admin-credits-recovery { padding:12px; border:1px solid #b58e37; background:var(--admin-warning-surface,#fff9eb); border-radius:8px; }
 .admin-credits-recovery .admin-button { margin:4px 8px 4px 0; }
 .admin-credits [role=alert] { color:var(--admin-danger,#a02c2c); }
 .admin-credits [data-credit-success] { padding:10px; border:1px solid #81a88b; border-radius:8px; }
@@ -52,7 +52,7 @@
   .admin-credits-table { overflow-x:visible; }
   .admin-credits-table table, .admin-credits-table tbody, .admin-credits-table tr { display:block; }
   .admin-credits-table thead { display:none; }
-  .admin-credits-table tr { display:grid; grid-template-columns:1fr 1fr auto; gap:2px 12px; align-items:center; margin-bottom:8px; padding:10px 12px; border:1px solid var(--admin-border,#d7e0d9); border-radius:10px; background:#fff; }
+  .admin-credits-table tr { display:grid; grid-template-columns:1fr 1fr auto; gap:2px 12px; align-items:center; margin-bottom:8px; padding:10px 12px; border:1px solid var(--admin-border,#d7e0d9); border-radius:8px; background:#fff; }
   .admin-credits-table td { padding:0; border:0; }
   .admin-credits-table td:nth-child(1) { grid-column:1 / 3; grid-row:1; min-width:0; }
   .admin-credits-table td:nth-child(1) small { margin-top:1px; font-size:11px; line-height:1.4; }

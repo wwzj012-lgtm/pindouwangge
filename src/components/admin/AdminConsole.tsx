@@ -19,7 +19,7 @@ import { SettingsDiffView } from './SettingsDiffView';
 import { AdminBadge, AdminButton, AdminConfirmDialog, AdminDrawer, AdminEmptyState, AdminErrorState, AdminLoading, AdminToolbar } from './AdminPrimitives';
 import { createAdminBlobRequest, createAdminRequest, type AdminApiResult, type AdminRequest } from './adminRequest';
 import { AdminConnectionNotices } from './adminConnectionNotices';
-import { parseDashboardMetrics, parseDashboardTodo, registerTrendTotal, todoDrillQuery, todayRegistrations, trendBarPixelHeights, trendTooltipDate, trendTooltipValue, type DashboardSection } from './adminDashboardModel';
+import { parseDashboardRange, type DashboardRange } from './dashboard/dashboardRange';
 import './admin.css';
 
 export type { AdminApiResult, AdminRequest } from './adminRequest';
@@ -48,16 +48,17 @@ export function parseAdminCapabilities(value: unknown, operatorUid: string): Adm
 type SectionId = 'dashboard' | 'users' | 'credits' | 'codes' | 'welfare' | 'community' | 'tagDictionary' | 'bannedwords' | 'brands' | 'resources' | 'operationLogs' | 'runLogs' | 'announcements' | 'config' | 'roles';
 type GroupId = 'overview' | 'business' | 'content' | 'assets' | 'system';
 interface MenuItem { id: SectionId; label: string; group: GroupId; icon: LucideIcon; }
-interface TrendPoint { date: string; count: number; }
+/** 服务端 GET /api/admin/dashboard 的返回（只做加法：批次 6 新增 analytics / meta.range）。 */
 interface DashboardData {
-  overview: { totalUsers: number; newUsers30Days: number; activeVipUsers: number; works: number; communityPosts: number; redeemedCodes: number; recentErrors: number };
-  trends: { days7: { users: TrendPoint[]; works: TrendPoint[]; communityPosts: TrendPoint[]; successfulActions: TrendPoint[]; errors: TrendPoint[] } };
-  telemetry: { successfulActions24h: number; durationSamples24h: number; averageDurationMs: number; maximumDurationMs: number; errors24h: number; errorCodes: { code: string; count: number }[] };
+  /** 累计口径：只作页脚小字，不单独成图（PRD 禁止虚荣指标）。 */
+  overview?: { totalUsers?: number; newUsers30Days?: number; activeVipUsers?: number; works?: number; communityPosts?: number; redeemedCodes?: number; recentErrors?: number };
   warnings?: string[];
-  /** 批次 3：结构化分段可用性、待办与今日指标。 */
-  sections?: Record<string, DashboardSection>;
-  todo?: ReturnType<typeof parseDashboardTodo>;
-  metrics?: ReturnType<typeof parseDashboardMetrics>;
+  /** 批次 3：结构化分段可用性。失败时前端显示「数据暂不可用」。 */
+  sections?: Record<string, { available: boolean; error?: string }>;
+  todo?: unknown;
+  /** 批次 6：analytics 段；解析失败为 null → 全部显示「—」，不补造 0。 */
+  analytics?: unknown;
+  meta?: { requests?: number; generatedAt?: number; range?: number };
 }
 const GROUPS: { id: GroupId; label: string }[] = [
   { id: 'overview', label: '总览' },
@@ -140,183 +141,8 @@ function Sidebar({ active, navigate, returnToApp, visibleSections }: { active: S
     <div className="admin-sidebar-footer"><AdminButton variant="ghost" onClick={returnToApp}><ArrowLeft aria-hidden="true" />返回前台</AdminButton></div>
   </>;
 }
-function TrendChart({ label, action, points }: { label: string; action: string; points?: TrendPoint[] }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const samples = (Array.isArray(points) ? points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
-  const count = samples.length;
-  const peak = Math.max(0, ...samples.map(point => point.count));
-  const flat = peak === 0;
-  // 给峰值留 15% 的顶空，否则最大值那一天会顶到上边框，看着像被裁掉。
-  const scale = flat ? 1 : peak * 1.15;
-  const total = samples.reduce((sum, point) => sum + Math.max(0, point.count), 0);
-  // 92 是基线，向上 80 个单位留给最大值；顶部再留 12 给 hover 气泡。
-  const at = (index: number): [number, number] => {
-    const x = count <= 1 ? 50 : (index / (count - 1)) * 100;
-    const y = 92 - (Math.max(0, samples[index].count) / scale) * 80;
-    return [Number(x.toFixed(2)), Number(y.toFixed(2))];
-  };
-  const polyline = samples.map((_, index) => at(index).join(' ')).join(' L ');
-  const area = count ? 'M ' + at(0)[0] + ' 100 L ' + polyline + ' L ' + at(count - 1)[0] + ' 100 Z' : '';
-  return <article className="admin-chart">
-    <div className="admin-chart-head">
-      <h3>{label}</h3>
-      {count > 0 && <p><span>{count}日合计</span><strong>{formatAdminMetric(total)}</strong></p>}
-    </div>
-    {count ? <>
-      <div className="admin-chart-plot" onMouseLeave={() => setHover(null)}>
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={label + '，最近' + count + '天合计' + formatAdminMetric(total)}>
-          {[12, 52, 92].map(y => <line key={y} x1="0" y1={y} x2="100" y2={y} className="admin-chart-grid" vectorEffect="non-scaling-stroke" />)}
-          <path d={area} className="admin-chart-area" />
-          <path d={'M ' + polyline} className="admin-chart-line" vectorEffect="non-scaling-stroke" />
-          {hover !== null && <line x1={at(hover)[0]} y1="4" x2={at(hover)[0]} y2="100" className="admin-chart-cursor" vectorEffect="non-scaling-stroke" />}
-        </svg>
-        {flat && <p className="admin-chart-flat">{count} 天内没有新增</p>}
-        <div className="admin-chart-hits">
-          {samples.map((point, index) => <button key={point.date} type="button" className="admin-chart-hit"
-            aria-label={point.date + '：' + formatAdminMetric(point.count)}
-            onMouseEnter={() => setHover(index)} onFocus={() => setHover(index)} onBlur={() => setHover(null)} />)}
-        </div>
-        {hover !== null && <div className="admin-chart-tip" data-trend-tooltip
-          style={{ left: at(hover)[0] + '%', transform: 'translateX(' + (at(hover)[0] < 14 ? '0' : at(hover)[0] > 86 ? '-100%' : '-50%') + ')' }}>
-          <span className="admin-chart-tip-date">{trendTooltipDate(samples[hover].date)}</span>
-          <b className="admin-chart-tip-value">{trendTooltipValue(action, samples[hover].count)}</b>
-        </div>}
-      </div>
-      <div className="admin-chart-axis">{samples.map(point => <span key={point.date}>{point.date.slice(5)}</span>)}</div>
-    </> : <AdminEmptyState title="暂无趋势样本" description="未收到可用数据，不补造趋势。" />}
-  </article>;
-}
-/** 批次 3：待办卡。数字来自服务端 todo 分段；缺失时不渲染（不伪造 0）。
- * 密度改版：三张卡一行三列，label+数字同行+右侧状态徽标，卡高 ≤56px。 */
-function TodoCards({ todo, navigate }: { todo: DashboardData['todo']; navigate: (id: SectionId, query?: Record<string, string>) => void }) {
-  if (!todo) return null;
-  const cards: { key: string; label: string; value: number; tone: 'danger' | 'warning' | 'neutral'; target: SectionId; query: Record<string, string> }[] = [
-    { key: 'pendingReviews', label: '待审核帖子', value: todo.pendingReviews, tone: todo.pendingReviews > 0 ? 'warning' : 'neutral', target: 'community', query: todoDrillQuery('reviews') },
-    { key: 'pendingReports', label: '待处理举报', value: todo.pendingReports, tone: todo.pendingReports > 0 ? 'danger' : 'neutral', target: 'community', query: todoDrillQuery('reports') },
-    { key: 'codes', label: '兑换码库存', value: todo.availableCodes ?? 0, tone: todo.lowStockCodes ? 'danger' : 'neutral', target: 'codes', query: todoDrillQuery('codes') },
-  ];
-  return <section className="admin-dashboard-section" aria-labelledby="admin-todo-title" data-dashboard-todo>
-    <AdminToolbar><h2 id="admin-todo-title">待办事项</h2></AdminToolbar>
-    <div className="admin-metrics admin-metrics--todo">
-      {cards.map((card) => <button type="button" key={card.key} className="admin-metric admin-metric--todo" data-todo-card={card.key}
-        aria-label={card.label + ' ' + card.value + '，去处理'}
-        onClick={() => navigate(card.target, card.query)}>
-        <span className="admin-metric-label">{card.label}</span>
-        <strong className="admin-metric-value" data-todo-value={card.key}>{formatAdminMetric(card.value)}</strong>
-        <AdminBadge tone={card.tone}>{card.tone === 'neutral' ? '正常' : '待处理'}</AdminBadge>
-        <ArrowUpRight className="admin-metric-open" aria-hidden="true" />
-      </button>)}
-    </div>
-  </section>;
-}
-
-/** 批次 3：今日指标一行四列 compact 卡 + 7 天注册趋势柱状图。 */
-function MetricsPanel({ metrics }: { metrics: DashboardData['metrics'] }) {
-  if (!metrics) return null;
-  const registered = todayRegistrations(metrics);
-  const trendPoints = metrics.registerTrend7d;
-  // 趋势重做（用户反馈"一堆数字看不懂"）：先算 7 天总和——
-  // 全 0 时不再渲染"3px 灰柱 + 大空轨道"，只给一行紧凑灰字；有数据才画柱状图。
-  const trendTotal = registerTrendTotal(trendPoints);
-  const trendPeak = trendPoints.reduce((max, point) => Math.max(max, point.count), 0);
-  const heights = trendBarPixelHeights(trendPoints);
-  const cards: { key: string; label: string; value: number | null; icon: LucideIcon }[] = [
-    { key: 'works', label: '今日新作品', value: metrics.todayNewWorks, icon: Archive },
-    { key: 'posts', label: '今日新帖子', value: metrics.todayNewPosts, icon: Activity },
-    { key: 'reports', label: '今日新举报', value: metrics.todayNewReports, icon: ShieldAlert },
-    { key: 'registrations', label: '今日新注册', value: registered, icon: Users },
-  ];
-  return <section className="admin-dashboard-section" aria-labelledby="admin-metrics-title" data-dashboard-metrics>
-    <AdminToolbar><h2 id="admin-metrics-title">今日概览</h2></AdminToolbar>
-    <div className="admin-metrics admin-metrics--today">
-      {cards.map((card) => <article className="admin-metric admin-metric--sm" key={card.key} data-metric-card={card.key}>
-        <span className="admin-metric-label">{card.label}</span>
-        <strong className="admin-metric-value" data-metric-value={card.key}>{formatAdminMetric(card.value)}</strong>
-        <card.icon className="admin-metric-icon" aria-hidden="true" />
-      </article>)}
-    </div>
-    {/* 7 天注册趋势：每天一列 28px 柱宽居中；值>0 才在柱顶显示数值标签，
-        峰值柱用 primary 实色、其余 primary-soft；柱上 hover 显示「MM-DD · N 人」。
-        整段趋势区（标题+柱区+日期）总高 ≤110px，高度随有无数据自适应。 */}
-    {trendPoints.length > 0 && trendTotal > 0 && <div className="admin-register-trend" data-register-trend>
-      <span className="admin-register-title">近 7 天注册趋势</span>
-      <div className="admin-register-bars" role="img" aria-label={'近 7 天注册趋势，合计 ' + formatAdminMetric(trendTotal) + ' 人'}>
-        {trendPoints.map((point, index) => <div key={point.date} className="admin-register-bar"
-          data-peak={point.count > 0 && point.count === trendPeak || undefined}
-          title={point.date.slice(5) + ' · ' + point.count + ' 人'}>
-          <b className="admin-register-value">{point.count > 0 ? point.count : ''}</b>
-          <span className="admin-register-track" aria-hidden="true"><i style={{ height: heights[index] + 'px' }} data-zero={point.count <= 0 || undefined} /></span>
-          <small>{point.date.slice(5)}</small>
-        </div>)}
-      </div>
-    </div>}
-    {/* 全 0 的趋势不画图：一行 12px 灰字说明（高 ≤24px），不可下钻。 */}
-    {trendPoints.length > 0 && trendTotal === 0 && <p className="admin-register-empty" data-register-trend-empty>近 7 天无新注册</p>}
-  </section>;
-}
-
-function Dashboard({ data, error, loading, retry, navigate }: { data: DashboardData | null; error: string; loading: boolean; retry: () => void; navigate: (id: SectionId, query?: Record<string, string>) => void }) {
-  if (loading && !data) return <AdminLoading label="正在加载服务端统计…" />;
-  if (error) return <AdminErrorState title="统计暂不可用" message={error} retry={retry} busy={loading} />;
-  if (!data) return <AdminEmptyState title="尚无统计结果" description="未知值不会显示为零。" action={<AdminButton onClick={retry}>刷新统计</AdminButton>} />;
-  const overview = data.overview, telemetry = data.telemetry;
-  // 每张趋势图配一个类型词：悬浮提示「11月11日 · 新建 1 个」里的动词，与图标题对应。
-  const trendDefs = ([
-    { label: '用户新增趋势', action: '注册', points: data.trends?.days7?.users },
-    { label: '图纸创建趋势', action: '新建', points: data.trends?.days7?.works },
-    { label: '社区发布趋势', action: '发布', points: data.trends?.days7?.communityPosts },
-    { label: '成功操作趋势', action: '操作', points: data.trends?.days7?.successfulActions },
-    { label: '服务端错误趋势', action: '错误', points: data.trends?.days7?.errors },
-  ] as { label: string; action: string; points?: TrendPoint[] }[]).map(item => {
-    const samples = (Array.isArray(item.points) ? item.points : []).filter(point => typeof point.date === 'string' && Number.isFinite(point.count));
-    // 全 0 的图不再占一张大卡：它只是"这段时间没发生"，折叠成一行说明。
-    return { ...item, zero: samples.length > 0 && samples.every(point => point.count <= 0) };
-  });
-  const duration = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? formatAdminMetric(Math.max(0, Math.round(value))) + ' ms' : '—';
-  // 运营总览两级分层（PRD B6）：4 项核心指标合并为一张大卡（数字 ≥24px），不再 4 张独立小卡。
-  const overviewItems: { key: string; label: string; value: unknown; detail: string; target?: SectionId }[] = [
-    { key: 'totalUsers', label: '注册用户', value: overview?.totalUsers, detail: '近30天新增 ' + formatAdminMetric(overview?.newUsers30Days), target: 'users' },
-    { key: 'activeVipUsers', label: '活跃会员', value: overview?.activeVipUsers, detail: '当前有效 VIP / Pro', target: 'users' },
-    { key: 'works', label: '图纸与社区作品', value: sumAdminMetrics(overview?.works, overview?.communityPosts), detail: '图纸 ' + formatAdminMetric(overview?.works) + ' · 社区 ' + formatAdminMetric(overview?.communityPosts), target: 'community' },
-    { key: 'redeemedCodes', label: '累计兑换', value: overview?.redeemedCodes, detail: '近24小时错误 ' + formatAdminMetric(overview?.recentErrors), target: 'codes' },
-  ];
-  return <section aria-label="运营概览" aria-busy={loading}>
-    <AdminToolbar><h2>运营概览</h2></AdminToolbar>
-    {loading && <p role="status" className="admin-muted">正在更新统计，当前结果暂时保留…</p>}
-    <TodoCards todo={data.todo} navigate={navigate} />
-    <MetricsPanel metrics={data.metrics} />
-    <div className="admin-overview-card" data-overview-card>
-      {overviewItems.map(item => {
-        const text = typeof item.value === 'string' ? item.value : formatAdminMetric(item.value);
-        return item.target
-          ? <button type="button" key={item.key} className="admin-overview-item" data-overview-item={item.key} aria-label={item.label + ' ' + text + '，查看明细'} onClick={() => navigate(item.target!)}>
-            <span>{item.label}</span><strong>{text}</strong><small>{item.detail}</small>
-          </button>
-          : <div key={item.key} className="admin-overview-item" data-overview-item={item.key}><span>{item.label}</span><strong>{text}</strong><small>{item.detail}</small></div>;
-      })}
-    </div>
-    <section className="admin-dashboard-section" aria-labelledby="admin-telemetry-title"><AdminToolbar><h2 id="admin-telemetry-title">性能与错误监控</h2></AdminToolbar>
-      <div className="admin-ops">
-        <div><span>24小时成功操作</span><strong>{formatAdminMetric(telemetry?.successfulActions24h)}</strong></div>
-        <div><span>平均耗时</span><strong>{telemetry && telemetry.durationSamples24h > 0 ? duration(telemetry.averageDurationMs) : '—'}</strong></div>
-        <div><span>最大耗时</span><strong>{telemetry && telemetry.durationSamples24h > 0 ? duration(telemetry.maximumDurationMs) : '—'}</strong></div>
-        <div><span>24小时服务端错误</span><strong>{formatAdminMetric(telemetry?.errors24h)}</strong></div>
-        {telemetry && Array.isArray(telemetry.errorCodes)
-          ? telemetry.errorCodes.length === 0 && <p className="admin-ops-note"><CheckCircle2 aria-hidden="true" />近 24 小时未记录服务端错误</p>
-          : <p className="admin-ops-note" data-tone="muted">遥测暂不可用</p>}
-      </div>
-      {telemetry && Array.isArray(telemetry.errorCodes) && telemetry.errorCodes.length > 0 && <div className="admin-telemetry"><h3>错误码分布</h3><div className="admin-toolbar-actions">{telemetry.errorCodes.map(item => <AdminBadge key={item.code} tone="danger">{item.code} · {formatAdminMetric(item.count)}</AdminBadge>)}</div></div>}
-    </section>
-    <div className="admin-charts">{trendDefs.filter(item => !item.zero).map(item => <React.Fragment key={item.label}><TrendChart label={item.label} action={item.action} points={item.points} /></React.Fragment>)}</div>
-    {trendDefs.some(item => item.zero) && <p className="admin-zero-note">近 7 天没有新增：{trendDefs.filter(item => item.zero).map(item => item.label.replace('趋势', '')).join('、')}。产生数据后这里会出现对应趋势图。</p>}
-    {/* 警告条降级（PRD B7）：页脚 footnote 灰字 + 展开箭头；展开后显示分段级 error 详情。 */}
-    {Boolean(data.warnings?.length) && <details className="admin-warnings-footnote" role="status" data-dashboard-warnings>
-      <summary>部分统计暂不可用（{data.warnings!.length} 项）</summary>
-      <ul>{data.warnings!.map(warning => <li key={warning}>{warning}</li>)}</ul>
-      {data.sections && Object.entries(data.sections).filter(([, section]) => section.available === false && section.error).map(([key, section]) => <p key={key}><span className="admin-mono">{key}</span>：{section.error}</p>)}
-    </details>}
-  </section>;
-}
+/** 仪表盘整块懒加载：解析器 + 四个区块搬出 AdminPage 主 chunk（图表再单独一层懒加载）。 */
+const LazyDashboardView = React.lazy(() => import('./dashboard/DashboardView'));
 type Control = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 const controlValue = (control: Control) => control instanceof HTMLInputElement && control.type === 'checkbox' ? String(control.checked) : control.value;
 export function isEditorControl(target: EventTarget | null): target is Control {
@@ -345,6 +171,9 @@ function AdminConsoleSession(_props: { key?: string }) {
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [dashboardError, setDashboardError] = useState('');
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  // 时间范围（PRD §3）：默认 7 天，非法值回落 7；写入 URL 便于分享/刷新保持。
+  const [range, setRange] = useState<DashboardRange>(() => parseDashboardRange(new URLSearchParams(window.location.search).get('range')));
+  const rangeRef = useRef<DashboardRange>(range);
   const [capabilities, setCapabilities] = useState<AdminCapabilities | null>(null);
   const [capabilityError, setCapabilityError] = useState('');
   const [capabilityLoading, setCapabilityLoading] = useState(false);
@@ -424,17 +253,31 @@ function AdminConsoleSession(_props: { key?: string }) {
     }
     finally { setModulePending(value => Math.max(0, value - 1)); }
   }, [adminRequest, refreshRevision, activeSection, userUid]);
-  const loadDashboard = useCallback(async () => {
+  /**
+   * 取仪表盘。`range` 作为参数而非闭包依赖：切换范围只重取统计，
+   * 不触发 verifySession（否则会把整页打回「正在验证会话」门页）。
+   */
+  const loadDashboard = useCallback(async (nextRange: DashboardRange = rangeRef.current) => {
     const version = generation.current;
     setDashboardLoading(true);
     try {
-      const result = await adminRequest<DashboardData>('/api/admin/dashboard');
+      const result = await adminRequest<DashboardData>(`/api/admin/dashboard?range=${nextRange}`);
       if (version !== generation.current) return result.status;
       if (result.ok && result.data) { setDashboard(result.data); setDashboardError(''); }
       else { setDashboard(null); setDashboardError(result.status === 403 ? '服务端拒绝读取概览。仍可进入其它模块，权限以服务端结果为准。' : result.error ?? '统计加载失败，请重试。'); }
       return result.status;
     } finally { if (version === generation.current) setDashboardLoading(false); }
   }, [adminRequest]);
+  /** 切换时间范围：保留旧数据（PRD §4 刷新态），URL 同步，仅重取统计。 */
+  const changeRange = useCallback((next: DashboardRange) => {
+    if (next === rangeRef.current) return;
+    rangeRef.current = next;
+    setRange(next);
+    const url = new URL(window.location.href);
+    url.searchParams.set('range', String(next));
+    window.history.replaceState(window.history.state, '', url);
+    void loadDashboard(next);
+  }, [loadDashboard]);
   const verifySession = useCallback(async () => {
     const version = ++generation.current;
     setChecking(true); setAccess('checking'); setAccessError('');
@@ -589,7 +432,7 @@ function AdminConsoleSession(_props: { key?: string }) {
         onFocusCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, controlValue(event.target)); }}
         onChangeCapture={event => { pruneEditorCache(edits.current); if (isEditorControl(event.target) && !edits.current.has(event.target)) edits.current.set(event.target, '\u0000'); }}>
         {requestNotice && <AdminErrorState title="模块连接失败" message={requestNotice} retry={() => queueAction({ kind: 'refresh' })} busy={busy} />}
-        {activeSection === 'dashboard' ? <Dashboard data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} navigate={navigate} /> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
+        {activeSection === 'dashboard' ? <React.Suspense fallback={<AdminLoading label="正在加载仪表盘…" />}><LazyDashboardView data={dashboard} error={dashboardError} loading={dashboardLoading} retry={() => void loadDashboard()} range={range} onRangeChange={changeRange} onDrill={(target, query) => navigate(target, query)} /></React.Suspense> : <div className="admin-module" data-admin-module={activeSection}>{module}</div>}
       </main>
     </div>
     <AdminDrawer open={mobileNavigation} title="后台菜单" side="left" className="admin-navigation-drawer" onClose={() => setMobileNavigation(false)}><Sidebar active={activeSection} navigate={navigate} returnToApp={returnToApp} visibleSections={visibleSections} /></AdminDrawer>

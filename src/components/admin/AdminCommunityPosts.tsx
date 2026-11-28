@@ -7,6 +7,7 @@ import { AdminButton, AdminConfirmDialog, AdminEmptyState, AdminErrorState, Admi
 import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTable';
 import { AdminPagination } from './shared/AdminPagination';
 import { dateText } from './adminUserModel';
+import { clearDrillPreset, communityTabFromPreset, drillPresetFromLocation } from './adminDrillPreset';
 
 type CommunityStatus = 'all' | 'public' | 'private' | 'blocked' | 'withdrawn';
 type ModerationState = 'visible' | 'hidden' | 'pending' | 'rejected';
@@ -176,7 +177,8 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
   const writing = useRef(false), listEpoch = useRef(0), detailEpoch = useRef(0), queueEpoch = useRef(0), reportEpoch = useRef(0);
   const [mustRead, setMustRead] = useState(false);
   // 批次 2（临时挂载）：审核队列与举报两个 tab；正式视觉批次 5 重做。
-  const [tab, setTab] = useState<AdminCommunityTab>('posts');
+  // 待办卡下钻：preset=review-queue|reports 直接落到审核队列/举报页签（QA B11）。
+  const [tab, setTab] = useState<AdminCommunityTab>(() => communityTabFromPreset(drillPresetFromLocation()) ?? 'posts');
   const [queueStatusDraft, setQueueStatusDraft] = useState<QueueStatusFilter>('pending');
   const [queueStatus, setQueueStatus] = useState<QueueStatusFilter>('pending');
   const [queuePage, setQueuePage] = useState(0);
@@ -402,7 +404,7 @@ export function AdminCommunityPosts({ request, previewRequest }: { request: Admi
     <div className="admin-community-filters" role="tablist" aria-label="社区治理视图">
       {(['posts', 'queue', 'reports'] as const).map((value) => (
         <AdminButton key={value} role="tab" aria-selected={tab === value} variant={tab === value ? 'primary' : 'secondary'}
-          onClick={() => { setTab(value); setTabMessage(''); }}>{communityTabLabel(value)}</AdminButton>
+          onClick={() => { setTab(value); setTabMessage(''); clearDrillPreset(); }}>{communityTabLabel(value)}</AdminButton>
       ))}
     </div>
     {tabMessage && <p className="admin-success-message" role="status">{tabMessage}</p>}

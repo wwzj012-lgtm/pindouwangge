@@ -3,17 +3,25 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 /**
- * 密度压缩重设计（PRD admin_console_density）验收锚点：
+ * 密度压缩重设计验收锚点（批次 6 起按 Recharts 仪表盘重写断言）：
  * - 页头只留 面包屑 + 一行「大标题 + 右侧动作按钮」，板块描述/info 行全部删除；
  * - 表格 36px 基线行高（td 上下 7px + 13px 字号），1280px 视口一屏 ≥8 行数据；
- * - 待办一行三列 / 今日概览一行四列横排 compact 卡；
- * - 注册趋势重做为真柱状图（28px 固定柱宽、峰值 64px、零值 3px 灰柱）；
+ * - 仪表盘：A 4 张决策卡（数字 22–24px）→ B 主趋势图（220px，懒加载）→ C 漏斗/质量 → D 待办三项；
  * - 侧边栏滚动条 6px、hover 才显现；间距全量收敛到 4/8/12/16/20 五档。
  */
 
 const css = readFileSync(fileURLToPath(new URL('./admin.css', import.meta.url)), 'utf8');
 const consoleSrc = readFileSync(fileURLToPath(new URL('./AdminConsole.tsx', import.meta.url)), 'utf8');
 const modelSrc = readFileSync(fileURLToPath(new URL('./adminDashboardModel.ts', import.meta.url)), 'utf8');
+const dashboardFile = (name: string) => readFileSync(fileURLToPath(new URL(`./dashboard/${name}`, import.meta.url)), 'utf8');
+const kpiSrc = dashboardFile('DashboardKpiCards.tsx');
+const trendSrc = dashboardFile('DashboardTrendSection.tsx');
+const chartsSrc = dashboardFile('AdminDashboardCharts.tsx');
+const funnelSrc = dashboardFile('DashboardFunnel.tsx');
+const qualitySrc = dashboardFile('DashboardQuality.tsx');
+const todoSrc = dashboardFile('DashboardTodoBar.tsx');
+const tooltipSrc = dashboardFile('tooltipPosition.ts');
+const viewSrc = dashboardFile('DashboardView.tsx');
 
 describe('admin density: page headers have no description rows', () => {
   it('deletes the admin-page-description row from the shell and stylesheet', () => {
@@ -76,63 +84,163 @@ describe('admin density: table rows compress to a 36px baseline', () => {
   });
 });
 
-describe('admin density: dashboard todo and today rows go horizontal', () => {
-  it('lays todo cards out as one row of three columns', () => {
-    expect(css).toMatch(/\.admin-metrics--todo \{[^}]*grid-template-columns:repeat\(3/);
-    expect(css).toMatch(/\.admin-metric--todo[^{]*\{[^}]*display:flex/);
-    expect(consoleSrc).toContain('admin-metric--todo');
-    expect(consoleSrc).toContain('data-todo-card={card.key}');
+describe('admin density: dashboard decision cards are four equal columns', () => {
+  it('lays the four KPI cards out as one row of four columns', () => {
+    expect(css).toMatch(/\.admin-dash-kpis \{[^}]*grid-template-columns:repeat\(4/);
+    expect(css).toMatch(/\.admin-dash-kpi \{[^}]*min-height:92px/);
+    expect(kpiSrc).toContain('data-kpi-card="creators"');
+    expect(kpiSrc).toContain('data-kpi-card="conversion"');
+    expect(kpiSrc).toContain('data-kpi-card="pending"');
+    expect(kpiSrc).toContain('data-kpi-card="error-rate"');
+    expect(viewSrc).toContain('<DashboardKpiCards analytics={analytics} range={range} />');
   });
-  it('lays today metrics out as one row of four compact columns', () => {
-    expect(css).toMatch(/\.admin-metrics--today \{[^}]*grid-template-columns:repeat\(4/);
-    expect(css).toMatch(/\.admin-metric--sm[^{]*\{[^}]*display:flex/);
-    expect(consoleSrc).toContain('data-metric-card={card.key}');
+  it('renders 22–24px tabular-nums numbers and keeps all four cards the same height', () => {
+    const valueRule = css.match(/\.admin-root \.admin-dash-kpi-value \{[^}]*\}/)?.[0] ?? '';
+    expect(valueRule).toMatch(/font-size:2[24]px/);
+    expect(valueRule).toContain('font-variant-numeric:tabular-nums');
+    // 同一 min-height + flex 列布局 => 四张卡等高，长副行不会把某张卡拉高。
+    expect(css).toMatch(/\.admin-root \.admin-dash-kpi \{[^}]*display:flex/);
+    expect(css).toMatch(/\.admin-root \.admin-dash-kpi \{[^}]*flex-direction:column/);
+  });
+  it('keeps the four answers on the first screen: creators / conversion / pending / error rate', () => {
+    expect(kpiSrc).toContain('今日新增创作者');
+    expect(kpiSrc).toContain('{range} 天发布转化率');
+    expect(kpiSrc).toContain('待处理');
+    expect(kpiSrc).toContain('24 小时错误率');
+    expect(kpiSrc).toContain('昨日同刻');
+    expect(kpiSrc).toContain('代理口径');
   });
 });
 
-describe('admin density: register trend is a real bar chart', () => {
-  it('renders fixed 28px columns centered, max 44px tall, zero days as 3px gray bars', () => {
-    const trend = css.match(/\.admin-register-trend \{[^}]*\}/)?.[0] ?? '';
-    expect(trend).toContain('flex-direction:column');
-    const bars = css.match(/\.admin-register-bars \{[^}]*\}/)?.[0] ?? '';
-    expect(bars).toContain('justify-content:center');
-    const bar = css.match(/\.admin-register-bar \{[^}]*\}/)?.[0] ?? '';
-    expect(bar).toContain('width:28px');
-    expect(bar).toContain('flex-direction:column');
-    const track = css.match(/\.admin-register-track \{[^}]*\}/)?.[0] ?? '';
-    expect(track).toContain('height:44px');
-    expect(track).toContain('align-items:flex-end');
-    expect(css).toMatch(/\.admin-register-track i\[data-zero='true'\] \{[^}]*background:var\(--admin-border\)/);
+describe('admin density: main trend chart is a lazy 220px Recharts panel', () => {
+  it('lazy-loads the chart chunk instead of bundling recharts into AdminPage', () => {
+    expect(trendSrc).toContain("React.lazy(() => import('./AdminDashboardCharts')");
+    expect(qualitySrc).toContain("React.lazy(() => import('./AdminDashboardCharts')");
+    // 主 chunk（AdminConsole）不得直接依赖 recharts。
+    expect(consoleSrc).not.toContain('recharts');
+    expect(consoleSrc).not.toContain('ComposedChart');
+    // 只有图表文件 import recharts。
+    expect(chartsSrc).toContain("from 'recharts'");
   });
-  it('computes pixel heights with a 44px peak and 3px zero baseline in the model', () => {
-    expect(modelSrc).toContain('export function trendBarPixelHeights');
-    expect(modelSrc).toContain('peakHeight = 44');
-    expect(modelSrc).toContain('return points.map(() => 3)');
+  it('composes two left-axis lines with a right-axis bar and integer ticks with units', () => {
+    expect(chartsSrc).toContain('<ComposedChart');
+    expect(chartsSrc).toContain('dataKey="newUsers"');
+    expect(chartsSrc).toContain('dataKey="activeUsersProxy"');
+    expect(chartsSrc).toContain('dataKey="works"');
+    expect(chartsSrc).toContain('yAxisId="people"');
+    expect(chartsSrc).toContain('yAxisId="items"');
+    expect(chartsSrc).toContain('allowDecimals={false}');
+    expect(chartsSrc).toContain('axisTicks(leftMax, 4)');
+    // 单位标在图例行左侧（recharts 轴 label 会压住顶部刻度值，已弃用该写法）。
+    expect(chartsSrc).toContain('admin-chart-axis-unit');
+    expect(chartsSrc).toContain('左轴 人 · 右轴 个');
+    expect(chartsSrc).toContain('左轴 错误率% · 右轴 ms');
+    expect(css).toMatch(/\.admin-chart-axis-unit \{[^}]*font-size:12px/);
   });
-  it('renders no chart when the 7-day total is zero, only a compact gray note', () => {
-    // 用户反馈"这个是什么意思，一堆数字"：全 0 时旧版渲染 3px 灰柱 + 64px 空轨道。
-    // 重做后 total===0 不渲染图表，只留一行 ≤24px 的灰字（不可下钻）。
-    expect(modelSrc).toContain('export function registerTrendTotal');
-    expect(consoleSrc).toMatch(/trendTotal === 0 && <p className="admin-register-empty" data-register-trend-empty>近 7 天无新注册<\/p>/);
-    expect(consoleSrc).toMatch(/trendTotal > 0 && <div className="admin-register-trend" data-register-trend>/);
-    const emptyRule = css.match(/\.admin-register-empty \{[^}]*\}/)?.[0] ?? '';
+  it('shows the legend top-right, toggles series and lets the axis adapt', () => {
+    expect(css).toMatch(/\.admin-chart-legend \{[^}]*justify-content:flex-end/);
+    expect(chartsSrc).toContain('aria-pressed={on}');
+    // 隐藏后轴自适应：刻度来自「可见序列」的最大值。
+    expect(chartsSrc).toContain("show('newUsers') ? row.newUsers : 0");
+    expect(chartsSrc).toContain("show('works') ? row.works : 0");
+  });
+  it('keeps the chart 220px on desktop and 180px on mobile', () => {
+    expect(css).toMatch(/\.admin-root \.admin-dash-chart \{ height:220px/);
+    const mobile = css.match(/@media \(max-width:639px\) \{[\s\S]*?\.admin-root \.admin-dash-chart \{ height:180px; \}/)?.[0] ?? '';
+    expect(mobile).toContain('height:180px');
+  });
+  it('collapses an all-zero window to one gray line instead of an empty plot', () => {
+    expect(trendSrc).toContain('trendIsEmpty(rows)');
+    expect(trendSrc).toContain('近 {range} 天无新增');
+    const emptyRule = css.match(/\.admin-root \.admin-dash-empty \{[^}]*\}/)?.[0] ?? '';
     expect(emptyRule).toContain('font-size:12px');
     expect(emptyRule).toContain('color:var(--admin-muted)');
+    expect(modelSrc).toContain('export function trendIsEmpty');
   });
-  it('shows numeric value labels above non-zero bars, marks the peak bar and tooltips MM-DD · N 人', () => {
-    expect(consoleSrc).toContain('admin-register-value');
-    expect(consoleSrc).toMatch(/data-peak=\{point\.count > 0 && point\.count === trendPeak \|\| undefined\}/);
-    expect(consoleSrc).toContain("point.date.slice(5) + ' · ' + point.count + ' 人'");
-    expect(css).toMatch(/\.admin-register-bar\[data-peak='true'\] \.admin-register-track i \{[^}]*background:var\(--admin-primary\)/);
-    expect(css).toMatch(/\.admin-register-bar\[data-peak='true'\] \.admin-register-value \{[^}]*color:var\(--admin-primary\)/);
+  it('declares the UTC + proxy-active provenance note under the chart title', () => {
+    expect(trendSrc).toContain('UTC 0 点切分');
+    expect(trendSrc).toContain('互动活跃用户为代理口径');
   });
-  it('caps the whole trend block (title + labels + bars + dates) at 110px when data exists', () => {
-    // 6*2 上下内边距 + 标题 15 + gap 2 + 数值标签 14 + gap 3 + 轨道 44 + gap 3 + 日期 13 = 106px。
-    expect(2 * 6 + 15 + 2 + 14 + 3 + 44 + 3 + 13).toBeLessThanOrEqual(110);
+});
+
+describe('admin density: trend tooltip avoids the hovered point (user feedback)', () => {
+  it('positions the tooltip with the pure placement helper, never pinned to the top', () => {
+    expect(tooltipSrc).toContain('export function placeTooltip');
+    expect(chartsSrc).toContain('placeChartTooltip({');
+    // 旧实现是 top:0 固定贴顶，导致压住峰值。
+    expect(chartsSrc).not.toContain('top:0');
+    expect(chartsSrc).toContain('data-dash-tooltip');
+    expect(chartsSrc).toContain('data-placement={tip.placement}');
   });
-  it('keeps the 7-column trend from filling the whole width (7 × 40px ≈ 280px centered)', () => {
-    // 柱宽 28px + 两端 12px gap，7 柱总宽约 7×28 + 6×12 = 268px，远小于 1280 全宽。
-    expect(7 * 28 + 6 * 12).toBeLessThan(420);
+  it('styles the tooltip as a surface card that never intercepts the pointer', () => {
+    const tip = css.match(/\.admin-root \.admin-dash-tip \{[^}]*\}/)?.[0] ?? '';
+    expect(tip).toContain('position:absolute');
+    expect(tip).toContain('background:var(--admin-surface)');
+    expect(tip).toContain('border:1px solid var(--admin-border)');
+    expect(tip).toContain('border-radius:var(--admin-radius)');
+    expect(tip).toContain('box-shadow:var(--admin-shadow)');
+    expect(tip).toContain('pointer-events:none');
+  });
+  it('stacks a 12px muted date above 12px series rows with tabular-nums values', () => {
+    const dateRule = css.match(/\.admin-root \.admin-dash-tip-date \{[^}]*\}/)?.[0] ?? '';
+    expect(dateRule).toContain('font-size:12px');
+    expect(dateRule).toContain('color:var(--admin-muted)');
+    const rowRule = css.match(/\.admin-root \.admin-dash-tip-row \{[^}]*\}/)?.[0] ?? '';
+    expect(rowRule).toContain('font-size:12px');
+    expect(css).toMatch(/\.admin-root \.admin-dash-tip-row b \{[^}]*font-variant-numeric:tabular-nums/);
+  });
+  it('supports keyboard day-by-day navigation on the chart container', () => {
+    expect(chartsSrc).toContain('ArrowLeft');
+    expect(chartsSrc).toContain('ArrowRight');
+    expect(chartsSrc).toContain('tabIndex={0}');
+    expect(css).toMatch(/\.admin-chart-canvas:focus-visible \{[^}]*outline:2px solid var\(--admin-primary\)/);
+  });
+});
+
+describe('admin density: funnel, quality and todo blocks', () => {
+  it('renders the three-step funnel with per-step and overall conversion', () => {
+    expect(css).toMatch(/\.admin-root \.admin-dash-funnel-track \{[^}]*height:8px/);
+    expect(funnelSrc).toContain('data-funnel-step={step.key}');
+    expect(funnelSrc).toContain("{ key: 'works', label: '图纸创建'");
+    expect(funnelSrc).toContain("{ key: 'posts', label: '社区发布'");
+    expect(funnelSrc).toContain('data-funnel-step-rate={step.key}');
+    expect(funnelSrc).toContain('data-funnel-overall');
+    // 完成事件口径必须写明（含修订），否则会被读成"完成图纸数"。
+    expect(funnelSrc).toContain('完成事件（含修订）');
+    expect(funnelSrc).toContain('conversionLabel(overall, works)');
+  });
+  it('shows 本期无样本 when the denominator is zero and 口径不可比 when rate>1', () => {
+    expect(modelSrc).toContain("return '本期无样本'");
+    expect(modelSrc).toContain("return '—（口径不可比）'");
+    expect(modelSrc).toContain('export function conversionIsIncomparable');
+  });
+  it('puts error rate and durations into the quality panel with a proxy-scope note', () => {
+    expect(qualitySrc).toContain('代理口径：真实错误率 ≥ 展示值');
+    expect(qualitySrc).toContain('data-quality-fact="errorRate"');
+    expect(qualitySrc).toContain('data-quality-fact="avgDuration"');
+    expect(qualitySrc).toContain('data-quality-fact="maxDuration"');
+    expect(qualitySrc).toContain('data-quality-fact="unresolved"');
+    expect(qualitySrc).toContain('data-quality-error-codes');
+    expect(qualitySrc).toContain('错误码 Top5');
+  });
+  it('lays the todo bar out as one row of three drill-down buttons', () => {
+    expect(css).toMatch(/\.admin-root \.admin-dash-todo \{[^}]*grid-template-columns:repeat\(3/);
+    expect(todoSrc).toContain('data-todo-card={item.key}');
+    expect(todoSrc).toContain('data-todo-value={item.key}');
+    expect(todoSrc).toContain("todoDrillQuery('reviews')");
+    expect(todoSrc).toContain("todoDrillQuery('reports')");
+    expect(todoSrc).toContain("todoDrillQuery('codes')");
+    // 待举报只按 open 计数，复核数只作副行灰字（与举报列表默认筛选一致）。
+    expect(todoSrc).toContain('复核中');
+    expect(todoSrc).toContain('（不计入）');
+  });
+  it('keeps the legacy vanity metrics as one footnote line, never as charts', () => {
+    expect(viewSrc).toContain('data-dashboard-cumulative');
+    // 旧实现（累计大卡 + 5 张同构 SVG 图 + 注册柱图）整块删除，不留并行实现。
+    expect(viewSrc).not.toContain('admin-overview-card');
+    expect(consoleSrc).not.toContain('TrendChart');
+    expect(consoleSrc).not.toContain('admin-register-trend');
+    expect(consoleSrc).not.toContain('admin-metric--today');
   });
 });
 
@@ -149,48 +257,6 @@ describe('admin density: sidebar scrollbar is thin and hover-only', () => {
   it('sets the Firefox scrollbar-color fallback to thin/transparent', () => {
     expect(css).toMatch(/\.admin-navigation \{[^}]*scrollbar-width:thin/);
     expect(css).toMatch(/\.admin-navigation \{[^}]*scrollbar-color:transparent transparent/);
-  });
-});
-
-describe('admin density: trend tooltip is a semantic surface card (user feedback)', () => {
-  // 用户反馈：悬浮深色小框只有「11-11 1」，无语义无样式。
-  // 改造后：日期 muted 12px 在上 + 「类型词 N 个」16px 600 tabular-nums 在下，
-  // 白底 surface 卡（1px --admin-border + --admin-shadow + 8px 圆角）。
-  const tip = css.match(/\.admin-root \.admin-chart-tip \{[^}]*\}/)?.[0] ?? '';
-  it('renders one shared tooltip with the data-trend-tooltip anchor', () => {
-    expect(consoleSrc).toContain('data-trend-tooltip');
-    // 组件共享：TrendChart 是唯一悬浮实现（className="admin-chart-tip" 只渲染一份）。
-    expect(consoleSrc.match(/className="admin-chart-tip"/g)).toHaveLength(1);
-    expect(consoleSrc).toContain('admin-chart-tip-date');
-    expect(consoleSrc).toContain('admin-chart-tip-value');
-  });
-  it('styles the tooltip as a white surface card with border, radius and shadow tokens', () => {
-    expect(tip).toContain('background:var(--admin-surface)');
-    expect(tip).toContain('border:1px solid var(--admin-border)');
-    expect(tip).toContain('border-radius:var(--admin-radius)');
-    expect(tip).toContain('box-shadow:var(--admin-shadow)');
-    expect(tip).toContain('pointer-events:none');
-  });
-  it('stacks a 12px muted date above a 16px 600 tabular-nums value', () => {
-    expect(tip).toContain('flex-direction:column');
-    const dateRule = css.match(/\.admin-root \.admin-chart-tip-date \{[^}]*\}/)?.[0] ?? '';
-    expect(dateRule).toContain('font-size:12px');
-    expect(dateRule).toContain('color:var(--admin-muted)');
-    const valueRule = css.match(/\.admin-root \.admin-chart-tip-value \{[^}]*\}/)?.[0] ?? '';
-    expect(valueRule).toContain('font-size:16px');
-    expect(valueRule).toContain('font-weight:600');
-    expect(valueRule).toContain('font-variant-numeric:tabular-nums');
-  });
-  it('maps every trend chart to a semantic action word and the shared copy helpers', () => {
-    expect(consoleSrc).toContain("{ label: '图纸创建趋势', action: '新建'");
-    expect(consoleSrc).toContain("{ label: '社区发布趋势', action: '发布'");
-    expect(consoleSrc).toContain("{ label: '成功操作趋势', action: '操作'");
-    expect(consoleSrc).toContain("{ label: '服务端错误趋势', action: '错误'");
-    expect(consoleSrc).toContain("{ label: '用户新增趋势', action: '注册'");
-    expect(consoleSrc).toContain('trendTooltipDate(samples[hover].date)');
-    expect(consoleSrc).toContain('trendTooltipValue(action, samples[hover].count)');
-    expect(modelSrc).toContain('export function trendTooltipDate');
-    expect(modelSrc).toContain('export function trendTooltipValue');
   });
 });
 
@@ -224,10 +290,10 @@ describe('admin density: global spacing scale 4/8/12/16/20', () => {
     expect(css).toContain('--admin-space-4:16px');
     expect(css).toContain('--admin-space-5:20px');
   });
-  it('compresses cards, dialogs, charts and trend plot height', () => {
-    expect(css).toMatch(/\.admin-overview-card \{[^}]*padding:10px 12px/);
-    expect(css).toMatch(/\.admin-chart \{[^}]*padding:10px 12px/);
-    expect(css).toMatch(/\.admin-chart-plot \{[^}]*height:110px/);
+  it('compresses panels, dialogs, cards and the chart height', () => {
+    expect(css).toMatch(/\.admin-dash-panel \{[^}]*padding:10px 12px/);
+    expect(css).toMatch(/\.admin-dash-kpi \{[^}]*padding:10px 12px/);
+    expect(css).toMatch(/\.admin-dash-chart \{ height:220px/);
     expect(css).toMatch(/\.admin-stage-panel \{[^}]*padding:10px 12px/);
     expect(css).toMatch(/\.admin-dialog-body \{[^}]*padding:16px/);
     expect(css).toMatch(/\.admin-overlay \{[^}]*padding:16px/);

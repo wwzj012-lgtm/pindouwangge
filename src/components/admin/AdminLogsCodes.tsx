@@ -8,6 +8,7 @@ import { AdminDataTable, type AdminDataTableColumn } from './shared/AdminDataTab
 import { AdminPagination } from './shared/AdminPagination';
 import { defaultTriggerDownload } from './CsvExportButton';
 import { LatestRequest, dateText, requestError } from './adminUserModel';
+import { clearDrillPreset, codeStatusFromPreset, drillPresetFromLocation } from './adminDrillPreset';
 import { CodeWriteLocks, codeSaleLabel, codeSaleRowClassName, codeWriteFeedback, collectKnownChannels, freezeGeneration, logDates, logDuration, logOutcome, type GenerationDraft } from './adminCodesLogsModel';
 
 type Mode = 'logs' | 'codes';
@@ -124,8 +125,16 @@ function LogsPanel({ request }: { request: AdminRequest }) {
 interface CodeQuery { search: string; channel: string; memberType: 'all' | '1' | '2'; copied: 'all' | 'true' | 'false'; status: 'all' | 'delete-pending' | 'redeemed' | 'available'; page: number; limit: number; }
 const emptyCodeQuery = (): CodeQuery => ({ search: '', channel: '', memberType: 'all', copied: 'all', status: 'all', page: 1, limit: 20 });
 type Review = { kind: 'generation'; value: ReturnType<typeof freezeGeneration> } | { kind: 'row'; code: VipCode; updates: { copied?: boolean; deletePendingAt?: number | null }; label: string; impact: string };
+/**
+ * 初始查询：待办卡 `preset=low-stock` 下钻时直接落到「可用」筛选
+ * （低库存 = 可用库存低于阈值，与待办卡展示的 availableCodes 同口径，QA B11）。
+ */
+const initialCodeQuery = (): CodeQuery => {
+  const status = codeStatusFromPreset(drillPresetFromLocation());
+  return status === null ? emptyCodeQuery() : { ...emptyCodeQuery(), status };
+};
 function CodesPanelV2({ request }: { request: AdminRequest }) {
-  const [draft, setDraft] = useState(emptyCodeQuery), [query, setQuery] = useState(emptyCodeQuery);
+  const [draft, setDraft] = useState(initialCodeQuery), [query, setQuery] = useState(initialCodeQuery);
   const [snapshot, setSnapshot] = useState<CodePage | null>(null), [loading, setLoading] = useState(false), [error, setError] = useState('');
   const [records, setRecords] = useState<(Paged<Redemption> & { page: number; stats?: { total: number; vip: number; pro: number } }) | null>(null);
   const [redemptionPage, setRedemptionPage] = useState(1), [redemptionLimit, setRedemptionLimit] = useState(20), [recordsLoading, setRecordsLoading] = useState(false), [recordsError, setRecordsError] = useState('');
@@ -274,8 +283,8 @@ function CodesPanelV2({ request }: { request: AdminRequest }) {
       <label>卡密搜索<input data-code-search value={draft.search} onChange={event => setDraft(value => ({ ...value, search: event.target.value }))} placeholder="卡密搜索" /></label><label>发行渠道<input value={draft.channel} list="admin-filter-channel-options" onChange={event => setDraft(value => ({ ...value, channel: event.target.value }))} placeholder="渠道筛选" /><datalist id="admin-filter-channel-options">{filterChannelOptions.map(channel => <option key={channel} value={channel} />)}</datalist></label>
       <label>权益<select value={draft.memberType} onChange={event => setDraft(value => ({ ...value, memberType: event.target.value as CodeQuery['memberType'] }))}><option value="all">全部</option><option value="1">普通VIP</option><option value="2">商家Pro</option></select></label>
       <label>发售标记<select value={draft.copied} onChange={event => setDraft(value => ({ ...value, copied: event.target.value as CodeQuery['copied'] }))}><option value="all">全部</option><option value="true">有标记</option><option value="false">无标记</option></select></label>
-      <label>兑换 / 删除状态<select value={draft.status} onChange={event => setDraft(value => ({ ...value, status: event.target.value as CodeQuery['status'] }))}><option value="all">全部</option><option value="available">可用</option><option value="redeemed">已兑换</option><option value="delete-pending">删除等待</option></select></label>
-      <div className="admin-filter-actions"><AdminButton data-code-query variant="primary" disabled={anyWrite} onClick={apply}>查询</AdminButton><AdminButton disabled={anyWrite} onClick={() => { setDraft(emptyCodeQuery()); setQuery(emptyCodeQuery()); setRedemptionPage(1); }}>重置</AdminButton></div>
+      <label>兑换 / 删除状态<select value={draft.status} onChange={event => { clearDrillPreset(); setDraft(value => ({ ...value, status: event.target.value as CodeQuery['status'] })); }}><option value="all">全部</option><option value="available">可用</option><option value="redeemed">已兑换</option><option value="delete-pending">删除等待</option></select></label>
+      <div className="admin-filter-actions"><AdminButton data-code-query variant="primary" disabled={anyWrite} onClick={apply}>查询</AdminButton><AdminButton disabled={anyWrite} onClick={() => { clearDrillPreset(); setDraft(emptyCodeQuery()); setQuery(emptyCodeQuery()); setRedemptionPage(1); }}>重置</AdminButton></div>
     </div>
     <section className="admin-stage-panel" aria-busy={loading}><h2 className="admin-detail-title">兑换码列表</h2>{loading && snapshot && <p role="status" className="admin-result-caption">正在读取，旧列表保留…</p>}
       {!snapshot ? loading ? <AdminLoading label="正在读取兑换码…" /> : <AdminEmptyState title="尚无成功读取结果" /> : snapshot.items.length ? <>

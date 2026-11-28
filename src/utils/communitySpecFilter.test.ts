@@ -1,21 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { SPEC_FILTER_OPTIONS, matchesSpecFilter, type SpecFilter } from './communitySpecFilter';
 
-const LE_FILTERS: SpecFilter[] = ['le500', 'le1000', 'le2000', 'le3000', 'le5000', 'le8000'];
+const LE_FILTERS: SpecFilter[] = ['le1000', 'le2000', 'le3000', 'le5000', 'le8000'];
 
 describe('communitySpecFilter — 累计上限语义（用户反馈 Bug 的回归）', () => {
-  it('keeps the chip order and copy stable', () => {
+  it('keeps the chip order and copy stable (7 chips, no ≤500)', () => {
+    // 2026-11-28 用户要求去掉「≤500」：现在恰好 7 个 chip，首桶是 ≤1k。
+    expect(SPEC_FILTER_OPTIONS).toHaveLength(7);
     expect(SPEC_FILTER_OPTIONS.map(({ value }) => value)).toEqual([
-      'all', 'le500', 'le1000', 'le2000', 'le3000', 'le5000', 'le8000', 'gt8000',
+      'all', 'le1000', 'le2000', 'le3000', 'le5000', 'le8000', 'gt8000',
     ]);
     expect(SPEC_FILTER_OPTIONS.map(({ label }) => label)).toEqual([
-      '全部', '≤500', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k',
+      '全部', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k',
     ]);
+    // 已下线的 500 颗桶不允许悄悄回流。
+    expect(SPEC_FILTER_OPTIONS.map(({ label }) => label)).not.toContain('≤500');
   });
 
-  it('removes the reported bug: ≤8k contains every smaller bucket (500/1000/2000/3000/5000/8000)', () => {
-    // 旧实现的区间桶在这里只会命中 8000（5000 < n ≤ 8000），其余 5 个全部 false。
-    for (const beads of [500, 1000, 2000, 3000, 5000, 8000]) {
+  it('removes the reported bug: ≤8k contains every smaller bucket (1000/2000/3000/5000/8000)', () => {
+    // 旧实现的区间桶在这里只会命中 8000（5000 < n ≤ 8000），其余 4 个全部 false。
+    for (const beads of [1000, 2000, 3000, 5000, 8000]) {
       expect(matchesSpecFilter(beads, 'le8000')).toBe(true);
     }
     // 更直观的断言：≤2k 的每一份作品都必须出现在 ≤8k 里。
@@ -27,8 +31,6 @@ describe('communitySpecFilter — 累计上限语义（用户反馈 Bug 的回�
   it('treats each ≤ bucket as an inclusive upper bound', () => {
     expect(matchesSpecFilter(2000, 'le2000')).toBe(true);
     expect(matchesSpecFilter(2001, 'le2000')).toBe(false);
-    expect(matchesSpecFilter(500, 'le500')).toBe(true);
-    expect(matchesSpecFilter(501, 'le500')).toBe(false);
     expect(matchesSpecFilter(1000, 'le1000')).toBe(true);
     expect(matchesSpecFilter(1001, 'le1000')).toBe(false);
     expect(matchesSpecFilter(3000, 'le3000')).toBe(true);
@@ -37,7 +39,9 @@ describe('communitySpecFilter — 累计上限语义（用户反馈 Bug 的回�
     expect(matchesSpecFilter(5001, 'le5000')).toBe(false);
     expect(matchesSpecFilter(8000, 'le8000')).toBe(true);
     expect(matchesSpecFilter(8001, 'le8000')).toBe(false);
-    expect(matchesSpecFilter(0, 'le500')).toBe(true);
+    // 「0 颗」边界改由首桶 ≤1k 覆盖（≤500 已下线）。
+    expect(matchesSpecFilter(0, 'le1000')).toBe(true);
+    expect(matchesSpecFilter(499, 'le1000')).toBe(true);
   });
 
   it('keeps >8k as the strict complement of ≤8k', () => {
@@ -78,5 +82,15 @@ describe('communitySpecFilter — 累计上限语义（用户反馈 Bug 的回�
       const gt = matchesSpecFilter(beads, 'gt8000');
       expect(le !== gt, `beads=${beads} must land in exactly one of ≤8k / >8k`).toBe(true);
     }
+  });
+
+  it('every option in SPEC_FILTER_OPTIONS is resolvable by matchesSpecFilter', () => {
+    // 防止「删了选项但忘了改类型/上限表」这类漂移：每个 chip 都要能算，且不抛错。
+    for (const { value } of SPEC_FILTER_OPTIONS) {
+      expect(() => matchesSpecFilter(1200, value)).not.toThrow();
+      expect(typeof matchesSpecFilter(1200, value)).toBe('boolean');
+    }
+    expect(matchesSpecFilter(1200, 'le1000')).toBe(false);
+    expect(matchesSpecFilter(1200, 'le2000')).toBe(true);
   });
 });

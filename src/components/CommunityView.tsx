@@ -35,10 +35,11 @@ const TAG_CHIP_PREVIEW_COUNT = 14;
 
 /**
  * 移动端筛选 chip 基线（排序 / 规格共用）：视觉 34px 高、水平内边距 6px、11px/600、圆角 8px。
- * 内边距取 6px 而非 8px 的唯一原因是算术：390px 可用宽 356px，8 个「≤Nk」chip 在 8px 内边距下
- * 合计 364px 会溢出 8px（把末位 >8k 变成半隐藏）；6px 下正好 356px，一眼看齐 8 个规格。
  * 触控热区用 `::after` 只向上下各扩 3px 补到 40px——左右不扩张，因此相邻 chip 的热区永不重叠
  * （HIG 44pt 与「不要老年模式」的折中）。桌面 `sm:` 全部还原成 36px。
+ *
+ * 历史：0.8 版 8 个规格 chip 在 390px（可用 356px）下 8px 内边距会溢出 8px，所以内边距取 6px。
+ * 2026-11-28 用户去掉「≤500」后只剩 7 个 chip，356px 有约 46px 余量，规格行天然零滚动。
  */
 const MOBILE_CHIP =
   "relative min-h-[34px] shrink-0 rounded-lg px-1.5 py-1 text-[11px] font-semibold cursor-pointer transition-all "
@@ -52,9 +53,18 @@ const SEGMENTED_GROUP = 'flex min-w-0 items-center gap-1 rounded-[10px] border b
 // 组内「排序:」「规格:」标签：移动端 11px/500 灰紫，不撑高整组；桌面还原 12px 紫 600 字重。
 const GROUP_LABEL = 'flex shrink-0 items-center px-1 text-[11px] font-medium text-purple-500 sm:px-2 sm:text-xs sm:text-purple-600';
 
-// 单行横向滚动容器：隐藏滚动条。
+/**
+ * 横向/纵向滚动容器：隐藏滚动条（视觉隐藏，滚动能力保留）。
+ *
+ * 双重保险：
+ * 1. `.no-scrollbar` —— index.css 里的通用类，覆盖全局 `::-webkit-scrollbar` 的 6px 轨道样式
+ *    （那条全局样式正是用户看到的「滑动线」的根因：它把 overlay 滚动条变成常驻经典滚动条）。
+ * 2. Tailwind 任意值 —— 即使某个构建产物里 CSS 顺序变了，`[&::-webkit-scrollbar]:*` 也独立生效。
+ * `[-ms-overflow-style:none]` 兼容旧 Edge/IE；`[scrollbar-width:none]` 覆盖 Firefox。
+ */
 const HIDE_SCROLLBAR =
-  '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
+  'no-scrollbar [scrollbar-width:none] [-ms-overflow-style:none] '
+  + '[&::-webkit-scrollbar]:hidden [&::-webkit-scrollbar]:w-0 [&::-webkit-scrollbar]:h-0';
 
 // "未分类"筛选的哨兵值：以 \u0000 开头，不可能与真实标签名冲突（后端标签最长 24 且不允许控制字符）。
 const UNCATEGORIZED_FILTER = '\u0000uncategorized';
@@ -467,10 +477,10 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           <div
             id="community-tag-drawer"
             aria-label="标签多选筛选"
-            className={`flex w-full flex-wrap items-center gap-1.5 sm:gap-2 ${tagDrawerOpen ? 'max-h-64 overflow-y-auto' : ''}`}
+            className={`${HIDE_SCROLLBAR} flex w-full flex-wrap items-center gap-1.5 sm:gap-2 ${tagDrawerOpen ? 'max-h-64 overflow-y-auto' : ''}`}
           >
             {/* 已选标签 sticky 选中区：w-full 独占一行固定在 chips 区上方。移动端多选后
-                chips 单行横滚（不再换行成 3 行占满屏），「清空标签筛选」永远钉在右侧。
+                chips 单行横滚（不再换行成 3 行占满屏），「清空」永远钉在右侧。
                 收起时仅视觉隐藏（display:none），节点保留在 DOM 中，状态不会因开合丢失。 */}
             {selectedTags.size > 0 && (
               <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 flex-nowrap items-center justify-between gap-2 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5 sm:flex-wrap sm:gap-3`}>
@@ -501,10 +511,12 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setSelectedTags(new Set<string>())}
+                  aria-label="清空标签筛选"
+                  title="清空标签筛选"
                   className="inline-flex min-h-[34px] shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100 sm:min-h-8"
                 >
                   <X className="h-3 w-3 shrink-0" aria-hidden="true" />
-                  清空标签筛选
+                  清空
                 </button>
               </div>
             )}
@@ -576,7 +588,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
 
           {/* Sort + spec filters — 移动端恰好 2 行（用户反馈：刷新不独占一行、规格必须 1 行）：
               第 1 行 = 排序组（flex:1，窄屏可横滚）+ 刷新按钮（36×36 纯图标）；
-              第 2 行 = 规格组（单行 8 chip）、永不换行，真溢出时组内横滚 + 两端 12px 渐隐。
+              第 2 行 = 规格组（单行 7 chip）、永不换行，真溢出时组内横滚 + 两端 12px 渐隐。
               桌面（≥640px）用 sm:contents 让这一行的包装层退化为透明，
               回到原来的「排序 + 规格 + 刷新」同一行布局，视觉保持不变。 */}
           <div className="flex w-full flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
@@ -645,8 +657,8 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               避免 390px 一行放得下时把首尾 chip 压暗。 */}
           <div className="relative w-full min-w-0 sm:hidden">
             <div ref={specScrollRef} role="group" aria-label="按豆子数量筛选规格" className={`${SEGMENTED_GROUP} w-full flex-nowrap overflow-x-auto ${HIDE_SCROLLBAR}`}>
-              {/* 移动端规格行不放漏斗图标：8 个 8px 内边距的 chip 已经把 390px 吃满，
-                  省下这 16px 让「>8k」不被遮住；语义由 role="group" 的 aria-label 承担。 */}
+              {/* 移动端规格行不放漏斗图标：7 个规格 chip 在 390px 下已接近满宽，
+                  省下这 16px 给 chip 留呼吸位；语义由 role="group" 的 aria-label 承担。 */}
               <span className={`${GROUP_LABEL} mr-0.5`}>
                 规格:
               </span>

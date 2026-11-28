@@ -154,6 +154,33 @@ body {
   display: none;
 }
 
+/*
+ * 筛选区（排序行 / 规格行 / 已选标签行 / 标签抽屉）统一隐藏滚动条。
+ *
+ * 背景：上面那条全局 `::-webkit-scrollbar { width:6px; height:6px }` 会把 Chromium 的
+ * 滚动条从「overlay 自动隐藏」变成「常驻带轨道的经典滚动条」——于是筛选区一溢出，
+ * 用户就看到一条灰白相间的「滑动线」（用户 2026-11-28 反馈：隐藏这个滑动线）。
+ * 因此这里用 `.no-scrollbar` 在**元素级**把轨道宽度归零并 display:none，
+ * 选择器带类名（0,1,0）稳定压过全局 `::-webkit-scrollbar`（0,0,0）。
+ *
+ * 只隐藏视觉，不改变滚动能力：键盘 Tab / 方向键 / 触控滑动 / 拖拽仍可滚动。
+ */
+.no-scrollbar {
+  scrollbar-width: none;      /* Firefox */
+  -ms-overflow-style: none;   /* 旧 Edge / IE */
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;              /* Chromium / WebKit：彻底不参与布局 */
+}
+.no-scrollbar::-webkit-scrollbar-track,
+.no-scrollbar::-webkit-scrollbar-thumb,
+.no-scrollbar::-webkit-scrollbar-corner {
+  display: none;
+  background: transparent;
+}
+
 /* Landing page: bead-grid creative surface aligned with the light brand theme. */
 .landing-shell { --landing-ink: #32125f; --landing-muted: #74658f; --landing-line: rgba(112, 54, 194, .17); --landing-header-offset: 88px; position: relative; height: fit-content; min-height: 0 !important; overflow-x: clip; overflow-y: visible; color: var(--landing-ink); background: #fbf9ff; isolation: isolate; scroll-padding-top: var(--landing-header-offset); }
 /* Keep the landing surface continuous when the browser is scrolled to an

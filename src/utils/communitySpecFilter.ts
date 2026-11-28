@@ -13,10 +13,14 @@
  * 塞进任何上限桶都会骗人。
  */
 
-/** 规格筛选桶。`all` = 不筛；`le*` = 上限包含；`gt8000` = 大于 8000。 */
+/**
+ * 规格筛选桶。`all` = 不筛；`le*` = 上限包含；`gt8000` = 大于 8000。
+ *
+ * 2026-11-28 用户要求「去掉小于 500 这个选项」：`le500` 桶已删除（7 个 chip）。
+ * 首桶从 1k 起——小于 1k 的作品由 `≤1k` 覆盖，信息不丢失。
+ */
 export type SpecFilter =
   | 'all'
-  | 'le500'
   | 'le1000'
   | 'le2000'
   | 'le3000'
@@ -35,7 +39,6 @@ export interface SpecFilterOption {
  */
 export const SPEC_FILTER_OPTIONS: readonly SpecFilterOption[] = [
   { value: 'all', label: '全部' },
-  { value: 'le500', label: '≤500' },
   { value: 'le1000', label: '≤1k' },
   { value: 'le2000', label: '≤2k' },
   { value: 'le3000', label: '≤3k' },
@@ -49,7 +52,6 @@ export const SPEC_FILTER_OPTIONS: readonly SpecFilterOption[] = [
  * `matchesSpecFilter` 无需改动。
  */
 const SPEC_UPPER_BOUND: Record<Exclude<SpecFilter, 'all' | 'gt8000'>, number> = {
-  le500: 500,
   le1000: 1_000,
   le2000: 2_000,
   le3000: 3_000,

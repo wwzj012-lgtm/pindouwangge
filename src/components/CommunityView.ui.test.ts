@@ -132,7 +132,7 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     let tree = await loadTags(render());
     button(tree, '标签筛选').props.onClick(); tree = render();
     // 无选中时不渲染 sticky 区，入口按钮无徽标。
-    expect(nodes(tree).some(node => node.props['aria-label'] === '清空标签筛选' || text(node) === '清空标签筛选')).toBe(false);
+    expect(nodes(tree).some(node => node.props['aria-label'] === '清空标签筛选')).toBe(false);
     expect(text(tree)).not.toContain('已选');
     // 选中两个标签：sticky 区渲染两个已选 chip，入口按钮显示 "已选 2"。
     button(tree, '#人物(1)').props.onClick(); tree = render();
@@ -190,7 +190,11 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     // 面板内支持单独一键清空标签筛选（保留其它筛选状态）。
     button(tree, '#人物(1)').props.onClick(); tree = render();
     expect(cards(tree)).toHaveLength(1);
-    button(tree, '清空标签筛选').props.onClick(); tree = render();
+    // 文案已按用户要求缩短为「清空」，可访问性名称/悬浮说明仍是完整的「清空标签筛选」。
+    const clearTags = nodes(tree).find(node => node.type === 'button' && node.props['aria-label'] === '清空标签筛选')!;
+    expect(text(clearTags).trim()).toBe('清空');
+    expect(clearTags.props.title).toBe('清空标签筛选');
+    clearTags.props.onClick(); tree = render();
     expect(cards(tree)).toHaveLength(3);
   });
 
@@ -213,6 +217,8 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     const expandedDrawer = drawerNode(tree);
     expect(String(expandedDrawer.props.className)).toContain('max-h-64');
     expect(String(expandedDrawer.props.className)).toContain('overflow-y-auto');
+    // 抽屉的纵向滚动条（用户反馈的「滑动线」）同样隐藏：能滚但看不到轨道。
+    expect(String(expandedDrawer.props.className)).toContain('no-scrollbar');
     const expanded = childButtons(expandedDrawer);
     expect(expanded[0].props['aria-expanded']).toBe(true);
     expect(expanded[1].props['aria-label']).toBe('全部作品');
@@ -220,6 +226,42 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
       expect(String(chip.props.className)).toContain('inline-flex');
       expect(String(chip.props.className)).not.toContain('hidden');
     }
+  });
+
+  it('hides the scrollbar track on every filter scroller (no visible 滑动线) while keeping scrolling', async () => {
+    // 用户反馈「隐藏这个滑动线」：筛选区 4 个滚动容器都必须视觉隐藏滚动条。
+    let tree = await loadTags(render());
+    // 展开抽屉 + 选中标签，让 4 个滚动容器全部出现在 DOM 里。
+    button(tree, '标签筛选').props.onClick(); tree = render();
+    button(tree, '#人物(1)').props.onClick(); tree = render();
+    const rendered = nodes(tree);
+    const byAria = (label: string) => rendered.find(node => node.props['aria-label'] === label);
+    // 已选标签 sticky 区内部的那条横滚容器（与既有用例同样的定位方式）。
+    const sticky = rendered.find(node => String(node.props.className ?? '').includes('rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5'));
+    expect(sticky).toBeTruthy();
+    const selectedScroller = nodes(sticky).find(node => String(node.props.className ?? '').includes('overflow-x-auto'));
+    const filterScrollers = [
+      byAria('作品排序'),                                                          // 排序行（移动端横滚）
+      byAria('按豆子数量筛选规格'),                                                  // 规格行（移动端横滚）
+      byAria('标签多选筛选'),                                                        // 标签抽屉（展开后纵滚）
+      selectedScroller,                                                            // 已选标签行（移动端横滚）
+    ].filter((node): node is Node => Boolean(node));
+    expect(filterScrollers).toHaveLength(4);
+    for (const scroller of filterScrollers) {
+      const className = String(scroller.props.className ?? '');
+      // 只隐藏视觉：overflow 仍然存在，键盘/触控仍可滚。
+      expect(className).toContain('no-scrollbar');
+      expect(className).toContain('[scrollbar-width:none]');
+      expect(className).toContain('[&::-webkit-scrollbar]:hidden');
+      expect(className).toContain('[&::-webkit-scrollbar]:w-0');
+      expect(className).toContain('[&::-webkit-scrollbar]:h-0');
+    }
+    // 抽屉保留滚动能力（max-h-64 + overflow-y-auto 仍在），只是看不到轨道。
+    expect(String(byAria('标签多选筛选')!.props.className)).toContain('overflow-y-auto');
+    // 全局兜底类真的存在且把轨道宽度归零（防止 index.css 被误删）。
+    const css = readFileSync(new URL('../index.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.no-scrollbar\s*\{[^}]*scrollbar-width:\s*none/);
+    expect(css).toMatch(/\.no-scrollbar::-webkit-scrollbar\s*\{[^}]*display:\s*none/);
   });
 
   it('refreshes through the shared hook and keeps existing cards during refresh failures', () => {
@@ -341,14 +383,16 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
       if (!node) throw Error(`Missing spec button: ${label}`);
       return node;
     };
-    specButton(tree, '≤500');
-    // 移动端规格 chips 行：同一筛选容器内的独立一行，8 个规格桶齐全。
+    specButton(tree, '≤1k');
+    // 移动端规格 chips 行：同一筛选容器内的独立一行，7 个规格桶齐全（≤500 已按用户要求下线）。
     const mobileSpecGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格');
     expect(mobileSpecGroup).toBeTruthy();
     const mobileSpecValues = nodes(mobileSpecGroup)
       .filter(node => node.type === 'button' && node.props['aria-label'] === undefined)
       .map(node => text(node).trim());
-    expect(mobileSpecValues).toEqual(['全部', '≤500', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k']);
+    expect(mobileSpecValues).toEqual(['全部', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k']);
+    expect(mobileSpecValues).toHaveLength(7);
+    expect(mobileSpecValues).not.toContain('≤500');
     // 移动端尺寸收敛（用户反馈「按钮不用这么大」）：chip 34px 高、11px 字，
     // 规格组 flex-nowrap 单行不换行（390px 下必须 1 行）。
     for (const chip of nodes(mobileSpecGroup).filter(node => node.type === 'button')) {
@@ -358,13 +402,16 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     const mobileSpecClass = String(mobileSpecGroup.props.className);
     expect(mobileSpecClass).toContain('flex-nowrap');
     expect(mobileSpecClass).not.toContain('flex-wrap');
+    // 滚动条（用户看到的「滑动线」）必须被隐藏：横向可滚但不出滚动条。
+    expect(mobileSpecClass).toContain('no-scrollbar');
+    expect(mobileSpecClass).toContain('[&::-webkit-scrollbar]:hidden');
     // 点击移动端规格 chips 可筛选。
     nodes(mobileSpecGroup)
-      .find(node => node.type === 'button' && text(node).trim() === '≤500')!.props.onClick();
+      .find(node => node.type === 'button' && text(node).trim() === '≤1k')!.props.onClick();
     tree = render();
     const mobileGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格')!;
     const pressed = nodes(mobileGroup).find(node => node.type === 'button' && node.props['aria-pressed'] === true);
-    expect(text(pressed).trim()).toBe('≤500');
+    expect(text(pressed).trim()).toBe('≤1k');
     specButton(tree, '全部').props.onClick(); tree = render();
     const resetGroup = nodes(tree).find(node => node.props['aria-label'] === '按豆子数量筛选规格')!;
     const pressedAll = nodes(resetGroup).find(node => node.type === 'button' && node.props['aria-pressed'] === true);
@@ -381,10 +428,10 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
       if (!node) throw Error(`Missing spec button: ${label}`);
       return node;
     };
-    specButton(render(), '≤500').props.onClick();
+    specButton(render(), '≤1k').props.onClick();
     let tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
-    // 累计上限：≤8k 必须包含 ≤500 的 400 颗作品（旧区间实现只返回 7000 那颗——用户报的 Bug）。
+    // 累计上限：≤8k 必须包含 ≤1k 的 400 颗作品（旧区间实现只返回 7000 那颗——用户报的 Bug）。
     specButton(tree, '≤8k').props.onClick(); tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1', '2']);
     // ≤2k 的结果是 ≤8k 的子集（同一条链上的单调性）。

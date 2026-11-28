@@ -148,11 +148,20 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(cards(tree)).toHaveLength(3);
     expect(nodes(tree).some(node => node.props['aria-label'] === '移除已选标签 花卉')).toBe(false);
     expect(text(tree)).not.toContain('已选 2');
-    // sticky 区容器 flex-wrap 支持多个已选 chip 换行。
+    // 已选区：移动端固定单行（chip 横向滚动，不换行成 3 行），桌面恢复 HEAD 的换行行为。
     button(tree, '#人物(1)').props.onClick(); button(tree, '#花卉(1)').props.onClick();
     tree = render();
     const sticky = nodes(tree).find(node => String(node.props.className ?? '').includes('rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5'))!;
-    expect(String(sticky.props.className)).toContain('flex-wrap');
+    const stickyClasses = String(sticky.props.className).split(/\s+/);
+    expect(stickyClasses).toContain('flex-nowrap');
+    expect(stickyClasses).not.toContain('flex-wrap');
+    expect(stickyClasses).toContain('sm:flex-wrap');
+    const stickyScroller = nodes(sticky).find(node => String(node.props.className ?? '').includes('overflow-x-auto'))!;
+    const scrollerClasses = String(stickyScroller.props.className).split(/\s+/);
+    expect(scrollerClasses).toContain('flex-nowrap');
+    expect(scrollerClasses).toContain('overflow-x-auto');
+    expect(scrollerClasses).toContain('sm:flex-wrap');
+    expect(scrollerClasses).toContain('sm:overflow-visible');
   });
 
   it('offers an uncategorized bucket and a collapsible tag filter drawer, combined with search', async () => {
@@ -340,10 +349,15 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
       .filter(node => node.type === 'button' && node.props['aria-label'] === undefined)
       .map(node => text(node).trim());
     expect(mobileSpecValues).toEqual(['全部', '≤500', '≤1k', '≤2k', '≤3k', '≤5k', '≤8k', '>8k']);
-    // 触控目标 ≥44px：移动端规格 chips 用 min-h-11。
+    // 移动端尺寸收敛（用户反馈「按钮不用这么大」）：chip 34px 高、11px 字，
+    // 规格组 flex-nowrap 单行不换行（390px 下必须 1 行）。
     for (const chip of nodes(mobileSpecGroup).filter(node => node.type === 'button')) {
-      expect(String(chip.props.className)).toContain('min-h-11');
+      expect(String(chip.props.className)).toContain('min-h-[34px]');
+      expect(String(chip.props.className)).toContain('text-[11px]');
     }
+    const mobileSpecClass = String(mobileSpecGroup.props.className);
+    expect(mobileSpecClass).toContain('flex-nowrap');
+    expect(mobileSpecClass).not.toContain('flex-wrap');
     // 点击移动端规格 chips 可筛选。
     nodes(mobileSpecGroup)
       .find(node => node.type === 'button' && text(node).trim() === '≤500')!.props.onClick();
@@ -357,7 +371,7 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     expect(text(pressedAll).trim()).toBe('全部');
   });
 
-  it('filters posts by the specs bead count and keeps unknown-spec posts only in 全部', () => {
+  it('filters posts by the specs bead count with cumulative upper bounds', () => {
     feed.posts = [post('1'), post('2'), post('3')];
     feed.posts[0]!.specs = { gridWidth: 10, gridHeight: 10, beadCount: 400, colorCount: 5 };
     feed.posts[1]!.specs = { gridWidth: 60, gridHeight: 60, beadCount: 7000, colorCount: 12 };
@@ -370,8 +384,16 @@ describe('CommunityView UI, real tags and removed image-only publication', () =>
     specButton(render(), '≤500').props.onClick();
     let tree = render();
     expect(cards(tree).map(card => card.props.post.id)).toEqual(['1']);
+    // 累计上限：≤8k 必须包含 ≤500 的 400 颗作品（旧区间实现只返回 7000 那颗——用户报的 Bug）。
     specButton(tree, '≤8k').props.onClick(); tree = render();
-    expect(cards(tree).map(card => card.props.post.id)).toEqual(['2']);
+    expect(cards(tree).map(card => card.props.post.id)).toEqual(['1', '2']);
+    // ≤2k 的结果是 ≤8k 的子集（同一条链上的单调性）。
+    specButton(tree, '≤2k').props.onClick(); tree = render();
+    const le2000 = cards(tree).map(card => card.props.post.id);
+    expect(le2000).toEqual(['1']);
+    specButton(tree, '≤8k').props.onClick(); tree = render();
+    const le8000 = cards(tree).map(card => card.props.post.id);
+    expect(le8000).toEqual(expect.arrayContaining(le2000));
     // 规格未知（旧数据未回填）的作品不进任何非"全部"桶。
     specButton(tree, '>8k').props.onClick(); tree = render();
     expect(cards(tree)).toHaveLength(0);

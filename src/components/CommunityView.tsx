@@ -9,7 +9,9 @@ import type { StoredPatternProject } from '../utils/patternGridCodec';
 import { canvasLimitForMembership, canEditCommunityPattern } from '../utils/communityPatternAccess';
 import { CommunityPatternWorkspace } from './CommunityPatternWorkspace';
 import { CommunityPostCard, communityPostTags } from './CommunityPostCard';
+import { SPEC_FILTER_OPTIONS, matchesSpecFilter, type SpecFilter } from '../utils/communitySpecFilter';
 import { useCommunityFeed } from '../hooks/useCommunityFeed';
+import { useOverflowScroll } from '../hooks/useOverflowScroll';
 import {
   type CommunityPost,
   type CommunityTagSummary,
@@ -27,22 +29,32 @@ interface CommunityViewProps {
 }
 
 type SortMode = 'hot' | 'new' | 'favorites';
-// 规格筛选桶（与后端 specs 快照的 beadCount 区间一一对应）。
-type SpecFilter = 'all' | 'le500' | 'le1000' | 'le2000' | 'le3000' | 'le5000' | 'le8000' | 'gt8000';
 
 // 标签抽屉默认渲染的热度前 N 个 chips；总数超出时显示"更多 (n)"，展开后内部滚动。
 const TAG_CHIP_PREVIEW_COUNT = 14;
 
-const SPEC_FILTER_OPTIONS: { value: SpecFilter; label: string }[] = [
-  { value: 'all', label: '全部' },
-  { value: 'le500', label: '≤500' },
-  { value: 'le1000', label: '≤1k' },
-  { value: 'le2000', label: '≤2k' },
-  { value: 'le3000', label: '≤3k' },
-  { value: 'le5000', label: '≤5k' },
-  { value: 'le8000', label: '≤8k' },
-  { value: 'gt8000', label: '>8k' },
-];
+/**
+ * 移动端筛选 chip 基线（排序 / 规格共用）：视觉 34px 高、水平内边距 6px、11px/600、圆角 8px。
+ * 内边距取 6px 而非 8px 的唯一原因是算术：390px 可用宽 356px，8 个「≤Nk」chip 在 8px 内边距下
+ * 合计 364px 会溢出 8px（把末位 >8k 变成半隐藏）；6px 下正好 356px，一眼看齐 8 个规格。
+ * 触控热区用 `::after` 只向上下各扩 3px 补到 40px——左右不扩张，因此相邻 chip 的热区永不重叠
+ * （HIG 44pt 与「不要老年模式」的折中）。桌面 `sm:` 全部还原成 36px。
+ */
+const MOBILE_CHIP =
+  "relative min-h-[34px] shrink-0 rounded-lg px-1.5 py-1 text-[11px] font-semibold cursor-pointer transition-all "
+  + "after:absolute after:left-0 after:right-0 after:top-[-3px] after:bottom-[-3px] after:content-[''] "
+  + 'sm:min-h-9 sm:text-xs sm:font-bold sm:after:hidden';
+
+// 分段式容器（排序组 / 规格组）：移动端 3px 内边距 + 10px 圆角 + 浅紫底 + 1px 浅紫描边；
+// 桌面 `sm:` 还原成原来的 4px 内边距 / 12px 圆角 / 实色描边，保证 ≥640px 视觉零变化。
+const SEGMENTED_GROUP = 'flex min-w-0 items-center gap-1 rounded-[10px] border border-purple-200/80 bg-white/80 p-[3px] text-[11px] sm:rounded-xl sm:border-purple-200 sm:p-1 sm:text-xs';
+
+// 组内「排序:」「规格:」标签：移动端 11px/500 灰紫，不撑高整组；桌面还原 12px 紫 600 字重。
+const GROUP_LABEL = 'flex shrink-0 items-center px-1 text-[11px] font-medium text-purple-500 sm:px-2 sm:text-xs sm:text-purple-600';
+
+// 单行横向滚动容器：隐藏滚动条。
+const HIDE_SCROLLBAR =
+  '[-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden';
 
 // "未分类"筛选的哨兵值：以 \u0000 开头，不可能与真实标签名冲突（后端标签最长 24 且不允许控制字符）。
 const UNCATEGORIZED_FILTER = '\u0000uncategorized';
@@ -99,8 +111,13 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
   const editLimit = canvasLimitForMembership(membership);
   // 标签多选：归一化键集合（含"未分类"哨兵），过滤语义为并集（命中任一选中键即显示）。
   const [selectedTags, setSelectedTags] = useState<Set<string>>(() => new Set<string>());
-  // 规格筛选：全部 / 小型（≤2000 豆）/ 中型（2001-6000）/ 大型（>6000）。
+  // 规格筛选：累计上限语义（≤2k = 2000 颗及以下，≤8k 包含 ≤2k 的全部作品）。
+  // 唯一实现在 utils/communitySpecFilter.ts，本组件不再自带区间判断。
   const [specFilter, setSpecFilter] = useState<SpecFilter>('all');
+  // 移动端规格行是否真的滚得动——只有溢出时才画两端渐隐，避免不滚动时压暗首尾 chip。
+  const { ref: specScrollRef, flags: specScrollFlags } = useOverflowScroll<HTMLDivElement>();
+  // 已选标签行同理（多选后单行横滚，不换行）。
+  const { ref: selectedScrollRef, flags: selectedScrollFlags } = useOverflowScroll<HTMLSpanElement>();
   // 标签筛选抽屉：默认收起为紧凑入口，展开后是带全部标签 chips（含计数与"未分类"）的面板。
   const [tagDrawerOpen, setTagDrawerOpen] = useState(false);
   // 标签字典（服务端 usage_count，已按热度降序返回）；展开态是否显示全部标签。
@@ -273,19 +290,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       }
       return false;
     };
-    const specMatch = (pattern: CommunityPost) => {
-      if (specFilter === 'all') return true;
-      // 规格来自后端 dto 的 specs 快照；缺失（旧数据/未回填）不进任何非"全部"桶。
-      const beads = pattern.specs?.beadCount;
-      if (beads === undefined) return false;
-      if (specFilter === 'le500') return beads <= 500;
-      if (specFilter === 'le1000') return beads > 500 && beads <= 1000;
-      if (specFilter === 'le2000') return beads > 1000 && beads <= 2000;
-      if (specFilter === 'le3000') return beads > 2000 && beads <= 3000;
-      if (specFilter === 'le5000') return beads > 3000 && beads <= 5000;
-      if (specFilter === 'le8000') return beads > 5000 && beads <= 8000;
-      return beads > 8000;
-    };
+    // 规格来自后端 dto 的 specs 快照；缺失（旧数据/未回填）不进任何非"全部"桶。
+    // 累计上限语义（≤8k 必须包含 ≤2k 的全部作品）由纯函数统一实现，便于单测回归。
+    const specMatch = (pattern: CommunityPost) => matchesSpecFilter(pattern.specs?.beadCount, specFilter);
     const visible = patternsState.filter(pattern => tagMatch(pattern) && specMatch(pattern) && (!query
       || pattern.title.toLocaleLowerCase().includes(query)
       || pattern.author.displayName.toLocaleLowerCase().includes(query)
@@ -450,9 +457,9 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
       </section>
 
       {/* Main Content Area */}
-      <div className="max-w-[1600px] w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+      <div className="max-w-[1600px] w-full mx-auto px-4 pt-2 sm:px-6 sm:pt-4 lg:px-8">
         {/* Category Tabs & Sorting bar */}
-        <div className="flex flex-col items-start gap-2.5 pb-3 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
+        <div className="flex flex-col items-start gap-1.5 pb-2 border-b border-purple-200/80 sm:gap-3 sm:pb-3">
           {/* Tag filter drawer — 单一 flex-wrap 容器（用户示意拍平）：「标签筛选」按钮是流里
               第一个元素，展开后的标签 chips（带作品计数）与"未分类"桶紧跟在按钮后面流动、
               铺满整行后自然换行；展开时容器 max-h-64 内部滚动。chips 支持多选（并集过滤）。收起时 chips 仅视觉隐藏
@@ -460,33 +467,41 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           <div
             id="community-tag-drawer"
             aria-label="标签多选筛选"
-            className={`flex w-full flex-wrap items-center gap-2 ${tagDrawerOpen ? 'max-h-64 overflow-y-auto' : ''}`}
+            className={`flex w-full flex-wrap items-center gap-1.5 sm:gap-2 ${tagDrawerOpen ? 'max-h-64 overflow-y-auto' : ''}`}
           >
-            {/* 已选标签 sticky 选中区：w-full 独占一行固定在 chips 区上方，多个已选 chip
-                可逐个移除（每个带 ×），另有"清空标签筛选"一键清空全部。
+            {/* 已选标签 sticky 选中区：w-full 独占一行固定在 chips 区上方。移动端多选后
+                chips 单行横滚（不再换行成 3 行占满屏），「清空标签筛选」永远钉在右侧。
                 收起时仅视觉隐藏（display:none），节点保留在 DOM 中，状态不会因开合丢失。 */}
             {selectedTags.size > 0 && (
-              <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5`}>
-                <span className="inline-flex min-w-0 flex-wrap items-center gap-1.5">
-                  <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
-                  {selectedTagEntries.map(({ key, label }) => (
-                    <span key={key} className="inline-flex min-w-0 max-w-full items-center rounded-full bg-purple-600 px-2.5 py-1 text-xs font-bold text-white">
-                      <span className="min-w-0 truncate">{`#${label}`}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeTagFilter(key)}
-                        aria-label={`移除已选标签 ${label}`}
-                        className="ml-1 grid h-6 w-6 shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white"
-                      >
-                        <X className="h-3 w-3" aria-hidden="true" />
-                      </button>
-                    </span>
-                  ))}
+              <div className={`${tagDrawerOpen ? 'flex' : 'hidden'} w-full min-w-0 flex-nowrap items-center justify-between gap-2 rounded-xl border border-purple-300 bg-purple-50 px-2.5 py-1.5 sm:flex-wrap sm:gap-3`}>
+                <span className="relative flex min-w-0 flex-1 items-center">
+                  <span ref={selectedScrollRef} className={`inline-flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-x-auto ${HIDE_SCROLLBAR} sm:flex-wrap sm:overflow-visible`}>
+                    <span className="shrink-0 text-[11px] font-bold text-purple-500">已选标签</span>
+                    {selectedTagEntries.map(({ key, label }) => (
+                      <span key={key} className="inline-flex shrink-0 items-center rounded-full bg-purple-600 px-2 py-0.5 text-[11px] font-semibold text-white sm:px-2.5 sm:py-1 sm:text-xs sm:font-bold">
+                        <span className="max-w-[7rem] truncate">{`#${label}`}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeTagFilter(key)}
+                          aria-label={`移除已选标签 ${label}`}
+                          className="ml-1 grid h-[22px] w-[22px] shrink-0 cursor-pointer place-items-center rounded-full text-white/90 transition-colors hover:bg-white/20 hover:text-white sm:h-6 sm:w-6"
+                        >
+                          <X className="h-3 w-3" aria-hidden="true" />
+                        </button>
+                      </span>
+                    ))}
+                  </span>
+                  {selectedScrollFlags.start && (
+                    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-3 bg-gradient-to-r from-purple-50 to-transparent" />
+                  )}
+                  {selectedScrollFlags.end && (
+                    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-3 bg-gradient-to-l from-purple-50 to-transparent" />
+                  )}
                 </span>
                 <button
                   type="button"
                   onClick={() => setSelectedTags(new Set<string>())}
-                  className="inline-flex min-h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100"
+                  className="inline-flex min-h-[34px] shrink-0 cursor-pointer items-center gap-1 rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-100 sm:min-h-8"
                 >
                   <X className="h-3 w-3 shrink-0" aria-hidden="true" />
                   清空标签筛选
@@ -498,7 +513,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               aria-expanded={tagDrawerOpen}
               aria-controls="community-tag-drawer"
               onClick={() => setTagDrawerOpen(value => !value)}
-              className={`inline-flex min-h-11 sm:min-h-9 shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition-all duration-200 ${
+              className={`inline-flex min-h-[34px] shrink-0 cursor-pointer items-center gap-2 rounded-xl border px-2.5 py-1 text-[11px] font-bold transition-all duration-200 sm:min-h-9 sm:px-3 sm:py-2 sm:text-xs ${
                 tagDrawerOpen
                   ? 'border-purple-400 bg-purple-100 text-purple-900 shadow-sm'
                   : selectedTags.size > 0
@@ -536,7 +551,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   aria-pressed={pressed}
                   aria-label={entry.ariaLabel}
                   onClick={() => toggleTagFilter(entry.value)}
-                  className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-11 sm:min-h-9 min-w-[4.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors ${
+                  className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-[34px] min-w-[3.5rem] max-w-full cursor-pointer items-center justify-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors sm:min-h-9 sm:min-w-[4.5rem] sm:px-3.5 sm:py-1.5 sm:text-xs ${
                     pressed
                       ? 'bg-purple-600 text-white shadow-sm'
                       : 'bg-white/80 hover:bg-purple-100 text-purple-800 border border-purple-200/80'
@@ -552,25 +567,29 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 type="button"
                 aria-expanded={showAllTags}
                 onClick={() => setShowAllTags(value => !value)}
-                className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-11 sm:min-h-9 min-w-[4.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full border border-dashed border-purple-300 bg-white/60 px-3.5 py-1.5 text-xs font-bold text-purple-700 transition-colors hover:bg-purple-50`}
+                className={`${tagDrawerOpen ? 'inline-flex' : 'hidden'} min-h-[34px] min-w-[3.5rem] cursor-pointer items-center justify-center whitespace-nowrap rounded-full border border-dashed border-purple-300 bg-white/60 px-2.5 py-1 text-[11px] font-bold text-purple-700 transition-colors hover:bg-purple-50 sm:min-h-9 sm:min-w-[4.5rem] sm:px-3.5 sm:py-1.5 sm:text-xs`}
               >
                 {showAllTags ? '收起' : `更多 (${tagFilters.length - TAG_CHIP_PREVIEW_COUNT})`}
               </button>
             )}
           </div>
 
-          {/* Sort + spec filters — 排序与规格 chips 在同一个筛选容器内；
-              移动端规格 chips 单独另起一行自然换行，桌面端排序+规格仍同一行。 */}
-          <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
-          <div role="group" aria-label="作品排序" className="flex min-w-0 flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs">
-            <span className="text-purple-600 font-medium px-2 flex items-center gap-1">
-              <Filter className="w-3 h-3 shrink-0" />
+          {/* Sort + spec filters — 移动端恰好 2 行（用户反馈：刷新不独占一行、规格必须 1 行）：
+              第 1 行 = 排序组（flex:1，窄屏可横滚）+ 刷新按钮（36×36 纯图标）；
+              第 2 行 = 规格组（单行 8 chip）、永不换行，真溢出时组内横滚 + 两端 12px 渐隐。
+              桌面（≥640px）用 sm:contents 让这一行的包装层退化为透明，
+              回到原来的「排序 + 规格 + 刷新」同一行布局，视觉保持不变。 */}
+          <div className="flex w-full flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between sm:gap-3">
+          <div className="flex w-full min-w-0 items-center gap-2 sm:contents">
+          <div role="group" aria-label="作品排序" className={`${SEGMENTED_GROUP} flex-1 flex-nowrap overflow-x-auto ${HIDE_SCROLLBAR} sm:flex-none sm:flex-wrap sm:overflow-visible`}>
+            <span className={`${GROUP_LABEL} mr-0.5 sm:mr-0`}>
+              <Filter className="mr-1 h-3 w-3 shrink-0" aria-hidden="true" />
               排序:
             </span>
             <button
               aria-pressed={sortBy === 'hot'}
               onClick={() => setSortBy('hot')}
-              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`${MOBILE_CHIP} sm:px-2.5 ${
                 sortBy === 'hot' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
@@ -579,7 +598,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <button
               aria-pressed={sortBy === 'new'}
               onClick={() => setSortBy('new')}
-              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`${MOBILE_CHIP} sm:px-2.5 ${
                 sortBy === 'new' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
@@ -588,14 +607,14 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
             <button
               aria-pressed={sortBy === 'favorites'}
               onClick={() => setSortBy('favorites')}
-              className={`min-h-11 sm:min-h-9 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+              className={`${MOBILE_CHIP} sm:px-2.5 ${
                 sortBy === 'favorites' ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
               }`}
             >
               最多收藏
             </button>
             <span className="mx-1 hidden h-4 w-px bg-purple-200 sm:block" aria-hidden="true" />
-            <span className="hidden px-1 font-bold text-purple-900 sm:inline">规格:</span>
+            <span className="hidden shrink-0 px-1 text-xs font-bold text-purple-900 sm:inline">规格:</span>
             <span className="hidden min-w-0 flex-wrap items-center sm:flex">
               {SPEC_FILTER_OPTIONS.map(({ value, label }) => (
                 <button
@@ -603,7 +622,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                   key={`spec:${value}`}
                   aria-pressed={specFilter === value}
                   onClick={() => setSpecFilter(value)}
-                  className={`min-h-11 sm:min-h-9 px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  className={`${MOBILE_CHIP} sm:px-2 ${
                     specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
                   }`}
                 >
@@ -612,34 +631,45 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
               ))}
             </span>
           </div>
-          {/* 移动端规格 chips：与排序在同一个筛选容器内，但单独另起一行自然换行。 */}
-          <div role="group" aria-label="按豆子数量筛选规格" className="flex min-w-0 flex-wrap items-center gap-1 bg-white/80 p-1 rounded-xl border border-purple-200 text-xs sm:hidden">
-            <span className="text-purple-600 font-medium px-2 flex items-center gap-1">
-              <Filter className="w-3 h-3 shrink-0" />
-              规格:
-            </span>
-            {SPEC_FILTER_OPTIONS.map(({ value, label }) => (
-              <button
-                type="button"
-                key={`m-spec:${value}`}
-                aria-pressed={specFilter === value}
-                onClick={() => setSpecFilter(value)}
-                className={`min-h-11 px-2.5 py-1 rounded-lg font-bold transition-all cursor-pointer ${
-                  specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
+          {/* 刷新：移动端只留 36×36 图标按钮（与排序同处第 1 行右侧），桌面恢复带文字的按钮。 */}
+          <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); void refreshTagDictionary(); }} disabled={isLoading || isLoadingMore}
+            aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
+            title={isLoading ? '正在刷新社区' : '刷新社区'}
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center gap-2 rounded-[10px] border border-purple-200 bg-white p-0 text-[11px] font-semibold text-purple-800 transition-colors hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60 sm:h-auto sm:w-auto sm:min-h-11 sm:min-w-11 sm:rounded-xl sm:border-purple-300 sm:px-4 sm:py-2 sm:text-sm sm:font-bold">
+            <RefreshCw aria-hidden="true" className={`h-[15px] w-[15px] sm:h-4 sm:w-4 ${isLoading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
+            <span className="hidden sm:inline">{isLoading ? '正在刷新' : '刷新社区'}</span>
+          </button>
           </div>
-          <div className="flex min-w-0 items-center gap-2 sm:contents">
-            <button type="button" onClick={() => { setRequestError(null); void refreshPatterns(); void refreshTagDictionary(); }} disabled={isLoading || isLoadingMore}
-              aria-label={isLoading ? '正在刷新社区' : '刷新社区'}
-              title={isLoading ? '正在刷新社区' : '刷新社区'}
-              className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-purple-300 bg-white px-3 py-2 text-sm font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-wait disabled:opacity-60 sm:px-4">
-              <RefreshCw aria-hidden="true" className={`h-4 w-4 ${isLoading ? 'animate-spin motion-reduce:animate-none' : ''}`} />
-              <span className="hidden sm:inline">{isLoading ? '正在刷新' : '刷新社区'}</span>
-            </button>
+          {/* 移动端规格 chips：单行不换行（flex-nowrap）、chip 34px/11px、组内 gap 4px。
+              仅当真的滚得动时才渲染两端 12px 渐隐（useOverflowScroll 实测），
+              避免 390px 一行放得下时把首尾 chip 压暗。 */}
+          <div className="relative w-full min-w-0 sm:hidden">
+            <div ref={specScrollRef} role="group" aria-label="按豆子数量筛选规格" className={`${SEGMENTED_GROUP} w-full flex-nowrap overflow-x-auto ${HIDE_SCROLLBAR}`}>
+              {/* 移动端规格行不放漏斗图标：8 个 8px 内边距的 chip 已经把 390px 吃满，
+                  省下这 16px 让「>8k」不被遮住；语义由 role="group" 的 aria-label 承担。 */}
+              <span className={`${GROUP_LABEL} mr-0.5`}>
+                规格:
+              </span>
+              {SPEC_FILTER_OPTIONS.map(({ value, label }) => (
+                <button
+                  type="button"
+                  key={`m-spec:${value}`}
+                  aria-pressed={specFilter === value}
+                  onClick={() => setSpecFilter(value)}
+                  className={`${MOBILE_CHIP} whitespace-nowrap ${
+                    specFilter === value ? 'bg-purple-100 text-purple-900 shadow-2xs' : 'text-purple-600 hover:text-purple-900'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {specScrollFlags.start && (
+              <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0 w-3 rounded-l-[10px] bg-gradient-to-r from-white to-transparent" />
+            )}
+            {specScrollFlags.end && (
+              <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 w-3 rounded-r-[10px] bg-gradient-to-l from-white to-transparent" />
+            )}
           </div>
           </div>
         </div>
@@ -652,7 +682,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
         {/* The status line duplicates the loading block below during the first
             fetch, so only show it once there is something to count. */}
         {!(isLoading && patternsState.length === 0) && (
-          <p role="status" aria-live="polite" className="mt-3 text-xs text-purple-700">
+          <p role="status" aria-live="polite" className="mt-2 text-[11px] text-purple-700 sm:mt-3 sm:text-xs">
             {isLoading ? '正在刷新社区作品与标签…' : `已加载 ${patternsState.length} 件作品 · 当前显示 ${filteredPatterns.length} 件`}
             {nextCursor && ' · 加载更多可发现更多作品和标签'}
           </p>
@@ -680,7 +710,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
           <>
           {/* 手机上三列缩略图：作品图是内容主体，一列大卡一屏只放得下一张。
               三列时卡片只留封面 + 标题 + 作者/点赞，完整信息在详情里。 */}
-          <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 sm:gap-4 my-4">
+          <div className="grid grid-cols-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-4 mt-2.5 mb-4 sm:my-4">
             {filteredPatterns.map(pattern => (
               <CommunityPostCard key={pattern.id} post={pattern}
                 pendingReaction={pendingReactions.has(`like:${pattern.id}`) ? 'like' : pendingReactions.has(`favorite:${pattern.id}`) ? 'favorite' : null}
@@ -804,7 +834,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                 <div className="sm:hidden">{editLimitNotice}</div>
                 <div className="grid gap-2 pt-2">
                   <button type="button" onClick={() => setWorkspaceMode('practice')} disabled={isOpeningPattern || !selectedProject}
-                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50">
+                    className="flex min-h-10 items-center justify-center gap-2 rounded-xl bg-purple-600 px-4 py-3 text-xs font-bold text-white hover:bg-purple-700 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-11">
                     <Eye size={16} />查看与实操
                   </button>
                   <button
@@ -812,7 +842,7 @@ export const CommunityView: React.FC<CommunityViewProps> = ({
                       if (selectedProject) editPublicCopy(selectedProject);
                     }}
                     disabled={isOpeningPattern || !selectedProject || !canEditCommunityPattern(selectedProject, membership)}
-                    className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-4 py-3 text-xs font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex min-h-10 items-center justify-center gap-2 rounded-xl border border-purple-200 bg-white px-4 py-3 text-xs font-bold text-purple-800 hover:bg-purple-50 disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-11"
                   >
                     <Zap className="w-4 h-4" />
                     <span>{isOpeningPattern ? '正在加载原始图纸…' : selectedProject && !canEditCommunityPattern(selectedProject, membership) ? '超出当前账号编辑上限' : '载入完整图纸'}</span>

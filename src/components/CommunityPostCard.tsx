@@ -28,7 +28,7 @@ export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pend
       <button type="button" onClick={() => onOpen(post)} aria-label={`查看作品：${post.title}`} className={`relative block aspect-square w-full overflow-hidden bg-purple-50/50 sm:aspect-4/3 ${focus}`}>
         <img src={post.imageUrl} alt={post.title} loading="lazy" decoding="async" fetchPriority="low" className="h-full w-full object-contain [image-rendering:pixelated]" />
       </button>
-      <div className="flex flex-1 flex-col p-2 sm:p-4">
+      <div className="flex flex-1 flex-col p-3 sm:p-4">
         {/* 作者行：手机上让位给三列缩略图，由底部的紧凑 meta 行代替。 */}
         <div className="mb-1.5 hidden min-w-0 items-center gap-2 text-xs font-bold text-purple-900 sm:flex">
           {post.author.photoUrl ? <img src={post.author.photoUrl} alt="" loading="lazy" decoding="async" fetchPriority="low" className="h-6 w-6 rounded-full border border-purple-200 object-cover" />
@@ -65,7 +65,8 @@ export const CommunityPostCard: React.FC<CommunityPostCardProps> = ({ post, pend
               {favoritePending ? <Loader2 size={16} aria-hidden="true" className="animate-spin" /> : <Bookmark size={16} aria-hidden="true" className={post.favorited ? 'fill-current' : ''} />}<span>{post.favorited ? '已收藏' : '收藏'} {post.favoriteCount}</span>
             </button>
           </div>
-          <button type="button" onClick={() => onOpen(post)} className={`mt-2 inline-flex min-h-11 sm:min-h-9 w-full items-center justify-center gap-2 rounded-xl bg-purple-600 px-3 py-1.5 text-xs sm:text-sm font-bold text-white transition-colors hover:bg-purple-700 ${focus}`}>
+          {/* 桌面主 CTA（<640px 时整块被 hidden 收起，移动端走整卡点击）。移动端 40px/12px/10px 圆角，桌面 36px。 */}
+          <button type="button" onClick={() => onOpen(post)} className={`mt-2 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-[10px] bg-purple-600 px-3 py-1.5 text-xs font-bold text-white transition-colors hover:bg-purple-700 sm:min-h-9 sm:text-sm ${focus}`}>
             查看图纸<ArrowRight size={16} aria-hidden="true" />
           </button>
         </div>
